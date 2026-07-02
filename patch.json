@@ -1,44 +1,10 @@
 {
-  "commit": "docs: introduce engineering process",
+  "commit": "feat(kernel): validate patches before applying",
   "operations": [
     {
-      "type": "mkdir",
-      "path": "PROCESS"
-    },
-    {
-      "type": "create",
-      "path": "PROCESS/README.md",
-      "content": "# Engineering Process\n\nThis directory contains the engineering protocols that define how the project evolves.\n\nThe project must not depend on any individual LLM remembering the workflow.\n\nThe repository stores both project knowledge and engineering processes.\n\n## Protocols\n\n- PRE_COMMIT_PROTOCOL.md\n- PATCH_PROTOCOL.md\n- SESSION_PROTOCOL.md\n- DOCUMENTATION_PROTOCOL.md\n"
-    },
-    {
-      "type": "create",
-      "path": "PROCESS/PRE_COMMIT_PROTOCOL.md",
-      "content": "# Pre-Commit Protocol\n\nExecute before preparing every Patch.\n\n## Repository Integrity\n\n- Repository remains self-contained.\n- No orphan documents.\n- Every new document is linked.\n- README navigation updated.\n- Documentation index updated.\n- Cross-references verified.\n\n## Knowledge Integrity\n\n- No duplicated information.\n- Existing documents updated when appropriate.\n- New project rules recorded.\n- Roadmap updated if milestone changes.\n- Architecture updated if system structure changes.\n\n## Engineering Integrity\n\n- Engineering over Perfection.\n- Measure Before Optimizing.\n- Validate Before Elaborating.\n\n## Patch Quality\n\n- One conceptual change.\n- Small verifiable improvement.\n- Repository understandable without chat history.\n"
-    },
-    {
-      "type": "create",
-      "path": "PROCESS/PATCH_PROTOCOL.md",
-      "content": "# Patch Protocol\n\nA Patch is the only approved mechanism for changing the repository.\n\nEvery Patch should:\n\n1. Solve one conceptual problem.\n2. Preserve repository consistency.\n3. Update affected documentation.\n4. Leave the repository in a self-contained state.\n5. Avoid hidden knowledge.\n"
-    },
-    {
-      "type": "create",
-      "path": "PROCESS/SESSION_PROTOCOL.md",
-      "content": "# Session Protocol\n\n## Session Start\n\n1. Connect the repository.\n2. Follow BOOT.md.\n3. Restore CURRENT_CONTEXT.md.\n4. Continue the work.\n\n## Session End\n\nBefore ending a session:\n\n- Record new decisions.\n- Update roadmap if necessary.\n- Update architecture if necessary.\n- Update current context.\n- Produce a Patch.\n\nNo important knowledge should remain only inside chat history.\n"
-    },
-    {
-      "type": "create",
-      "path": "PROCESS/DOCUMENTATION_PROTOCOL.md",
-      "content": "# Documentation Protocol\n\nEvery document must:\n\n- Have a clear purpose.\n- Be reachable from repository navigation.\n- Avoid duplicated information.\n- Reference related documents where appropriate.\n\nThe repository should function as a coherent knowledge graph.\n"
-    },
-    {
       "type": "update",
-      "path": "README.md",
-      "content": "# Operating System for LLMs\n\nAn open research project exploring hierarchical orchestration of Large Language Models.\n\nThe repository is the project's single source of truth.\n\n## Engineering Process\n\nSee PROCESS/README.md.\n"
-    },
-    {
-      "type": "update",
-      "path": "docs/README.md",
-      "content": "# Documentation\n\n## Engineering Process\n\nSee ../PROCESS/README.md\n"
+      "path": "apply.py",
+      "content": "REPLACE_MANUALLY"
     }
   ]
 }
