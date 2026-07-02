@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -10,7 +11,10 @@ def git(*args):
     """Run a git command and stop on error."""
     print(">", "git", *args)
 
-    result = subprocess.run(["git", *args], text=True)
+    result = subprocess.run(
+        ["git", *args],
+        text=True
+    )
 
     if result.returncode != 0:
         raise RuntimeError("Git command failed")
@@ -18,6 +22,9 @@ def git(*args):
 
 def create_file(repo, op):
     path = repo / op["path"]
+
+    if path.exists():
+        raise RuntimeError(f"File already exists: {path}")
 
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -29,12 +36,60 @@ def create_file(repo, op):
     print("Created:", path)
 
 
+def update_file(repo, op):
+    path = repo / op["path"]
+
+    if not path.exists():
+        raise RuntimeError(f"File does not exist: {path}")
+
+    path.write_text(
+        op.get("content", ""),
+        encoding="utf-8"
+    )
+
+    print("Updated:", path)
+
+
 def delete_file(repo, op):
     path = repo / op["path"]
 
-    if path.exists():
-        path.unlink()
-        print("Deleted:", path)
+    if not path.exists():
+        raise RuntimeError(f"File does not exist: {path}")
+
+    path.unlink()
+
+    print("Deleted:", path)
+
+
+def mkdir(repo, op):
+    path = repo / op["path"]
+
+    path.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    print("Directory:", path)
+
+
+def move(repo, op):
+    source = repo / op["from"]
+    destination = repo / op["to"]
+
+    if not source.exists():
+        raise RuntimeError(f"Source does not exist: {source}")
+
+    destination.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    shutil.move(
+        str(source),
+        str(destination)
+    )
+
+    print("Moved:", source, "->", destination)
 
 
 def apply_old_format(repo, patch):
@@ -51,27 +106,45 @@ def apply_new_format(repo, patch):
 
         op_type = op["type"]
 
-        if op_type == "create":
+        if op_type == "mkdir":
+            mkdir(repo, op)
+
+        elif op_type == "create":
             create_file(repo, op)
+
+        elif op_type == "update":
+            update_file(repo, op)
 
         elif op_type == "delete":
             delete_file(repo, op)
 
+        elif op_type == "move":
+            move(repo, op)
+
         else:
-            raise ValueError(f"Unsupported operation: {op_type}")
+            raise ValueError(
+                f"Unsupported operation: {op_type}"
+            )
+
+
+def load_patch(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def main():
 
     repo = Path(__file__).parent
 
-    patch_path = repo / PATCH_FILE
+    if len(sys.argv) > 1:
+        patch_path = repo / sys.argv[1]
+    else:
+        patch_path = repo / PATCH_FILE
 
     if not patch_path.exists():
-        raise FileNotFoundError(PATCH_FILE)
+        raise FileNotFoundError(patch_path)
 
-    with open(patch_path, "r", encoding="utf-8") as f:
-        patch = json.load(f)
+    patch = load_patch(patch_path)
 
     if "operations" in patch:
         print("Patch format: operations")
