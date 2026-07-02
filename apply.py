@@ -182,9 +182,24 @@ def apply_new_format(repo, patch):
         elif op_type == "move":
             move(repo, op)
 
+                elif op_type == "update":
+            create_file(repo, op)
+
+        elif op_type in (
+            "append",
+            "replace",
+            "insert_after",
+            "insert_before",
+            "move",
+            "validate"
+        ):
+            raise NotImplementedError(
+                f"Operation '{op_type}' is reserved for Patch Format v2."
+            )
+
         else:
             raise ValueError(
-                f"Unsupported operation: {op_type}"
+                f"Unknown operation: {op_type}"
             )
 
 
