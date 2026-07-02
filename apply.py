@@ -258,7 +258,7 @@ def apply_new_format(repo, patch):
             "move",
             "validate"
                         ):
-        raise NotImplementedError(
+            raise NotImplementedError(
             f"Operation '{op_type}' is reserved for Patch Format v2."
     )
 

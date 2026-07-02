@@ -1,15 +1,10 @@
 {
-  "commit": "fix: restore governance documents",
+  "commit": "docs: establish patch format v2 policy",
   "operations": [
     {
-      "type": "update",
+      "type": "append",
       "path": "DECISIONS.md",
-      "content": "# Decisions Log\n\n## D-0001\nGit is the single source of truth.\n\n## D-0002\nEnglish is the canonical project language.\nRussian is a synchronized translation.\n\n## D-0003\nEngineering over Perfection.\n\n## D-0004\nThe project consists of a White Paper, Architecture Specification and Reference Implementation.\n\n## D-0005\nKernel must remain independent of any specific LLM.\n\n## D-0006\nProject memory is layered.\n\n## D-0007\nEvery document must be reachable from repository navigation.\n\n## D-0008\nEvery Patch must leave the repository in a consistent, navigable state.\n\n## D-0009\nRepository content overrides chat history.\n\n## D-0010\nBOOT.md defines the canonical repository loading sequence.\n\n## D-0011\nSYSTEM_PROMPT.md defines permanent behavioural rules.\n\n## D-0012\nEvery commit must improve the repository as a complete knowledge system.\n\n## D-0013\nRecurring engineering practices must be documented as repository protocols.\n\n## D-0014\nNo important project knowledge may remain only inside chat history.\n\n## D-0015\nThe repository stores both project knowledge and engineering processes.\n\n## D-0016\nA commit should represent exactly one conceptual change.\n\n## D-0017\nValidate Before Elaborating.\nImplement new architectural layers only after validating the previous ones.\n\n## D-0018\nInfrastructure Before Features.\nImprove development infrastructure before relying on new capabilities.\n"
-    },
-    {
-      "type": "update",
-      "path": "PROJECT_CHARTER.md",
-      "content": "# Project Charter\n\n## Mission\n\nDesign and build an open architecture for efficient orchestration of multiple LLMs.\n\n## Time Horizon\n\nThe project is expected to evolve over several months.\nThe objective is a working architecture before the ecosystem changes significantly.\n\n## Primary Deliverables\n\n1. White Paper\n2. Architecture Specification\n3. Reference Implementation\n\n## Core Principles\n\n- Engineering over Perfection.\n- Git is the single source of truth.\n- Decisions must be documented.\n- Every architectural claim should eventually be validated experimentally.\n- Build the smallest working system first.\n"
+      "content": "\n\n## D-0019\nPatch Format v2 is the standard modification format. Large documents should be modified incrementally instead of being fully overwritten.\n\n## D-0020\nHuman assistance is a fallback mechanism. Every automatic repository access method must be attempted before requesting manual intervention.\n\n## D-0021\nThe repository should be executable engineering memory. A new session should recover project state from the repository rather than chat history.\n"
     }
   ]
 }

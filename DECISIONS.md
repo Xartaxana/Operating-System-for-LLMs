@@ -56,3 +56,23 @@ Implement new architectural layers only after validating the previous ones.
 ## D-0018
 Infrastructure Before Features.
 Improve development infrastructure before relying on new capabilities.
+
+
+## D-0019
+Patch Format v2 is the standard modification format. Large documents should be modified incrementally instead of being fully overwritten.
+
+## D-0020
+Human assistance is a fallback mechanism. Every automatic repository access method must be attempted before requesting manual intervention.
+
+## D-0021
+The repository should be executable engineering memory. A new session should recover project state from the repository rather than chat history.
+
+
+## D-0019
+Patch Format v2 is the standard modification format. Large documents should be modified incrementally instead of being fully overwritten.
+
+## D-0020
+Human assistance is a fallback mechanism. Every automatic repository access method must be attempted before requesting manual intervention.
+
+## D-0021
+The repository should be executable engineering memory. A new session should recover project state from the repository rather than chat history.
