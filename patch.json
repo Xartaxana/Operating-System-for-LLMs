@@ -1,10 +1,15 @@
 {
-  "commit": "docs: establish patch format v2 policy",
+  "commit": "docs: define zero context recovery protocol",
   "operations": [
     {
       "type": "append",
       "path": "DECISIONS.md",
-      "content": "\n\n## D-0019\nPatch Format v2 is the standard modification format. Large documents should be modified incrementally instead of being fully overwritten.\n\n## D-0020\nHuman assistance is a fallback mechanism. Every automatic repository access method must be attempted before requesting manual intervention.\n\n## D-0021\nThe repository should be executable engineering memory. A new session should recover project state from the repository rather than chat history.\n"
+      "content": "\n\n## D-0022\nThe success criterion for repository memory is a Zero Context Recovery Test. A new LLM session must be able to resume the project using only the repository."
+    },
+    {
+      "type": "create",
+      "path": "PROCESS/ZERO_CONTEXT_PROTOCOL.md",
+      "content": "# Zero Context Recovery Protocol\n\n## Goal\n\nVerify that a completely new LLM session can continue the project using only the repository.\n\n## Input\n\n- Git repository\n- BOOT.md\n- No chat history\n\n## Success Criteria\n\nThe new session correctly identifies:\n\n- project mission\n- current phase\n- engineering principles\n- active roadmap\n- current task\n- repository structure\n\nwithout relying on previous conversation history.\n\n## Rule\n\nIf the test fails, improve the repository rather than the prompt or the model.\n"
     }
   ]
 }
