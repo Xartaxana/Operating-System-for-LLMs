@@ -1,55 +1,10 @@
 {
-  "commit": "docs: establish project foundation",
+  "commit": "docs: define project memory architecture",
   "operations": [
     {
       "type": "create",
-      "path": "README.md",
-      "content": "# Operating System for LLMs\n\nAn open research project exploring hierarchical orchestration of Large Language Models.\n\nThis repository is the single source of truth for the project.\n\n## Project Structure\n\n- PROJECT_CHARTER.md – project goals and constraints.\n- PROJECT_PHILOSOPHY.md – engineering principles.\n- DECISIONS.md – accepted project decisions.\n- ROADMAP.md – milestones.\n- ANTI_GOALS.md – things this project intentionally does not do.\n- docs/ – book, ADRs and specifications.\n\nThe chat is used only for discussion.\nGit is the project memory.\n"
-    },
-    {
-      "type": "create",
-      "path": "PROJECT_CHARTER.md",
-      "content": "# Project Charter\n\n## Mission\n\nDesign and build an open architecture for efficient orchestration of multiple LLMs.\n\n## Time Horizon\n\nThe project is expected to evolve over several months.\nThe objective is a working architecture before the ecosystem changes significantly.\n\n## Primary Deliverables\n\n1. White Paper\n2. Architecture Specification\n3. Reference Implementation\n\n## Core Principles\n\n- Engineering over Perfection.\n- Git is the single source of truth.\n- Decisions must be documented.\n- Every architectural claim should eventually be validated experimentally.\n- Build the smallest working system first.\n"
-    },
-    {
-      "type": "create",
-      "path": "PROJECT_PHILOSOPHY.md",
-      "content": "# Project Philosophy\n\n## Engineering over Perfection\n\nPrefer simple, measurable and working solutions over ideal but impractical designs.\n\n## Measure Before Optimizing\n\nOptimization without measurements is speculation.\n\n## Escalation is a Resource\n\nPowerful models are expensive resources and should be used intentionally.\n\n## Simplicity Wins\n\nEvery new component must justify its existence.\n\n## Git is Memory\n\nThe repository is the project's memory.\nChat conversations are not.\n"
-    },
-    {
-      "type": "create",
-      "path": "ANTI_GOALS.md",
-      "content": "# Anti Goals\n\nThis project is NOT:\n\n- an AGI project;\n- another agent framework;\n- a replacement for existing LLMs;\n- an attempt to maximize the number of agents;\n- architecture for architecture's sake.\n"
-    },
-    {
-      "type": "create",
-      "path": "DECISIONS.md",
-      "content": "# Decisions Log\n\n## D-0001\nGit is the single source of truth.\n\n## D-0002\nEnglish is the canonical language.\nRussian documentation is a synchronized translation.\n\n## D-0003\nEngineering over Perfection.\n\n## D-0004\nThe project consists of three equally important parts:\n- White Paper\n- Architecture Specification\n- Reference Implementation\n\n## D-0005\nThe Kernel must remain independent of any particular LLM.\n"
-    },
-    {
-      "type": "create",
-      "path": "ROADMAP.md",
-      "content": "# Roadmap\n\n## Milestone 0\n\n- [x] First automatic commit.\n\n## Milestone 1\n\nProject foundation.\n\n## Milestone 2\n\nKernel MVP.\n\n## Milestone 3\n\nArchitecture Decision Records.\n\n## Milestone 4\n\nBook skeleton.\n\n## Milestone 5\n\nFirst orchestrated prototype.\n"
-    },
-    {
-      "type": "create",
-      "path": "CONTRIBUTING.md",
-      "content": "# Contributing\n\n## Workflow\n\nDiscussion → Decision → Implementation.\n\nLarge architectural changes should be documented before implementation.\n\nKeep commits small and logically complete.\n"
-    },
-    {
-      "type": "create",
-      "path": "docs/adr/README.md",
-      "content": "# Architecture Decision Records\n\nThis directory contains long-term architectural decisions.\n"
-    },
-    {
-      "type": "create",
-      "path": "docs/book/en/README.md",
-      "content": "# English Edition\n\nThis directory contains the canonical version of the book.\n"
-    },
-    {
-      "type": "create",
-      "path": "docs/book/ru/README.md",
-      "content": "# Русское издание\n\nЭта директория содержит синхронизированный перевод английской версии.\n"
+      "path": "MEMORY_ARCHITECTURE.md",
+      "content": "# Memory Architecture\n\n## Purpose\n\nThe project treats memory as a first-class subsystem.\n\nThe objective is to make project continuity independent from any particular LLM or chat history.\n\n---\n\n## Principle 1 — Git is the source of truth\n\nGit is the only long-term memory.\n\nChat conversations are temporary workspaces.\n\nNo important project knowledge should exist only inside a conversation.\n\n---\n\n## Principle 2 — Layered Memory\n\n### Layer 1 — Constitution\n\nAlways loaded.\n\nIncludes:\n- PROJECT_CHARTER.md\n- PROJECT_PHILOSOPHY.md\n- ANTI_GOALS.md\n\n### Layer 2 — Decisions\n\nArchitectural knowledge.\n\nIncludes:\n- DECISIONS.md\n- ADR/*\n\n### Layer 3 — Operational State\n\nCurrent status of the project.\n\nIncludes:\n- ROADMAP.md\n- CURRENT_CONTEXT.md (future)\n\n### Layer 4 — Repository History\n\nComplete Git history.\n\nNever fully injected into an LLM context.\n\nRetrieved on demand.\n\n---\n\n## Principle 3 — Context Manager\n\nLLMs should not remember project rules.\n\nA Context Manager prepares the appropriate context from Git before every reasoning session.\n\n---\n\n## Principle 4 — Constitution is Mandatory\n\nThe Constitution layer is always included in the reasoning context.\n\nThis prevents architectural drift.\n\n---\n\n## Principle 5 — Full Repository Access\n\nThe operating system must always have access to the complete repository.\n\nOnly the loaded context is selective.\n\nStorage is complete.\n"
     }
   ]
 }
