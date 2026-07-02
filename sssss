@@ -1,0 +1,29 @@
+[33mcommit fbcd1b6919dba131b27138066f7bf6397cb703fb[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: Xartaxana <mariialobashova@gmail.com>
+Date:   Thu Jul 2 20:41:43 2026 +0200
+
+    docs: establish repository executability principle
+
+[33mcommit 26032db2ee10afc628b9bcf8ff5149f40247414b[m
+Author: Xartaxana <mariialobashova@gmail.com>
+Date:   Thu Jul 2 20:10:31 2026 +0200
+
+    feat(kernel): validate patches before applying
+
+[33mcommit 7dd503ccae6250add3f992d8171feff8f79d5b08[m
+Author: Xartaxana <mariialobashova@gmail.com>
+Date:   Thu Jul 2 17:35:02 2026 +0200
+
+    docs: define boot sequence and repository-aware workflow
+
+[33mcommit 21ca18268df62f7d868bb9d22517b533b94c0f88[m
+Author: Xartaxana <mariialobashova@gmail.com>
+Date:   Thu Jul 2 17:19:35 2026 +0200
+
+    docs: add documentation index and navigation
+
+[33mcommit 8165037ca592a1fbd86ca0cdda97eb234b17cfbb[m
+Author: Xartaxana <mariialobashova@gmail.com>
+Date:   Thu Jul 2 16:47:00 2026 +0200
+
+    docs: establish project foundation
