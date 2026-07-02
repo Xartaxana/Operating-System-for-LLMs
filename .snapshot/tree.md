@@ -1,0 +1,31 @@
+docs/
+    docs/adr/
+        docs/adr/README.md
+    docs/book/
+        docs/book/en/
+            docs/book/en/README.md
+        docs/book/ru/
+            docs/book/ru/README.md
+    docs/README.md
+    docs/SESSION_START.md
+PROCESS/
+    PROCESS/DOCUMENTATION_PROTOCOL.md
+    PROCESS/PATCH_PROTOCOL.md
+    PROCESS/PRE_COMMIT_PROTOCOL.md
+    PROCESS/README.md
+    PROCESS/SESSION_PROTOCOL.md
+ANTI_GOALS.md
+apply.py
+BOOT.md
+CONTRIBUTING.md
+CURRENT_CONTEXT.md
+DECISIONS.md
+hello.md
+MEMORY_ARCHITECTURE.md
+patch.json
+PROJECT_CHARTER.md
+PROJECT_PHILOSOPHY.md
+README.md
+ROADMAP.md
+snapshot.py
+SYSTEM_PROMPT.md

@@ -1,15 +1,15 @@
 {
-  "commit": "feat(kernel): add repository snapshot generator",
+  "commit": "docs: establish repository executability principle",
   "operations": [
     {
-      "type": "create",
-      "path": "snapshot.py",
-      "content": "import hashlib\nimport json\nfrom pathlib import Path\n\nROOT = Path(__file__).parent\nSNAPSHOT = ROOT / '.snapshot'\n\nIGNORE = {\n    '.git',\n    '.snapshot',\n    '__pycache__',\n    '.venv',\n    'venv'\n}\n\n\ndef sha256(path):\n    h = hashlib.sha256()\n    with open(path, 'rb') as f:\n        while True:\n            chunk = f.read(65536)\n            if not chunk:\n                break\n            h.update(chunk)\n    return h.hexdigest()\n\n\ndef build_tree(directory, prefix=''):\n    lines = []\n\n    entries = sorted(directory.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))\n\n    for entry in entries:\n\n        if entry.name in IGNORE:\n            continue\n\n        rel = entry.relative_to(ROOT)\n\n        if entry.is_dir():\n            lines.append(prefix + rel.as_posix() + '/')\n            lines.extend(build_tree(entry, prefix + '    '))\n        else:\n            lines.append(prefix + rel.as_posix())\n\n    return lines\n\n\ndef build_index():\n\n    result = []\n\n    for path in sorted(ROOT.rglob('*')):\n\n        rel = path.relative_to(ROOT)\n\n        if any(part in IGNORE for part in rel.parts):\n            continue\n\n        if path.is_file():\n            result.append({\n                'path': rel.as_posix(),\n                'sha256': sha256(path),\n                'size': path.stat().st_size\n            })\n\n    return result\n\n\ndef main():\n\n    SNAPSHOT.mkdir(exist_ok=True)\n\n    tree = build_tree(ROOT)\n\n    (SNAPSHOT / 'tree.md').write_text(\n        '\\n'.join(tree),\n        encoding='utf-8'\n    )\n\n    index = build_index()\n\n    with open(SNAPSHOT / 'files.json', 'w', encoding='utf-8') as f:\n        json.dump(index, f, indent=2)\n\n    print('Snapshot created.')\n    print(SNAPSHOT / 'tree.md')\n    print(SNAPSHOT / 'files.json')\n\n\nif __name__ == '__main__':\n    main()\n"
+      "type": "update",
+      "path": "DECISIONS.md",
+      "content": "APPEND_MANUALLY"
     },
     {
       "type": "update",
-      "path": "README.md",
-      "content": "# Operating System for LLMs\n\nAn open research project exploring hierarchical orchestration of Large Language Models.\n\nThe repository is the project's single source of truth.\n\n## Repository Snapshot\n\nRun:\n\n```\npython snapshot.py\n```\n\nThis creates:\n\n```\n.snapshot/tree.md\n.snapshot/files.json\n```\n\nThese files provide a reproducible snapshot of the repository structure and are intended to be shared with an LLM before generating a Patch.\n\n## Engineering Process\n\nSee PROCESS/README.md.\n"
+      "path": "PROJECT_CHARTER.md",
+      "content": "APPEND_MANUALLY"
     }
   ]
 }

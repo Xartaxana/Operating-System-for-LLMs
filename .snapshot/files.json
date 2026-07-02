@@ -1,0 +1,127 @@
+[
+  {
+    "path": "ANTI_GOALS.md",
+    "sha256": "bd45effdaa8af5dc63c53a45ccb749083379dc8bd3da6314d6c46113e39b404a",
+    "size": 212
+  },
+  {
+    "path": "apply.py",
+    "sha256": "d2721fdfb7e73272244479371272eb9217f1978710fbc47ab11defbe91ffd576",
+    "size": 4662
+  },
+  {
+    "path": "BOOT.md",
+    "sha256": "2cd5b5c0b15138ea5130022730e0529f6a50afa2e8faa98a77afe720d9fe7098",
+    "size": 564
+  },
+  {
+    "path": "CONTRIBUTING.md",
+    "sha256": "810933afc0e9061bfcbc216a497066f0e62cbba82f8db47a648b4652b0be7f95",
+    "size": 199
+  },
+  {
+    "path": "CURRENT_CONTEXT.md",
+    "sha256": "0ff3cff4728e241f11aa0d00fd430e2898b3f62e8266a4166e2862d29b09c352",
+    "size": 501
+  },
+  {
+    "path": "DECISIONS.md",
+    "sha256": "d9c5d0a61fd5bb9e98a487d2b7bbb28423262fca61eaa181aa335c98f25f6607",
+    "size": 1436
+  },
+  {
+    "path": "docs/adr/README.md",
+    "sha256": "047b416cd7109bb609ea1a178bcb7c27db0a1c2c54d14a828a9a22c219e2b6c8",
+    "size": 95
+  },
+  {
+    "path": "docs/book/en/README.md",
+    "sha256": "4b6ac99a3c27494ba8d109cf1a5c749fed1bc29c651e207f9e5517310fd0d652",
+    "size": 81
+  },
+  {
+    "path": "docs/book/ru/README.md",
+    "sha256": "08190966e2b8521ac05a114afdc31439fe73cb60649341672b500726f063dae3",
+    "size": 168
+  },
+  {
+    "path": "docs/README.md",
+    "sha256": "a35004e130b8abf6f6e3119a3ef9cdb241b619b8f5c2e52af44880c70b457e55",
+    "size": 71
+  },
+  {
+    "path": "docs/SESSION_START.md",
+    "sha256": "d38b5cfe154c46137b5cdb31de69f6544b440743860939968855f5ac63711668",
+    "size": 307
+  },
+  {
+    "path": "hello.md",
+    "sha256": "7cce627a2d0f4a1cf01b23c78e88c59aaf34c0ca7492a3689d628ed4a02fe4d8",
+    "size": 47
+  },
+  {
+    "path": "MEMORY_ARCHITECTURE.md",
+    "sha256": "7716e1f7d786629513d49dfe3b15ab96bc175334a95748e4cecd586d4e41aacf",
+    "size": 1477
+  },
+  {
+    "path": "patch.json",
+    "sha256": "dc45f0499c7d80024efce77482a10588204f4f30cea9555721be8912b508d829",
+    "size": 2651
+  },
+  {
+    "path": "PROCESS/DOCUMENTATION_PROTOCOL.md",
+    "sha256": "7c79886371ff3d48c933ae793cd46d62386f101827900a54a05a7eccbaeb7b1f",
+    "size": 269
+  },
+  {
+    "path": "PROCESS/PATCH_PROTOCOL.md",
+    "sha256": "1e3ebdf85576d2ff9570b9e98b16ba30714b0e558b944ef789e934ecfbfe4212",
+    "size": 300
+  },
+  {
+    "path": "PROCESS/PRE_COMMIT_PROTOCOL.md",
+    "sha256": "2637206cc8500bf24e4899f24f2dcd0d1f0f042b8cd4df425a5d025708d0e45a",
+    "size": 767
+  },
+  {
+    "path": "PROCESS/README.md",
+    "sha256": "cb4769b0d2c5a6896f2db31fe8c21daf1d5e0971dcc6128631424e5fd7c872b3",
+    "size": 384
+  },
+  {
+    "path": "PROCESS/SESSION_PROTOCOL.md",
+    "sha256": "9f010280ca62206bccbdcd49a8a2cbb4077b7679130ab686ec93f175adc363d5",
+    "size": 400
+  },
+  {
+    "path": "PROJECT_CHARTER.md",
+    "sha256": "2305d2fbeb27b191a72500b8102c32f7112754b91dbf4dbd489dcfe1ee0a104a",
+    "size": 634
+  },
+  {
+    "path": "PROJECT_PHILOSOPHY.md",
+    "sha256": "085b9132c5bcd627d0ddcc75678fa5816cbab50ca0ab3025f96c612fee3172f6",
+    "size": 501
+  },
+  {
+    "path": "README.md",
+    "sha256": "1a9fa0a4bcb0f67785b0e1b6e6d48c202c9b954f7e62d182ca0a58df7120bec2",
+    "size": 511
+  },
+  {
+    "path": "ROADMAP.md",
+    "sha256": "37bac0e28fb2f8acdfbf77387112a66e0426f48b0492d5aa7767513ba0698d85",
+    "size": 322
+  },
+  {
+    "path": "snapshot.py",
+    "sha256": "0e2fec3c8620287f8413e795f92258bb91b6b761a83ada9cc2ac18489a45d49a",
+    "size": 1868
+  },
+  {
+    "path": "SYSTEM_PROMPT.md",
+    "sha256": "941b1b55ec9441d195b6d7eccf24cf5156a898b114799bdcf91be65cf682af54",
+    "size": 517
+  }
+]
