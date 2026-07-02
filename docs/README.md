@@ -1,14 +1,17 @@
 # Documentation
 
-This directory contains the project's long-term documentation.
+## Boot
+
+- BOOT.md
+- SYSTEM_PROMPT.md
+- CURRENT_CONTEXT.md
+- SESSION_START.md
 
 ## Architecture
 
-- ADR (Architecture Decision Records)
+- ADR
 
 ## Book
 
-- English Edition
-- Russian Edition
-
-The repository root contains the project constitution and governance documents.
+- English
+- Russian

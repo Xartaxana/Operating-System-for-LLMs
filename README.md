@@ -2,30 +2,36 @@
 
 An open research project exploring hierarchical orchestration of Large Language Models.
 
-This repository is the single source of truth for the project.
+The repository is the project's single source of truth.
+
+## Governance
+
+- Project Charter
+- Project Philosophy
+- Memory Architecture
+- Roadmap
+- Decisions
+- Anti Goals
+- Contributing
+
+## Boot
+
+- BOOT.md
+- SYSTEM_PROMPT.md
+- CURRENT_CONTEXT.md
 
 ## Documentation
 
-### Governance
+- Documentation Index
+- Session Start Guide
+- ADR
+- Book (English)
+- Book (Russian)
 
-- [Project Charter](PROJECT_CHARTER.md)
-- [Project Philosophy](PROJECT_PHILOSOPHY.md)
-- [Memory Architecture](MEMORY_ARCHITECTURE.md)
-- [Roadmap](ROADMAP.md)
-- [Decisions](DECISIONS.md)
-- [Anti Goals](ANTI_GOALS.md)
-- [Contributing](CONTRIBUTING.md)
+## Principles
 
-### Project Documentation
-
-- [Documentation Index](docs/README.md)
-- [Architecture Decision Records](docs/adr/README.md)
-- [Book (English)](docs/book/en/README.md)
-- [Book (Russian)](docs/book/ru/README.md)
-
-## Development Principles
-
-- Git is the single source of truth.
-- Chat is for discussion only.
+- Git is memory.
+- Repository First.
 - Engineering over Perfection.
-- Small, verifiable commits.
+- Measure Before Optimizing.
+- Small verifiable commits.

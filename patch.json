@@ -1,20 +1,45 @@
 {
-  "commit": "docs: add documentation index and navigation",
+  "commit": "docs: define boot sequence and repository-aware workflow",
   "operations": [
     {
       "type": "create",
+      "path": "BOOT.md",
+      "content": "# Boot Sequence\n\nThe repository is the only source of truth.\n\nWhen starting a new conversation:\n\n1. Read README.md.\n2. Read PROJECT_CHARTER.md.\n3. Read PROJECT_PHILOSOPHY.md.\n4. Read ANTI_GOALS.md.\n5. Read DECISIONS.md.\n6. Read MEMORY_ARCHITECTURE.md.\n7. Read ROADMAP.md.\n8. Read CURRENT_CONTEXT.md if it exists.\n\nAfter loading these documents:\n\n- summarize the current state;\n- identify the current milestone;\n- identify the next objective;\n- continue the work.\n\nIf repository contents conflict with chat history, the repository always wins."
+    },
+    {
+      "type": "create",
+      "path": "SYSTEM_PROMPT.md",
+      "content": "# System Prompt\n\nThis document defines the permanent behaviour expected from any LLM working on this repository.\n\nCore principles:\n\n- Git is the only source of truth.\n- Chat is only a temporary workspace.\n- Engineering over Perfection.\n- Measure Before Optimizing.\n- Small verifiable improvements.\n- Never invent missing project state.\n- Always retrieve project knowledge from the repository.\n- Repository content overrides chat history.\n- Every architectural decision should eventually be documented.\n"
+    },
+    {
+      "type": "create",
+      "path": "CURRENT_CONTEXT.md",
+      "content": "# Current Context\n\n## Current Milestone\n\nMilestone 1 — Repository-Aware Lead\n\n## Current Status\n\nRepository foundation completed.\nKernel supports operation-based patches.\nDocumentation structure established.\nMemory architecture defined.\n\n## Current Objective\n\nInvestigate repository-aware context loading.\n\n## Next Tasks\n\n- Validate GitHub Connector capabilities.\n- Design Repository Memory Manager.\n- Define Context Builder.\n\nThis file is intended to be updated frequently.\n"
+    },
+    {
+      "type": "create",
+      "path": "docs/SESSION_START.md",
+      "content": "# Starting a New Session\n\nThe recommended way to continue work on this project is:\n\nResume Operating-System-for-LLMs.\n\nRepository:\nhttps://github.com/Xartaxana/Operating-System-for-LLMs\n\nFollow BOOT.md.\n\nThe assistant should restore project state from the repository before proposing any changes."
+    },
+    {
+      "type": "create",
       "path": "docs/README.md",
-      "content": "# Documentation\n\nThis directory contains the project's long-term documentation.\n\n## Architecture\n\n- ADR (Architecture Decision Records)\n\n## Book\n\n- English Edition\n- Russian Edition\n\nThe repository root contains the project constitution and governance documents.\n"
+      "content": "# Documentation\n\n## Boot\n\n- BOOT.md\n- SYSTEM_PROMPT.md\n- CURRENT_CONTEXT.md\n- SESSION_START.md\n\n## Architecture\n\n- ADR\n\n## Book\n\n- English\n- Russian\n"
     },
     {
       "type": "create",
       "path": "README.md",
-      "content": "# Operating System for LLMs\n\nAn open research project exploring hierarchical orchestration of Large Language Models.\n\nThis repository is the single source of truth for the project.\n\n## Documentation\n\n### Governance\n\n- [Project Charter](PROJECT_CHARTER.md)\n- [Project Philosophy](PROJECT_PHILOSOPHY.md)\n- [Memory Architecture](MEMORY_ARCHITECTURE.md)\n- [Roadmap](ROADMAP.md)\n- [Decisions](DECISIONS.md)\n- [Anti Goals](ANTI_GOALS.md)\n- [Contributing](CONTRIBUTING.md)\n\n### Project Documentation\n\n- [Documentation Index](docs/README.md)\n- [Architecture Decision Records](docs/adr/README.md)\n- [Book (English)](docs/book/en/README.md)\n- [Book (Russian)](docs/book/ru/README.md)\n\n## Development Principles\n\n- Git is the single source of truth.\n- Chat is for discussion only.\n- Engineering over Perfection.\n- Small, verifiable commits.\n"
+      "content": "# Operating System for LLMs\n\nAn open research project exploring hierarchical orchestration of Large Language Models.\n\nThe repository is the project's single source of truth.\n\n## Governance\n\n- Project Charter\n- Project Philosophy\n- Memory Architecture\n- Roadmap\n- Decisions\n- Anti Goals\n- Contributing\n\n## Boot\n\n- BOOT.md\n- SYSTEM_PROMPT.md\n- CURRENT_CONTEXT.md\n\n## Documentation\n\n- Documentation Index\n- Session Start Guide\n- ADR\n- Book (English)\n- Book (Russian)\n\n## Principles\n\n- Git is memory.\n- Repository First.\n- Engineering over Perfection.\n- Measure Before Optimizing.\n- Small verifiable commits.\n"
     },
     {
       "type": "create",
       "path": "DECISIONS.md",
-      "content": "# Decisions Log\n\n## D-0001\nGit is the single source of truth.\n\n## D-0002\nEnglish is the canonical language.\nRussian documentation is a synchronized translation.\n\n## D-0003\nEngineering over Perfection.\n\n## D-0004\nThe project consists of three equally important parts:\n- White Paper\n- Architecture Specification\n- Reference Implementation\n\n## D-0005\nThe Kernel must remain independent of any particular LLM.\n\n## D-0006\nProject memory is layered.\n\n## D-0007\nEvery new document must be reachable from README.md or docs/README.md.\n\n## D-0008\nEvery Patch must leave the repository in a consistent navigable state.\n"
+      "content": "# Decisions Log\n\n## D-0001\nGit is the single source of truth.\n\n## D-0002\nEnglish is the canonical language.\nRussian is a synchronized translation.\n\n## D-0003\nEngineering over Perfection.\n\n## D-0004\nThe project consists of White Paper, Architecture Specification and Reference Implementation.\n\n## D-0005\nKernel must remain independent of any particular LLM.\n\n## D-0006\nProject memory is layered.\n\n## D-0007\nEvery document must be reachable from the repository index.\n\n## D-0008\nEvery Patch must leave the repository in a consistent navigable state.\n\n## D-0009\nRepository content always overrides chat history.\n\n## D-0010\nBOOT.md defines the canonical repository loading sequence.\n\n## D-0011\nSYSTEM_PROMPT.md defines permanent behavioural rules for project assistants.\n"
+    },
+    {
+      "type": "create",
+      "path": "ROADMAP.md",
+      "content": "# Roadmap\n\n## Phase 0\n\n- [x] Automatic commits\n- [x] Patch protocol\n- [x] Project foundation\n- [x] Memory architecture\n- [x] Boot sequence\n\n## Phase 1\n\nRepository-aware assistant.\n\nGoals:\n\n- Read repository.\n- Restore project state.\n- Build context automatically.\n- Continue work without chat history.\n"
     }
   ]
 }

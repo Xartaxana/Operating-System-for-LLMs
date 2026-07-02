@@ -1,25 +1,20 @@
 # Roadmap
 
-## Milestone 0
+## Phase 0
 
-- [x] First automatic commit.
+- [x] Automatic commits
+- [x] Patch protocol
+- [x] Project foundation
+- [x] Memory architecture
+- [x] Boot sequence
 
-## Milestone 1
+## Phase 1
 
-Project foundation.
+Repository-aware assistant.
 
-## Milestone 2
+Goals:
 
-Kernel MVP.
-
-## Milestone 3
-
-Architecture Decision Records.
-
-## Milestone 4
-
-Book skeleton.
-
-## Milestone 5
-
-First orchestrated prototype.
+- Read repository.
+- Restore project state.
+- Build context automatically.
+- Continue work without chat history.
