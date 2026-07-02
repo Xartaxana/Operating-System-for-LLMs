@@ -35,3 +35,16 @@ Phase 0 SHALL NOT be considered complete until:
 - A repeated Zero Context Recovery Test confirms the corrections.
 
 Only then may the project enter Phase 1.
+
+
+---
+
+# Current Task (Authoritative)
+
+The current engineering task is the single source of truth for repository development.
+
+Current Task:
+
+Improve the repository until an independent Zero Context Recovery Test succeeds without requiring clarification from the user.
+
+LLMs must execute this task before proposing any new architecture or features.

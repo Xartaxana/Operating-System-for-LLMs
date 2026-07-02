@@ -1,15 +1,15 @@
 {
-  "commit": "docs: define phase 0 exit criteria",
+  "commit": "docs: define current task protocol",
   "operations": [
     {
       "type": "append",
       "path": "DECISIONS.md",
-      "content": "\n\n## D-0024\nPhase 0 is complete only after a successful Zero Context Recovery Test and correction of all deficiencies discovered during that test."
+      "content": "\n\n## D-0025\nThe repository must always define exactly one current engineering task. LLMs should execute that task instead of inferring the next objective."
     },
     {
       "type": "append",
       "path": "CURRENT_CONTEXT.md",
-      "content": "\n\n---\n\n## Phase 0 Exit Criteria\n\nPhase 0 SHALL NOT be considered complete until:\n\n- Zero Context Recovery Test succeeds.\n- Repository inconsistencies found during the test are corrected.\n- A repeated Zero Context Recovery Test confirms the corrections.\n\nOnly then may the project enter Phase 1.\n"
+      "content": "\n\n---\n\n# Current Task (Authoritative)\n\nThe current engineering task is the single source of truth for repository development.\n\nCurrent Task:\n\nImprove the repository until an independent Zero Context Recovery Test succeeds without requiring clarification from the user.\n\nLLMs must execute this task before proposing any new architecture or features.\n"
     }
   ]
 }

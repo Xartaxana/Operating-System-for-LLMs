@@ -86,3 +86,6 @@ Every repository boot must produce a standardized Boot Report. Boot success is d
 
 ## D-0024
 Phase 0 is complete only after a successful Zero Context Recovery Test and correction of all deficiencies discovered during that test.
+
+## D-0025
+The repository must always define exactly one current engineering task. LLMs should execute that task instead of inferring the next objective.
