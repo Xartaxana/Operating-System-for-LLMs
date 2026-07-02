@@ -61,6 +61,30 @@ def append_file(repo, op):
         f.write(op.get("content", ""))
 
     print("Appended:", path)
+    
+
+def replace_in_file(repo, op):
+    path = repo / op["path"]
+
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    text = path.read_text(encoding="utf-8")
+
+    find = op["find"]
+    replace = op["replace"]
+
+    if find not in text:
+        raise ValueError(
+            f"Text not found in {path}: {find!r}"
+        )
+
+    text = text.replace(find, replace, 1)
+
+    path.write_text(text, encoding="utf-8")
+
+    print("Replaced:", path)
+
 
 def mkdir(repo, op):
     path = repo / op["path"]
@@ -195,9 +219,11 @@ def apply_new_format(repo, patch):
 
         elif op_type == "append":
             append_file(repo, op)
+            
+        elif op_type == "replace":
+            replace_in_file(repo, op)    
 
         elif op_type in (
-            "replace",
             "insert_after",
             "insert_before",
             "move",
