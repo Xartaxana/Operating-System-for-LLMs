@@ -83,3 +83,6 @@ The success criterion for repository memory is a Zero Context Recovery Test. A n
 
 ## D-0023
 Every repository boot must produce a standardized Boot Report. Boot success is determined by loading repository state rather than by subjective interpretation.
+
+## D-0024
+Phase 0 is complete only after a successful Zero Context Recovery Test and correction of all deficiencies discovered during that test.

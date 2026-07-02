@@ -22,3 +22,16 @@ Investigate repository-aware context loading.
 - Define Context Builder.
 
 This file is intended to be updated frequently.
+
+
+---
+
+## Phase 0 Exit Criteria
+
+Phase 0 SHALL NOT be considered complete until:
+
+- Zero Context Recovery Test succeeds.
+- Repository inconsistencies found during the test are corrected.
+- A repeated Zero Context Recovery Test confirms the corrections.
+
+Only then may the project enter Phase 1.

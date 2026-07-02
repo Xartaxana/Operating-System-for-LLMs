@@ -1,15 +1,15 @@
 {
-  "commit": "docs: define boot report protocol",
+  "commit": "docs: define phase 0 exit criteria",
   "operations": [
     {
       "type": "append",
       "path": "DECISIONS.md",
-      "content": "\n\n## D-0023\nEvery repository boot must produce a standardized Boot Report. Boot success is determined by loading repository state rather than by subjective interpretation."
+      "content": "\n\n## D-0024\nPhase 0 is complete only after a successful Zero Context Recovery Test and correction of all deficiencies discovered during that test."
     },
     {
-      "type": "create",
-      "path": "PROCESS/BOOT_REPORT_PROTOCOL.md",
-      "content": "# Boot Report Protocol\n\n## Purpose\n\nEvery new LLM session must produce the same structured report after executing BOOT.md.\n\n## Boot Report Template\n\n```\nBOOT REPORT\n\nRepository Loaded: YES/NO\n\nConstitution Loaded: YES/NO\n\nDecisions Loaded: YES/NO\n\nCurrent Context Loaded: YES/NO\n\nCurrent Phase:\n\nCurrent Objective:\n\nNext Required Action:\n\nConfidence:\n```\n\n## Rule\n\nThe report must be generated before proposing new work.\n"
+      "type": "append",
+      "path": "CURRENT_CONTEXT.md",
+      "content": "\n\n---\n\n## Phase 0 Exit Criteria\n\nPhase 0 SHALL NOT be considered complete until:\n\n- Zero Context Recovery Test succeeds.\n- Repository inconsistencies found during the test are corrected.\n- A repeated Zero Context Recovery Test confirms the corrections.\n\nOnly then may the project enter Phase 1.\n"
     }
   ]
 }
