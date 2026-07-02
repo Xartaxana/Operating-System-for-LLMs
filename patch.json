@@ -1,0 +1,10 @@
+{
+    "commit": "feat: first automatic commit",
+
+    "files": [
+        {
+            "path": "hello.md",
+            "content": "# Hello\n\nThis file was created automatically."
+        }
+    ]
+}
