@@ -1,10 +1,20 @@
 {
-  "commit": "docs: define project memory architecture",
+  "commit": "docs: add documentation index and navigation",
   "operations": [
     {
       "type": "create",
-      "path": "MEMORY_ARCHITECTURE.md",
-      "content": "# Memory Architecture\n\n## Purpose\n\nThe project treats memory as a first-class subsystem.\n\nThe objective is to make project continuity independent from any particular LLM or chat history.\n\n---\n\n## Principle 1 — Git is the source of truth\n\nGit is the only long-term memory.\n\nChat conversations are temporary workspaces.\n\nNo important project knowledge should exist only inside a conversation.\n\n---\n\n## Principle 2 — Layered Memory\n\n### Layer 1 — Constitution\n\nAlways loaded.\n\nIncludes:\n- PROJECT_CHARTER.md\n- PROJECT_PHILOSOPHY.md\n- ANTI_GOALS.md\n\n### Layer 2 — Decisions\n\nArchitectural knowledge.\n\nIncludes:\n- DECISIONS.md\n- ADR/*\n\n### Layer 3 — Operational State\n\nCurrent status of the project.\n\nIncludes:\n- ROADMAP.md\n- CURRENT_CONTEXT.md (future)\n\n### Layer 4 — Repository History\n\nComplete Git history.\n\nNever fully injected into an LLM context.\n\nRetrieved on demand.\n\n---\n\n## Principle 3 — Context Manager\n\nLLMs should not remember project rules.\n\nA Context Manager prepares the appropriate context from Git before every reasoning session.\n\n---\n\n## Principle 4 — Constitution is Mandatory\n\nThe Constitution layer is always included in the reasoning context.\n\nThis prevents architectural drift.\n\n---\n\n## Principle 5 — Full Repository Access\n\nThe operating system must always have access to the complete repository.\n\nOnly the loaded context is selective.\n\nStorage is complete.\n"
+      "path": "docs/README.md",
+      "content": "# Documentation\n\nThis directory contains the project's long-term documentation.\n\n## Architecture\n\n- ADR (Architecture Decision Records)\n\n## Book\n\n- English Edition\n- Russian Edition\n\nThe repository root contains the project constitution and governance documents.\n"
+    },
+    {
+      "type": "create",
+      "path": "README.md",
+      "content": "# Operating System for LLMs\n\nAn open research project exploring hierarchical orchestration of Large Language Models.\n\nThis repository is the single source of truth for the project.\n\n## Documentation\n\n### Governance\n\n- [Project Charter](PROJECT_CHARTER.md)\n- [Project Philosophy](PROJECT_PHILOSOPHY.md)\n- [Memory Architecture](MEMORY_ARCHITECTURE.md)\n- [Roadmap](ROADMAP.md)\n- [Decisions](DECISIONS.md)\n- [Anti Goals](ANTI_GOALS.md)\n- [Contributing](CONTRIBUTING.md)\n\n### Project Documentation\n\n- [Documentation Index](docs/README.md)\n- [Architecture Decision Records](docs/adr/README.md)\n- [Book (English)](docs/book/en/README.md)\n- [Book (Russian)](docs/book/ru/README.md)\n\n## Development Principles\n\n- Git is the single source of truth.\n- Chat is for discussion only.\n- Engineering over Perfection.\n- Small, verifiable commits.\n"
+    },
+    {
+      "type": "create",
+      "path": "DECISIONS.md",
+      "content": "# Decisions Log\n\n## D-0001\nGit is the single source of truth.\n\n## D-0002\nEnglish is the canonical language.\nRussian documentation is a synchronized translation.\n\n## D-0003\nEngineering over Perfection.\n\n## D-0004\nThe project consists of three equally important parts:\n- White Paper\n- Architecture Specification\n- Reference Implementation\n\n## D-0005\nThe Kernel must remain independent of any particular LLM.\n\n## D-0006\nProject memory is layered.\n\n## D-0007\nEvery new document must be reachable from README.md or docs/README.md.\n\n## D-0008\nEvery Patch must leave the repository in a consistent navigable state.\n"
     }
   ]
 }

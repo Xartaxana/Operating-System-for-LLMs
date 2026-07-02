@@ -4,14 +4,28 @@ An open research project exploring hierarchical orchestration of Large Language 
 
 This repository is the single source of truth for the project.
 
-## Project Structure
+## Documentation
 
-- PROJECT_CHARTER.md – project goals and constraints.
-- PROJECT_PHILOSOPHY.md – engineering principles.
-- DECISIONS.md – accepted project decisions.
-- ROADMAP.md – milestones.
-- ANTI_GOALS.md – things this project intentionally does not do.
-- docs/ – book, ADRs and specifications.
+### Governance
 
-The chat is used only for discussion.
-Git is the project memory.
+- [Project Charter](PROJECT_CHARTER.md)
+- [Project Philosophy](PROJECT_PHILOSOPHY.md)
+- [Memory Architecture](MEMORY_ARCHITECTURE.md)
+- [Roadmap](ROADMAP.md)
+- [Decisions](DECISIONS.md)
+- [Anti Goals](ANTI_GOALS.md)
+- [Contributing](CONTRIBUTING.md)
+
+### Project Documentation
+
+- [Documentation Index](docs/README.md)
+- [Architecture Decision Records](docs/adr/README.md)
+- [Book (English)](docs/book/en/README.md)
+- [Book (Russian)](docs/book/ru/README.md)
+
+## Development Principles
+
+- Git is the single source of truth.
+- Chat is for discussion only.
+- Engineering over Perfection.
+- Small, verifiable commits.
