@@ -51,6 +51,17 @@ def delete_file(repo, op):
     print("Deleted:", path)
 
 
+def append_file(repo, op):
+    path = repo / op["path"]
+
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(op.get("content", ""))
+
+    print("Appended:", path)
+
 def mkdir(repo, op):
     path = repo / op["path"]
 
@@ -182,25 +193,19 @@ def apply_new_format(repo, patch):
         elif op_type == "move":
             move(repo, op)
 
-                elif op_type == "update":
-            create_file(repo, op)
+        elif op_type == "append":
+            append_file(repo, op)
 
         elif op_type in (
-            "append",
             "replace",
             "insert_after",
             "insert_before",
             "move",
             "validate"
-        ):
-            raise NotImplementedError(
-                f"Operation '{op_type}' is reserved for Patch Format v2."
-            )
-
-        else:
-            raise ValueError(
-                f"Unknown operation: {op_type}"
-            )
+                        ):
+        raise NotImplementedError(
+            f"Operation '{op_type}' is reserved for Patch Format v2."
+    )
 
 
 def load_patch(path):
