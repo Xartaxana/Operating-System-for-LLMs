@@ -80,3 +80,6 @@ The repository should be executable engineering memory. A new session should rec
 
 ## D-0022
 The success criterion for repository memory is a Zero Context Recovery Test. A new LLM session must be able to resume the project using only the repository.
+
+## D-0023
+Every repository boot must produce a standardized Boot Report. Boot success is determined by loading repository state rather than by subjective interpretation.
