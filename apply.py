@@ -86,6 +86,33 @@ def replace_in_file(repo, op):
     print("Replaced:", path)
 
 
+def insert_after(repo, op):
+    path = repo / op["path"]
+
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    text = path.read_text(encoding="utf-8")
+
+    anchor = op["anchor"]
+    content = op["content"]
+
+    pos = text.find(anchor)
+
+    if pos == -1:
+        raise ValueError(
+            f"Anchor not found in {path}: {anchor!r}"
+        )
+
+    pos += len(anchor)
+
+    text = text[:pos] + content + text[pos:]
+
+    path.write_text(text, encoding="utf-8")
+
+    print("Inserted:", path)
+
+
 def mkdir(repo, op):
     path = repo / op["path"]
 
@@ -221,10 +248,12 @@ def apply_new_format(repo, patch):
             append_file(repo, op)
             
         elif op_type == "replace":
-            replace_in_file(repo, op)    
+            replace_in_file(repo, op) 
+
+        elif op_type == "insert_after":
+            insert_after(repo, op)    
 
         elif op_type in (
-            "insert_after",
             "insert_before",
             "move",
             "validate"
