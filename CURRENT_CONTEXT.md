@@ -173,11 +173,33 @@ iterations: keep §7 synchronized with the evidence log; add the
 context-repetition section once local telemetry confirms or refutes
 the 50-62% prior; Architect review of the draft.
 
-Remaining Lead-tier queue: precise Phase 2 entry criteria (what
-telemetry, what thresholds, what volume triggers Router/compression
-work) — becomes a White Paper section when done.
+DONE (2026-07-04): Phase 2 entry criteria defined (ROADMAP.md,
+D-0033) — common gate (14 days real traffic, calibrated judge),
+router gate (R1-R5: evidence volume, >=25% delegable share of
+accounted Lead spend, mix stability, 3x economics, paid-Lead or
+sign-off), compression gate (C1-C3: >=40% repetition confirmed
+locally, >=20 multi-turn sessions, >=25% of input spend re-sent).
+Green gate -> written report -> Architect signs; first task is
+always an evaluation, never a build. Summarized in White Paper §10.
+
+Remaining Lead-tier queue: White Paper §7 upkeep; Architect review
+of the draft.
 
 ---
+
+# Delegated Task Queue (for CHEAPER model sessions)
+
+Queued behind the cost-accounting task below, both born from the
+Phase 2 gates (D-0033):
+
+- Real-vs-synthetic traffic tagging in the request log (gate G1
+  excludes synthetic working sets, replay and judge calls from gate
+  math; today they are distinguishable only by heuristics). Likely a
+  metadata column + tagging in the generators; spec to be written by
+  the Lead before execution.
+- metrics.py "Phase 2 readiness" digest section: print current values
+  vs. the ROADMAP gate thresholds (G/R/C criteria) so gate progress
+  is visible in every daily digest. Depends on the tagging item.
 
 # Delegated Task (queued for a CHEAPER model session): Rule #1 cost accounting in shadow_eval.py
 

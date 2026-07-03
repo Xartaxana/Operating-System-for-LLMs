@@ -249,10 +249,19 @@ receipts — what to route, and proving the supervisor earns its keep.
   accounting task is specified and delegated); grow real traffic
   through the gateway; repeat the evaluation against a paid frontier
   Lead when a key is available.
-- **Phase 2 (entered on evidence, D-0029):** router — evaluate
-  RouteLLM before building; context compression aimed at whichever
-  cost driver the Ledger confirms locally (the external prior says:
-  re-sent history). Compression follows the same doctrine as routing:
+- **Phase 2 (entered on evidence, D-0029, D-0033):** gated by
+  explicit telemetry-computable criteria (ROADMAP.md), set up front
+  and revised only through the decision log. The router gate requires
+  ≥30 judged pairs per category, a validated-delegable share ≥25% of
+  the Lead's accounted spend, a stable category mix, projected
+  savings ≥3x the router's own cost, and a paid Lead (or explicit
+  sign-off on accounted-price justification). The compression gate
+  requires local confirmation of the re-sent-context driver (≥40%
+  repetition on real multi-turn traffic) and ≥25% of accounted input
+  spend in re-sent context. A green gate produces a written report
+  and a human signature, not an automatic transition.
+- **Phase 2 workstreams (once gated in):** router — evaluate RouteLLM
+  before building. Compression follows the same doctrine as routing:
   the tooling is commoditized (LLMLingua-2/PCToolkit at token level,
   Letta-style recursive summarization architecturally — see
   docs/RELATED_WORK.md) and the open question is not *how* to

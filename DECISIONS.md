@@ -100,3 +100,6 @@ The LLM judge is itself a supervised worker. Its verdicts are audited by a Lead-
 
 ## D-0032
 Accounting prices, not cash prices. Every gateway alias carries a nonzero accounting price (the provider's paid-tier price for free-tier APIs, synthetic Haiku-class prices for local models); a free tier is a cash discount, not a cost of zero. Rule #1 (supervision must cost less than the savings it produces) is verified against accounting prices, and the accounted cost of every component — including the judge — must appear in the reports where delegation decisions are made.
+
+## D-0033
+Phase transitions are gated by explicit, telemetry-computable criteria recorded in ROADMAP.md, with numeric thresholds set up front and revised only through a DECISIONS.md entry. A gate turning green produces a written gate report; the Architect signs the transition. The first task of any newly opened workstream is an evaluation of an existing tool, never a build (extends D-0029, D-0030).
