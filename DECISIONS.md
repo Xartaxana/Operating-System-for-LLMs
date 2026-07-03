@@ -91,3 +91,6 @@ Delegation decisions are driven by DELEGATION_TABLE.md. The initial table is est
 
 ## D-0029
 The Router is deferred until telemetry from Phase 1 shows what is worth routing.
+
+## D-0030
+Prefer existing open-source solutions over building custom ones whenever they fit the project's purpose. Custom code is written only where no suitable open-source component exists or where the component is the project's own contribution. Example: use LiteLLM as the gateway instead of writing a proxy.
