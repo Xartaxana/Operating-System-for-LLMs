@@ -15,7 +15,8 @@
 
 Each step is useful on its own even if the next one is never built.
 
-1. [ ] Gateway: LiteLLM proxy, all real traffic through it, request log in SQLite.
+1. [x] Gateway built: LiteLLM proxy + SQLite request log (gateway/), logging path verified end-to-end.
+   - [ ] Operational: all real traffic actually routed through the gateway (needs API keys configured by the Architect).
 2. [ ] Guard: deterministic budget counters, 80% warning, 100% cutoff.
 3. [ ] Ledger: metrics.py daily digest — cost, task categories, context-repetition ratio.
 4. [ ] Analyst: local small model answering questions over Ledger output.

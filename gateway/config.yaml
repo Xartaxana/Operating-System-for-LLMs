@@ -1,0 +1,21 @@
+# LiteLLM proxy configuration for the gateway.
+#
+# Run from the gateway/ directory so the callback module resolves:
+#   litellm --config config.yaml
+#
+# API keys are taken from the environment (e.g. ANTHROPIC_API_KEY).
+
+model_list:
+  - model_name: lead
+    litellm_params:
+      model: anthropic/claude-fable-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # Smoke-test model: never calls a provider, needs no API key.
+  - model_name: mock
+    litellm_params:
+      model: anthropic/claude-fable-5
+      mock_response: pong
+
+litellm_settings:
+  callbacks: sqlite_logger.logger_instance
