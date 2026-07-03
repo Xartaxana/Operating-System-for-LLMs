@@ -26,9 +26,11 @@ Each step is useful on its own even if the next one is never built.
    over Ledger output through the gateway under its own alias.
 5. [~] Shadow Evaluation: shadow_eval.py built and tested; first real
    run 2026-07-03 (lead-gemini -> intern, 10 requests) produced the
-   first evidence-backed DELEGATION_TABLE.md verdicts. Remaining: the
-   difflib heuristic produces false "rejected" verdicts on verbose
-   answers — an LLM judge is now required (see CURRENT_CONTEXT.md).
+   first evidence-backed DELEGATION_TABLE.md verdicts. LLM judge
+   built and calibrated 11/11 (judge-groq = gpt-oss-120b via Groq
+   free tier; replaced middle-groq, which mis-traced correct code).
+   Remaining: traffic volume, middle tier as replay target, paid
+   Lead baseline (see CURRENT_CONTEXT.md).
 
 ## Phase 2 — Routing (data-driven)
 

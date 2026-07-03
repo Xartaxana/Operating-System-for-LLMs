@@ -83,13 +83,27 @@ decide_status via pass_rate >= --pass-threshold, default 0.75),
 --calibrate (agreement report against judge_calibration.json), and
 per-pair verdict logging. 31 tests pass.
 
-Calibration result: middle-groq (Llama-3.3-70B via Groq free tier,
-1000 req/day) agreed 10/11 with the manual labels — the one miss is
-a borderline strictness call (fibonacci: penalized missing negative-n
-validation), not systematic. ADOPTED as default judge. lead-gemini as
-judge is impractical: free tier is 5 req/min (verified 429) and it
-would judge its own source answers (self-preference bias). analyst
-(4B) not evaluated — no need while middle-groq is free.
+Calibration history: middle-groq (Llama-3.3-70B via Groq free tier)
+agreed 10/11 and was adopted 2026-07-03, then REPLACED the same day —
+see below. lead-gemini as judge is impractical: free tier is 5
+req/min (verified 429) and it would judge its own source answers
+(self-preference bias). analyst (4B) not evaluated — no need while
+Groq is free.
+
+JUDGE UPGRADE (2026-07-03, later session): the fibonacci miss was NOT
+strictness — diagnosis (asking the judge to explain) showed
+Llama-3.3-70B hallucinates a bug while "tracing" the correct
+`a, b = b, a + b` loop (claims the code returns b; it returns a).
+Prompt hardening (judge only the explicit task; step-by-step check
+before claiming a bug) did not flip it — a capability ceiling, not a
+prompt problem. The hardened prompt was kept, and the judge was
+upgraded: alias `judge-groq` = groq/openai/gpt-oss-120b (reasoning
+model, same free Groq key), screened directly against the calibration
+set (gpt-oss-120b 11/11; qwen3-32b 7/11 with rate-limit errors and a
+real miss on pair #7), then officially calibrated through the gateway:
+11/11. ADOPTED as default judge. judge-groq is a role alias (never a
+traffic source), so judge cost stays separable in the Ledger and the
+contamination filter has a second line of defense.
 
 Judged runs done (2026-07-03), with two process lessons the hard way:
 
@@ -99,21 +113,21 @@ Judged runs done (2026-07-03), with two process lessons the hard way:
    Architect asked whether the chief judge (Claude) had reviewed the
    run. Fixed: sample_requests() excludes judge calls (prompt LIKE
    filter + test); contaminated log lines marked [RETRACTED].
-2. JUDGE BIAS (known, unresolved): middle-groq consistently rules
-   WORSE on the fibonacci pair for missing negative-n validation the
-   task never asked for (calibration mismatch #2 + clean rerun, two
-   independent runs). Chief judge overruled: coding stays validated.
-   Fix path: tune JUDGE_SYSTEM_PROMPT to "only correctness w.r.t.
-   what the task asked", then re-calibrate expecting 11/11.
+2. JUDGE BIAS — RESOLVED (2026-07-03): root cause was middle-groq
+   mis-tracing correct code, not strictness (see JUDGE UPGRADE above).
+   Judge replaced with judge-groq (gpt-oss-120b), calibration 11/11.
+   Lesson: when a judge misses, ask it to explain before tuning the
+   prompt — the stated theory ("penalizes missing validation") was
+   wrong, and two prompt fixes aimed at it changed nothing.
 
 Process rule going forward: judge verdicts that CHANGE a table status
 get a chief-judge (or Architect) review of the actual pairs before
 the change is accepted; --update-table output is not self-certifying.
 
-Next: (a) tune judge prompt, re-calibrate to 11/11; (b) grow real
-traffic volume (n=2 per category is thin); (c) test "Routine code
-generation -> Middle" with middle-groq as TARGET; (d) once
-ANTHROPIC_API_KEY exists, repeat against the true paid Lead.
+Next: (a) grow real traffic volume (n=2 per category is thin);
+(b) test "Routine code generation -> Middle" with middle-groq as
+TARGET (judge-groq as judge — different models, no self-preference);
+(c) once ANTHROPIC_API_KEY exists, repeat against the true paid Lead.
 
 ## Research Notes for Later Phases (2026-07-03)
 

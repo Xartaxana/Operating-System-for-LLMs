@@ -60,14 +60,29 @@ DEFAULT_PASS_THRESHOLD = 0.75
 # The judge sees only the task and two anonymized answers, never model
 # names, and is instructed to ignore exactly what broke difflib:
 # verbosity, formatting and phrasing (see judge_calibration.json).
+# Neither clause fixed middle-groq's fibonacci miss: it hallucinates
+# a bug while "tracing" a correct loop (claims the code returns b; it
+# returns a) — a reasoning-capability ceiling, not a prompt problem
+# (diagnosed 2026-07-03; the earlier "missing validation" theory was
+# wrong). Fix was a stronger judge: judge-groq (gpt-oss-120b) scores
+# 11/11 with this prompt. parse_verdict() takes the LAST keyword, so
+# the judge may reason before the final verdict line.
+# NOTE: sample_requests() filters judge contamination by matching the
+# first sentence of this prompt — keep it stable or update the filter.
 JUDGE_SYSTEM_PROMPT = (
     "You are an impartial judge comparing two answers to the same task. "
     "Decide whether Answer B accomplishes the task as well as Answer A. "
+    "Judge ONLY against what the task explicitly asked for. "
     "Verbosity, formatting, phrasing, markdown fences and extra "
-    "explanation do NOT matter; only correctness and completeness of "
-    "the task result matter. Reply with exactly one word: EQUIVALENT "
-    "if Answer B accomplishes the task as well as Answer A (or better), "
-    "or WORSE if Answer B is incorrect or materially worse."
+    "explanation do NOT matter. If Answer A includes extras the task "
+    "did not ask for (input validation, error handling, edge-case "
+    "tests, examples), Answer B is NOT worse for lacking them. "
+    "First verify each answer against the task step by step; for code, "
+    "trace the execution on one or two small inputs before claiming a "
+    "bug. Then reply on the final line with exactly one word: "
+    "EQUIVALENT if Answer B accomplishes what the task explicitly "
+    "asked as well as Answer A (or better), or WORSE if Answer B "
+    "fails or is incorrect at the explicit task."
 )
 
 

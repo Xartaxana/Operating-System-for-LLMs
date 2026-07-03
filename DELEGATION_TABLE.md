@@ -118,3 +118,11 @@ and should be addressed by tuning JUDGE_SYSTEM_PROMPT ("only
 correctness w.r.t. what the task asked"), not by accepting the
 verdict. classification rejected STANDS: the judge's WORSE there
 matches the manual review (intern's flawed sentiment reasoning).
+
+Judge upgraded (2026-07-03, follow-up): the "strictness" diagnosis
+above was wrong — when asked to explain, middle-groq hallucinated a
+bug while tracing the correct loop (claimed the code returns b; it
+returns a). Prompt tuning did not flip it. Default judge replaced:
+judge-groq (groq/openai/gpt-oss-120b, reasoning model, same free
+key), calibration 11/11 including the fibonacci pair. Future runs
+use judge=judge-groq; middle-groq remains a replay TARGET only.

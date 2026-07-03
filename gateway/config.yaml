@@ -33,6 +33,16 @@ model_list:
       model: groq/llama-3.3-70b-versatile
       api_key: os.environ/GROQ_API_KEY
 
+  # Shadow Evaluation judge (shadow_eval.py --judge-model). gpt-oss-120b
+  # reasoning model via Groq free tier: 11/11 on judge_calibration.json
+  # where middle-groq stuck at 10/11 (mis-traces correct code). Named by
+  # role, not tier: judging is supervision, its cost must be separable
+  # in the Ledger (ARCHITECTURE.md Rule #1).
+  - model_name: judge-groq
+    litellm_params:
+      model: groq/openai/gpt-oss-120b
+      api_key: os.environ/GROQ_API_KEY
+
   # Intern: local worker (ARCHITECTURE.md hierarchy), free to run.
   # Synthetic per-token prices exercise the Guard/Ledger money paths
   # (roughly Haiku-class pricing) without real spend.
