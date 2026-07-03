@@ -79,3 +79,15 @@ Phase 0 is complete only after a successful Zero Context Recovery Test and corre
 
 ## D-0025
 The repository must always define exactly one current engineering task. LLMs should execute that task instead of inferring the next objective.
+
+## D-0026
+Direct git commits are the standard modification mechanism when the LLM has repository access. The patch mechanism (apply.py) is retained only as a fallback for environments without repository access.
+
+## D-0027
+Supervision of the Lead model is split by reliability requirements: Guard (deterministic budget enforcement, no LLM), Ledger (deterministic analytics, no LLM), Analyst (small LLM over telemetry, on demand). The cost of supervision must be measurably lower than the savings it produces.
+
+## D-0028
+Delegation decisions are driven by DELEGATION_TABLE.md. The initial table is estimated up front and refined continuously by Shadow Evaluation during implementation; a long measurement phase is explicitly rejected.
+
+## D-0029
+The Router is deferred until telemetry from Phase 1 shows what is worth routing.

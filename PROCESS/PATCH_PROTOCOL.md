@@ -1,8 +1,12 @@
 # Patch Protocol
 
-A Patch is the only approved mechanism for changing the repository.
+Status: fallback mechanism (see D-0026).
 
-Every Patch should:
+Direct git commits are the standard way to change the repository when
+the LLM has repository access. Patches (apply.py) are used only in
+environments without such access.
+
+Whether applied as a commit or a patch, every change should:
 
 1. Solve one conceptual problem.
 2. Preserve repository consistency.
