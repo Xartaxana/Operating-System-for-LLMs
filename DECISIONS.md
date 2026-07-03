@@ -97,3 +97,6 @@ Prefer existing open-source solutions over building custom ones whenever they fi
 
 ## D-0031
 The LLM judge is itself a supervised worker. Its verdicts are audited by a Lead-tier chief judge (escalation on table-status changes plus random per-run audits), reviewed pairs grow the calibration set, and the judge model is upgraded only on measured agreement degradation, never preemptively. See PROCESS/JUDGE_CALIBRATION_PROTOCOL.md.
+
+## D-0032
+Accounting prices, not cash prices. Every gateway alias carries a nonzero accounting price (the provider's paid-tier price for free-tier APIs, synthetic Haiku-class prices for local models); a free tier is a cash discount, not a cost of zero. Rule #1 (supervision must cost less than the savings it produces) is verified against accounting prices, and the accounted cost of every component — including the judge — must appear in the reports where delegation decisions are made.

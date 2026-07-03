@@ -75,7 +75,7 @@ coding 10% / classification 4% -> rejected.
 
 ---
 
-# Current Task (Authoritative)
+# Completed 2026-07-03: LLM Judge (built, calibrated, protocolized)
 
 LLM judge DONE (2026-07-03). shadow_eval.py gained --judge-model
 (judge through the gateway; verdicts override difflib in
@@ -145,6 +145,58 @@ target. 33 tests pass.
 
 Next: (a) grow real traffic volume (n=2 per category is thin);
 (b) once ANTHROPIC_API_KEY exists, repeat against the true paid Lead.
+
+---
+
+# Current Task (Authoritative): Rule #1 cost accounting in shadow_eval.py
+
+Intended executor: a CHEAPER model session (Middle-class task — the
+delegation table itself says routine coding -> Middle, validated).
+Planned by the Lead 2026-07-03 (D-0032); Lead/Architect reviews the
+diff, per PROCESS/JUDGE_CALIBRATION_PROTOCOL.md spirit: the executor
+does not self-certify.
+
+Diagnosis (verified 2026-07-03, do not re-derive): proxy-side
+accounting in gateway/requests.db is CORRECT — litellm prices the
+underlying groq/gemini models at paid-tier rates (judge-groq 52 calls
+= $0.0108, middle-groq $0.0191 logged). The costs are lost client-side
+in gateway/shadow_eval.py only:
+
+1. replay() computes cost via litellm.completion_cost on the ALIAS
+   name ("openai/middle-groq"), which is not in the client pricing
+   map -> exception -> cost_target=$0.0000 in every evidence-log line.
+2. judge_pair() does not capture cost at all, so judge (supervision)
+   spend never reaches the run report where the delegation decision
+   is recorded.
+
+Required changes (all in gateway/):
+
+1. In replay() and judge_pair(), take the cost the PROXY accounted
+   instead of recomputing client-side. Preferred source: the
+   x-litellm-response-cost response header (in the litellm client:
+   response._hidden_params, check "additional_headers"). VERIFY the
+   exact key empirically with one live call through the gateway
+   before wiring it up; if the header is absent, fallback = after the
+   call, read the newest matching row from requests.db (same alias,
+   ts >= call start). Do not keep completion_cost as silent fallback
+   — a wrong $0 is worse than an explicit None.
+2. evaluate() records per-pair judge_cost_usd; aggregate_by_category()
+   adds mean_judge_cost_usd; format_report() and the evidence-log
+   line in update_delegation_table() gain judge cost, e.g.
+   "judge=judge-groq pass_rate=1.00 judge_cost=$0.0004".
+3. Tests (mock _hidden_params / fallback path). All existing 33 tests
+   must stay green; new behavior covered.
+4. DELEGATION_TABLE.md: one caveat line noting that evidence entries
+   dated <= 2026-07-03 show cost_target=$0.0000 as a client-side
+   accounting artifact (real accounted costs are in requests.db), not
+   an actual $0.
+5. Do NOT change decide_status() semantics in this task; it already
+   compares mean costs and will simply start seeing honest numbers.
+
+Acceptance: a --categories coding run lead-gemini -> middle-groq
+--judge-model judge-groq produces an evidence line where cost_target
+and judge_cost are nonzero and match requests.db rows within
+rounding; 33+ tests pass.
 
 ## Research Notes for Later Phases (2026-07-03)
 
