@@ -12,3 +12,6 @@ The repository stores both project knowledge and engineering processes.
 - PATCH_PROTOCOL.md
 - SESSION_PROTOCOL.md
 - DOCUMENTATION_PROTOCOL.md
+- BOOT_REPORT_PROTOCOL.md
+- ZERO_CONTEXT_PROTOCOL.md
+- JUDGE_CALIBRATION_PROTOCOL.md

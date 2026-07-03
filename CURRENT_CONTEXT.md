@@ -123,6 +123,10 @@ Judged runs done (2026-07-03), with two process lessons the hard way:
 Process rule going forward: judge verdicts that CHANGE a table status
 get a chief-judge (or Architect) review of the actual pairs before
 the change is accepted; --update-table output is not self-certifying.
+Extended 2026-07-03 into PROCESS/JUDGE_CALIBRATION_PROTOCOL.md
+(D-0031): reviews grow judge_calibration.json, 1-2 random verdicts
+audited per run, recalibration every ~5 new pairs, judge model
+upgraded only on measured agreement drop below 90%.
 
 DONE (2026-07-03): "Routine code generation -> Middle" tested with
 middle-groq as TARGET, judge-groq as judge: n=2, pass_rate=1.00,
