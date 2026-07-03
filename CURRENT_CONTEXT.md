@@ -29,10 +29,28 @@ path, warning at 80% of budget, hard cutoff at 100%. No LLM involved
 
 # Current Task (Authoritative)
 
-Implement the Guard as a LiteLLM proxy hook in gateway/: per-model and
-per-day token/cost counters backed by the same SQLite log, a warning
-injected at 80% of the configured budget, hard refusal at 100%.
-Budgets are configuration, not code. The enforcement path must be
-covered by tests that do not require API keys.
+Implement the Guard in gateway/: per-model and per-day token/cost
+counters, a warning at 80% of the configured budget, hard refusal
+at 100%. Budgets are configuration, not code. The enforcement path
+must be covered by tests that do not require API keys.
+
+Per D-0030, first evaluate LiteLLM's native budget mechanisms
+(virtual keys, per-key/per-team budgets, rate limits); write a custom
+proxy hook only for whatever the native mechanisms cannot express
+(e.g. the 80% warning semantics). See docs/RELATED_WORK.md,
+"Cost telemetry / budget enforcement".
+
+## Research Notes for Later Phases (2026-07-03)
+
+Recorded in docs/RELATED_WORK.md and DELEGATION_TABLE.md
+("External Evidence"); key operational implications:
+
+- Phase 2 Router: evaluate RouteLLM (open source, OpenAI-compatible)
+  before building our own; it trains on preference data the Ledger and
+  Shadow Evaluation will produce.
+- Shadow Evaluation compares total task cost including retry loops
+  (DELEGATION_TABLE.md update rule 4).
+- Context-repetition priors to confirm locally: 50–62% of spend is
+  re-sent history, 30–40% of tokens are redundant.
 
 This file is intended to be updated frequently.
