@@ -25,6 +25,14 @@ model_list:
       model: gemini/gemini-2.5-flash
       api_key: os.environ/GEMINI_API_KEY
 
+  # Middle tier (ARCHITECTURE.md hierarchy: routine coding) via Groq
+  # free tier. Exists so "Routine code generation -> Middle" in
+  # DELEGATION_TABLE.md can be tested against the tier it names.
+  - model_name: middle-groq
+    litellm_params:
+      model: groq/llama-3.3-70b-versatile
+      api_key: os.environ/GROQ_API_KEY
+
   # Intern: local worker (ARCHITECTURE.md hierarchy), free to run.
   # Synthetic per-token prices exercise the Guard/Ledger money paths
   # (roughly Haiku-class pricing) without real spend.

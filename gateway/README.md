@@ -44,6 +44,11 @@ The proxy serves an OpenAI-compatible API on http://localhost:4000.
 Models (gateway aliases → ARCHITECTURE.md hierarchy):
 
 - `lead` — frontier model via Anthropic API; needs `ANTHROPIC_API_KEY` (paid).
+- `lead-sonnet` — test-traffic alias (Claude Sonnet 5); same key, paid.
+- `lead-gemini` — Gemini 2.5 Flash free tier; needs `GEMINI_API_KEY`
+  (note: gemini-2.0-flash has zero free-tier quota — use 2.5).
+- `middle-groq` — Llama-3.3-70B via Groq free tier (1000 req/day);
+  needs `GROQ_API_KEY`. The Middle tier of the hierarchy.
 - `intern` — local Qwen3-4B via Ollama; free, no keys. Synthetic
   per-token prices (Haiku-class) are configured so Guard/Ledger money
   paths work without real spend.
@@ -53,6 +58,12 @@ Models (gateway aliases → ARCHITECTURE.md hierarchy):
 
 Free-telemetry mode: with only Ollama installed (`ollama pull qwen3:4b`),
 traffic to `intern`/`analyst` produces full real telemetry at $0.
+With free-tier `GEMINI_API_KEY`/`GROQ_API_KEY` added, `lead-gemini`
+and `middle-groq` extend this to four hierarchy tiers, still at $0.
+
+API keys live in a gitignored `gateway/.env`. LiteLLM does NOT load
+it automatically — export the variables before starting the proxy
+(e.g. `set -a; source .env; set +a`).
 
 Set `GATEWAY_DB_PATH` to override the log location (default: `gateway/requests.db`).
 

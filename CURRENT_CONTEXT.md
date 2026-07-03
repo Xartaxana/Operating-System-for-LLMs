@@ -106,9 +106,14 @@ already applied to DELEGATION_TABLE.md: coding flipped to validated,
 classification stays rejected with corrected rationale. No extra
 data-gathering experiment needed before building the judge (D-0028
 spirit); expand the set later with disagreement cases the judge gets
-wrong. Groq (GROQ_API_KEY, free tier) is planned as a SEPARATE track:
-a Middle-tier worker alias so "Routine code generation -> Middle" can
-be tested against the tier the table actually names.
+wrong. Groq track DONE (2026-07-03): alias `middle-groq`
+(groq/llama-3.3-70b-versatile) live and verified — free tier, 1000
+req/day, 12k tokens/min, ~20 ms generation. Key in gitignored
+gateway/.env alongside GEMINI_API_KEY. The gateway now serves four
+hierarchy tiers at $0: intern/analyst (Qwen3-4B local), middle-groq
+(Llama-3.3-70B), lead-gemini (Gemini 2.5 Flash); paid lead/lead-sonnet
+remain optional. "Routine code generation -> Middle" can now be
+tested against the tier the table actually names.
 
 ## Research Notes for Later Phases (2026-07-03)
 
