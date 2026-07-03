@@ -127,5 +127,6 @@ Each step is useful on its own even if the next one is never built:
 ## Related Documents
 
 - DELEGATION_TABLE.md — living cost/value table for delegation decisions.
+- docs/RELATED_WORK.md — external projects and cost data this design is checked against.
 - PROJECT_CHARTER.md, PROJECT_PHILOSOPHY.md, ANTI_GOALS.md — constitution.
 - DECISIONS.md — decision log.

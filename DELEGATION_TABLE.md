@@ -34,3 +34,23 @@ Value = how much frontier intelligence actually improves the result.
 2. New task types are added as they appear in the Ledger.
 3. "Re-explaining known context" is tracked as the primary suspected
    cost driver; its row is retired when context compression ships.
+4. Shadow Evaluation compares TOTAL task cost (including retry loops),
+   not per-request cost: external data shows a cheaper model can need
+   10 loops where a frontier model needs 1, erasing the price advantage
+   (see docs/RELATED_WORK.md, "Tokenomics in Action").
+
+## External Evidence (priors, not measurements)
+
+Figures from outside sources that our own telemetry should confirm or
+refute. Sources and details: docs/RELATED_WORK.md.
+
+| Claim | Figure | Source |
+|---|---|---|
+| Re-sent conversation history share of token spend | 50–62% | Unblocked, 2026 |
+| Input tokens share of agentic session cost | ~85% (input:output ≈ 25:1) | Vantage, 2026 |
+| Tokens wasted on redundant context / re-reading | 30–40% | arXiv:2604.22750 |
+| Savings from summarization + budget-aware planning | 25–35% | arXiv:2604.22750 |
+| Cascade routing cost reduction at equal quality | up to 98% (benchmarks) | FrugalGPT |
+| GPT-4-class quality with 26% of frontier calls | 95% quality | RouteLLM |
+| Prompt-cache discount on cached prefix | ~90% | provider pricing |
+| Frontier vs cheap model retry loops on same task | 1 vs 10 loops | Klyshevich, 2026 |
