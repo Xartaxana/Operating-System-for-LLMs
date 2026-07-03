@@ -42,6 +42,19 @@ cheaper one — can backfire end-to-end: production data shows an
 identical task taking a frontier model 1 attempt, a mid-tier model
 3–5, and a small model 10, erasing the per-token price advantage.
 
+The context cost itself has two distinct layers that require
+different fixes:
+
+- **Intra-session:** LLM APIs are stateless, so an agent re-sends the
+  entire message history on every call and is re-billed for it as
+  input; naive agent loops are quadratic in step count. This layer is
+  addressed by context compression (§10) — a mature external tooling
+  landscape our system validates rather than reinvents.
+- **Inter-session:** each new session starts blank and must re-learn
+  project state, either by dragging an ever-growing conversation or
+  by a human re-explaining. This layer is addressed by the repository
+  as persistent memory (§8).
+
 So the problem is not "use cheaper models". It is: **keep the Lead on
 work that needs it, prove which work does not, and make sure the
 proving machinery costs less than it saves.**
@@ -192,8 +205,13 @@ needs 1.
 ## 8. The Repository Is the Operating System's Memory
 
 The second half of the "operating system" claim is not about models
-but about state. LLM sessions are ephemeral; the project treats that
-as a design constraint, not an inconvenience:
+but about state. This is the fix for the **inter-session** layer of
+the context cost (§2): sessions become short and disposable — a new
+session boots from a curated, compact context instead of dragging a
+long conversation, and nothing is lost when it ends. It deliberately
+does not address intra-session re-sending; that is Phase 2
+compression territory. LLM sessions are ephemeral; the project treats
+that as a design constraint, not an inconvenience:
 
 - **Git is the only long-term memory.** No project knowledge may
   exist only in chat history (D-0014). Decisions carry numbered
@@ -234,7 +252,14 @@ receipts — what to route, and proving the supervisor earns its keep.
 - **Phase 2 (entered on evidence, D-0029):** router — evaluate
   RouteLLM before building; context compression aimed at whichever
   cost driver the Ledger confirms locally (the external prior says:
-  re-sent history).
+  re-sent history). Compression follows the same doctrine as routing:
+  the tooling is commoditized (LLMLingua-2/PCToolkit at token level,
+  Letta-style recursive summarization architecturally — see
+  docs/RELATED_WORK.md) and the open question is not *how* to
+  compress but *what is safe to compress on our traffic*. That
+  question is answered by the existing Shadow Evaluation harness
+  unchanged: replay with compressed vs. full context, judge rules
+  equivalence, verdict lands in the evidence log.
 - **Continuous:** the delegation table and this paper's §7 are living
   documents; every Shadow Evaluation run appends to the evidence log.
 

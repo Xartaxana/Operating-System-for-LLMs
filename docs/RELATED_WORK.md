@@ -1,7 +1,8 @@
 # Related Work
 
 External projects, papers and articles overlapping with this project's
-ideas. Surveyed 2026-07-03. Each entry states what we can take from it.
+ideas. Surveyed 2026-07-03; context-compression section added
+2026-07-04. Each entry states what we can take from it.
 
 ## Routing / cascades (validates our Phase 2, D-0029)
 
@@ -69,6 +70,58 @@ Multiple independent sources confirm our primary suspicion:
 Take: the Ledger's context-repetition ratio is measuring the right thing;
 external numbers (50–62% re-sent, 30–40% waste) are the prior to beat.
 
+## Context compression / memory management (Phase 2 candidates)
+
+Surveyed 2026-07-04. The intra-session cost driver (stateless APIs
+re-bill the whole message history every call) has a mature solution
+landscape; per D-0030 we evaluate these before building anything.
+
+### LLMLingua family (Microsoft, open source)
+https://github.com/microsoft/LLMLingua
+
+Token-level prompt compression: a small model drops tokens that do
+not change the LLM's output (perplexity-guided), up to 20x compression.
+LongLLMLingua adds question-aware coarse-to-fine compression for long
+contexts (up to +21.4% quality with far fewer tokens,
+arXiv:2310.06839); LLMLingua-2 reformulates compression as token
+classification (task-agnostic, 2-5x at up to 2.9x lower latency).
+PCToolkit (arXiv:2403.17411) bundles five methods (Selective Context,
+LLMLingua, LongLLMLingua, SCRL, KiS) behind one interface.
+
+Caveat from practitioners: perplexity-based compression can corrupt
+code syntax — code-heavy contexts need specialized treatment.
+
+Take: LLMLingua-2 / PCToolkit are the candidates to evaluate for
+Phase 2 compression; never apply perplexity compression to code
+context without validation.
+
+### Letta (ex-MemGPT): architectural memory
+https://www.letta.com/blog/agent-memory/
+
+Positions itself literally as an "LLM Operating System": virtual
+context with OS-style paging, recursive summarization of old
+messages, agent-editable memory blocks, three-tier memory (core
+in-context -> recall searchable -> archival vector store), background
+"sleep-time" agents maintaining memory.
+
+Take: the architectural answer to intra-session context growth;
+overlaps our repository-as-memory idea at the inter-session level but
+solves the intra-session level we deliberately deferred. If Phase 1
+telemetry confirms the 50-62% prior, Letta-style recursive
+summarization is the pattern to evaluate against LLMLingua-style
+token compression.
+
+### Why the problem is still open despite mature tools
+
+Compression is lossy and task-dependent: nobody knows up front which
+context fragment is the needle that cannot be dropped, so production
+adoption is cautious and manual. This is exactly the gap our
+machinery fills: **validating compression is the same problem as
+validating delegation** — replay a request with compressed vs. full
+context, let the calibrated judge rule equivalence, attach the
+verdict as evidence. The Shadow Evaluation harness generalizes to
+compression validation with no architectural change.
+
 ## "Tokenomics in Action" (Klyshevich, LinkedIn, 2026)
 https://www.linkedin.com/pulse/tokenomics-action-what-running-ai-dark-factory-costs-how-klyshevich-4t0xf/
 
@@ -95,8 +148,8 @@ figures added as external evidence.
   syscalls — conceptual framing, no cost supervision.
 - AIOS (arXiv:2403.16971): OS-style scheduling/resource management for
   agents; academic kernel, not cost-driven.
-- MemGPT: virtual context management (memory paging) — relevant later
-  for context compression, orthogonal to supervision.
+- MemGPT/Letta: virtual context management (memory paging) — see the
+  dedicated "Context compression" section above.
 - Curated list: https://github.com/bilalonur/awesome-llm-os
 
 Take: no project in this space combines deterministic budget enforcement
@@ -113,3 +166,8 @@ supervision economics, not the router.
    not per-request cost (loop-count effect).
 4. Context-repetition ratio has external priors: 50–62% re-sent history,
    30–40% redundant tokens; our Ledger should confirm or refute locally.
+5. Compression (Phase 2): evaluate LLMLingua-2/PCToolkit (token-level)
+   and Letta-style recursive summarization (architectural) before
+   building (D-0030); validate any of them with the existing Shadow
+   Evaluation harness (compressed vs. full context, judge rules
+   equivalence) — same loop as delegation validation.

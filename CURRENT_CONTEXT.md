@@ -239,5 +239,10 @@ Recorded in docs/RELATED_WORK.md and DELEGATION_TABLE.md
   Shadow Evaluation will produce.
 - Context-repetition priors to confirm locally: 50–62% of spend is
   re-sent history, 30–40% of tokens are redundant.
+- Phase 2 compression (surveyed 2026-07-04): evaluate LLMLingua-2 /
+  PCToolkit (token-level) and Letta-style recursive summarization
+  (architectural) before building; validate with the existing Shadow
+  Evaluation harness (compressed vs. full context, judge equivalence).
+  Never perplexity-compress code context without validation.
 
 This file is intended to be updated frequently.
