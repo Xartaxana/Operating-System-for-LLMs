@@ -4,6 +4,11 @@ An open research project exploring hierarchical orchestration of Large Language 
 
 The repository is the project's single source of truth.
 
+## Architecture
+
+See ARCHITECTURE.md for the authoritative architecture specification
+and DELEGATION_TABLE.md for the living delegation cost/value table.
+
 ## Repository Snapshot
 
 Run:

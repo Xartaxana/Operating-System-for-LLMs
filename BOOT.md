@@ -10,8 +10,9 @@ When starting a new conversation:
 4. Read ANTI_GOALS.md.
 5. Read DECISIONS.md.
 6. Read MEMORY_ARCHITECTURE.md.
-7. Read ROADMAP.md.
-8. Read CURRENT_CONTEXT.md if it exists.
+7. Read ARCHITECTURE.md.
+8. Read ROADMAP.md.
+9. Read CURRENT_CONTEXT.md if it exists.
 
 After loading these documents:
 
