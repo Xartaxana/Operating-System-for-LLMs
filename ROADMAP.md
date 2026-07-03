@@ -17,8 +17,9 @@ Each step is useful on its own even if the next one is never built.
 
 1. [x] Gateway built: LiteLLM proxy + SQLite request log (gateway/), logging path verified end-to-end.
    - [ ] Operational: all real traffic actually routed through the gateway (needs API keys configured by the Architect).
-2. [ ] Guard: deterministic budget counters, 80% warning, 100% cutoff
-   (per D-0030: LiteLLM native budgets first, custom hook only for gaps).
+2. [x] Guard: deterministic budget counters, 80% warning, 100% cutoff.
+   Custom pre-call hook over the SQLite log (native LiteLLM budgets
+   evaluated per D-0030 and rejected: they need Postgres+Redis).
 3. [ ] Ledger: metrics.py daily digest — cost, task categories, context-repetition ratio.
 4. [ ] Analyst: local small model answering questions over Ledger output.
 5. [ ] Shadow Evaluation: replay sampled Lead requests on cheaper models, update DELEGATION_TABLE.md.

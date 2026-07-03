@@ -2,18 +2,20 @@
 
 ## Current Milestone
 
-Phase 1 — Supervised Lead (MVP), step 2: Guard.
+Phase 1 — Supervised Lead (MVP), step 3: Ledger.
 
 ## Current Status
 
-Phase 0 closed 2026-07-03 (Zero Context Recovery Test passed).
+Phase 0 closed 2026-07-03. Phase 1 steps 1–2 built and verified:
 
-Phase 1 step 1 (Gateway) is built and verified: gateway/ contains the
-LiteLLM proxy config and a SQLite logging callback. Verified end-to-end
-locally: the proxy serves an OpenAI-compatible endpoint, success and
-failure requests both produce rows in the log (gateway alias, provider
-model, tokens, cost, latency, prompt JSON, response). Tests in
-gateway/test_sqlite_logger.py pass without API keys.
+- Gateway (step 1): LiteLLM proxy + SQLite request logging (gateway/).
+- Guard (step 2): deterministic daily per-model budgets as a pre-call
+  hook over the same SQLite log; warn event at 80% (once per model per
+  day), HTTP 429 at 100%. Verified end-to-end through the running
+  proxy: over-budget request refused with 429 + block event, request
+  at 80% passed with warn event. LiteLLM native budgets were evaluated
+  per D-0030 and rejected (require Postgres+Redis, both deferred by
+  ARCHITECTURE.md). Tests: gateway/test_guard.py, no API keys needed.
 
 Open operational item (Architect): set ANTHROPIC_API_KEY and point real
 traffic at the gateway (gateway/README.md). Telemetry for the Ledger
@@ -21,24 +23,22 @@ starts accumulating only after that.
 
 ## Current Objective
 
-Phase 1 step 2: Guard — deterministic budget counters in the request
-path, warning at 80% of budget, hard cutoff at 100%. No LLM involved
-(see ARCHITECTURE.md, "Guard"; D-0027).
+Phase 1 step 3: Ledger — metrics.py daily digest over the request log:
+cost per model/day, task categories, context-repetition ratio
+(see ARCHITECTURE.md, "Ledger"). Pure Python/SQL, no LLM.
 
 ---
 
 # Current Task (Authoritative)
 
-Implement the Guard in gateway/: per-model and per-day token/cost
-counters, a warning at 80% of the configured budget, hard refusal
-at 100%. Budgets are configuration, not code. The enforcement path
-must be covered by tests that do not require API keys.
-
-Per D-0030, first evaluate LiteLLM's native budget mechanisms
-(virtual keys, per-key/per-team budgets, rate limits); write a custom
-proxy hook only for whatever the native mechanisms cannot express
-(e.g. the 80% warning semantics). See docs/RELATED_WORK.md,
-"Cost telemetry / budget enforcement".
+Implement the Ledger in gateway/ (or a sibling module): a metrics
+script over requests.db producing a daily digest — tokens/cost per
+model and per day, budget events, and the context-repetition ratio
+(overlap between consecutive prompts of the same model). External
+priors to confirm or refute with local data: 50–62% of spend is
+re-sent history, 30–40% of tokens are redundant (docs/RELATED_WORK.md).
+Output is human-readable text plus machine-readable rows the Analyst
+(step 4) can consume. Covered by tests on a seeded database.
 
 ## Research Notes for Later Phases (2026-07-03)
 
@@ -50,7 +50,5 @@ Recorded in docs/RELATED_WORK.md and DELEGATION_TABLE.md
   Shadow Evaluation will produce.
 - Shadow Evaluation compares total task cost including retry loops
   (DELEGATION_TABLE.md update rule 4).
-- Context-repetition priors to confirm locally: 50–62% of spend is
-  re-sent history, 30–40% of tokens are redundant.
 
 This file is intended to be updated frequently.

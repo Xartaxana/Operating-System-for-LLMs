@@ -1,18 +1,31 @@
 # Gateway
 
-Phase 1 step 1 (see ARCHITECTURE.md, "Gateway").
+Phase 1 steps 1–2 (see ARCHITECTURE.md, "Gateway" and "Guard").
 
 A LiteLLM proxy that all real model traffic passes through.
 Every request — successful or failed — is recorded in a SQLite log
 that the Ledger (Phase 1 step 3) will consume. Raw prompt text is
 stored because the context-repetition ratio needs it.
 
+The Guard enforces daily per-model budgets deterministically inside
+the request path: a `warn` event at 80% of budget (once per model per
+day), HTTP 429 refusal at 100%. Budgets live in `budgets.yaml` and are
+re-read on every request — edits apply without a proxy restart.
+
+Why not LiteLLM's native budgets (D-0030 evaluation): they require
+Postgres (and Redis for cross-worker counters), both explicitly
+deferred by ARCHITECTURE.md, and lack per-model 80%-warning semantics.
+The Guard is ~100 lines over the SQLite log the gateway already writes.
+
 ## Files
 
 - `config.yaml` — proxy configuration (models, callback registration).
 - `sqlite_logger.py` — LiteLLM custom callback writing to SQLite.
-- `test_sqlite_logger.py` — logging-path tests, no API keys required.
+- `guard.py` — budget enforcement pre-call hook (no LLM).
+- `budgets.yaml` — daily budgets per gateway alias; `GATEWAY_BUDGETS_PATH` overrides.
+- `test_sqlite_logger.py`, `test_guard.py` — tests, no API keys required.
 - `requests.db` — the request log (created on first request, not committed).
+  Also holds the `budget_events` table (warn/block history for the Ledger).
 
 ## Run
 
@@ -47,8 +60,13 @@ The request is logged like any other, so a `success` row for model
 ## Tests
 
 ```
-python -m pytest gateway/test_sqlite_logger.py
+python -m pytest gateway/
 ```
+
+Note on thresholds: the 80% warning uses float comparison; a spend
+sitting exactly on the boundary may not trigger it (observed:
+0.8 × 0.025 > 0.02 in IEEE 754). Harmless in practice — the next
+request over the line warns.
 
 ## Log schema
 

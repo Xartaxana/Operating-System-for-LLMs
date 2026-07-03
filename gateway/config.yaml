@@ -18,4 +18,4 @@ model_list:
       mock_response: pong
 
 litellm_settings:
-  callbacks: sqlite_logger.logger_instance
+  callbacks: [sqlite_logger.logger_instance, guard.guard_instance]

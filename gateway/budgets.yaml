@@ -1,0 +1,11 @@
+# Guard budget configuration (see guard.py).
+#
+# daily_usd: per gateway alias, per local calendar day.
+# A model without an entry falls back to "default";
+# no entry and no default means no limit for that model.
+
+warn_ratio: 0.8
+
+daily_usd:
+  default: 5.00
+  lead: 10.00
