@@ -11,6 +11,13 @@ model_list:
       model: anthropic/claude-fable-5
       api_key: os.environ/ANTHROPIC_API_KEY
 
+  # Test-traffic alias: generates sample Lead-tier telemetry for Shadow
+  # Evaluation without touching the production "lead" alias (D-0028).
+  - model_name: lead-sonnet
+    litellm_params:
+      model: anthropic/claude-sonnet-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
   # Intern: local worker (ARCHITECTURE.md hierarchy), free to run.
   # Synthetic per-token prices exercise the Guard/Ledger money paths
   # (roughly Haiku-class pricing) without real spend.

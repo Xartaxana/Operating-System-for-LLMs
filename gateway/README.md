@@ -25,7 +25,8 @@ The Guard is ~100 lines over the SQLite log the gateway already writes.
 - `budgets.yaml` — daily budgets per gateway alias; `GATEWAY_BUDGETS_PATH` overrides.
 - `metrics.py` — the Ledger: daily digest over the request log (no LLM).
 - `analyst.py` — the Analyst: local small model narrating the digest.
-- `test_sqlite_logger.py`, `test_guard.py`, `test_metrics.py`, `test_analyst.py` — tests, no API keys required.
+- `shadow_eval.py` — Shadow Evaluation: replay + compare, updates DELEGATION_TABLE.md.
+- `test_sqlite_logger.py`, `test_guard.py`, `test_metrics.py`, `test_analyst.py`, `test_shadow_eval.py` — tests, no API keys required.
 - `requests.db` — the request log (created on first request, not committed).
   Also holds the `budget_events` table (warn/block history for the Ledger).
 
@@ -105,6 +106,35 @@ python analyst.py --digest-only        # inspect what the model sees
 The Analyst feeds the Ledger digest (never raw conversations) to the
 local model through the gateway and answers operator questions.
 Requires the proxy and Ollama running.
+
+## Shadow Evaluation
+
+```
+python shadow_eval.py --source-model lead --target-model intern [--days N] [--sample N] [--update-table] [--json]
+```
+
+Samples successful requests logged for `--source-model`, replays each
+prompt on `--target-model` through the gateway, and compares answers
+with a transparent heuristic (character-level similarity via
+`difflib`; an LLM judge can replace this later without changing the
+pipeline — same "estimate, mark it as such" spirit as `metrics.categorize`).
+Results are grouped by the same keyword-heuristic task category
+`metrics.py` uses. A category needs `--min-samples` (default 2)
+before it can move off `estimated`; source and target must differ —
+comparing a model to itself is not evidence of delegation.
+
+`--update-table` writes `validated`/`rejected` verdicts into
+`DELEGATION_TABLE.md` row Status cells and appends one line per run to
+its "Shadow Evaluation Log" section (evidence for Update Rule 1).
+
+Caveat (Update Rule 4): this replays each prompt once. It measures
+one-shot answer quality and cost, not retry-loop cost — a category
+marked `validated` here has not yet been checked against the "cheap
+model needs 10 retries" failure mode rule 4 warns about.
+
+Needs real `--source-model` traffic in the log first (e.g. `lead`,
+once `ANTHROPIC_API_KEY` is set, or another paid/free-tier alias) —
+comparing `intern` against itself does not validate anything.
 
 ## Tests
 

@@ -33,24 +33,60 @@ Open operational item (Architect): route real traffic through the
 gateway to accumulate telemetry (free via intern/analyst;
 lead needs ANTHROPIC_API_KEY, paid).
 
+Test-traffic alias `lead-sonnet` (anthropic/claude-sonnet-5) added to
+gateway/config.yaml for future Shadow Evaluation baselines, but unused
+for now: no ANTHROPIC_API_KEY in this environment. Working set for
+Shadow Evaluation instead generated via `intern` (Ollama, free): 6
+requests across coding/summarization/extraction/classification/
+formatting categories, logged in gateway/requests.db (38% context
+repetition observed on this tiny sample — not meaningful yet, needs
+volume).
+
+Planned (not yet done): add Gemini and Groq free-tier aliases to
+config.yaml for traffic diversity. Rationale: local Ollama traffic
+alone can't validate delegation decisions against a real frontier
+Lead — Gemini/Groq free tiers give real remote latency and real
+provider pricing at $0, useful once comparing delegation candidates
+against genuine frontier-Lead output (vs. `lead-sonnet` once a paid
+key is available).
+
 ## Current Objective
 
-Phase 1 step 5: Shadow Evaluation — replay sampled requests on cheaper
-models, compare outputs, update DELEGATION_TABLE.md with evidence
-(see ARCHITECTURE.md, "Shadow Evaluation"; D-0028).
+Phase 1 step 5: Shadow Evaluation. gateway/shadow_eval.py is built and
+tested (11 passing tests, no live model needed — mock_response like
+test_analyst.py): samples successful requests for --source-model,
+replays them on --target-model, compares via difflib similarity
+(transparent heuristic, LLM judge deferred), aggregates by the same
+task category metrics.py uses, and (--update-table) writes
+validated/rejected verdicts into DELEGATION_TABLE.md + an evidence
+log entry. Guards: refuses source==target (self-comparison is not
+delegation evidence); a category stays "estimated" (inconclusive)
+below --min-samples (default 2).
+
+Blocked on data, not code: `requests.db` has only `intern` traffic (no
+`lead` rows — no ANTHROPIC_API_KEY). Ran live against the current log:
+`python shadow_eval.py --source-model lead --target-model intern`
+correctly reports "no successful 'lead' requests in range" rather than
+fabricating a verdict. Next real run needs `lead`-tier traffic — via
+ANTHROPIC_API_KEY on `lead`/`lead-sonnet`, or once added, a Gemini/Groq
+free-tier alias (see below).
 
 ---
 
 # Current Task (Authoritative)
 
-Implement Shadow Evaluation: a script that samples logged requests
-from requests.db, replays them on a cheaper model (start with
-intern = local Qwen3-4B, free), and compares outputs (heuristics
-first; LLM judge later). Results update DELEGATION_TABLE.md row
-statuses per its update rules — including rule 4: compare TOTAL task
-cost, counting retry loops. Prerequisite: some real traffic in the
-log; if the log is still empty, generate a small working set by
-routing this project's own tasks through the gateway first.
+gateway/shadow_eval.py is implemented and tested (2026-07-03) — see
+"Current Objective" above for what it does and its guards. Remaining
+work on Phase 1 step 5 is data, not code: get real `lead`-tier traffic
+into requests.db, then run
+`python shadow_eval.py --source-model lead --target-model intern --update-table`
+to produce the first evidence-backed DELEGATION_TABLE.md verdicts.
+Options to unblock, in the order discussed with the Architect:
+
+1. Set ANTHROPIC_API_KEY and route real project traffic through
+   `lead` (or the `lead-sonnet` test alias already in config.yaml).
+2. Add Gemini/Groq free-tier aliases to config.yaml (planned, not yet
+   done — see above) for a frontier-ish baseline at $0.
 
 ## Research Notes for Later Phases (2026-07-03)
 

@@ -2,4 +2,5 @@ __pycache__/
 *.pyc
 gateway/*.db
 gateway/*.db-journal
+gateway/*.log
 .pytest_cache/
