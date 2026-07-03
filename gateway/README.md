@@ -1,6 +1,6 @@
 # Gateway
 
-Phase 1 steps 1–3 (see ARCHITECTURE.md: "Gateway", "Guard", "Ledger").
+Phase 1 steps 1–4 (see ARCHITECTURE.md: "Gateway", "Guard", "Ledger", "Analyst").
 
 A LiteLLM proxy that all real model traffic passes through.
 Every request — successful or failed — is recorded in a SQLite log
@@ -24,7 +24,8 @@ The Guard is ~100 lines over the SQLite log the gateway already writes.
 - `guard.py` — budget enforcement pre-call hook (no LLM).
 - `budgets.yaml` — daily budgets per gateway alias; `GATEWAY_BUDGETS_PATH` overrides.
 - `metrics.py` — the Ledger: daily digest over the request log (no LLM).
-- `test_sqlite_logger.py`, `test_guard.py`, `test_metrics.py` — tests, no API keys required.
+- `analyst.py` — the Analyst: local small model narrating the digest.
+- `test_sqlite_logger.py`, `test_guard.py`, `test_metrics.py`, `test_analyst.py` — tests, no API keys required.
 - `requests.db` — the request log (created on first request, not committed).
   Also holds the `budget_events` table (warn/block history for the Ledger).
 
@@ -37,13 +38,32 @@ litellm --config config.yaml
 ```
 
 The proxy serves an OpenAI-compatible API on http://localhost:4000.
-Point any OpenAI-compatible client at it with the model name `lead`.
 
-Set `ANTHROPIC_API_KEY` in the environment before starting.
+Models (gateway aliases → ARCHITECTURE.md hierarchy):
+
+- `lead` — frontier model via Anthropic API; needs `ANTHROPIC_API_KEY` (paid).
+- `intern` — local Qwen3-4B via Ollama; free, no keys. Synthetic
+  per-token prices (Haiku-class) are configured so Guard/Ledger money
+  paths work without real spend.
+- `analyst` — same local model under its own alias, so the Ledger
+  accounts supervision cost separately (Rule #1).
+- `mock` — canned response, for smoke tests.
+
+Free-telemetry mode: with only Ollama installed (`ollama pull qwen3:4b`),
+traffic to `intern`/`analyst` produces full real telemetry at $0.
+
 Set `GATEWAY_DB_PATH` to override the log location (default: `gateway/requests.db`).
 
 On Windows also set `PYTHONUTF8=1`: with a non-UTF-8 console codepage
 (e.g. cp1251) the proxy crashes on startup printing its banner.
+
+Run the proxy FROM the gateway/ directory: LiteLLM imports the callback
+modules (`sqlite_logger`, `guard`) relative to the working directory.
+
+Ollama on old NVIDIA drivers (observed on GTX 1060): CUDA kernels fail
+with "PTX compiled with an unsupported toolchain" and the request errors
+out. Either update the NVIDIA driver or run Ollama in CPU mode:
+`CUDA_VISIBLE_DEVICES=-1 ollama serve` (Qwen3-4B is usable on CPU).
 
 ## Smoke test without API keys
 
@@ -71,6 +91,17 @@ common-prefix overlap, which matches append-only conversation history);
 task categories by transparent keyword heuristics (estimates for the
 delegation table, refined later by the Analyst); and budget events.
 `--json` emits the same digest machine-readable for the Analyst (step 4).
+
+## Analyst
+
+```
+python analyst.py "why was today expensive?" [--days N]
+python analyst.py --digest-only        # inspect what the model sees
+```
+
+The Analyst feeds the Ledger digest (never raw conversations) to the
+local model through the gateway and answers operator questions.
+Requires the proxy and Ollama running.
 
 ## Tests
 

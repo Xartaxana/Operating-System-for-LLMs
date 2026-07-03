@@ -2,46 +2,55 @@
 
 ## Current Milestone
 
-Phase 1 — Supervised Lead (MVP), step 4: Analyst.
+Phase 1 — Supervised Lead (MVP), step 5: Shadow Evaluation.
 
 ## Current Status
 
-Phase 0 closed 2026-07-03. Phase 1 steps 1–3 built and verified:
+Phase 0 closed 2026-07-03. Phase 1 steps 1–4 built and verified:
 
-- Gateway (step 1): LiteLLM proxy + SQLite request logging (gateway/).
-- Guard (step 2): daily per-model budgets as a pre-call hook; warn at
-  80%, HTTP 429 at 100%; verified through the running proxy.
-- Ledger (step 3): gateway/metrics.py — daily digest per model/day
-  (requests, failures, tokens, cost, latency, answer length),
-  context-repetition ratio (common-prefix overlap of consecutive
-  prompts), keyword-heuristic task categories, budget events;
-  human-readable text or --json for the Analyst. 12 tests pass,
-  no API keys needed.
+- Gateway (step 1): LiteLLM proxy + SQLite request logging.
+- Guard (step 2): daily per-model budgets, warn 80% / refuse 100%.
+- Ledger (step 3): metrics.py daily digest (text/JSON).
+- Analyst (step 4): analyst.py feeds the Ledger digest to a local
+  Qwen3-4B (Ollama) through the gateway under its own alias, so
+  supervision cost is accounted separately. Verified live: answered
+  a Russian operator question from real telemetry. Answer quality is
+  Intern-class (numbers occasionally garbled) — acceptable for MVP,
+  prompt to be tuned on real telemetry.
 
-Open operational item (Architect): set ANTHROPIC_API_KEY and point real
-traffic at the gateway (gateway/README.md). Telemetry starts
-accumulating only after that — the Ledger digest is empty until then.
+Free-telemetry mode is in place (no paid keys needed): local models
+`intern` and `analyst` (Ollama Qwen3-4B) run through the gateway with
+synthetic Haiku-class per-token prices, so Guard/Ledger money paths
+work at $0. `lead` (Anthropic API, paid) stays optional.
+
+Environment notes (this machine): Ollama 0.31.1 installed via winget;
+GTX 1060 driver too old for Ollama CUDA → run CPU mode
+(CUDA_VISIBLE_DEVICES=-1), see gateway/README.md. Proxy must be
+started from gateway/ (callback imports are cwd-relative).
+
+Open operational items (Architect):
+- Route real traffic through the gateway to accumulate telemetry
+  (free via intern/analyst; lead needs ANTHROPIC_API_KEY, paid).
+- Optional: update the NVIDIA driver for GPU-speed local models.
 
 ## Current Objective
 
-Phase 1 step 4: Analyst — a small local model (Ollama, Qwen3-4B class)
-that reads Ledger output (never raw conversations) and answers
-"where did tokens go?" (see ARCHITECTURE.md, "Analyst").
+Phase 1 step 5: Shadow Evaluation — replay sampled requests on cheaper
+models, compare outputs, update DELEGATION_TABLE.md with evidence
+(see ARCHITECTURE.md, "Shadow Evaluation"; D-0028).
 
 ---
 
 # Current Task (Authoritative)
 
-Implement the Analyst: a script that feeds the Ledger's --json digest
-to a small local model (Ollama) and answers operator questions about
-spending. Blocked on environment: requires Ollama with a Qwen3-4B-class
-model on the Architect's machine — confirm availability before coding.
-If Ollama is unavailable, the fallback per ARCHITECTURE.md is any cheap
-API model, but local-first is preferred (cost of supervision rule).
-
-Also pending: real traffic through the gateway (see operational item) —
-without accumulated telemetry the Analyst has nothing to analyze, so
-consider routing real traffic first.
+Implement Shadow Evaluation: a script that samples logged requests
+from requests.db, replays them on a cheaper model (start with
+intern = local Qwen3-4B, free), and compares outputs (heuristics
+first; LLM judge later). Results update DELEGATION_TABLE.md row
+statuses per its update rules — including rule 4: compare TOTAL task
+cost, counting retry loops. Prerequisite: some real traffic in the
+log; if the log is still empty, generate a small working set by
+routing this project's own tasks through the gateway first.
 
 ## Research Notes for Later Phases (2026-07-03)
 
@@ -51,8 +60,6 @@ Recorded in docs/RELATED_WORK.md and DELEGATION_TABLE.md
 - Phase 2 Router: evaluate RouteLLM (open source, OpenAI-compatible)
   before building our own; it trains on preference data the Ledger and
   Shadow Evaluation will produce.
-- Shadow Evaluation compares total task cost including retry loops
-  (DELEGATION_TABLE.md update rule 4).
 - Context-repetition priors to confirm locally: 50–62% of spend is
   re-sent history, 30–40% of tokens are redundant.
 

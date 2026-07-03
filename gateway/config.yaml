@@ -11,6 +11,25 @@ model_list:
       model: anthropic/claude-fable-5
       api_key: os.environ/ANTHROPIC_API_KEY
 
+  # Intern: local worker (ARCHITECTURE.md hierarchy), free to run.
+  # Synthetic per-token prices exercise the Guard/Ledger money paths
+  # (roughly Haiku-class pricing) without real spend.
+  - model_name: intern
+    litellm_params:
+      model: ollama/qwen3:4b
+      api_base: http://localhost:11434
+      input_cost_per_token: 0.0000001
+      output_cost_per_token: 0.0000004
+
+  # Analyst: same local model under its own alias so the Ledger
+  # accounts supervision cost separately (ARCHITECTURE.md Rule #1).
+  - model_name: analyst
+    litellm_params:
+      model: ollama/qwen3:4b
+      api_base: http://localhost:11434
+      input_cost_per_token: 0.0000001
+      output_cost_per_token: 0.0000004
+
   # Smoke-test model: never calls a provider, needs no API key.
   - model_name: mock
     litellm_params:

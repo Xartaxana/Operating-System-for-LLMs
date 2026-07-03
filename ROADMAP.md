@@ -22,7 +22,8 @@ Each step is useful on its own even if the next one is never built.
    evaluated per D-0030 and rejected: they need Postgres+Redis).
 3. [x] Ledger: metrics.py daily digest — cost, task categories (keyword
    heuristics), context-repetition ratio, budget events; text + JSON output.
-4. [ ] Analyst: local small model answering questions over Ledger output.
+4. [x] Analyst: local small model (Ollama, Qwen3-4B) answering questions
+   over Ledger output through the gateway under its own alias.
 5. [ ] Shadow Evaluation: replay sampled Lead requests on cheaper models, update DELEGATION_TABLE.md.
 
 ## Phase 2 — Routing (data-driven)
