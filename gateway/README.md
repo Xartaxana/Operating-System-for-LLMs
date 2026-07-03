@@ -60,10 +60,13 @@ On Windows also set `PYTHONUTF8=1`: with a non-UTF-8 console codepage
 Run the proxy FROM the gateway/ directory: LiteLLM imports the callback
 modules (`sqlite_logger`, `guard`) relative to the working directory.
 
-Ollama on old NVIDIA drivers (observed on GTX 1060): CUDA kernels fail
-with "PTX compiled with an unsupported toolchain" and the request errors
-out. Either update the NVIDIA driver or run Ollama in CPU mode:
-`CUDA_VISIBLE_DEVICES=-1 ollama serve` (Qwen3-4B is usable on CPU).
+Ollama on old NVIDIA drivers: CUDA kernels fail with "PTX compiled
+with an unsupported toolchain" and the request errors out. Fix: update
+the driver — for Pascal cards (GTX 10xx) Game Ready drivers ended in
+2025, but the 580-branch security drivers (e.g. 582.28) are full
+drivers and resolve this (verified on GTX 1060: driver 560.94 failed,
+582.28 runs Qwen3-4B 100% on GPU, ~3x faster than CPU). Temporary
+workaround: CPU mode via `CUDA_VISIBLE_DEVICES=-1 ollama serve`.
 
 ## Smoke test without API keys
 

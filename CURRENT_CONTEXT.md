@@ -23,15 +23,15 @@ Free-telemetry mode is in place (no paid keys needed): local models
 synthetic Haiku-class per-token prices, so Guard/Ledger money paths
 work at $0. `lead` (Anthropic API, paid) stays optional.
 
-Environment notes (this machine): Ollama 0.31.1 installed via winget;
-GTX 1060 driver too old for Ollama CUDA → run CPU mode
-(CUDA_VISIBLE_DEVICES=-1), see gateway/README.md. Proxy must be
+Environment notes (this machine): Ollama 0.31.1 installed via winget.
+NVIDIA driver updated 560.94 → 582.28 (last Pascal security branch),
+which fixed the Ollama CUDA PTX error: Qwen3-4B now runs 100% on the
+GTX 1060 GPU, warm requests ~5 s vs ~15 s on CPU. Proxy must be
 started from gateway/ (callback imports are cwd-relative).
 
-Open operational items (Architect):
-- Route real traffic through the gateway to accumulate telemetry
-  (free via intern/analyst; lead needs ANTHROPIC_API_KEY, paid).
-- Optional: update the NVIDIA driver for GPU-speed local models.
+Open operational item (Architect): route real traffic through the
+gateway to accumulate telemetry (free via intern/analyst;
+lead needs ANTHROPIC_API_KEY, paid).
 
 ## Current Objective
 
