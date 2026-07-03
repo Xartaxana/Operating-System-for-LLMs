@@ -124,10 +124,16 @@ Process rule going forward: judge verdicts that CHANGE a table status
 get a chief-judge (or Architect) review of the actual pairs before
 the change is accepted; --update-table output is not self-certifying.
 
+DONE (2026-07-03): "Routine code generation -> Middle" tested with
+middle-groq as TARGET, judge-groq as judge: n=2, pass_rate=1.00,
+chief-judge review confirmed both pairs -> row validated with
+tier-matching evidence (earlier evidence used intern as a stand-in).
+shadow_eval.py gained --categories (whitelist) so a run aimed at one
+row cannot update rows whose Delegate-to tier differs from the
+target. 33 tests pass.
+
 Next: (a) grow real traffic volume (n=2 per category is thin);
-(b) test "Routine code generation -> Middle" with middle-groq as
-TARGET (judge-groq as judge — different models, no self-preference);
-(c) once ANTHROPIC_API_KEY exists, repeat against the true paid Lead.
+(b) once ANTHROPIC_API_KEY exists, repeat against the true paid Lead.
 
 ## Research Notes for Later Phases (2026-07-03)
 

@@ -95,6 +95,18 @@ def test_evaluate_uses_mock_response(conn):
     assert results[0]["error"] is None
 
 
+def test_evaluate_categories_whitelist(conn):
+    seed(conn, "lead", [{"role": "user", "content": "summarize this article"}], "a summary")
+    seed(conn, "lead", [{"role": "user", "content": "write a python function"}], "def f(): pass")
+
+    results = evaluate(
+        conn, "lead", "intern", "http://localhost:4000", days=7, sample_n=10,
+        categories={"coding"}, mock_response="def f(): pass",
+    )
+    assert len(results) == 1
+    assert results[0]["category"] == "coding"
+
+
 def test_evaluate_records_replay_errors(conn):
     seed(conn, "lead", [{"role": "user", "content": "hi"}], "hello")
 

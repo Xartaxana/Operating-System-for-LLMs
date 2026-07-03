@@ -172,7 +172,11 @@ def last_user_content(messages: list) -> str:
     return ""
 
 
-def evaluate(conn, source_model: str, target_model: str, gateway: str, days: int, sample_n: int, judge_model: str = None, **replay_kwargs):
+def evaluate(conn, source_model: str, target_model: str, gateway: str, days: int, sample_n: int, judge_model: str = None, categories: set = None, **replay_kwargs):
+    """categories: optional whitelist. A replay only supports the table
+    row whose 'Delegate to' tier the target actually is, so a run
+    aimed at one row (e.g. coding -> Middle) must not touch rows whose
+    named tier differs from the target."""
     results = []
     for row in sample_requests(conn, source_model, days, sample_n):
         try:
@@ -180,6 +184,8 @@ def evaluate(conn, source_model: str, target_model: str, gateway: str, days: int
         except (TypeError, json.JSONDecodeError):
             continue
         category = categorize(row["prompt"])
+        if categories and category not in categories:
+            continue
         try:
             replayed_text, replayed_cost = replay(messages, target_model, gateway, **replay_kwargs)
             error = None
@@ -358,6 +364,9 @@ def main():
                         help="min share of 'equivalent' judge verdicts for 'validated'")
     parser.add_argument("--calibrate", metavar="PAIRS_JSON",
                         help="run --judge-model on labeled pairs and report agreement; no replay")
+    parser.add_argument("--categories",
+                        help="comma-separated category whitelist (e.g. 'coding');"
+                        " restricts the run to rows whose Delegate-to tier matches the target")
     parser.add_argument("--update-table", action="store_true")
     parser.add_argument(
         "--table",
@@ -389,8 +398,10 @@ def main():
         )
 
     conn = sqlite3.connect(args.db)
+    categories = set(args.categories.split(",")) if args.categories else None
     results = evaluate(conn, args.source_model, args.target_model, args.gateway,
-                       args.days, args.sample, judge_model=args.judge_model)
+                       args.days, args.sample, judge_model=args.judge_model,
+                       categories=categories)
     aggregated = aggregate_by_category(results)
     statuses = {
         category: decide_status(agg, args.threshold, args.min_samples, args.pass_threshold)

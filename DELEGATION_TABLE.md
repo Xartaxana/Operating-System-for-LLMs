@@ -119,6 +119,16 @@ correctness w.r.t. what the task asked"), not by accepting the
 verdict. classification rejected STANDS: the judge's WORSE there
 matches the manual review (intern's flawed sentiment reasoning).
 
+- 2026-07-03  category=coding  source=lead-gemini target=middle-groq  n=2  sim=0.25  judge=judge-groq pass_rate=1.00  cost_source=$0.0044 cost_target=$0.0000  -> validated
+
+First run where the target IS the tier the row names (coding ->
+Middle; earlier evidence used intern as a stand-in). Run restricted
+via --categories coding so other rows are not updated from a target
+that does not match their Delegate-to tier. Chief-judge review of
+both pairs (2026-07-03): reverse_string and fibonacci replays are
+correct code with docstrings; both EQUIVALENT verdicts confirmed.
+Row stays validated, now with tier-matching evidence.
+
 Judge upgraded (2026-07-03, follow-up): the "strictness" diagnosis
 above was wrong — when asked to explain, middle-groq hallucinated a
 bug while tracing the correct loop (claimed the code returns b; it
