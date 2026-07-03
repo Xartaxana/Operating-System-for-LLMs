@@ -20,7 +20,8 @@ Each step is useful on its own even if the next one is never built.
 2. [x] Guard: deterministic budget counters, 80% warning, 100% cutoff.
    Custom pre-call hook over the SQLite log (native LiteLLM budgets
    evaluated per D-0030 and rejected: they need Postgres+Redis).
-3. [ ] Ledger: metrics.py daily digest — cost, task categories, context-repetition ratio.
+3. [x] Ledger: metrics.py daily digest — cost, task categories (keyword
+   heuristics), context-repetition ratio, budget events; text + JSON output.
 4. [ ] Analyst: local small model answering questions over Ledger output.
 5. [ ] Shadow Evaluation: replay sampled Lead requests on cheaper models, update DELEGATION_TABLE.md.
 

@@ -1,6 +1,6 @@
 # Gateway
 
-Phase 1 steps 1–2 (see ARCHITECTURE.md, "Gateway" and "Guard").
+Phase 1 steps 1–3 (see ARCHITECTURE.md: "Gateway", "Guard", "Ledger").
 
 A LiteLLM proxy that all real model traffic passes through.
 Every request — successful or failed — is recorded in a SQLite log
@@ -23,7 +23,8 @@ The Guard is ~100 lines over the SQLite log the gateway already writes.
 - `sqlite_logger.py` — LiteLLM custom callback writing to SQLite.
 - `guard.py` — budget enforcement pre-call hook (no LLM).
 - `budgets.yaml` — daily budgets per gateway alias; `GATEWAY_BUDGETS_PATH` overrides.
-- `test_sqlite_logger.py`, `test_guard.py` — tests, no API keys required.
+- `metrics.py` — the Ledger: daily digest over the request log (no LLM).
+- `test_sqlite_logger.py`, `test_guard.py`, `test_metrics.py` — tests, no API keys required.
 - `requests.db` — the request log (created on first request, not committed).
   Also holds the `budget_events` table (warn/block history for the Ledger).
 
@@ -56,6 +57,20 @@ curl http://localhost:4000/v1/chat/completions -H "Content-Type: application/jso
 
 The request is logged like any other, so a `success` row for model
 `mock` must appear in `requests.db`.
+
+## Ledger digest
+
+```
+python metrics.py [--db PATH] [--days N] [--json]
+```
+
+Reports per model per day: requests, failures, tokens, cost, latency,
+answer length; the context-repetition ratio (share of prompt characters
+already sent in the previous request of the same model — computed as a
+common-prefix overlap, which matches append-only conversation history);
+task categories by transparent keyword heuristics (estimates for the
+delegation table, refined later by the Analyst); and budget events.
+`--json` emits the same digest machine-readable for the Analyst (step 4).
 
 ## Tests
 
