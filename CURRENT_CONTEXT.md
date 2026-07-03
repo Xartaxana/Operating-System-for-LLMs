@@ -96,6 +96,20 @@ judge its own class) or `lead-gemini` (free tier, stronger, but
 rate-limited and judging its own outputs on the source side — note
 the self-preference bias).
 
+Calibration set ready (2026-07-03): gateway/judge_calibration.json —
+the 11 replay pairs manually labeled by Claude Fable 5 with verdicts
+and rationales. Calibration procedure: run the automated judge on
+these pairs and compare to the labels; it must reproduce them,
+including the two difflib false rejections (coding) and the genuine
+intern quality gap (classification pair 7). Manual review outcome
+already applied to DELEGATION_TABLE.md: coding flipped to validated,
+classification stays rejected with corrected rationale. No extra
+data-gathering experiment needed before building the judge (D-0028
+spirit); expand the set later with disagreement cases the judge gets
+wrong. Groq (GROQ_API_KEY, free tier) is planned as a SEPARATE track:
+a Middle-tier worker alias so "Routine code generation -> Middle" can
+be tested against the tier the table actually names.
+
 ## Research Notes for Later Phases (2026-07-03)
 
 Recorded in docs/RELATED_WORK.md and DELEGATION_TABLE.md

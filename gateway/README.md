@@ -26,6 +26,7 @@ The Guard is ~100 lines over the SQLite log the gateway already writes.
 - `metrics.py` — the Ledger: daily digest over the request log (no LLM).
 - `analyst.py` — the Analyst: local small model narrating the digest.
 - `shadow_eval.py` — Shadow Evaluation: replay + compare, updates DELEGATION_TABLE.md.
+- `judge_calibration.json` — replay pairs manually labeled with semantic verdicts; the automated LLM judge is calibrated against it.
 - `test_sqlite_logger.py`, `test_guard.py`, `test_metrics.py`, `test_analyst.py`, `test_shadow_eval.py` — tests, no API keys required.
 - `requests.db` — the request log (created on first request, not committed).
   Also holds the `budget_events` table (warn/block history for the Ledger).

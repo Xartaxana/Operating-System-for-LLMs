@@ -17,7 +17,7 @@ Value = how much frontier intelligence actually improves the result.
 | Strategic planning, architecture | High | Very high | Lead only | estimated |
 | Research, hard debugging | High | Very high | Lead only | estimated |
 | Idea generation | Medium | High | Lead, cheap model for expansion | estimated |
-| Routine code generation | High | Medium | Middle | rejected |
+| Routine code generation | High | Medium | Middle | validated |
 | Summarization | Medium | Medium | Junior | validated |
 | Re-explaining known context | High | Low | eliminate via context compression | estimated |
 | Checking lists, verification passes | Medium | Low | Junior | estimated |
@@ -63,12 +63,26 @@ Caveat on the comparison method (2026-07-03): sim is difflib
 character-level similarity. High-sim `validated` verdicts are
 trustworthy; low-sim `rejected` verdicts are SUSPECT — a verbose
 answer scores near zero against a terse one even when semantically
-identical (classification sim=0.04 is likely this artifact). Rejected
-rows must be re-checked once the LLM judge replaces the heuristic
-(see CURRENT_CONTEXT.md, Current Task).
+identical. Confirmed by manual review the same day (see below):
+2 of 5 difflib verdicts were wrong for exactly this reason.
 
 - 2026-07-03  category=coding  source=lead-gemini target=intern  n=2  sim=0.10  cost_source=$0.0044 cost_target=$0.0000  -> rejected
 - 2026-07-03  category=summarization  source=lead-gemini target=intern  n=2  sim=0.52  cost_source=$0.0016 cost_target=$0.0000  -> validated
 - 2026-07-03  category=extraction  source=lead-gemini target=intern  n=2  sim=0.91  cost_source=$0.0003 cost_target=$0.0000  -> validated
 - 2026-07-03  category=classification  source=lead-gemini target=intern  n=2  sim=0.04  cost_source=$0.0021 cost_target=$0.0000  -> rejected
 - 2026-07-03  category=formatting  source=lead-gemini target=intern  n=2  sim=0.60  cost_source=$0.0004 cost_target=$0.0000  -> validated
+
+Manual semantic review of the same 11 pairs (judge: Claude Fable 5,
+2026-07-03; full labeled pairs in gateway/judge_calibration.json —
+the calibration set the automated LLM judge must reproduce):
+
+- coding: difflib rejected -> OVERTURNED to validated. Both intern
+  answers are correct (s[::-1]; iterative two-variable loop); low sim
+  measured verbosity, not quality. Caveat: one-shot quality, n=2 —
+  retry-loop cost (Update Rule 4) still unmeasured.
+- classification: rejected CONFIRMED, but for the right reason now:
+  in 1 of 2 pairs intern gave a defensible-looking but flawed verdict
+  (negative vs neutral, misreading what "but" emphasizes). Not a
+  difflib artifact — a genuine quality gap.
+- summarization, extraction, formatting: validated CONFIRMED;
+  differences are cosmetic (verbosity, code fences, preambles).
