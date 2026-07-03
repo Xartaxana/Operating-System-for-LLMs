@@ -2,36 +2,35 @@
 
 ## Current Milestone
 
-Phase 0 exit — Zero Context Recovery Test.
+Phase 1 — Supervised Lead (MVP), step 1: Gateway.
 
 ## Current Status
 
-Architecture specification committed (ARCHITECTURE.md).
-Preliminary delegation table committed (DELEGATION_TABLE.md).
-Direct git commits replace patches as the standard workflow (D-0026).
-Repository cleaned of accidental artifacts and duplicated decisions.
+Phase 0 is complete. The Zero Context Recovery Test passed on 2026-07-03:
+a fresh session recovered mission, phase, principles, roadmap, current task
+and repository structure from the repository alone, produced a Boot Report
+(PROCESS/BOOT_REPORT_PROTOCOL.md) and found no repository inconsistencies
+to correct, so no confirming re-run was required (D-0024).
 
 ## Current Objective
 
-Pass the Zero Context Recovery Test, then start Phase 1 step 1
-(LiteLLM gateway with SQLite request logging).
-
-## Phase 0 Exit Criteria
-
-Phase 0 SHALL NOT be considered complete until:
-
-- Zero Context Recovery Test succeeds.
-- Repository inconsistencies found during the test are corrected.
-- A repeated Zero Context Recovery Test confirms the corrections.
-
-Only then may the project enter Phase 1.
+Phase 1 step 1: LiteLLM gateway — all real traffic through a single proxy,
+every request logged to SQLite (see ARCHITECTURE.md, "Gateway").
 
 ---
 
 # Current Task (Authoritative)
 
-Run the Zero Context Recovery Test (PROCESS/ZERO_CONTEXT_PROTOCOL.md)
-in a fresh session. If it fails, improve the repository and repeat.
-On success, begin Phase 1 step 1 (see ROADMAP.md).
+Implement the Gateway: LiteLLM proxy configuration plus a logging callback
+that records every request (model, tokens, cost, latency, prompt/response)
+into a SQLite request log. The log schema must already contain what the
+Ledger (Phase 1 step 3) will need, including the raw prompt text required
+to compute the context-repetition ratio.
+
+Definition of done:
+
+- the proxy starts locally and serves an OpenAI-compatible endpoint;
+- a completed request produces a row in the SQLite log;
+- the logging path is covered by a test that does not require API keys.
 
 This file is intended to be updated frequently.

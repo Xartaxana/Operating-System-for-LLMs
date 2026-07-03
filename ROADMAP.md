@@ -9,7 +9,7 @@
 - [x] Boot sequence
 - [x] Architecture specification (ARCHITECTURE.md)
 - [x] Preliminary delegation table (DELEGATION_TABLE.md)
-- [ ] Zero Context Recovery Test passes (exit criterion)
+- [x] Zero Context Recovery Test passes (exit criterion) — passed 2026-07-03
 
 ## Phase 1 — Supervised Lead (MVP)
 
