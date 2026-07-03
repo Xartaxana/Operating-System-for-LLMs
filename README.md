@@ -4,6 +4,12 @@ An open research project exploring hierarchical orchestration of Large Language 
 
 The repository is the project's single source of truth.
 
+## White Paper
+
+See WHITE_PAPER.md — living draft of the project's primary
+deliverable (Supervised Delegation: an Operating System Approach to
+LLM Cost).
+
 ## Architecture
 
 See ARCHITECTURE.md for the authoritative architecture specification

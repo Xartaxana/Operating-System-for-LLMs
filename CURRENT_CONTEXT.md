@@ -160,7 +160,26 @@ Next: (a) grow real traffic volume (n=2 per category is thin);
 
 ---
 
-# Current Task (Authoritative): Rule #1 cost accounting in shadow_eval.py
+# Current Task (Authoritative): White Paper iteration
+
+Lead-tier task, prioritized by the Architect 2026-07-04 ("actions
+that need the strongest model first"). Draft v0.1 of WHITE_PAPER.md
+written 2026-07-04 (deliverable #1 of PROJECT_CHARTER.md): problem,
+supervision decomposition, evidence-based delegation, the judge as a
+supervised worker (capability tracks hierarchy: 4B 11/13, 70B 12/13,
+120B 13/13), accounting prices, repository-as-memory/self-hosting,
+positioning, honest empirical status (§7) and limitations. Next
+iterations: keep §7 synchronized with the evidence log; add the
+context-repetition section once local telemetry confirms or refutes
+the 50-62% prior; Architect review of the draft.
+
+Remaining Lead-tier queue: precise Phase 2 entry criteria (what
+telemetry, what thresholds, what volume triggers Router/compression
+work) — becomes a White Paper section when done.
+
+---
+
+# Delegated Task (queued for a CHEAPER model session): Rule #1 cost accounting in shadow_eval.py
 
 Intended executor: a CHEAPER model session (Middle-class task — the
 delegation table itself says routine coding -> Middle, validated).
