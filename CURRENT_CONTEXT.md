@@ -135,6 +135,18 @@ default temperature (borderline pair #7 flipped between runs:
 11/11 -> 12/13); judge_pair now defaults to temperature=0.
 Current baseline: judge-groq 13/13, reproduced twice.
 
+Local-judge fallback measured (2026-07-04): Qwen3-4B (alias analyst,
+GTX 1060) scored 11/13 (84.6%) on the calibration set — below the
+90% protocol bar. Its two misses are exactly the discriminating
+pairs: #2 fibonacci (code tracing — same failure mode as
+Llama-3.3-70B) and #7 borderline sentiment. Judge capability tracks
+the model hierarchy: 4B fails both hard pairs, 70B fails code
+tracing, 120B reasoning passes all 13. Conclusion: no local judge on
+this hardware; revisit only if the Groq free tier disappears
+(fallback order: judge-groq > paid API judge > local 4B with
+category restrictions). Caveat: Ollama default context window may
+truncate the longest pairs — untested, could only improve the 4B.
+
 DONE (2026-07-03): "Routine code generation -> Middle" tested with
 middle-groq as TARGET, judge-groq as judge: n=2, pass_rate=1.00,
 chief-judge review confirmed both pairs -> row validated with
