@@ -189,17 +189,16 @@ of the draft.
 
 # Delegated Task Queue (for CHEAPER model sessions)
 
-Queued behind the cost-accounting task below, both born from the
-Phase 2 gates (D-0033):
+Execution order (each task reviewed by Lead/Architect before the
+next starts; the executor does not self-certify):
 
-- Real-vs-synthetic traffic tagging in the request log (gate G1
-  excludes synthetic working sets, replay and judge calls from gate
-  math; today they are distinguishable only by heuristics). Likely a
-  metadata column + tagging in the generators; spec to be written by
-  the Lead before execution.
-- metrics.py "Phase 2 readiness" digest section: print current values
-  vs. the ROADMAP gate thresholds (G/R/C criteria) so gate progress
-  is visible in every daily digest. Depends on the tagging item.
+1. Rule #1 cost accounting in shadow_eval.py (spec below).
+2. Traffic-kind tagging in the request log (spec below; born from
+   gate G1, D-0033).
+3. metrics.py "Phase 2 readiness" digest section: print current
+   values vs. the ROADMAP gate thresholds (G/R/C criteria) so gate
+   progress is visible in every daily digest. Depends on task 2;
+   spec to be written by the Lead after task 2 lands.
 
 # Delegated Task (queued for a CHEAPER model session): Rule #1 cost accounting in shadow_eval.py
 
@@ -250,6 +249,58 @@ Acceptance: a --categories coding run lead-gemini -> middle-groq
 --judge-model judge-groq produces an evidence line where cost_target
 and judge_cost are nonzero and match requests.db rows within
 rounding; 33+ tests pass.
+
+---
+
+# Delegated Task 2: traffic_kind tagging in the request log
+
+Purpose: gate G1 (ROADMAP.md, D-0033) counts only REAL traffic;
+today real, synthetic, replay and judge requests are distinguishable
+only by heuristics. Lead decisions below are made — do not redesign
+them; escalate blockers instead of improvising around them.
+
+Design (decided by the Lead 2026-07-04):
+
+1. New column on requests: traffic_kind TEXT NOT NULL DEFAULT 'real',
+   values: 'real' | 'synthetic' | 'replay' | 'judge'.
+   - real: default; anything not explicitly tagged.
+   - synthetic: working-set generation traffic.
+   - replay: shadow_eval.py target-model calls.
+   - judge: shadow_eval.py judge calls (calibration and evaluation).
+2. The tag travels as litellm metadata from the CALLER, not by
+   content sniffing: shadow_eval.py replay() sends
+   metadata={"traffic_kind": "replay"}, judge_pair() sends "judge";
+   any future synthetic generator must send "synthetic" (record this
+   convention as a comment in sqlite_logger.py near the schema).
+   gateway/sqlite_logger.py reads it in the callback (expected at
+   kwargs["litellm_params"]["metadata"], but VERIFY the exact path
+   empirically with one live call through the proxy before wiring;
+   if client metadata does not reach the callback at all, STOP and
+   escalate to the Lead — do not invent an alternative channel).
+3. Migration: on logger init, ALTER TABLE ... ADD COLUMN when the
+   column is missing (SQLite supports ADD COLUMN with DEFAULT).
+   Backfill pre-migration rows honestly: rows matching the judge
+   LIKE filter ('%impartial judge comparing two answers%') ->
+   'judge'; ALL other pre-migration rows -> 'synthetic' (no real
+   traffic has passed through the gateway yet — today's log is
+   working sets, replays and tests; tagging it 'real' would poison
+   gate G1 forever).
+4. sample_requests() in shadow_eval.py additionally excludes
+   traffic_kind IN ('replay', 'judge'). It deliberately KEEPS
+   'synthetic' (replaying synthetic sources is legitimate for method
+   development; gate math, not the sampler, excludes synthetic).
+   The prompt LIKE filter STAYS as defense in depth
+   (PROCESS/JUDGE_CALIBRATION_PROTOCOL.md rule 6).
+5. Tests: migration adds the column to an existing db without data
+   loss; callback writes each kind; untagged call logs 'real';
+   backfill tags judge rows correctly; sampler excludes replay/judge
+   but keeps synthetic. Existing tests stay green.
+
+Acceptance: after one calibration run and one shadow_eval run against
+the live proxy, requests.db contains correctly tagged 'judge' and
+'replay' rows, a plain client call logs 'real', and
+SELECT traffic_kind, COUNT(*) FROM requests GROUP BY 1 shows zero
+pre-migration rows tagged 'real'.
 
 ## Research Notes for Later Phases (2026-07-03)
 
