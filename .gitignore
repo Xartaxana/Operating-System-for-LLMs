@@ -3,4 +3,6 @@ __pycache__/
 gateway/*.db
 gateway/*.db-journal
 gateway/*.log
+.env
+gateway/.env
 .pytest_cache/

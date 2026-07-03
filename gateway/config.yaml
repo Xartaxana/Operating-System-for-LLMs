@@ -18,6 +18,13 @@ model_list:
       model: anthropic/claude-sonnet-5
       api_key: os.environ/ANTHROPIC_API_KEY
 
+  # Frontier-ish baseline at $0 for Shadow Evaluation, until a paid
+  # ANTHROPIC_API_KEY is available (D-0028; CURRENT_CONTEXT.md).
+  - model_name: lead-gemini
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+
   # Intern: local worker (ARCHITECTURE.md hierarchy), free to run.
   # Synthetic per-token prices exercise the Guard/Ledger money paths
   # (roughly Haiku-class pricing) without real spend.

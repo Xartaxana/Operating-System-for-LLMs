@@ -17,13 +17,13 @@ Value = how much frontier intelligence actually improves the result.
 | Strategic planning, architecture | High | Very high | Lead only | estimated |
 | Research, hard debugging | High | Very high | Lead only | estimated |
 | Idea generation | Medium | High | Lead, cheap model for expansion | estimated |
-| Routine code generation | High | Medium | Middle | estimated |
-| Summarization | Medium | Medium | Junior | estimated |
+| Routine code generation | High | Medium | Middle | rejected |
+| Summarization | Medium | Medium | Junior | validated |
 | Re-explaining known context | High | Low | eliminate via context compression | estimated |
 | Checking lists, verification passes | Medium | Low | Junior | estimated |
-| Data extraction, JSON conversion | Medium | Low | Intern | estimated |
-| Formatting (Markdown, tables) | Low–Medium | Low | Intern | estimated |
-| Classification, tagging | Low | Low | Junior | estimated |
+| Data extraction, JSON conversion | Medium | Low | Intern | validated |
+| Formatting (Markdown, tables) | Low–Medium | Low | Intern | validated |
+| Classification, tagging | Low | Low | Junior | rejected |
 | Duplicate / repetition detection | Low | Medium | Ledger (no LLM) | estimated |
 | Token and cost accounting | — | — | Guard/Ledger (no LLM) | estimated |
 
@@ -54,3 +54,21 @@ refute. Sources and details: docs/RELATED_WORK.md.
 | GPT-4-class quality with 26% of frontier calls | 95% quality | RouteLLM |
 | Prompt-cache discount on cached prefix | ~90% | provider pricing |
 | Frontier vs cheap model retry loops on same task | 1 vs 10 loops | Klyshevich, 2026 |
+
+## Shadow Evaluation Log
+
+Evidence for Update Rule 1. One line per Shadow Evaluation run.
+
+Caveat on the comparison method (2026-07-03): sim is difflib
+character-level similarity. High-sim `validated` verdicts are
+trustworthy; low-sim `rejected` verdicts are SUSPECT — a verbose
+answer scores near zero against a terse one even when semantically
+identical (classification sim=0.04 is likely this artifact). Rejected
+rows must be re-checked once the LLM judge replaces the heuristic
+(see CURRENT_CONTEXT.md, Current Task).
+
+- 2026-07-03  category=coding  source=lead-gemini target=intern  n=2  sim=0.10  cost_source=$0.0044 cost_target=$0.0000  -> rejected
+- 2026-07-03  category=summarization  source=lead-gemini target=intern  n=2  sim=0.52  cost_source=$0.0016 cost_target=$0.0000  -> validated
+- 2026-07-03  category=extraction  source=lead-gemini target=intern  n=2  sim=0.91  cost_source=$0.0003 cost_target=$0.0000  -> validated
+- 2026-07-03  category=classification  source=lead-gemini target=intern  n=2  sim=0.04  cost_source=$0.0021 cost_target=$0.0000  -> rejected
+- 2026-07-03  category=formatting  source=lead-gemini target=intern  n=2  sim=0.60  cost_source=$0.0004 cost_target=$0.0000  -> validated

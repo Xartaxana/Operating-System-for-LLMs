@@ -63,30 +63,38 @@ log entry. Guards: refuses source==target (self-comparison is not
 delegation evidence); a category stays "estimated" (inconclusive)
 below --min-samples (default 2).
 
-Blocked on data, not code: `requests.db` has only `intern` traffic (no
-`lead` rows — no ANTHROPIC_API_KEY). Ran live against the current log:
-`python shadow_eval.py --source-model lead --target-model intern`
-correctly reports "no successful 'lead' requests in range" rather than
-fabricating a verdict. Next real run needs `lead`-tier traffic — via
-ANTHROPIC_API_KEY on `lead`/`lead-sonnet`, or once added, a Gemini/Groq
-free-tier alias (see below).
+First real run completed 2026-07-03. Gemini free tier connected:
+alias `lead-gemini` (gemini/gemini-2.5-flash; 2.0-flash has ZERO
+free-tier quota on this key — 429, don't use it). Key lives in
+gitignored gateway/.env; litellm did NOT auto-load it, export the
+variable before starting the proxy. 10-request working set (2 per
+category) replayed on `intern`; DELEGATION_TABLE.md now has its first
+evidence-backed verdicts + a "Shadow Evaluation Log" section:
+extraction 91% / formatting 60% / summarization 52% -> validated;
+coding 10% / classification 4% -> rejected.
 
 ---
 
 # Current Task (Authoritative)
 
-gateway/shadow_eval.py is implemented and tested (2026-07-03) — see
-"Current Objective" above for what it does and its guards. Remaining
-work on Phase 1 step 5 is data, not code: get real `lead`-tier traffic
-into requests.db, then run
-`python shadow_eval.py --source-model lead --target-model intern --update-table`
-to produce the first evidence-backed DELEGATION_TABLE.md verdicts.
-Options to unblock, in the order discussed with the Architect:
+Replace the difflib similarity heuristic in gateway/shadow_eval.py
+with an LLM judge. The first real run (2026-07-03) showed the
+heuristic is no longer sufficient: it produces false "rejected"
+verdicts. Evidence: classification scored sim=4% although the answers
+are likely semantically identical ("negative") — difflib compares
+characters, so a verbose Qwen3 answer vs a terse Gemini answer scores
+near zero even when the content is right. "validated" verdicts (high
+similarity) are trustworthy; "rejected" ones are suspect and must be
+re-checked by the judge before being treated as evidence.
 
-1. Set ANTHROPIC_API_KEY and route real project traffic through
-   `lead` (or the `lead-sonnet` test alias already in config.yaml).
-2. Add Gemini/Groq free-tier aliases to config.yaml (planned, not yet
-   done — see above) for a frontier-ish baseline at $0.
+Design constraints already anticipated in shadow_eval.py: the judge
+slots in as a replacement for similarity()/decide_status inputs
+without changing the pipeline; run it through the gateway under its
+own alias (like analyst) so judge cost lands in the Ledger (Rule #1).
+Candidate judges: `analyst` (local Qwen3-4B, free, may be too weak to
+judge its own class) or `lead-gemini` (free tier, stronger, but
+rate-limited and judging its own outputs on the source side — note
+the self-preference bias).
 
 ## Research Notes for Later Phases (2026-07-03)
 

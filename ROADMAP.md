@@ -24,9 +24,11 @@ Each step is useful on its own even if the next one is never built.
    heuristics), context-repetition ratio, budget events; text + JSON output.
 4. [x] Analyst: local small model (Ollama, Qwen3-4B) answering questions
    over Ledger output through the gateway under its own alias.
-5. [~] Shadow Evaluation: shadow_eval.py built and tested (replay,
-   heuristic comparison, DELEGATION_TABLE.md update) — blocked on real
-   `lead`-tier traffic to produce actual verdicts (no ANTHROPIC_API_KEY yet).
+5. [~] Shadow Evaluation: shadow_eval.py built and tested; first real
+   run 2026-07-03 (lead-gemini -> intern, 10 requests) produced the
+   first evidence-backed DELEGATION_TABLE.md verdicts. Remaining: the
+   difflib heuristic produces false "rejected" verdicts on verbose
+   answers — an LLM judge is now required (see CURRENT_CONTEXT.md).
 
 ## Phase 2 — Routing (data-driven)
 
