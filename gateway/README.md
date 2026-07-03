@@ -135,6 +135,26 @@ Results are grouped by the same keyword-heuristic task category
 before it can move off `estimated`; source and target must differ —
 comparing a model to itself is not evidence of delegation.
 
+`--judge-model ALIAS` replaces the heuristic with an LLM judge run
+through the gateway (judge cost lands in the Ledger, Rule #1). The
+judge sees the task and both anonymized answers and rules
+EQUIVALENT/WORSE, explicitly ignoring verbosity and formatting — the
+two things difflib gets wrong. Judge verdicts override similarity in
+status decisions (`--pass-threshold`, default 0.75).
+
+Calibrate a judge before trusting it:
+
+```
+python shadow_eval.py --calibrate judge_calibration.json --judge-model middle-groq
+```
+
+Calibration result 2026-07-03: `middle-groq` agreed with the manual
+labels on 10/11 pairs (the one miss is a borderline strictness call
+on input validation, not a systematic error) — adopted as the default
+judge. `lead-gemini` as judge hits its 5 req/min free-tier limit on
+an 11-pair set and also has a self-preference bias when judging its
+own source answers; `analyst` (4B) was not evaluated.
+
 `--update-table` writes `validated`/`rejected` verdicts into
 `DELEGATION_TABLE.md` row Status cells and appends one line per run to
 its "Shadow Evaluation Log" section (evidence for Update Rule 1).
@@ -143,10 +163,6 @@ Caveat (Update Rule 4): this replays each prompt once. It measures
 one-shot answer quality and cost, not retry-loop cost — a category
 marked `validated` here has not yet been checked against the "cheap
 model needs 10 retries" failure mode rule 4 warns about.
-
-Needs real `--source-model` traffic in the log first (e.g. `lead`,
-once `ANTHROPIC_API_KEY` is set, or another paid/free-tier alias) —
-comparing `intern` against itself does not validate anything.
 
 ## Tests
 

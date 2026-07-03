@@ -12,8 +12,11 @@ import pytest
 from shadow_eval import (
     aggregate_by_category,
     append_evidence_log,
+    calibrate,
     decide_status,
     evaluate,
+    judge_pair,
+    parse_verdict,
     sample_requests,
     similarity,
     update_table_status,
@@ -116,6 +119,69 @@ def test_decide_status_estimated_when_not_enough_samples():
 def test_decide_status_estimated_when_all_errored():
     agg = {"n": 2, "mean_similarity": 0.0, "mean_source_cost_usd": 0.02, "mean_target_cost_usd": 0.0, "errors": 2}
     assert decide_status(agg, similarity_threshold=0.5, min_samples=2) == "estimated"
+
+
+def test_parse_verdict():
+    assert parse_verdict("EQUIVALENT") == "equivalent"
+    assert parse_verdict("The answer is WORSE.") == "target_worse"
+    assert parse_verdict("<think>worse? no, equal quality</think>EQUIVALENT") == "equivalent"
+    assert parse_verdict("no keyword here") is None
+    assert parse_verdict("") is None
+    # last keyword wins when the judge restates both options first
+    assert parse_verdict("Either EQUIVALENT or WORSE... verdict: EQUIVALENT") == "equivalent"
+
+
+def test_judge_pair_with_mock():
+    verdict = judge_pair(
+        "Summarize X", "short summary", "verbose but correct summary",
+        "judge-alias", "http://localhost:4000", mock_response="EQUIVALENT",
+    )
+    assert verdict == "equivalent"
+
+
+def test_evaluate_with_judge_records_verdict(conn):
+    seed(conn, "lead", [{"role": "user", "content": "summarize this article"}], "a summary")
+
+    results = evaluate(
+        conn, "lead", "intern", "http://localhost:4000", days=7, sample_n=10,
+        judge_model="judge-alias", mock_response="EQUIVALENT",
+    )
+    assert results[0]["verdict"] == "equivalent"
+
+
+def test_aggregate_pass_rate():
+    results = [
+        {"category": "coding", "source_cost_usd": 0.02, "target_cost_usd": 0.001, "similarity": 0.1, "verdict": "equivalent", "error": None},
+        {"category": "coding", "source_cost_usd": 0.03, "target_cost_usd": 0.002, "similarity": 0.1, "verdict": "target_worse", "error": None},
+    ]
+    agg = aggregate_by_category(results)
+    assert agg["coding"]["pass_rate"] == pytest.approx(0.5)
+
+
+def test_decide_status_judge_overrides_similarity():
+    # low difflib sim but judge says equivalent -> validated
+    agg = {"n": 2, "mean_similarity": 0.1, "mean_source_cost_usd": 0.02,
+           "mean_target_cost_usd": 0.001, "errors": 0, "pass_rate": 1.0}
+    assert decide_status(agg, similarity_threshold=0.5, min_samples=2) == "validated"
+    # high sim but judge says worse -> rejected
+    agg["pass_rate"] = 0.0
+    agg["mean_similarity"] = 0.9
+    assert decide_status(agg, similarity_threshold=0.5, min_samples=2) == "rejected"
+
+
+def test_calibrate_reports_agreement_and_mismatches():
+    pairs = [
+        {"prompt": "task1", "source_response": "a", "target_response": "b",
+         "category": "coding", "verdict": "equivalent"},
+        {"prompt": "task2", "source_response": "a", "target_response": "b",
+         "category": "classification", "verdict": "target_worse"},
+    ]
+    report = calibrate(pairs, "judge-alias", "http://localhost:4000",
+                       mock_response="EQUIVALENT")
+    assert report["n"] == 2
+    assert report["agreements"] == 1
+    assert report["mismatches"][0]["category"] == "classification"
+    assert report["mismatches"][0]["got"] == "equivalent"
 
 
 def test_update_table_status_replaces_only_matching_row():

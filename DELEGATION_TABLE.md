@@ -86,3 +86,7 @@ the calibration set the automated LLM judge must reproduce):
   difflib artifact — a genuine quality gap.
 - summarization, extraction, formatting: validated CONFIRMED;
   differences are cosmetic (verbosity, code fences, preambles).
+- 2026-07-03  category=coding  source=lead-gemini target=intern  n=4  sim=0.51  judge=middle-groq pass_rate=1.00  cost_source=$0.0023 cost_target=$0.0000  -> validated
+- 2026-07-03  category=summarization  source=lead-gemini target=intern  n=4  sim=0.55  judge=middle-groq pass_rate=1.00  cost_source=$0.0013 cost_target=$0.0000  -> validated
+- 2026-07-03  category=extraction  source=lead-gemini target=intern  n=1  sim=0.84  judge=middle-groq pass_rate=1.00  cost_source=$0.0003 cost_target=$0.0000  -> estimated
+- 2026-07-03  category=formatting  source=lead-gemini target=intern  n=2  sim=0.98  judge=middle-groq pass_rate=1.00  cost_source=$0.0005 cost_target=$0.0000  -> validated

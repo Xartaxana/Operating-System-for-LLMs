@@ -77,43 +77,27 @@ coding 10% / classification 4% -> rejected.
 
 # Current Task (Authoritative)
 
-Replace the difflib similarity heuristic in gateway/shadow_eval.py
-with an LLM judge. The first real run (2026-07-03) showed the
-heuristic is no longer sufficient: it produces false "rejected"
-verdicts. Evidence: classification scored sim=4% although the answers
-are likely semantically identical ("negative") — difflib compares
-characters, so a verbose Qwen3 answer vs a terse Gemini answer scores
-near zero even when the content is right. "validated" verdicts (high
-similarity) are trustworthy; "rejected" ones are suspect and must be
-re-checked by the judge before being treated as evidence.
+LLM judge DONE (2026-07-03). shadow_eval.py gained --judge-model
+(judge through the gateway; verdicts override difflib in
+decide_status via pass_rate >= --pass-threshold, default 0.75),
+--calibrate (agreement report against judge_calibration.json), and
+per-pair verdict logging. 31 tests pass.
 
-Design constraints already anticipated in shadow_eval.py: the judge
-slots in as a replacement for similarity()/decide_status inputs
-without changing the pipeline; run it through the gateway under its
-own alias (like analyst) so judge cost lands in the Ledger (Rule #1).
-Candidate judges: `analyst` (local Qwen3-4B, free, may be too weak to
-judge its own class) or `lead-gemini` (free tier, stronger, but
-rate-limited and judging its own outputs on the source side — note
-the self-preference bias).
+Calibration result: middle-groq (Llama-3.3-70B via Groq free tier,
+1000 req/day) agreed 10/11 with the manual labels — the one miss is
+a borderline strictness call (fibonacci: penalized missing negative-n
+validation), not systematic. ADOPTED as default judge. lead-gemini as
+judge is impractical: free tier is 5 req/min (verified 429) and it
+would judge its own source answers (self-preference bias). analyst
+(4B) not evaluated — no need while middle-groq is free.
 
-Calibration set ready (2026-07-03): gateway/judge_calibration.json —
-the 11 replay pairs manually labeled by Claude Fable 5 with verdicts
-and rationales. Calibration procedure: run the automated judge on
-these pairs and compare to the labels; it must reproduce them,
-including the two difflib false rejections (coding) and the genuine
-intern quality gap (classification pair 7). Manual review outcome
-already applied to DELEGATION_TABLE.md: coding flipped to validated,
-classification stays rejected with corrected rationale. No extra
-data-gathering experiment needed before building the judge (D-0028
-spirit); expand the set later with disagreement cases the judge gets
-wrong. Groq track DONE (2026-07-03): alias `middle-groq`
-(groq/llama-3.3-70b-versatile) live and verified — free tier, 1000
-req/day, 12k tokens/min, ~20 ms generation. Key in gitignored
-gateway/.env alongside GEMINI_API_KEY. The gateway now serves four
-hierarchy tiers at $0: intern/analyst (Qwen3-4B local), middle-groq
-(Llama-3.3-70B), lead-gemini (Gemini 2.5 Flash); paid lead/lead-sonnet
-remain optional. "Routine code generation -> Middle" can now be
-tested against the tier the table actually names.
+Next: rerun Shadow Evaluation with the judge
+(`--source-model lead-gemini --target-model intern --judge-model
+middle-groq --update-table`) to replace heuristic-based verdicts with
+judge-backed ones in DELEGATION_TABLE.md; then grow real traffic
+volume (n=2 per category is thin) and, once ANTHROPIC_API_KEY exists,
+repeat against the true paid Lead. Groq tier also enables testing
+"Routine code generation -> Middle" against middle-groq as target.
 
 ## Research Notes for Later Phases (2026-07-03)
 
