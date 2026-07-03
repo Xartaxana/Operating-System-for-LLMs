@@ -86,7 +86,35 @@ the calibration set the automated LLM judge must reproduce):
   difflib artifact — a genuine quality gap.
 - summarization, extraction, formatting: validated CONFIRMED;
   differences are cosmetic (verbosity, code fences, preambles).
-- 2026-07-03  category=coding  source=lead-gemini target=intern  n=4  sim=0.51  judge=middle-groq pass_rate=1.00  cost_source=$0.0023 cost_target=$0.0000  -> validated
-- 2026-07-03  category=summarization  source=lead-gemini target=intern  n=4  sim=0.55  judge=middle-groq pass_rate=1.00  cost_source=$0.0013 cost_target=$0.0000  -> validated
-- 2026-07-03  category=extraction  source=lead-gemini target=intern  n=1  sim=0.84  judge=middle-groq pass_rate=1.00  cost_source=$0.0003 cost_target=$0.0000  -> estimated
-- 2026-07-03  category=formatting  source=lead-gemini target=intern  n=2  sim=0.98  judge=middle-groq pass_rate=1.00  cost_source=$0.0005 cost_target=$0.0000  -> validated
+RETRACTED (2026-07-03, chief-judge review): the four lines below are
+contaminated. A failed lead-gemini calibration attempt logged its
+judge prompts as regular lead-gemini traffic, and this run's random
+sample included 6 nested judge prompts out of 11 pairs, inflating n.
+The 5 clean pairs in the run all received correct judge verdicts
+(manually confirmed), so no table Status was changed by retraction.
+Sampling now excludes judge calls; clean rerun follows.
+
+- 2026-07-03  category=coding  source=lead-gemini target=intern  n=4  sim=0.51  judge=middle-groq pass_rate=1.00  cost_source=$0.0023 cost_target=$0.0000  -> validated [RETRACTED]
+- 2026-07-03  category=summarization  source=lead-gemini target=intern  n=4  sim=0.55  judge=middle-groq pass_rate=1.00  cost_source=$0.0013 cost_target=$0.0000  -> validated [RETRACTED]
+- 2026-07-03  category=extraction  source=lead-gemini target=intern  n=1  sim=0.84  judge=middle-groq pass_rate=1.00  cost_source=$0.0003 cost_target=$0.0000  -> estimated [RETRACTED]
+- 2026-07-03  category=formatting  source=lead-gemini target=intern  n=2  sim=0.98  judge=middle-groq pass_rate=1.00  cost_source=$0.0005 cost_target=$0.0000  -> validated [RETRACTED]
+Clean rerun (2026-07-03, judge-call contamination filter active; all
+11 sampled pairs verified clean by chief-judge review):
+
+- 2026-07-03  category=coding  source=lead-gemini target=intern  n=2  sim=0.08  judge=middle-groq pass_rate=0.50  cost_source=$0.0044 cost_target=$0.0000  -> rejected [OVERRULED, see below]
+- 2026-07-03  category=summarization  source=lead-gemini target=intern  n=2  sim=0.46  judge=middle-groq pass_rate=1.00  cost_source=$0.0016 cost_target=$0.0000  -> validated
+- 2026-07-03  category=extraction  source=lead-gemini target=intern  n=2  sim=0.87  judge=middle-groq pass_rate=1.00  cost_source=$0.0003 cost_target=$0.0000  -> validated
+- 2026-07-03  category=classification  source=lead-gemini target=intern  n=2  sim=0.02  judge=middle-groq pass_rate=0.50  cost_source=$0.0021 cost_target=$0.0000  -> rejected
+- 2026-07-03  category=formatting  source=lead-gemini target=intern  n=2  sim=0.62  judge=middle-groq pass_rate=1.00  cost_source=$0.0004 cost_target=$0.0000  -> validated
+
+Chief-judge ruling on coding (2026-07-03): rejected OVERRULED, row
+stays validated. The judge's WORSE is the same systematic strictness
+call it made in calibration (mismatch #2): it penalizes the fibonacci
+answer for missing negative-n input validation that the task never
+asked for. The fresh intern replay was manually verified correct
+(two-variable iterative loop, correct n=0/1/2 walkthrough). This is
+the judge's one known bias — consistent across two independent runs —
+and should be addressed by tuning JUDGE_SYSTEM_PROMPT ("only
+correctness w.r.t. what the task asked"), not by accepting the
+verdict. classification rejected STANDS: the judge's WORSE there
+matches the manual review (intern's flawed sentiment reasoning).

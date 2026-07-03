@@ -72,11 +72,17 @@ JUDGE_SYSTEM_PROMPT = (
 
 
 def sample_requests(conn: sqlite3.Connection, source_model: str, days: int, limit: int):
-    """Random sample of successful requests for source_model, most recent --days."""
+    """Random sample of successful requests for source_model, most recent --days.
+
+    Judge calls are excluded: when the judge model doubles as a traffic
+    model, its judge prompts land in the log under the same alias, and
+    replaying them contaminates the sample (observed 2026-07-03: a
+    failed lead-gemini calibration polluted 6 of 11 sampled pairs)."""
     rows = conn.execute(
         "SELECT id, prompt, response, COALESCE(cost_usd, 0) FROM requests"
         " WHERE model = ? AND status = 'success' AND prompt IS NOT NULL"
         " AND response IS NOT NULL AND substr(ts, 1, 10) >= date('now', ?)"
+        " AND prompt NOT LIKE '%impartial judge comparing two answers%'"
         " ORDER BY RANDOM() LIMIT ?",
         (source_model, f"-{days} days", limit),
     ).fetchall()

@@ -66,6 +66,22 @@ def test_sample_requests_filters_model_and_status(conn):
     assert rows[0]["response"] == "hello"
 
 
+def test_sample_requests_excludes_judge_calls(conn):
+    from shadow_eval import JUDGE_SYSTEM_PROMPT
+
+    seed(conn, "lead", [{"role": "user", "content": "real task"}], "real answer")
+    seed(
+        conn, "lead",
+        [{"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+         {"role": "user", "content": "Task:\nx\n\nAnswer A:\na\n\nAnswer B:\nb\n\nVerdict:"}],
+        "EQUIVALENT",
+    )
+
+    rows = sample_requests(conn, "lead", days=7, limit=10)
+    assert len(rows) == 1
+    assert rows[0]["response"] == "real answer"
+
+
 def test_evaluate_uses_mock_response(conn):
     seed(conn, "lead", [{"role": "user", "content": "summarize this article"}], "a short summary")
 

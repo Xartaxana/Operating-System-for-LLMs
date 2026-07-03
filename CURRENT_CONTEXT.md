@@ -91,13 +91,29 @@ judge is impractical: free tier is 5 req/min (verified 429) and it
 would judge its own source answers (self-preference bias). analyst
 (4B) not evaluated — no need while middle-groq is free.
 
-Next: rerun Shadow Evaluation with the judge
-(`--source-model lead-gemini --target-model intern --judge-model
-middle-groq --update-table`) to replace heuristic-based verdicts with
-judge-backed ones in DELEGATION_TABLE.md; then grow real traffic
-volume (n=2 per category is thin) and, once ANTHROPIC_API_KEY exists,
-repeat against the true paid Lead. Groq tier also enables testing
-"Routine code generation -> Middle" against middle-groq as target.
+Judged runs done (2026-07-03), with two process lessons the hard way:
+
+1. CONTAMINATION: the first judged run sampled 6/11 nested judge
+   prompts — the failed lead-gemini calibration had logged its judge
+   calls as regular lead-gemini traffic. Caught only because the
+   Architect asked whether the chief judge (Claude) had reviewed the
+   run. Fixed: sample_requests() excludes judge calls (prompt LIKE
+   filter + test); contaminated log lines marked [RETRACTED].
+2. JUDGE BIAS (known, unresolved): middle-groq consistently rules
+   WORSE on the fibonacci pair for missing negative-n validation the
+   task never asked for (calibration mismatch #2 + clean rerun, two
+   independent runs). Chief judge overruled: coding stays validated.
+   Fix path: tune JUDGE_SYSTEM_PROMPT to "only correctness w.r.t.
+   what the task asked", then re-calibrate expecting 11/11.
+
+Process rule going forward: judge verdicts that CHANGE a table status
+get a chief-judge (or Architect) review of the actual pairs before
+the change is accepted; --update-table output is not self-certifying.
+
+Next: (a) tune judge prompt, re-calibrate to 11/11; (b) grow real
+traffic volume (n=2 per category is thin); (c) test "Routine code
+generation -> Middle" with middle-groq as TARGET; (d) once
+ANTHROPIC_API_KEY exists, repeat against the true paid Lead.
 
 ## Research Notes for Later Phases (2026-07-03)
 
