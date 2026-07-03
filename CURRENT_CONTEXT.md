@@ -2,29 +2,19 @@
 
 ## Current Milestone
 
-Milestone 1 — Repository-Aware Lead
+Phase 0 exit — Zero Context Recovery Test.
 
 ## Current Status
 
-Repository foundation completed.
-Kernel supports operation-based patches.
-Documentation structure established.
-Memory architecture defined.
+Architecture specification committed (ARCHITECTURE.md).
+Preliminary delegation table committed (DELEGATION_TABLE.md).
+Direct git commits replace patches as the standard workflow (D-0026).
+Repository cleaned of accidental artifacts and duplicated decisions.
 
 ## Current Objective
 
-Investigate repository-aware context loading.
-
-## Next Tasks
-
-- Validate GitHub Connector capabilities.
-- Design Repository Memory Manager.
-- Define Context Builder.
-
-This file is intended to be updated frequently.
-
-
----
+Pass the Zero Context Recovery Test, then start Phase 1 step 1
+(LiteLLM gateway with SQLite request logging).
 
 ## Phase 0 Exit Criteria
 
@@ -36,15 +26,12 @@ Phase 0 SHALL NOT be considered complete until:
 
 Only then may the project enter Phase 1.
 
-
 ---
 
 # Current Task (Authoritative)
 
-The current engineering task is the single source of truth for repository development.
+Run the Zero Context Recovery Test (PROCESS/ZERO_CONTEXT_PROTOCOL.md)
+in a fresh session. If it fails, improve the repository and repeat.
+On success, begin Phase 1 step 1 (see ROADMAP.md).
 
-Current Task:
-
-Improve the repository until an independent Zero Context Recovery Test succeeds without requiring clarification from the user.
-
-LLMs must execute this task before proposing any new architecture or features.
+This file is intended to be updated frequently.
