@@ -128,6 +128,13 @@ Extended 2026-07-03 into PROCESS/JUDGE_CALIBRATION_PROTOCOL.md
 audited per run, recalibration every ~5 new pairs, judge model
 upgraded only on measured agreement drop below 90%.
 
+Protocol applied same day: the two chief-judge-reviewed pairs from
+the coding->middle-groq run appended to judge_calibration.json (now
+13 pairs). First recalibration exposed verdict nondeterminism at
+default temperature (borderline pair #7 flipped between runs:
+11/11 -> 12/13); judge_pair now defaults to temperature=0.
+Current baseline: judge-groq 13/13, reproduced twice.
+
 DONE (2026-07-03): "Routine code generation -> Middle" tested with
 middle-groq as TARGET, judge-groq as judge: n=2, pass_rate=1.00,
 chief-judge review confirmed both pairs -> row validated with

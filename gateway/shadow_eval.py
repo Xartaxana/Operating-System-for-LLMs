@@ -146,7 +146,14 @@ def judge_pair(task_prompt: str, source_answer: str, target_answer: str,
                judge_model: str, gateway: str, **kwargs):
     """Asks judge_model (through the gateway, so judge cost lands in
     the Ledger) whether the target answer is as good as the source's.
-    Returns 'equivalent', 'target_worse', or None if unparseable."""
+    Returns 'equivalent', 'target_worse', or None if unparseable.
+
+    temperature=0: at default temperature the verdict on borderline
+    pairs is a coin flip between runs (observed 2026-07-03: calibration
+    pair #7 flipped between two consecutive runs), which makes
+    calibration numbers irreproducible. Tests and callers may still
+    override via kwargs."""
+    kwargs.setdefault("temperature", 0)
     response = litellm.completion(
         model=f"openai/{judge_model}",
         api_base=gateway.rstrip("/") + "/v1",
