@@ -192,9 +192,13 @@ of the draft.
 Execution order (each task reviewed by Lead/Architect before the
 next starts; the executor does not self-certify):
 
-1. Rule #1 cost accounting in shadow_eval.py (spec below).
+1. Rule #1 cost accounting in shadow_eval.py (spec below). NOT STARTED
+   — executed out of order, see task 2 below (Architect chose task 2
+   first, citing smaller scope under a limited session budget).
 2. Traffic-kind tagging in the request log (spec below; born from
-   gate G1, D-0033).
+   gate G1, D-0033). CODE WRITTEN AND SELF-TESTED 2026-07-04 by a
+   Sonnet session — see "Delegated Task 2 — Execution Report" below.
+   AWAITING REVIEW (not Architect-signed; do not treat as done).
 3. metrics.py "Phase 2 readiness" digest section: print current
    values vs. the ROADMAP gate thresholds (G/R/C criteria) so gate
    progress is visible in every daily digest. Depends on task 2;
@@ -301,6 +305,70 @@ the live proxy, requests.db contains correctly tagged 'judge' and
 'replay' rows, a plain client call logs 'real', and
 SELECT traffic_kind, COUNT(*) FROM requests GROUP BY 1 shows zero
 pre-migration rows tagged 'real'.
+
+## Delegated Task 2 — Execution Report (2026-07-04, Sonnet session)
+
+Status: code written, self-tested, NOT Architect-reviewed. Executor
+does not self-certify (queue rule above) — next session must review
+the diff before task 1 or task 3 starts.
+
+Implemented as specced in gateway/sqlite_logger.py and
+gateway/shadow_eval.py: schema column with migration/backfill,
+replay()/judge_pair() tag their own calls, sample_requests() excludes
+replay/judge (keeps synthetic). Tests: 41/41 pass (was 33), including
+new coverage for migration+backfill, tag-by-metadata, untagged->real,
+and sampler exclusion (gateway/test_sqlite_logger.py,
+gateway/test_shadow_eval.py).
+
+SPEC DEVIATION FOUND BY EMPIRICAL VERIFICATION (the mandatory
+"verify the exact path" step in item 2 above caught a real bug in the
+spec's assumption, not just confirmed it):
+
+litellm.completion(model=f"openai/{target_model}", api_base=<remote
+gateway>, metadata={"traffic_kind": ...}) does NOT put metadata on
+the wire. Proven live: with litellm.set_verbose + logging.DEBUG, the
+actual POST body to the proxy was `{"messages": [...], "model": ...}`
+— no metadata key at all. litellm.completion's own metadata= kwarg
+only feeds ITS OWN local logging object; it is never serialized into
+the HTTP request when the call target is a remote OpenAI-compatible
+api_base (as opposed to metadata set by the proxy's own router,
+e.g. model_group, which is a different code path already working).
+First attempt at the live acceptance run confirmed this the hard way:
+replay/judge rows landed in requests.db tagged 'real' instead of
+'replay'/'judge'.
+
+Fix: send the tag via extra_body={"metadata": {"traffic_kind": ...}}
+instead — extra_body IS merged into the outgoing JSON body (verified
+the same way: it appeared in the actual POST payload, and the
+callback then saw kwargs["litellm_params"]["metadata"]["traffic_kind"]
+correctly). Both replay() and judge_pair() now use extra_body; a code
+comment documents the gotcha in both functions and near the schema
+comment in sqlite_logger.py, so nobody re-discovers this by making
+tagging silently no-op again.
+
+Live acceptance run performed against a real gateway process (proxy
+started from gateway/, GEMINI_API_KEY / GROQ_API_KEY from
+gateway/.env), against a throwaway --db (not the checked-in
+gateway/requests.db, to avoid polluting real gate-G1 telemetry with
+verification noise): one real lead-gemini call, then
+`shadow_eval.py --source-model lead-gemini --target-model middle-groq
+--judge-model judge-groq --sample 1 --days 1` (no --update-table).
+Result: lead-gemini row -> 'real', middle-groq row -> 'replay',
+judge-groq row -> 'judge'. Matches the acceptance criterion exactly.
+
+Also fixed in passing: the pre-existing test_failure_is_logged
+asserted on r[-1] (last column) to find the error field; adding
+traffic_kind as a new last column silently broke that assertion
+(it started reading traffic_kind's value instead of error). Changed
+to name-based column access (sqlite3.Row) — a latent fragility any
+future column addition would have hit again.
+
+Not done in this session (left for review before proceeding):
+Rule #1 cost accounting (task 1) untouched; task 1's own live
+verification (task 1 needs the x-litellm-response-cost header or a
+requests.db fallback) has NOT been attempted and may hit a similar
+spec-vs-reality gap — verify empirically before trusting the spec's
+assumed header name, per the same lesson learned here.
 
 ## Research Notes for Later Phases (2026-07-03)
 

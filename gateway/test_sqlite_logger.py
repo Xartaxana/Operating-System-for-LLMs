@@ -69,5 +69,88 @@ def test_failure_is_logged(db):
             mock_response="litellm.InternalServerError",
         )
 
-    rows = wait_for_row(db, "failure")
-    assert any("InternalServerError" in (r[-1] or "") for r in rows)
+    wait_for_row(db, "failure")
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("SELECT * FROM requests WHERE status = 'failure'").fetchall()
+    assert any("InternalServerError" in (r["error"] or "") for r in rows)
+
+
+def test_untagged_call_logs_real_traffic_kind(db):
+    import litellm
+    from sqlite_logger import logger_instance
+
+    litellm.callbacks = [logger_instance]
+    litellm.completion(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": "ping"}],
+        mock_response="pong",
+    )
+
+    wait_for_row(db, "success")
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM requests WHERE status = 'success'").fetchone()
+    assert row["traffic_kind"] == "real"
+
+
+@pytest.mark.parametrize("kind", ["replay", "judge", "synthetic"])
+def test_metadata_traffic_kind_is_logged(db, kind):
+    import litellm
+    from sqlite_logger import logger_instance
+
+    litellm.callbacks = [logger_instance]
+    litellm.completion(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": "ping"}],
+        mock_response="pong",
+        metadata={"traffic_kind": kind},
+    )
+
+    wait_for_row(db, "success")
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM requests WHERE status = 'success'").fetchone()
+    assert row["traffic_kind"] == kind
+
+
+def test_migration_adds_column_and_backfills_existing_rows(db):
+    from sqlite_logger import _connect
+
+    # Simulate a pre-migration database (no traffic_kind column).
+    old_schema = """
+    CREATE TABLE requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts TEXT NOT NULL,
+        model TEXT,
+        provider_model TEXT,
+        status TEXT NOT NULL,
+        latency_ms REAL,
+        prompt_tokens INTEGER,
+        completion_tokens INTEGER,
+        total_tokens INTEGER,
+        cost_usd REAL,
+        prompt TEXT,
+        response TEXT,
+        error TEXT
+    );
+    """
+    conn = sqlite3.connect(db)
+    conn.execute(old_schema)
+    conn.execute(
+        "INSERT INTO requests (ts, status, prompt, response) VALUES (?, ?, ?, ?)",
+        ("2026-01-01T00:00:00", "success", "hi", "hello"),
+    )
+    conn.execute(
+        "INSERT INTO requests (ts, status, prompt, response) VALUES (?, ?, ?, ?)",
+        ("2026-01-01T00:00:00", "success",
+         "You are an impartial judge comparing two answers to the same task.", "EQUIVALENT"),
+    )
+    conn.commit()
+    conn.close()
+
+    migrated = _connect()
+    rows = migrated.execute("SELECT prompt, traffic_kind FROM requests ORDER BY id").fetchall()
+    assert len(rows) == 2
+    assert rows[0][1] == "synthetic"
+    assert rows[1][1] == "judge"

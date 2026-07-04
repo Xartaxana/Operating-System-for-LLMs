@@ -29,9 +29,20 @@ CREATE TABLE IF NOT EXISTS requests (
     cost_usd REAL,
     prompt TEXT,
     response TEXT,
-    error TEXT
+    error TEXT,
+    traffic_kind TEXT NOT NULL DEFAULT 'real'
 );
 """
+
+# traffic_kind convention (D-0033, CURRENT_CONTEXT.md "Delegated Task 2"):
+# the caller tags its own traffic via a "metadata": {"traffic_kind": ...}
+# field in the JSON body sent to this gateway. From a remote client this
+# means extra_body={"metadata": {...}} (see shadow_eval.py replay() /
+# judge_pair()) -- litellm.completion's own metadata= kwarg is a
+# client-side-only no-op against a remote api_base, it never reaches the
+# wire. Values: 'real' (default, anything untagged), 'synthetic'
+# (working-set generation), 'replay' (shadow_eval.py target calls),
+# 'judge' (shadow_eval.py judge calls). Gate G1 counts only 'real'.
 
 
 def db_path() -> Path:
@@ -41,6 +52,18 @@ def db_path() -> Path:
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(db_path())
     conn.execute(SCHEMA)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(requests)")}
+    if "traffic_kind" not in columns:
+        conn.execute(
+            "ALTER TABLE requests ADD COLUMN traffic_kind TEXT NOT NULL DEFAULT 'synthetic'"
+        )
+        # Pre-migration rows predate any real gateway traffic (today's log
+        # is working sets, replays and judge calls); the judge LIKE filter
+        # is the same one sample_requests() uses for contamination.
+        conn.execute(
+            "UPDATE requests SET traffic_kind = 'judge'"
+            " WHERE prompt LIKE '%impartial judge comparing two answers%'"
+        )
     return conn
 
 
@@ -68,6 +91,7 @@ def _base_row(kwargs, start_time, end_time) -> dict:
         if start_time and end_time
         else None,
         "prompt": json.dumps(messages, ensure_ascii=False) if messages else None,
+        "traffic_kind": metadata.get("traffic_kind") or "real",
     }
 
 

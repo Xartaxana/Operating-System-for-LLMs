@@ -17,6 +17,7 @@ from shadow_eval import (
     evaluate,
     judge_pair,
     parse_verdict,
+    replay,
     sample_requests,
     similarity,
     update_table_status,
@@ -34,19 +35,35 @@ def conn(tmp_path):
     return conn
 
 
-def seed(conn, model, prompt_messages, response, cost=0.01, status="success", ts=None):
-    conn.execute(
-        "INSERT INTO requests (ts, model, status, cost_usd, prompt, response)"
-        " VALUES (?, ?, ?, ?, ?, ?)",
-        (
-            ts or datetime.datetime.now().isoformat(),
-            model,
-            status,
-            cost,
-            json.dumps(prompt_messages),
-            response,
-        ),
-    )
+def seed(conn, model, prompt_messages, response, cost=0.01, status="success", ts=None,
+         traffic_kind=None):
+    if traffic_kind is None:
+        conn.execute(
+            "INSERT INTO requests (ts, model, status, cost_usd, prompt, response)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                ts or datetime.datetime.now().isoformat(),
+                model,
+                status,
+                cost,
+                json.dumps(prompt_messages),
+                response,
+            ),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO requests (ts, model, status, cost_usd, prompt, response, traffic_kind)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                ts or datetime.datetime.now().isoformat(),
+                model,
+                status,
+                cost,
+                json.dumps(prompt_messages),
+                response,
+                traffic_kind,
+            ),
+        )
     conn.commit()
 
 
@@ -80,6 +97,53 @@ def test_sample_requests_excludes_judge_calls(conn):
     rows = sample_requests(conn, "lead", days=7, limit=10)
     assert len(rows) == 1
     assert rows[0]["response"] == "real answer"
+
+
+def test_sample_requests_excludes_replay_and_judge_traffic_kind(conn):
+    seed(conn, "lead", [{"role": "user", "content": "real task"}], "real answer",
+         traffic_kind="real")
+    seed(conn, "lead", [{"role": "user", "content": "replayed task"}], "replayed answer",
+         traffic_kind="replay")
+    seed(conn, "lead", [{"role": "user", "content": "judge task"}], "judge answer",
+         traffic_kind="judge")
+    seed(conn, "lead", [{"role": "user", "content": "synthetic task"}], "synthetic answer",
+         traffic_kind="synthetic")
+
+    rows = sample_requests(conn, "lead", days=7, limit=10)
+    responses = {r["response"] for r in rows}
+    assert responses == {"real answer", "synthetic answer"}
+
+
+def test_replay_tags_traffic_kind_as_replay(monkeypatch):
+    import shadow_eval
+
+    real_completion = shadow_eval.litellm.completion
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured["extra_body"] = dict(kwargs.get("extra_body") or {})
+        kwargs.setdefault("mock_response", "ok")
+        return real_completion(**kwargs)
+
+    monkeypatch.setattr(shadow_eval.litellm, "completion", fake_completion)
+    replay([{"role": "user", "content": "hi"}], "intern", "http://localhost:4000")
+    assert captured["extra_body"] == {"metadata": {"traffic_kind": "replay"}}
+
+
+def test_judge_pair_tags_traffic_kind_as_judge(monkeypatch):
+    import shadow_eval
+
+    real_completion = shadow_eval.litellm.completion
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured["extra_body"] = dict(kwargs.get("extra_body") or {})
+        kwargs.setdefault("mock_response", "EQUIVALENT")
+        return real_completion(**kwargs)
+
+    monkeypatch.setattr(shadow_eval.litellm, "completion", fake_completion)
+    judge_pair("task", "a", "b", "judge-alias", "http://localhost:4000")
+    assert captured["extra_body"] == {"metadata": {"traffic_kind": "judge"}}
 
 
 def test_evaluate_uses_mock_response(conn):

@@ -97,6 +97,7 @@ def sample_requests(conn: sqlite3.Connection, source_model: str, days: int, limi
         "SELECT id, prompt, response, COALESCE(cost_usd, 0) FROM requests"
         " WHERE model = ? AND status = 'success' AND prompt IS NOT NULL"
         " AND response IS NOT NULL AND substr(ts, 1, 10) >= date('now', ?)"
+        " AND traffic_kind NOT IN ('replay', 'judge')"
         " AND prompt NOT LIKE '%impartial judge comparing two answers%'"
         " ORDER BY RANDOM() LIMIT ?",
         (source_model, f"-{days} days", limit),
@@ -113,12 +114,20 @@ def similarity(a: str, b: str) -> float:
 def replay(messages: list, target_model: str, gateway: str, **kwargs):
     """Runs the same messages on target_model through the gateway.
     Returns (response_text, cost_usd). kwargs pass through to litellm
-    (tests use mock_response to avoid a live model/proxy)."""
+    (tests use mock_response to avoid a live model/proxy).
+
+    traffic_kind is sent via extra_body, not litellm.completion's own
+    metadata= kwarg: that kwarg only feeds litellm's local logging
+    object and is never written into the HTTP request body sent to a
+    remote api_base, so the proxy-side callback never sees it
+    (verified empirically 2026-07-04: metadata= produced 'real' rows
+    on the proxy; extra_body={"metadata": ...} reaches the callback)."""
     response = litellm.completion(
         model=f"openai/{target_model}",
         api_base=gateway.rstrip("/") + "/v1",
         api_key=os.environ.get("GATEWAY_API_KEY", "anything"),
         messages=messages,
+        extra_body={"metadata": {"traffic_kind": "replay"}},
         **kwargs,
     )
     text = response.choices[0].message.content
@@ -167,6 +176,7 @@ def judge_pair(task_prompt: str, source_answer: str, target_answer: str,
                 f"Answer B:\n{target_answer}\n\nVerdict:",
             },
         ],
+        extra_body={"metadata": {"traffic_kind": "judge"}},
         **kwargs,
     )
     return parse_verdict(response.choices[0].message.content)
