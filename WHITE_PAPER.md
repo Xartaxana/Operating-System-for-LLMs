@@ -196,6 +196,16 @@ calibration + evaluation history is ~$0.01 against a source traffic
 sample accounted at ~$0.03 — trivially satisfying Rule #1 at this
 scale, but the ratio only becomes meaningful with production volume.
 
+As of 2026-07-04, Shadow Evaluation reads proxy-accounted costs for
+both replay targets and judge calls instead of recomputing costs from
+gateway aliases client-side; historical evidence lines dated
+2026-07-03 that show `cost_target=$0.0000` are therefore accounting
+artifacts, not zero-cost delegation. The same hardening added
+`traffic_kind` tagging so Phase 2 gates can distinguish real traffic
+from synthetic, replay and judge calls. Both changes are implemented
+and self-tested; they still require Lead/Architect review before being
+treated as signed process evidence.
+
 External priors the local telemetry must confirm or refute (sources
 in docs/RELATED_WORK.md): 50–62% of spend is re-sent history; 30–40%
 of tokens are redundant; cascade routing can cut cost up to 98% at
@@ -245,10 +255,10 @@ receipts — what to route, and proving the supervisor earns its keep.
 
 ## 10. Roadmap
 
-- **Phase 1 (current):** finish Shadow Evaluation hardening (cost
-  accounting task is specified and delegated); grow real traffic
-  through the gateway; repeat the evaluation against a paid frontier
-  Lead when a key is available.
+- **Phase 1 (current):** review and sign off the just-landed Shadow
+  Evaluation hardening (`traffic_kind` tagging and proxy-accounted
+  replay/judge costs); grow real traffic through the gateway; repeat
+  the evaluation against a paid frontier Lead when a key is available.
 - **Phase 2 (entered on evidence, D-0029, D-0033):** gated by
   explicit telemetry-computable criteria (ROADMAP.md), set up front
   and revised only through the decision log. The router gate requires
@@ -285,6 +295,6 @@ but not yet measured locally.
 ---
 
 *Canonical sources: ARCHITECTURE.md (specification), DECISIONS.md
-(D-0001…D-0032), DELEGATION_TABLE.md (evidence log),
+(D-0001…D-0033), DELEGATION_TABLE.md (evidence log),
 PROCESS/JUDGE_CALIBRATION_PROTOCOL.md, docs/RELATED_WORK.md,
 gateway/ (reference implementation).*

@@ -182,6 +182,13 @@ locally, >=20 multi-turn sessions, >=25% of input spend re-sent).
 Green gate -> written report -> Architect signs; first task is
 always an evaluation, never a build. Summarized in White Paper §10.
 
+DONE (2026-07-04): White Paper §7/§10 synchronized after the
+traffic_kind and Rule #1 cost-accounting implementation commits:
+WHITE_PAPER.md now states that the hardening is implemented and
+self-tested, but still awaiting Lead/Architect review before being
+treated as signed process evidence. Canonical source range updated
+to D-0001..D-0033.
+
 Remaining Lead-tier queue: White Paper §7 upkeep; Architect review
 of the draft.
 
