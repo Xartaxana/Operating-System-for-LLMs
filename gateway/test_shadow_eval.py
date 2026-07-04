@@ -10,6 +10,7 @@ import json
 import pytest
 
 from shadow_eval import (
+    _extract_cost,
     aggregate_by_category,
     append_evidence_log,
     calibrate,
@@ -20,6 +21,7 @@ from shadow_eval import (
     replay,
     sample_requests,
     similarity,
+    update_delegation_table,
     update_table_status,
 )
 
@@ -193,6 +195,76 @@ def test_aggregate_by_category():
     assert agg["other"]["errors"] == 1
 
 
+class _FakeResponse:
+    def __init__(self, hidden_params):
+        self._hidden_params = hidden_params
+
+
+def test_extract_cost_uses_hidden_params_response_cost():
+    response = _FakeResponse({"response_cost": 0.0042})
+    cost = _extract_cost(response, "middle-groq", db_path=None, call_start=datetime.datetime.now())
+    assert cost == 0.0042
+
+
+def test_extract_cost_falls_back_to_db_when_hidden_params_missing(tmp_path):
+    import sqlite3
+
+    from sqlite_logger import SCHEMA
+
+    db_path = tmp_path / "requests.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(SCHEMA)
+    call_start = datetime.datetime(2026, 7, 4, 12, 0, 0)
+    conn.execute(
+        "INSERT INTO requests (ts, model, status, cost_usd) VALUES (?, ?, ?, ?)",
+        ((call_start + datetime.timedelta(seconds=1)).isoformat(), "middle-groq", "success", 0.0191),
+    )
+    conn.commit()
+
+    response = _FakeResponse({"response_cost": None})
+    cost = _extract_cost(response, "middle-groq", db_path=str(db_path), call_start=call_start)
+    assert cost == 0.0191
+
+
+def test_extract_cost_returns_none_when_unavailable():
+    response = _FakeResponse({"response_cost": None})
+    assert _extract_cost(response, "middle-groq", db_path=None, call_start=datetime.datetime.now()) is None
+
+
+def test_extract_cost_returns_none_when_no_matching_db_row(tmp_path):
+    import sqlite3
+
+    from sqlite_logger import SCHEMA
+
+    db_path = tmp_path / "requests.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(SCHEMA)
+    conn.commit()
+
+    response = _FakeResponse({})
+    cost = _extract_cost(response, "middle-groq", db_path=str(db_path), call_start=datetime.datetime.now())
+    assert cost is None
+
+
+def test_aggregate_by_category_computes_mean_judge_cost():
+    results = [
+        {"category": "coding", "source_cost_usd": 0.02, "target_cost_usd": 0.001, "similarity": 0.8,
+         "verdict": "equivalent", "judge_cost_usd": 0.0004, "error": None},
+        {"category": "coding", "source_cost_usd": 0.03, "target_cost_usd": 0.002, "similarity": 0.6,
+         "verdict": "equivalent", "judge_cost_usd": 0.0006, "error": None},
+    ]
+    agg = aggregate_by_category(results)
+    assert agg["coding"]["mean_judge_cost_usd"] == pytest.approx(0.0005)
+
+
+def test_aggregate_by_category_mean_judge_cost_none_when_no_judge_run():
+    results = [
+        {"category": "coding", "source_cost_usd": 0.02, "target_cost_usd": 0.001, "similarity": 0.8, "error": None},
+    ]
+    agg = aggregate_by_category(results)
+    assert agg["coding"]["mean_judge_cost_usd"] is None
+
+
 def test_decide_status_validated():
     agg = {"n": 3, "mean_similarity": 0.9, "mean_source_cost_usd": 0.02, "mean_target_cost_usd": 0.001, "errors": 0}
     assert decide_status(agg, similarity_threshold=0.5, min_samples=2) == "validated"
@@ -224,11 +296,12 @@ def test_parse_verdict():
 
 
 def test_judge_pair_with_mock():
-    verdict = judge_pair(
+    verdict, cost = judge_pair(
         "Summarize X", "short summary", "verbose but correct summary",
         "judge-alias", "http://localhost:4000", mock_response="EQUIVALENT",
     )
     assert verdict == "equivalent"
+    assert cost is None
 
 
 def test_evaluate_with_judge_records_verdict(conn):
@@ -274,6 +347,30 @@ def test_calibrate_reports_agreement_and_mismatches():
     assert report["agreements"] == 1
     assert report["mismatches"][0]["category"] == "classification"
     assert report["mismatches"][0]["got"] == "equivalent"
+
+
+def test_update_delegation_table_evidence_line_includes_judge_cost(tmp_path):
+    table_path = tmp_path / "DELEGATION_TABLE.md"
+    table_path.write_text(
+        "| Task type | Cost (Lead) | Value of Lead | Delegate to | Status |\n"
+        "|---|---|---|---|---|\n"
+        "| Summarization | Medium | Medium | Junior | estimated |\n",
+        encoding="utf-8",
+    )
+    aggregated = {
+        "summarization": {
+            "n": 2, "mean_similarity": 0.9, "mean_source_cost_usd": 0.002,
+            "mean_target_cost_usd": 0.0001, "pass_rate": 1.0,
+            "mean_judge_cost_usd": 0.0004, "errors": 0,
+        }
+    }
+    statuses = {"summarization": "validated"}
+    update_delegation_table(
+        table_path, "2026-07-04", "lead-gemini", "middle-groq",
+        aggregated, statuses, judge_model="judge-groq",
+    )
+    text = table_path.read_text(encoding="utf-8")
+    assert "judge=judge-groq pass_rate=1.00 judge_cost=$0.0004" in text
 
 
 def test_update_table_status_replaces_only_matching_row():

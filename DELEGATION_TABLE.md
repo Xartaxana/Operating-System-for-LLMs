@@ -59,6 +59,19 @@ refute. Sources and details: docs/RELATED_WORK.md.
 
 Evidence for Update Rule 1. One line per Shadow Evaluation run.
 
+Caveat on cost_target=$0.0000 (2026-07-04, Rule #1 cost accounting
+fix): every evidence line below dated <= 2026-07-03 shows
+cost_target=$0.0000 as a CLIENT-SIDE ACCOUNTING ARTIFACT, not an
+actual $0 — shadow_eval.py was pricing the gateway alias name
+(e.g. "openai/middle-groq") against litellm's own client pricing
+map, which doesn't know gateway aliases, so completion_cost()
+silently raised and was swallowed. The proxy-side accounting in
+gateway/requests.db was correct throughout. Fixed by reading
+response._hidden_params["response_cost"] (falls back to the
+requests.db row when absent); judge cost is now captured the same
+way and shown as judge_cost=$X.XXXX. Runs from 2026-07-04 onward
+show honest nonzero costs.
+
 Caveat on the comparison method (2026-07-03): sim is difflib
 character-level similarity. High-sim `validated` verdicts are
 trustworthy; low-sim `rejected` verdicts are SUSPECT — a verbose

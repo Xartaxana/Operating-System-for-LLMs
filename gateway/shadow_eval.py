@@ -31,6 +31,7 @@ Usage:
 """
 
 import argparse
+import datetime
 import difflib
 import json
 import os
@@ -111,10 +112,45 @@ def similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a or "", b or "").ratio()
 
 
-def replay(messages: list, target_model: str, gateway: str, **kwargs):
+def _extract_cost(response, model: str, db_path, call_start):
+    """Rule #1 cost accounting: take the cost the PROXY accounted,
+    never recompute client-side. litellm.completion_cost(response)
+    looks up the ALIAS name (e.g. "openai/middle-groq") in the
+    client's own pricing map, which does not know gateway aliases ->
+    silent $0.0000 on every call (diagnosed 2026-07-03).
+
+    response._hidden_params["response_cost"] is the correct source:
+    verified empirically 2026-07-04 (live call through the gateway to
+    middle-groq) that it already equals the cost the proxy logged in
+    requests.db for the same call, with no header parsing needed.
+
+    Fallback (hidden_params missing/None): read the newest matching
+    row from requests.db for this model, ts >= call_start. If that
+    also fails, return None -- an explicit "unknown" is required
+    instead of a silent $0.0000 (Rule #1)."""
+    hidden_params = getattr(response, "_hidden_params", None) or {}
+    cost = hidden_params.get("response_cost")
+    if cost is not None:
+        return cost
+    if db_path is None:
+        return None
+    try:
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT cost_usd FROM requests WHERE model = ? AND ts >= ?"
+            " ORDER BY ts DESC LIMIT 1",
+            (model, call_start.isoformat()),
+        ).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def replay(messages: list, target_model: str, gateway: str, db_path=None, **kwargs):
     """Runs the same messages on target_model through the gateway.
-    Returns (response_text, cost_usd). kwargs pass through to litellm
-    (tests use mock_response to avoid a live model/proxy).
+    Returns (response_text, cost_usd); cost_usd is None if it could
+    not be determined (see _extract_cost). kwargs pass through to
+    litellm (tests use mock_response to avoid a live model/proxy).
 
     traffic_kind is sent via extra_body, not litellm.completion's own
     metadata= kwarg: that kwarg only feeds litellm's local logging
@@ -122,6 +158,7 @@ def replay(messages: list, target_model: str, gateway: str, **kwargs):
     remote api_base, so the proxy-side callback never sees it
     (verified empirically 2026-07-04: metadata= produced 'real' rows
     on the proxy; extra_body={"metadata": ...} reaches the callback)."""
+    call_start = datetime.datetime.now()
     response = litellm.completion(
         model=f"openai/{target_model}",
         api_base=gateway.rstrip("/") + "/v1",
@@ -131,10 +168,7 @@ def replay(messages: list, target_model: str, gateway: str, **kwargs):
         **kwargs,
     )
     text = response.choices[0].message.content
-    try:
-        cost = litellm.completion_cost(completion_response=response)
-    except Exception:
-        cost = 0.0
+    cost = _extract_cost(response, target_model, db_path, call_start)
     return text, cost
 
 
@@ -152,10 +186,13 @@ def parse_verdict(text: str):
 
 
 def judge_pair(task_prompt: str, source_answer: str, target_answer: str,
-               judge_model: str, gateway: str, **kwargs):
+               judge_model: str, gateway: str, db_path=None, **kwargs):
     """Asks judge_model (through the gateway, so judge cost lands in
     the Ledger) whether the target answer is as good as the source's.
-    Returns 'equivalent', 'target_worse', or None if unparseable.
+    Returns (verdict, cost_usd): verdict is 'equivalent', 'target_worse',
+    or None if unparseable; cost_usd is the judge call's own cost (Rule
+    #1: supervision cost must be visible where the delegation decision
+    is recorded), or None if it could not be determined (_extract_cost).
 
     temperature=0: at default temperature the verdict on borderline
     pairs is a coin flip between runs (observed 2026-07-03: calibration
@@ -163,6 +200,7 @@ def judge_pair(task_prompt: str, source_answer: str, target_answer: str,
     calibration numbers irreproducible. Tests and callers may still
     override via kwargs."""
     kwargs.setdefault("temperature", 0)
+    call_start = datetime.datetime.now()
     response = litellm.completion(
         model=f"openai/{judge_model}",
         api_base=gateway.rstrip("/") + "/v1",
@@ -179,7 +217,8 @@ def judge_pair(task_prompt: str, source_answer: str, target_answer: str,
         extra_body={"metadata": {"traffic_kind": "judge"}},
         **kwargs,
     )
-    return parse_verdict(response.choices[0].message.content)
+    cost = _extract_cost(response, judge_model, db_path, call_start)
+    return parse_verdict(response.choices[0].message.content), cost
 
 
 def last_user_content(messages: list) -> str:
@@ -189,7 +228,7 @@ def last_user_content(messages: list) -> str:
     return ""
 
 
-def evaluate(conn, source_model: str, target_model: str, gateway: str, days: int, sample_n: int, judge_model: str = None, categories: set = None, **replay_kwargs):
+def evaluate(conn, source_model: str, target_model: str, gateway: str, days: int, sample_n: int, judge_model: str = None, categories: set = None, db_path=None, **replay_kwargs):
     """categories: optional whitelist. A replay only supports the table
     row whose 'Delegate to' tier the target actually is, so a run
     aimed at one row (e.g. coding -> Middle) must not touch rows whose
@@ -204,16 +243,18 @@ def evaluate(conn, source_model: str, target_model: str, gateway: str, days: int
         if categories and category not in categories:
             continue
         try:
-            replayed_text, replayed_cost = replay(messages, target_model, gateway, **replay_kwargs)
+            replayed_text, replayed_cost = replay(
+                messages, target_model, gateway, db_path=db_path, **replay_kwargs
+            )
             error = None
         except Exception as exc:
             replayed_text, replayed_cost, error = None, None, str(exc)
-        verdict = None
+        verdict, judge_cost = None, None
         if judge_model and error is None:
             try:
-                verdict = judge_pair(
+                verdict, judge_cost = judge_pair(
                     last_user_content(messages), row["response"], replayed_text,
-                    judge_model, gateway, **replay_kwargs,
+                    judge_model, gateway, db_path=db_path, **replay_kwargs,
                 )
             except Exception as exc:
                 error = f"judge: {exc}"
@@ -225,6 +266,7 @@ def evaluate(conn, source_model: str, target_model: str, gateway: str, days: int
                 "target_cost_usd": replayed_cost,
                 "similarity": similarity(row["response"], replayed_text) if error is None else 0.0,
                 "verdict": verdict,
+                "judge_cost_usd": judge_cost,
                 "error": error,
             }
         )
@@ -240,6 +282,7 @@ def aggregate_by_category(results: list) -> dict:
     for category, items in buckets.items():
         n = len(items)
         judged = [i for i in items if i.get("verdict")]
+        judge_costs = [i["judge_cost_usd"] for i in items if i.get("judge_cost_usd") is not None]
         aggregated[category] = {
             "n": n,
             "mean_similarity": round(sum(i["similarity"] for i in items) / n, 4),
@@ -252,6 +295,9 @@ def aggregate_by_category(results: list) -> dict:
                 sum(1 for i in judged if i["verdict"] == "equivalent") / len(judged), 4
             )
             if judged
+            else None,
+            "mean_judge_cost_usd": round(sum(judge_costs) / len(judge_costs), 6)
+            if judge_costs
             else None,
         }
     return aggregated
@@ -307,7 +353,8 @@ def update_delegation_table(path: Path, date: str, source_model: str, target_mod
         status = statuses[category]
         judged = (
             f"  judge={judge_model} pass_rate={agg['pass_rate']:.2f}"
-            if judge_model and agg.get("pass_rate") is not None
+            f" judge_cost=${agg['mean_judge_cost_usd']:.4f}"
+            if judge_model and agg.get("pass_rate") is not None and agg.get("mean_judge_cost_usd") is not None
             else ""
         )
         entries.append(
@@ -329,7 +376,7 @@ def calibrate(pairs: list, judge_model: str, gateway: str, **kwargs) -> dict:
     reproduce them before its verdicts are trusted in --update-table."""
     agreements, mismatches = 0, []
     for i, pair in enumerate(pairs):
-        verdict = judge_pair(
+        verdict, _judge_cost = judge_pair(
             pair["prompt"], pair["source_response"], pair["target_response"],
             judge_model, gateway, **kwargs,
         )
@@ -354,8 +401,13 @@ def format_report(source_model, target_model, aggregated, statuses) -> str:
         judged = (
             f" pass_rate={agg['pass_rate']:.0%}" if agg.get("pass_rate") is not None else ""
         )
+        judge_cost = (
+            f" judge_cost=${agg['mean_judge_cost_usd']:.4f}"
+            if agg.get("mean_judge_cost_usd") is not None
+            else ""
+        )
         lines.append(
-            f"  {category} [{mapped}]: n={agg['n']} sim={agg['mean_similarity']:.0%}{judged}"
+            f"  {category} [{mapped}]: n={agg['n']} sim={agg['mean_similarity']:.0%}{judged}{judge_cost}"
             f" cost {source_model}=${agg['mean_source_cost_usd']:.4f}"
             f" vs {target_model}=${agg['mean_target_cost_usd']:.4f}"
             f" errors={agg['errors']} -> {statuses[category]}"
@@ -418,7 +470,7 @@ def main():
     categories = set(args.categories.split(",")) if args.categories else None
     results = evaluate(conn, args.source_model, args.target_model, args.gateway,
                        args.days, args.sample, judge_model=args.judge_model,
-                       categories=categories)
+                       categories=categories, db_path=args.db)
     aggregated = aggregate_by_category(results)
     statuses = {
         category: decide_status(agg, args.threshold, args.min_samples, args.pass_threshold)
@@ -431,8 +483,6 @@ def main():
         print(format_report(args.source_model, args.target_model, aggregated, statuses))
 
     if args.update_table and aggregated:
-        import datetime
-
         update_delegation_table(
             Path(args.table),
             datetime.date.today().isoformat(),

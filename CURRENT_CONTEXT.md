@@ -192,9 +192,12 @@ of the draft.
 Execution order (each task reviewed by Lead/Architect before the
 next starts; the executor does not self-certify):
 
-1. Rule #1 cost accounting in shadow_eval.py (spec below). NOT STARTED
-   — executed out of order, see task 2 below (Architect chose task 2
-   first, citing smaller scope under a limited session budget).
+1. Rule #1 cost accounting in shadow_eval.py (spec below). CODE
+   WRITTEN AND SELF-TESTED 2026-07-04 by a Sonnet session, run
+   immediately after task 2 in the same session (Architect judged the
+   two independent — different concern, only incidental code overlap
+   in replay()/judge_pair()) — see "Delegated Task 1 — Execution
+   Report" below. AWAITING REVIEW (not Architect-signed).
 2. Traffic-kind tagging in the request log (spec below; born from
    gate G1, D-0033). CODE WRITTEN AND SELF-TESTED 2026-07-04 by a
    Sonnet session — see "Delegated Task 2 — Execution Report" below.
@@ -202,7 +205,8 @@ next starts; the executor does not self-certify):
 3. metrics.py "Phase 2 readiness" digest section: print current
    values vs. the ROADMAP gate thresholds (G/R/C criteria) so gate
    progress is visible in every daily digest. Depends on task 2;
-   spec to be written by the Lead after task 2 lands.
+   spec to be written by the Lead after task 2 lands. NOT STARTED —
+   task 2 is unreviewed, and this task still needs its spec written.
 
 # Delegated Task (queued for a CHEAPER model session): Rule #1 cost accounting in shadow_eval.py
 
@@ -253,6 +257,70 @@ Acceptance: a --categories coding run lead-gemini -> middle-groq
 --judge-model judge-groq produces an evidence line where cost_target
 and judge_cost are nonzero and match requests.db rows within
 rounding; 33+ tests pass.
+
+## Delegated Task 1 — Execution Report (2026-07-04, Sonnet session)
+
+Status: code written, self-tested, NOT Architect-reviewed. Executor
+does not self-certify (queue rule above) — next session must review
+this diff (it lands together with task 2's, same session) before
+task 3 starts.
+
+Empirical verification FIRST (per the lesson from task 2 the same
+session — do not trust a spec's assumed API shape, check it live):
+the spec's preferred source was "the x-litellm-response-cost response
+header ... response._hidden_params, check additional_headers". Live
+call through the gateway (openai/middle-groq) showed two things the
+spec got only half right:
+
+1. additional_headers does carry the cost, but under a DIFFERENT key
+   than assumed: "llm_provider-x-litellm-response-cost" (litellm
+   prefixes provider-passthrough headers with "llm_provider-"), not
+   the bare "x-litellm-response-cost".
+2. There is a much simpler, more direct source that makes the header
+   lookup unnecessary: response._hidden_params["response_cost"] is
+   already the parsed float, and it matched the requests.db-logged
+   cost for the same call exactly (2.813e-05 both places, live
+   middle-groq call). Used this instead of parsing the header string.
+
+Implemented in gateway/shadow_eval.py: new _extract_cost(response,
+model, db_path, call_start) helper — hidden_params.response_cost
+first, else newest matching gateway/requests.db row for that model
+with ts >= call_start, else explicit None (never a silent $0, per
+the spec's Rule #1 requirement). replay() and judge_pair() both use
+it and gained a db_path= parameter; judge_pair() now returns
+(verdict, cost) instead of just verdict — updated its two other
+callers (evaluate(), calibrate()) accordingly. evaluate() threads
+judge_cost_usd through; aggregate_by_category() adds
+mean_judge_cost_usd (None when no judge ran, mirroring the existing
+pass_rate pattern); format_report() and the evidence-log line in
+update_delegation_table() both show judge_cost=$X.XXXX when present.
+decide_status() untouched, as specced.
+
+Tests: 48/48 pass (was 41 after task 2). New coverage: _extract_cost
+hidden_params path, db fallback path, both-unavailable -> None path;
+aggregate mean_judge_cost_usd with and without a judge; the
+update_delegation_table evidence-line format. One pre-existing test
+(test_judge_pair_with_mock) updated for the new (verdict, cost)
+return shape.
+
+Live acceptance run (same session, same throwaway --db discipline as
+task 2 — real gateway process, GEMINI_API_KEY/GROQ_API_KEY from
+gateway/.env, not the checked-in gateway/requests.db): seeded one
+real lead-gemini "reverse a string" request, then `shadow_eval.py
+--source-model lead-gemini --target-model middle-groq --judge-model
+judge-groq --categories coding --sample 1 --days 1 --json`. Result:
+cost_target=$0.00032122, judge_cost=$0.00034185, both matching the
+corresponding requests.db rows exactly (traffic_kind 'replay' and
+'judge' respectively, confirming task 1 and task 2 work correctly
+together in the same run).
+
+DELEGATION_TABLE.md gained the required caveat (item 4): all
+evidence lines dated <= 2026-07-03 show cost_target=$0.0000 as a
+client-side artifact of the bug this task fixes, not an actual $0.
+
+Not done in this session: metrics.py Phase 2 readiness digest (task
+3) — blocked on task 2 review and its own spec, per the queue note
+above.
 
 ---
 
