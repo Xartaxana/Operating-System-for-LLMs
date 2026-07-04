@@ -381,6 +381,76 @@ Every future context-management spec should answer:
 - How is stale or wrong context detected?
 - What is the rollback plan?
 
+### 12. Strengthen judge audit escalation rules
+
+The current judge protocol is a good MVP guardrail: all status-changing
+verdicts require chief-judge or Architect review, every reviewed pair
+grows the calibration set, 1-2 random verdicts are audited per run, and
+the judge is recalibrated after roughly five new calibration pairs.
+
+However, 1-2 random audits should be understood as a heartbeat check,
+not a statistical guarantee. If the true judge error rate were 10%, two
+random checks would catch at least one error only about 19% of the time:
+
+```text
+1 - (1 - 0.10)^2 = 0.19
+```
+
+At a 20% error rate, two checks still catch at least one error only
+about 36% of the time. That is useful as a smoke test, but it is not
+enough to prove judge reliability for high-impact decisions.
+
+Recommended audit policy:
+
+- Keep 1-2 random audits as the minimum for small, low-impact runs.
+- Increase audit size when the run is large, affects a Phase gate,
+  introduces a new task category, uses a new source or target model,
+  changes the judge prompt/model/version, or involves historically
+  fragile categories such as coding, classification or borderline
+  reasoning.
+- If a random audit finds a judge error, freeze table updates from that
+  run until expanded review completes.
+- On any judge audit failure, immediately review at least five
+  additional verdicts from the same run, or 20% of the run, whichever is
+  larger. If the affected category is small, review the whole category.
+- Classify the failure before changing prompts: judge error, ambiguous
+  pair, missing rubric, contaminated sample, bad target answer, or task
+  misclassification.
+- Append all reviewed failures and borderline cases to
+  `gateway/judge_calibration.json`.
+- If the failure is a genuine judge error, recalibrate immediately
+  instead of waiting for the normal "~5 new pairs" trigger.
+
+Recommended severity ladder:
+
+- One judge error in random audit: expanded audit plus immediate
+  recalibration.
+- Two judge errors in the same run or category: full manual review of
+  that category before accepting status changes.
+- A systematic pattern: freeze category status changes until prompt or
+  model diagnosis is complete.
+- Full calibration agreement below 90%: judge is not trusted for status
+  changes until fixed, replaced or explicitly accepted by the Architect
+  with a documented caveat.
+
+Recommended immediate recalibration triggers:
+
+- any random-audit mismatch where the chief judge labels the judge
+  wrong;
+- any mismatch on a status-changing verdict;
+- judge model, provider, prompt, temperature or output schema changes;
+- a new task category enters Shadow Evaluation;
+- transition from synthetic to real traffic;
+- any Phase 2 gate report;
+- suspected contamination;
+- provider-side model update under the same alias;
+- sudden judge-cost or latency change suggesting the backend may have
+  changed.
+
+The principle is that random audits are the early-warning mechanism.
+They should not merely record a failure; they should escalate the
+amount of supervision until the judge is trustworthy again.
+
 ## Suggested Near-Term Task Queue
 
 1. Review and sign off the already implemented Shadow Evaluation
