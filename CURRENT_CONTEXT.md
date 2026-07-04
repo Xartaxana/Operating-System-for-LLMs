@@ -189,6 +189,14 @@ self-tested, but still awaiting Lead/Architect review before being
 treated as signed process evidence. Canonical source range updated
 to D-0001..D-0033.
 
+DONE (2026-07-04): External review report recorded in
+docs/EXTERNAL_REVIEW_CONTEXT_MANAGEMENT_2026-07-04.md and linked from
+README.md + docs/README.md so it is discoverable after a fresh boot.
+Key review recommendation: treat Phase 2 as Context Management
+Evaluation, not only compression; evaluate provider prompt caching,
+cache-aware Ledger accounting, session/turn identity, structured
+compaction, retrieval/memory and memory governance under Rule #1.
+
 Remaining Lead-tier queue: White Paper §7 upkeep; Architect review
 of the draft.
 

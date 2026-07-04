@@ -15,6 +15,12 @@ LLM Cost).
 See ARCHITECTURE.md for the authoritative architecture specification
 and DELEGATION_TABLE.md for the living delegation cost/value table.
 
+## Review Reports
+
+See docs/EXTERNAL_REVIEW_CONTEXT_MANAGEMENT_2026-07-04.md for the
+2026-07-04 external review of project positioning, context management
+and Phase 2 development options.
+
 ## Gateway
 
 gateway/ contains the Phase 1 LiteLLM proxy with SQLite request logging.
