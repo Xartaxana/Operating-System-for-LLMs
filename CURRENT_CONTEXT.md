@@ -610,14 +610,28 @@ STRATEGIC BASELINE FINDINGS (Architect attention):
    repetition on the subscription contour — first hard evidence for
    the D-0036 ordering (measure net-of-cache before building any
    compression).
-3. SPEND MIX SURPRISE: sonnet-4-6 carries 62% of accounted spend
-   ($735.29, 6433 turns), not the frontier models (fable-5 $197.59,
-   opus-4-8 $205.67). The external plan's premise "the smartest
-   model burns most of the budget" is NOT what this history shows —
-   the routing policy (Phase 1.5 step 2) must be calibrated against
-   this baseline, not against the assumption. (Caveat: history mixes
-   pre-Fable weeks; the recent-window mix may differ — the weekly
-   calibration loop should watch the trend, not the all-time total.)
+3. SPEND MIX — CORRECTED BY THE ARCHITECT (2026-07-07): the Lead's
+   first reading ("sonnet-4-6 carries 62% of spend, so the premise
+   'the smartest model burns most' is refuted") was WRONG. The
+   baseline is CENSORED data: the operator was rationing frontier
+   usage precisely because limits would run out — the mix shows the
+   rationing, not free demand. The premise reads correctly as "the
+   smartest model burns tokens FASTEST", and the same baseline
+   confirms it: accounted burn per turn is opus-4-8 $0.264 and
+   fable-5 $0.216 vs sonnet-4-6 $0.114 and sonnet-5 $0.063 —
+   frontier models burn 2-4x faster per unit of work.
+   Two consequences for Phase 1.5:
+   (a) Success metric: NOT "frontier share of spend falls vs
+   baseline" alone — if routing frees up limits, Fable's share on
+   architecture work may legitimately RISE while per-unit economics
+   improve. Track cost per accepted unit of work by tier + the
+   escalation rate; watch the frontier share only alongside them.
+   (b) The baseline cannot say what the operator WOULD have used
+   frontier models for without rationing; the escalation journal
+   (junior failed -> escalate) is the instrument that measures the
+   true boundary, and it only starts producing data once routing is
+   live. (Also: history mixes pre-Fable weeks; the weekly loop
+   watches the recent-window trend, not the all-time total.)
 
 # Delegated Task (queued for a CHEAPER model session): Rule #1 cost accounting in shadow_eval.py
 
