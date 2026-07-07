@@ -79,6 +79,51 @@ table status moves). Note: an untracked agent test-reviewer.md
 appeared in AO3_tests during deployment (parallel session?) — no
 model assigned to it; assign on the next touch.
 
+FIRST LIVE VERIFICATION (2026-07-07, same day): routing WORKS —
+the operator's fresh AO3 session dispatched test-maintainer and it
+ran on sonnet-5 (63 turns, isSidechain=true), Lead stayed on Fable.
+Two findings: (a) the session did NOT write the delegated event to
+routing-log.jsonl (dispatch went through /qa-loop, whose prompt
+predates the policy) — watch for a few days, then either duplicate
+the journal rule inside /qa-loop or strengthen CLAUDE.md; (b) a REAL
+telemetry bug — see Delegated Task 6 below. Because of (b), the AO3
+retro baseline ($276.70) UNDERCOUNTS: subagent traffic never reached
+cc_usage. Numbers self-correct retroactively once Task 6 lands
+(transcripts persist).
+
+## Delegated Task 6 (spec, Lead 2026-07-07): subagent transcripts in usage_report.py
+
+Middle-class task (builder-tier). Bug: subagent transcripts live in
+~/.claude/projects/<project>/<session-id>/subagents/agent-*.jsonl,
+but transcript_glob() only matches <project>/*.jsonl — ALL sidechain
+traffic is invisible to cc_usage (56 such files exist on this
+machine already, 25 in D--AO3-tests). Verified live 2026-07-07:
+a sonnet-5 subagent run (63 turns, isSidechain=true) landed only in
+a subagents/ file.
+
+1. Extend the import to also scan
+   <projects>/<project>/*/subagents/*.jsonl. Verified facts about
+   these files (2026-07-07, one file inspected — RE-VERIFY on more):
+   per-line sessionId == the PARENT session UUID (so the existing
+   sessionId-field preference already yields the right session);
+   isSidechain true; assistant lines carry model + usage as usual;
+   extra fields agentId, promptId exist.
+2. Project attribution: Path(path).parent.name is 'subagents' for
+   these files — derive the project from the correct ancestor
+   (the directory directly under the projects root), for BOTH
+   layouts, with a test for each.
+3. Dedupe stays (session_id, requestId) — verify subagent lines
+   carry requestId; if absent, the existing uuid fallback applies.
+   Confirm no collision with parent-session rows on real data.
+4. turn_index: per-file counter is acceptable (cosmetic, matches
+   the accepted Task 5 note 1); do not renumber parent sessions.
+5. Tests: fixture with a nested subagents/ layout; project
+   attribution; idempotent re-import; existing 18 tools tests stay
+   green. Acceptance: after import, cc_usage sidechain rows > 0 on
+   this machine; the 2026-07-07 sonnet-5 subagent run (63 turns)
+   appears under project D--AO3-tests with is_sidechain=1; re-run
+   imports 0 new rows.
+
 ## Current Task (Authoritative, D-0025): Delegated Task 3
 
 ## System State (condensed, 2026-07-07)
