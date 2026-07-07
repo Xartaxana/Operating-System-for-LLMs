@@ -3,10 +3,15 @@
 A living document. Every row starts as an estimate and is refined by
 Shadow Evaluation during implementation (see ARCHITECTURE.md, D-0028).
 
-Status values:
+Status values (four-state model, D-0035):
 
-- `estimated` — expert guess, not yet measured;
-- `validated` — confirmed by Shadow Evaluation on real requests;
+- `estimated` — expert prior, not yet measured;
+- `provisionally_validated` — confirmed by Shadow Evaluation on
+  synthetic or small samples (the label used to be `validated`;
+  renamed 2026-07-07 so it cannot read stronger than the data);
+- `production_validated` — confirmed on real traffic with sufficient
+  volume and task-level cost; only this status may justify routing
+  real traffic;
 - `rejected` — delegation attempted and found harmful.
 
 Cost = typical Lead token spend on this task type.
@@ -17,15 +22,26 @@ Value = how much frontier intelligence actually improves the result.
 | Strategic planning, architecture | High | Very high | Lead only | estimated |
 | Research, hard debugging | High | Very high | Lead only | estimated |
 | Idea generation | Medium | High | Lead, cheap model for expansion | estimated |
-| Routine code generation | High | Medium | Middle | validated |
-| Summarization | Medium | Medium | Junior | validated |
-| Re-explaining known context | High | Low | eliminate via context compression | estimated |
+| Routine code generation | High | Medium | Middle | provisionally_validated |
+| Summarization | Medium | Medium | Junior | provisionally_validated |
+| Re-explaining known context | High | Low | eliminate via context management | estimated |
 | Checking lists, verification passes | Medium | Low | Junior | estimated |
-| Data extraction, JSON conversion | Medium | Low | Intern | validated |
-| Formatting (Markdown, tables) | Low–Medium | Low | Intern | validated |
+| Data extraction, JSON conversion | Medium | Low | Intern | provisionally_validated |
+| Formatting (Markdown, tables) | Low–Medium | Low | Intern | provisionally_validated |
 | Classification, tagging | Low | Low | Junior | rejected |
 | Duplicate / repetition detection | Low | Medium | Ledger (no LLM) | estimated |
 | Token and cost accounting | — | — | Guard/Ledger (no LLM) | estimated |
+
+Claude Code workstream rows (D-0034; evidence stream = escalation
+journal + acceptance verdicts, since replay is impossible on the
+subscription contour):
+
+| Task type | Cost (Lead) | Value of Lead | Delegate to | Status |
+|---|---|---|---|---|
+| Repo search, file reading, context gathering | Medium | Low | scout (Haiku subagent) | estimated |
+| Implementation to a written spec, tests | High | Medium | builder (Sonnet subagent) | estimated |
+| Code review, unclear-bug debugging | High | High | critic (Opus subagent) | estimated |
+| Decomposition, spec writing, acceptance | High | Very high | Lead session only | estimated |
 
 ## Update Rules
 

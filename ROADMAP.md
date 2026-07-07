@@ -32,7 +32,38 @@ Each step is useful on its own even if the next one is never built.
    Remaining: traffic volume, middle tier as replay target, paid
    Lead baseline (see CURRENT_CONTEXT.md).
 
-## Phase 2 — Routing and Compression (data-driven)
+## Phase 1.5 — Real Telemetry and Claude Code Routing (D-0034)
+
+The operator's real Lead is the Claude Code subscription; this
+workstream measures and routes that traffic. Merged from the external
+plan 2026-07-07 (docs/UNIFIED_PLAN_2026-07-07.md, which holds the
+detailed specs and acceptance criteria). Like Phase 1, every step is
+useful on its own:
+
+1. [ ] Baseline telemetry: tools/usage_report.py parses Claude Code
+   transcripts into per-day / per-model / per-session / per-project
+   token and accounted-cost reports, cache-aware from day one
+   (input vs cache_read vs cache_creation tokens — the fields exist
+   in transcripts, verified 2026-07-07). First deliverable: a
+   baseline report over the existing transcript history, BEFORE any
+   routing changes behavior.
+2. [ ] Routing in Claude Code: tiered subagents (scout=Haiku,
+   builder=Sonnet, critic=Opus), routing policy + escalation rule in
+   the project CLAUDE.md, delegation journal via hook. Every routed
+   category enters DELEGATION_TABLE.md as `estimated` (D-0028,
+   D-0035); the escalation journal is its evidence stream.
+3. [ ] Weekly calibration loop: escalation journal + usage report
+   reviewed, table statuses upgraded/downgraded on evidence, routing
+   rules adjusted. This is Shadow Evaluation's philosophy applied to
+   the subscription contour (replay is impossible there; acceptance
+   verdicts and escalations are the measurements).
+
+This workstream is NOT the deferred Router (D-0029): routing policy
+is executed by the Lead session itself following documented rules,
+no new inference infrastructure. The Router build decision still
+waits for the Phase 2 gate.
+
+## Phase 2 — Routing and Context Management Evaluation (data-driven)
 
 Entered only on evidence (D-0029, D-0033). The two workstreams have
 separate gates because they attack different cost drivers; each gate
@@ -46,10 +77,11 @@ rationale, not silent editing.
 
 ### Common gate (both workstreams)
 
-- G1. ≥14 consecutive days of REAL traffic through the gateway.
-  Synthetic working sets and replay/judge calls do not count
-  (operational detail: real-vs-synthetic tagging in the log is part
-  of the delegated task queue, see CURRENT_CONTEXT.md).
+- G1. ≥14 consecutive days of REAL traffic: the operator's actual
+  working traffic, measured at the gateway (traffic_kind='real') or
+  from Claude Code transcripts (D-0034). Synthetic working sets and
+  replay/judge calls never count. Transcript history may satisfy G1
+  retroactively once usage_report.py can compute it.
 - G2. The judge is calibrated per PROCESS/JUDGE_CALIBRATION_PROTOCOL.md
   at the moment of the gate check (currently met: 13/13).
 
@@ -76,22 +108,29 @@ First Router task when the gate opens: evaluate RouteLLM (D-0030),
 fed with the preference pairs Shadow Evaluation has accumulated —
 NOT build a router.
 
-### Compression gate (the cost driver is confirmed locally)
+### Context management gate (the cost driver is confirmed locally)
 
-- C1. Driver confirmed: Ledger context-repetition ratio ≥40% measured
-  on real multi-turn traffic (external prior 50–62%; if local traffic
-  shows materially less, compression is not our lever).
+Reframed per D-0036: the workstream is Context Management Evaluation
+(provider caching, compaction, retrieval/memory, semantic caching),
+not compression alone. All C-criteria are measured CACHE-AWARE: what
+matters is paid uncached re-sent input, not raw repetition.
+
+- C1. Driver confirmed: context-repetition ratio ≥40% measured on
+  real multi-turn traffic (external prior 50–62%; if local traffic
+  shows materially less, this lever is not ours).
 - C2. Substance: ≥20 real sessions of ≥5 turns in the G1 window
   (compression of single-shot traffic is meaningless).
-- C3. Money on the table: re-sent context accounts for ≥25% of total
-  accounted input spend over the G1 window.
+- C3. Money on the table: PAID UNCACHED re-sent context accounts for
+  ≥25% of total accounted input spend over the G1 window (context
+  already served from provider cache is not on the table).
 
-First Compression task when the gate opens: evaluate LLMLingua-2 /
-PCToolkit (token level) and Letta-style recursive summarization
-(architectural) — validated by the existing Shadow Evaluation harness
-(compressed vs. full context, judge rules equivalence); never
-perplexity-compress code context without validation
-(docs/RELATED_WORK.md).
+First task when the gate opens (evaluation order fixed by D-0036):
+provider prompt caching measurement first; only if C3 stays green
+net of caching, evaluate LLMLingua-2 / PCToolkit (token level) and
+Letta-style recursive summarization (architectural) — validated by
+the existing Shadow Evaluation harness (compressed vs. full context,
+judge rules equivalence); never perplexity-compress code context
+without validation (docs/RELATED_WORK.md).
 
 ### Phase transition procedure
 

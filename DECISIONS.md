@@ -103,3 +103,12 @@ Accounting prices, not cash prices. Every gateway alias carries a nonzero accoun
 
 ## D-0033
 Phase transitions are gated by explicit, telemetry-computable criteria recorded in ROADMAP.md, with numeric thresholds set up front and revised only through a DECISIONS.md entry. A gate turning green produces a written gate report; the Architect signs the transition. The first task of any newly opened workstream is an evaluation of an existing tool, never a build (extends D-0029, D-0030).
+
+## D-0034
+The operator's real Lead is the Claude Code subscription, and Claude Code transcripts (~/.claude/projects/**/*.jsonl) are a first-class real-traffic telemetry source alongside the gateway log. The external plan "routing in Claude Code" (2026-07-07) is merged into the roadmap as the Claude Code workstream (docs/UNIFIED_PLAN_2026-07-07.md): tiered subagents, routing policy, escalation journal, transcript-based usage reports. Subscription usage is accounted at API list prices (extends D-0032: a subscription is a cash discount, not a cost of zero). Gate G1's "real traffic" is amended accordingly: the operator's actual working traffic, measured at the gateway or from transcripts; synthetic, replay and judge traffic still never count.
+
+## D-0035
+Delegation statuses are a four-state model: estimated (expert prior), provisionally_validated (measured on synthetic or small samples), production_validated (measured on real traffic with sufficient volume and task-level cost), rejected (measured harmful). Adopted from the 2026-07-04 external review: rows previously marked "validated" from tiny synthetic samples are reclassified provisionally_validated — the label must not read stronger than the data. Status changes still require evidence (Update Rule 1); only production_validated rows may justify routing real traffic.
+
+## D-0036
+Phase 2's second workstream is Context Management Evaluation, not compression alone (adopted from the 2026-07-04 external review). Provider prompt caching, structured compaction, retrieval/memory and semantic response caching compete under Rule #1 through the same Shadow Evaluation loop. Evaluation order is fixed: cache-aware accounting first (raw vs cached vs paid-uncached input tokens), provider caching evaluated before any lossy compression, and code context stays exact by default. The C-gate repetition driver is measured net of provider caching: the lever must justify itself against what caching already delivers.
