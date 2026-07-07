@@ -244,12 +244,14 @@ next starts; the executor does not self-certify):
    (below). Execute AFTER task 4 (task 4 protects the telemetry the
    digest reads).
 4. Test isolation + review follow-ups (spec below, born from the
-   2026-07-07 Lead review findings). NOT STARTED. First in line.
+   2026-07-07 Lead review findings). ACCEPTED 2026-07-07 by Lead
+   review (commit 80b29b2; see "Lead Review of Delegated Task 4"
+   below). One open Architect decision: residual mock rows, see the
+   review.
 5. tools/usage_report.py — Claude Code transcript telemetry
    (Phase 1.5 step 1, D-0034). Spec in
-   docs/UNIFIED_PLAN_2026-07-07.md. NOT STARTED; may run in a
-   parallel session to task 4 (disjoint files), but is reviewed
-   after it.
+   docs/UNIFIED_PLAN_2026-07-07.md. NEXT IN LINE (task 4 accepted;
+   task 3 also unblocked and may run after it).
 
 ## Lead Review of Delegated Tasks 1-2 (2026-07-07, Fable session)
 
@@ -401,6 +403,41 @@ Spec deviations / empirical surprises (for Lead review):
    judge-alias -> 'judge') — earlier pre-migration test pollution,
    outside this task's scope; all tagged non-'real', so G1 math is
    unaffected. Left for a Lead decision.
+
+## Lead Review of Delegated Task 4 (2026-07-07, Fable session)
+
+Verdict: ACCEPTED (commit 80b29b2). Diff re-read line by line;
+acceptance reproduced INDEPENDENTLY on this machine: polluting-order
+run (test_sqlite_logger.py then test_shadow_eval.py, 37 passed) left
+requests.db byte-identical (5e40263484bbf0945abe875b6f8e5377245a2520
+before/after, and unchanged after the full 49-test suite); DB state
+confirmed: 223 rows, 0 in the mock window, zero 'real' rows anywhere.
+
+Review notes:
+
+- The executor's deviation #1 (litellm copies the logger into six
+  callback lists at call time; restoring litellm.callbacks alone is
+  insufficient) is a REAL empirical find, verified in the committed
+  conftest.py design and by my clean re-runs. This is the third
+  spec-vs-reality gap caught by the mandatory verify-empirically
+  rule (after metadata-vs-extra_body and the response-cost header) —
+  the rule stays mandatory in all future specs.
+- Deviation #2 (16 deleted, not ~18) is correct behavior: the spec's
+  window bound excluded the two 19:02/19:06 'mock' rows, and the
+  executor rightly refused to widen the clause on its own authority.
+- OPEN ARCHITECT DECISION: 24 residual mock-model rows remain
+  (judge-alias 4, nonexistent-model-xyz 18, mock 2; from 2026-07-03
+  and pre-window 2026-07-04) — test artifacts whose model names never
+  existed in config.yaml. Harmless to gate G1 (all non-'real') but
+  they appear as phantom models in per-model Ledger analytics. The
+  Lead proposes deleting them with:
+  DELETE FROM requests WHERE model IN
+  ('judge-alias','nonexistent-model-xyz','mock');
+  A permission guard correctly blocked the Lead from doing this
+  unilaterally in-session (the executor had flagged it "left for
+  your decision" and the Architect had not yet authorized it).
+  Pre-cleanup backup exists in the session scratchpad. Execute only
+  on explicit Architect approval, then record the deleted count here.
 
 # Delegated Task (queued for a CHEAPER model session): Rule #1 cost accounting in shadow_eval.py
 
