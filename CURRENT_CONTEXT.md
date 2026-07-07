@@ -246,8 +246,8 @@ next starts; the executor does not self-certify):
 4. Test isolation + review follow-ups (spec below, born from the
    2026-07-07 Lead review findings). ACCEPTED 2026-07-07 by Lead
    review (commit 80b29b2; see "Lead Review of Delegated Task 4"
-   below). One open Architect decision: residual mock rows, see the
-   review.
+   below). Residual mock rows: Architect approved, deleted same day
+   (24 rows, DB 223 -> 199).
 5. tools/usage_report.py — Claude Code transcript telemetry
    (Phase 1.5 step 1, D-0034). Spec in
    docs/UNIFIED_PLAN_2026-07-07.md. NEXT IN LINE (task 4 accepted;
@@ -425,7 +425,13 @@ Review notes:
 - Deviation #2 (16 deleted, not ~18) is correct behavior: the spec's
   window bound excluded the two 19:02/19:06 'mock' rows, and the
   executor rightly refused to widen the clause on its own authority.
-- OPEN ARCHITECT DECISION: 24 residual mock-model rows remain
+- RESOLVED 2026-07-07: Architect approved; the DELETE below was
+  executed the same session. 24 rows deleted (verified: matched
+  count 24, DB 223 -> 199; remaining models are only genuine gateway
+  aliases: intern, lead-gemini, middle-groq, judge-groq, analyst;
+  remaining kinds: judge 149, synthetic 50, real 0). Pre-cleanup
+  backup kept in the session scratchpad.
+  Original decision text (for the record): 24 residual mock-model rows remain
   (judge-alias 4, nonexistent-model-xyz 18, mock 2; from 2026-07-03
   and pre-window 2026-07-04) — test artifacts whose model names never
   existed in config.yaml. Harmless to gate G1 (all non-'real') but
