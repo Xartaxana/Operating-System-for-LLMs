@@ -160,7 +160,31 @@ Next: (a) grow real traffic volume (n=2 per category is thin);
 
 ---
 
-# Current Task (Authoritative): White Paper iteration
+# Current Task (Authoritative): Unified Plan 2026-07-07 execution
+
+Adopted 2026-07-07 (Architect + Lead session): the external plan
+"routing in Claude Code" (docs/EXTERNAL_PLAN_CLAUDE_CODE_ROUTING_2026-07-07.md)
+is merged with the repository roadmap into
+docs/UNIFIED_PLAN_2026-07-07.md (D-0034..D-0036). Key facts fixed by
+the Architect this session:
+
+- The operator's REAL Lead is the Claude Code subscription
+  (Fable/Opus), not an API key. Claude Code transcripts
+  (~/.claude/projects/**/*.jsonl) become a first-class real-traffic
+  telemetry source (D-0034); they natively carry model, usage,
+  cache_read/cache_creation token fields and per-session files —
+  verified live 2026-07-07.
+- Priority: telemetry feeds both deliverables (white paper and
+  day-to-day savings); one shared measurement foundation first.
+
+Next engineering steps, in order (details in the unified plan):
+Delegated Task 4 (test isolation), Delegated Task 5
+(tools/usage_report.py baseline), then Claude Code routing
+(subagents + policy + escalation journal).
+
+---
+
+# Previous Lead-tier task (2026-07-04): White Paper iteration
 
 Lead-tier task, prioritized by the Architect 2026-07-04 ("actions
 that need the strongest model first"). Draft v0.1 of WHITE_PAPER.md
@@ -198,7 +222,9 @@ cache-aware Ledger accounting, session/turn identity, structured
 compaction, retrieval/memory and memory governance under Rule #1.
 
 Remaining Lead-tier queue: White Paper §7 upkeep; Architect review
-of the draft.
+of the draft; sync the White Paper with D-0034..D-0036 (Claude Code
+workstream, 4-state delegation statuses, Phase 2 as Context
+Management Evaluation) once the unified plan's first steps land.
 
 ---
 
@@ -207,21 +233,106 @@ of the draft.
 Execution order (each task reviewed by Lead/Architect before the
 next starts; the executor does not self-certify):
 
-1. Rule #1 cost accounting in shadow_eval.py (spec below). CODE
-   WRITTEN AND SELF-TESTED 2026-07-04 by a Sonnet session, run
-   immediately after task 2 in the same session (Architect judged the
-   two independent — different concern, only incidental code overlap
-   in replay()/judge_pair()) — see "Delegated Task 1 — Execution
-   Report" below. AWAITING REVIEW (not Architect-signed).
+1. Rule #1 cost accounting in shadow_eval.py (spec below).
+   ACCEPTED 2026-07-07 by Lead review (see "Lead Review of Delegated
+   Tasks 1-2" below); Architect confirmed the review this session.
 2. Traffic-kind tagging in the request log (spec below; born from
-   gate G1, D-0033). CODE WRITTEN AND SELF-TESTED 2026-07-04 by a
-   Sonnet session — see "Delegated Task 2 — Execution Report" below.
-   AWAITING REVIEW (not Architect-signed; do not treat as done).
+   gate G1, D-0033). ACCEPTED 2026-07-07 by the same Lead review.
 3. metrics.py "Phase 2 readiness" digest section: print current
    values vs. the ROADMAP gate thresholds (G/R/C criteria) so gate
-   progress is visible in every daily digest. Depends on task 2;
-   spec to be written by the Lead after task 2 lands. NOT STARTED —
-   task 2 is unreviewed, and this task still needs its spec written.
+   progress is visible in every daily digest. Spec written 2026-07-07
+   (below). Execute AFTER task 4 (task 4 protects the telemetry the
+   digest reads).
+4. Test isolation + review follow-ups (spec below, born from the
+   2026-07-07 Lead review findings). NOT STARTED. First in line.
+5. tools/usage_report.py — Claude Code transcript telemetry
+   (Phase 1.5 step 1, D-0034). Spec in
+   docs/UNIFIED_PLAN_2026-07-07.md. NOT STARTED; may run in a
+   parallel session to task 4 (disjoint files), but is reviewed
+   after it.
+
+## Lead Review of Delegated Tasks 1-2 (2026-07-07, Fable session)
+
+Verdict: BOTH ACCEPTED. Diffs 55c570a (task 2) and af2281d (task 1)
+re-read line by line; 48/48 tests re-run green on this machine;
+requests.db verified: zero pre-migration rows tagged 'real'
+(judge 161 / replay 8 / synthetic 70) — acceptance criteria met.
+The two execution reports below remain the authoritative detail.
+
+Findings (none blocking; all folded into Delegated Task 4):
+
+1. TEST POLLUTION (real, contained): test_sqlite_logger.py sets
+   litellm.callbacks = [logger_instance] globally and never restores
+   it. With an unlucky test order, the mock litellm.completion calls
+   in test_shadow_eval.py fire the real callback and write into
+   gateway/requests.db. This HAPPENED 2026-07-04: 18 mock rows
+   (models 'judge-alias' / 'nonexistent-model-xyz' / 'intern', two
+   pytest clusters 19:08 and 19:10). Damage was contained by task 2
+   itself — every stray row is tagged replay/judge/synthetic, so
+   gate G1 math is unaffected. Alphabetical collection order
+   currently hides the bug (test_shadow_eval < test_sqlite_logger).
+2. Evidence-line coupling (minor, Rule #1 spirit): in
+   update_delegation_table() the judged segment renders only when
+   BOTH pass_rate AND mean_judge_cost_usd are present; if the judge
+   ran but cost extraction returned None, the evidence line silently
+   drops judge= pass_rate= even though verdicts drove the status —
+   exactly the silent omission Rule #1 forbids. format_report()
+   already decouples the two correctly.
+3. Fallback timezone risk (minor): _extract_cost's requests.db
+   fallback compares client-side naive datetime.now() with the
+   proxy-logged ts; a timezone/clock mismatch would make
+   ts >= call_start never match (returning None — honest, but the
+   fallback would be dead code). The primary hidden_params path is
+   live-verified; the fallback is verified only with mocks.
+4. Schema-default divergence (cosmetic): migrated DBs carry
+   DEFAULT 'synthetic' on traffic_kind, fresh DBs DEFAULT 'real'.
+   Harmless — the logger always writes the field explicitly, and
+   'synthetic' is the fail-closed direction for G1 — but keep the
+   deviation from the spec's DEFAULT 'real' documented.
+
+# Delegated Task 3 (spec, Lead 2026-07-07): Phase 2 readiness digest in metrics.py
+
+Middle-class task. Add a "Phase 2 readiness" section to the metrics.py
+text and JSON digest: one line per ROADMAP gate criterion (G1, G2,
+R1-R5, C1-C3) showing current value vs. threshold and met / not met /
+"not computable yet (needs <what>)". Rules:
+
+1. Deterministic Python/SQL over requests.db and
+   DELEGATION_TABLE.md only — no LLM calls.
+2. G1 counts DISTINCT days with traffic_kind='real' rows. R1 parses
+   judged evidence lines from the Shadow Evaluation Log. G2, R5 and
+   anything not derivable from telemetry print as "manual check"
+   with a pointer — never a guessed value.
+3. Criteria whose inputs do not exist yet (e.g. C2 sessions before
+   session identity lands, R2 spend shares before real traffic)
+   MUST print "not computable yet" with the missing prerequisite —
+   an honest gap, not a fake 0% (Rule #1 spirit).
+4. Tests over a seeded tmp DB; existing tests stay green.
+
+Acceptance: `python metrics.py --days 14` prints the section; JSON
+output carries a `phase2_readiness` object with the same content.
+
+# Delegated Task 4 (spec, Lead 2026-07-07): test isolation + review follow-ups
+
+Middle-class task, born from the Lead review findings above.
+
+1. Test isolation: add gateway/conftest.py with an autouse fixture
+   that (a) points GATEWAY_DB_PATH at a tmp_path DB for EVERY test,
+   (b) saves litellm.callbacks before each test and restores them
+   after. Remove per-test monkeypatch.setenv duplication where it
+   becomes redundant. Acceptance: running
+   `pytest test_sqlite_logger.py test_shadow_eval.py` (exactly that
+   order) leaves gateway/requests.db byte-identical.
+2. Evidence-line decoupling in update_delegation_table(): show
+   judge=... pass_rate=... whenever pass_rate is present; append
+   judge_cost=$X.XXXX when known and judge_cost=unknown when the
+   judge ran but cost is None. Test covers the None case.
+3. One-time cleanup of the 18 mock rows in gateway/requests.db:
+   DELETE FROM requests WHERE ts >= '2026-07-04T19:08' AND
+   ts < '2026-07-04T19:11'; record the deleted row count in the
+   commit message. (Local operational DB — the point is honest G1
+   telemetry, not git state.)
+4. All existing tests stay green.
 
 # Delegated Task (queued for a CHEAPER model session): Rule #1 cost accounting in shadow_eval.py
 
