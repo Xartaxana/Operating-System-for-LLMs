@@ -31,6 +31,8 @@ Value = how much frontier intelligence actually improves the result.
 | Classification, tagging | Low | Low | Junior | rejected |
 | Duplicate / repetition detection | Low | Medium | Ledger (no LLM) | estimated |
 | Token and cost accounting | — | — | Guard/Ledger (no LLM) | estimated |
+| Task decomposition + spec writing (coordinator role) | High | Very high | strongest available tier; judge-class candidate (D-0037) | estimated |
+| Dispatch of an already-scoped task to a tier | Low | Low | deterministic rules / Router when its gate opens (D-0029) | estimated |
 
 Claude Code workstream rows (D-0034; evidence stream = escalation
 journal + acceptance verdicts, since replay is impossible on the
@@ -42,6 +44,14 @@ subscription contour):
 | Implementation to a written spec, tests | High | Medium | builder (Sonnet subagent) | estimated |
 | Code review, unclear-bug debugging | High | High | critic (Opus subagent) | estimated |
 | Decomposition, spec writing, acceptance | High | Very high | Lead session only | estimated |
+
+Flat delegation rule (D-0037): subagents never spawn subagents.
+Parallelism = the Lead launches several subagents with independent
+specs; a subagent that finds its task decomposable escalates back
+("decomposable" is an escalation-journal category), it does not split
+the task itself. On non-Claude contours the coordinator role may move
+to a cheaper tier only via the decomposition row above gaining
+evidence — never by default.
 
 ## Update Rules
 
