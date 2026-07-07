@@ -28,26 +28,31 @@ Includes:
 - PROJECT_CHARTER.md
 - PROJECT_PHILOSOPHY.md
 - ANTI_GOALS.md
+- SYSTEM_PROMPT.md
 
-### Layer 2 — Decisions
+### Layer 2 — Decisions and Process
 
-Architectural knowledge.
+Architectural knowledge and engineering protocols.
 
 Includes:
 - DECISIONS.md
-- ADR/*
+- docs/adr/*
+- PROCESS/*
 
 ### Layer 3 — Operational State
 
-Current status of the project.
+Current status of the project. Loaded at boot; kept small by the
+D-0038 archiving rule (closed work moves to docs/task_reports/).
 
 Includes:
 - ROADMAP.md
-- CURRENT_CONTEXT.md (future)
+- CURRENT_CONTEXT.md
+- DELEGATION_TABLE.md
 
-### Layer 4 — Repository History
+### Layer 4 — Repository History and Archive
 
-Complete Git history.
+Complete Git history, docs/task_reports/, deep documents
+(WHITE_PAPER.md, docs/).
 
 Never fully injected into an LLM context.
 
