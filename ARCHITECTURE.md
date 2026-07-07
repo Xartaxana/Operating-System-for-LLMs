@@ -28,7 +28,47 @@ mechanisms with different reliability requirements:
 **Rule #1: the cost of supervision must be measurably lower than the
 savings it produces. A component that violates this rule is removed.**
 
-## Components
+## Two Contours (D-0034)
+
+The operator's real Lead is a Claude Code subscription; it cannot be
+routed through a proxy. The system therefore runs on two substrates
+with one discipline:
+
+```
+Subscription contour (the real Lead)          API contour (the lab)
+Claude Code (Fable) --delegates--> subagents  Gateway (LiteLLM)
+  scout=Haiku  builder=Sonnet  critic=Opus      intern/analyst/middle/judge aliases
+        |                                             |
+   transcripts ~/.claude/projects/**.jsonl       sqlite callback (traffic_kind)
+        |                                             |
+        +----------> one Ledger (SQLite + reports) <--+
+                          |
+              DELEGATION_TABLE.md (4-state, D-0035)
+              evidence: escalation journal | Shadow Evaluation + judge
+                          |
+                  Architect signs gates (D-0033)
+```
+
+Rule #1, accounting prices (D-0032), evidence-gated statuses and
+judge supervision are identical on both contours; only the
+measurement mechanism differs. On the API contour delegation is
+validated by replay (Shadow Evaluation + judge); on the subscription
+contour replay is impossible, so acceptance verdicts and the
+escalation journal are the evidence stream. Subscription usage is
+accounted at API list prices (a subscription is a cash discount, not
+a cost of zero). Plan of record for the merged workstream:
+docs/UNIFIED_PLAN_2026-07-07.md.
+
+**Delegation is flat on both contours (D-0037): workers never spawn
+workers.** Decomposition, spec writing and acceptance stay with the
+coordinator; parallelism means the coordinator dispatches several
+workers with independent specs. A worker that finds its task
+decomposable escalates ("decomposable" is an escalation-journal
+category). Dispatch of an already-scoped task is cheap (static rules;
+the future Router); decomposition defaults to the strongest available
+tier and moves down only via delegation-table evidence.
+
+## Components (API contour)
 
 ```
 User ──► Gateway (LiteLLM proxy) ──► Lead / worker models
@@ -88,6 +128,12 @@ The model hierarchy:
 | Senior (Lead) | architecture, planning, research | frontier API model |
 | Architect | defines policies | human |
 
+On the subscription contour the same tiers materialize as Claude Code
+subagents: scout=Haiku (context gathering), builder=Sonnet
+(implementation to a written spec), critic=Opus (review, hard
+debugging); the Lead session coordinates and never delegates
+decomposition or acceptance (D-0037).
+
 ## Shadow Evaluation
 
 Delegation recommendations are validated, not assumed:
@@ -115,18 +161,17 @@ measurement phase.
 - Analyst: Ollama + Qwen3-4B class model
 - Lead: frontier model via API
 
-## Phase 1 Plan
+## Plan
 
-Each step is useful on its own even if the next one is never built:
-
-1. Gateway + request logging (all real traffic through the proxy).
-2. `metrics.py` — daily digest: cost, categories, context repetition.
-3. Analyst — telemetry Q&A + Shadow Evaluation.
-4. Router — data-driven, only after 1–3 produce evidence.
+The phase and gate structure lives in ROADMAP.md (single owner; this
+document no longer duplicates it). Plan of record for the Claude Code
+workstream: docs/UNIFIED_PLAN_2026-07-07.md.
 
 ## Related Documents
 
 - DELEGATION_TABLE.md — living cost/value table for delegation decisions.
+- WHITE_PAPER.md — the project's primary written deliverable.
+- docs/UNIFIED_PLAN_2026-07-07.md — plan of record (D-0034..D-0036).
 - docs/RELATED_WORK.md — external projects and cost data this design is checked against.
-- PROJECT_CHARTER.md, PROJECT_PHILOSOPHY.md, ANTI_GOALS.md — constitution.
+- PROJECT_CHARTER.md, PROJECT_PHILOSOPHY.md, ANTI_GOALS.md, SYSTEM_PROMPT.md — constitution.
 - DECISIONS.md — decision log.
