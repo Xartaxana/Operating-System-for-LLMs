@@ -35,7 +35,17 @@ Confidence:
    the BOOT.md documents are loaded — before any reasoning about,
    or execution of, the current task.
 3. The report must be generated before proposing new work.
+4. After the report, STOP and wait for the operator's explicit
+   confirmation before starting any task. Boot recovery is not work
+   authorization; neither BOOT.md's queue nor an unblocked task in
+   CURRENT_CONTEXT.md overrides this stop.
 
 Rationale for 1–2 (added 2026-07-03): a session that starts with a
 silent series of file reads buries the report in tool noise; the
 operator could not tell whether context recovery had happened.
+
+Rationale for 4 (added 2026-07-07, Architect correction): a session
+began executing the next queued task immediately after its Boot
+Report; the operator wants to review the recovered state and
+explicitly greenlight the task first. Autonomy applies to executing
+a confirmed task, not to choosing when to start one.
