@@ -373,6 +373,34 @@ def test_update_delegation_table_evidence_line_includes_judge_cost(tmp_path):
     assert "judge=judge-groq pass_rate=1.00 judge_cost=$0.0004" in text
 
 
+def test_update_delegation_table_evidence_line_judge_cost_unknown(tmp_path):
+    # Rule #1 decoupling (2026-07-07 Lead review finding #2): when the
+    # judge ran (pass_rate present) but cost extraction failed, the
+    # evidence line must still carry judge= and pass_rate=, with an
+    # explicit judge_cost=unknown instead of dropping the segment.
+    table_path = tmp_path / "DELEGATION_TABLE.md"
+    table_path.write_text(
+        "| Task type | Cost (Lead) | Value of Lead | Delegate to | Status |\n"
+        "|---|---|---|---|---|\n"
+        "| Summarization | Medium | Medium | Junior | estimated |\n",
+        encoding="utf-8",
+    )
+    aggregated = {
+        "summarization": {
+            "n": 2, "mean_similarity": 0.9, "mean_source_cost_usd": 0.002,
+            "mean_target_cost_usd": 0.0001, "pass_rate": 1.0,
+            "mean_judge_cost_usd": None, "errors": 0,
+        }
+    }
+    statuses = {"summarization": "validated"}
+    update_delegation_table(
+        table_path, "2026-07-04", "lead-gemini", "middle-groq",
+        aggregated, statuses, judge_model="judge-groq",
+    )
+    text = table_path.read_text(encoding="utf-8")
+    assert "judge=judge-groq pass_rate=1.00 judge_cost=unknown" in text
+
+
 def test_update_table_status_replaces_only_matching_row():
     text = (
         "| Task type | Cost (Lead) | Value of Lead | Delegate to | Status |\n"

@@ -14,10 +14,10 @@ import pytest
 
 
 @pytest.fixture()
-def db(tmp_path, monkeypatch):
-    path = tmp_path / "requests.db"
-    monkeypatch.setenv("GATEWAY_DB_PATH", str(path))
-    return path
+def db(tmp_path):
+    # GATEWAY_DB_PATH already points here: the autouse fixture in
+    # conftest.py sets it to this exact tmp_path for every test.
+    return tmp_path / "requests.db"
 
 
 def wait_for_row(path, status, timeout=10):

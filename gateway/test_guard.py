@@ -51,7 +51,8 @@ def env(tmp_path, monkeypatch):
     budgets.write_text(
         "warn_ratio: 0.8\ndaily_usd:\n  lead: 1.00\n", encoding="utf-8"
     )
-    monkeypatch.setenv("GATEWAY_DB_PATH", str(db))
+    # GATEWAY_DB_PATH already points at this db: the autouse fixture in
+    # conftest.py sets it to tmp_path / "requests.db" for every test.
     monkeypatch.setenv("GATEWAY_BUDGETS_PATH", str(budgets))
     return db
 

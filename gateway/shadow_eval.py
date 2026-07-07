@@ -351,12 +351,18 @@ def update_delegation_table(path: Path, date: str, source_model: str, target_mod
             continue
         agg = aggregated[category]
         status = statuses[category]
-        judged = (
-            f"  judge={judge_model} pass_rate={agg['pass_rate']:.2f}"
-            f" judge_cost=${agg['mean_judge_cost_usd']:.4f}"
-            if judge_model and agg.get("pass_rate") is not None and agg.get("mean_judge_cost_usd") is not None
-            else ""
-        )
+        # Rule #1: pass_rate and judge cost are decoupled (as in
+        # format_report). If verdicts drove the status, the evidence
+        # line must say so even when cost extraction failed -- an
+        # explicit "judge_cost=unknown" instead of silently dropping
+        # the whole judged segment (2026-07-07 Lead review finding #2).
+        judged = ""
+        if agg.get("pass_rate") is not None:
+            judged = f"  judge={judge_model} pass_rate={agg['pass_rate']:.2f}"
+            if agg.get("mean_judge_cost_usd") is not None:
+                judged += f" judge_cost=${agg['mean_judge_cost_usd']:.4f}"
+            else:
+                judged += " judge_cost=unknown"
         entries.append(
             f"{date}  category={category}  source={source_model} target={target_model}"
             f"  n={agg['n']}  sim={agg['mean_similarity']:.2f}{judged}"
