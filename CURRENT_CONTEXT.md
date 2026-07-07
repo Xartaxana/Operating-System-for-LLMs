@@ -249,9 +249,11 @@ next starts; the executor does not self-certify):
    below). Residual mock rows: Architect approved, deleted same day
    (24 rows, DB 223 -> 199).
 5. tools/usage_report.py — Claude Code transcript telemetry
-   (Phase 1.5 step 1, D-0034). Spec in
-   docs/UNIFIED_PLAN_2026-07-07.md. NEXT IN LINE (task 4 accepted;
-   task 3 also unblocked and may run after it).
+   (Phase 1.5 step 1, D-0034). ACCEPTED 2026-07-07 by Lead review
+   (commit 7e645e7; see "Lead Review of Delegated Task 5" below).
+   Baseline exists: $1,177 accounted all-time, cache_read share
+   97.6%, G1 window looks retroactively green. Task 3 (readiness
+   digest) is NEXT IN LINE and can now read both sources.
 
 ## Lead Review of Delegated Tasks 1-2 (2026-07-07, Fable session)
 
@@ -561,6 +563,61 @@ Spec deviations (for Lead review):
    promo — flagging in case the Lead prefers promo-rate accounting.
 4. --all flag added (spec's acceptance mentions all-time "if trivial
    to add" — it was).
+
+## Lead Review of Delegated Task 5 (2026-07-07, Fable session)
+
+Verdict: ACCEPTED (commit 7e645e7). Code re-read in full; both test
+suites re-run green on this machine (tools 18/18, gateway 49/49).
+Acceptance reproduced independently: the all-time report ran clean
+(8752 turns / $1178.78 at review time — slightly above the executor's
+8747 / $1177.48 because live transcripts grew in between, exactly the
+executor's finding #6, not an idempotency failure). Two INDEPENDENT
+spot-checks on files the executor did NOT check, hand-summed with a
+throwaway dedup script: 1b4caf23 (D--Dog, 3 turns) and 4000c434
+(D--Dog, 27.2 MB, 485 turns, cache-read 229,876,370) — both exact
+matches against cc_usage. requests table intact at 199 rows.
+
+All four spec deviations accepted: (1) tools/fixtures is right for
+this repo layout; (2) dedupe_key/is_sidechain columns are justified
+(idempotency mechanism; sidechain = future subagent visibility);
+(3) pricing from the bundled claude-api skill table was the correct
+verified source, and standard-list-rate (not promo) accounting is
+CONFIRMED as policy — D-0032 says list prices, promotions are cash
+discounts; (4) --all was invited by the spec.
+
+Non-blocking notes for a future touch (do NOT fix without a task):
+
+1. turn_index counts pre-dedup assistant lines, so sessions have
+   index gaps where multi-line turns were deduped. Ordering is
+   preserved; cosmetic.
+2. accounted_cost_usd is frozen at import time; a price correction
+   requires rebuilding cc_usage (DROP TABLE + re-import — cheap,
+   the table is derived data). Document-only caveat.
+3. --json output omits the warnings list (unknown_cost_rows in
+   totals carries the signal); cosmetic asymmetry with text output.
+
+STRATEGIC BASELINE FINDINGS (Architect attention):
+
+1. G1 LOOKS GREEN RETROACTIVELY: per-day report shows real traffic
+   on every calendar day 2026-06-18..2026-07-07 — 20 consecutive
+   days (>=14 required, D-0034 transcripts count). Some days are
+   thin (3-6 turns). Formal gate check still goes through Task 3's
+   readiness digest + a written gate report + Architect signature
+   (D-0033); G2 (judge 13/13) also holds.
+2. CACHE READS DOMINATE: 97.6% of input-side tokens are cache reads;
+   accounted savings vs uncached input $7,117 on a $1,178 total.
+   Provider caching is already absorbing nearly all context
+   repetition on the subscription contour — first hard evidence for
+   the D-0036 ordering (measure net-of-cache before building any
+   compression).
+3. SPEND MIX SURPRISE: sonnet-4-6 carries 62% of accounted spend
+   ($735.29, 6433 turns), not the frontier models (fable-5 $197.59,
+   opus-4-8 $205.67). The external plan's premise "the smartest
+   model burns most of the budget" is NOT what this history shows —
+   the routing policy (Phase 1.5 step 2) must be calibrated against
+   this baseline, not against the assumption. (Caveat: history mixes
+   pre-Fable weeks; the recent-window mix may differ — the weekly
+   calibration loop should watch the trend, not the all-time total.)
 
 # Delegated Task (queued for a CHEAPER model session): Rule #1 cost accounting in shadow_eval.py
 
