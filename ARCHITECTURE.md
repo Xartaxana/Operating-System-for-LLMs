@@ -83,6 +83,14 @@ category). Dispatch of an already-scoped task is cheap (static rules;
 the future Router); decomposition defaults to the strongest available
 tier and moves down only via delegation-table evidence.
 
+**Workers run in the background by default (D-0040).** A coordinator
+blocked waiting on a worker wastes Lead availability — the scarcest
+subscription-contour resource: while a long worker runs, the Lead
+plans, reviews other results, talks to the operator, or dispatches
+parallel workers. Blocking waits are reserved for strictly sequential
+steps where the next action depends on the result and nothing else is
+pending. Acceptance on completion stays mandatory (D-0037).
+
 ## Components (API contour)
 
 The full scheme, including the evidence loop (judge) and the deferred
