@@ -15,11 +15,19 @@ LLM Cost).
 See ARCHITECTURE.md for the authoritative architecture specification
 and DELEGATION_TABLE.md for the living delegation cost/value table.
 
-## Review Reports
+## Unified Plan
+
+See docs/UNIFIED_PLAN_2026-07-07.md — the adopted plan of record
+merging the repository roadmap with the external Claude Code routing
+plan (D-0034..D-0036). ROADMAP.md holds the phase/gate structure.
+
+## Review Reports and External Inputs
 
 See docs/EXTERNAL_REVIEW_CONTEXT_MANAGEMENT_2026-07-04.md for the
 2026-07-04 external review of project positioning, context management
-and Phase 2 development options.
+and Phase 2 development options, and
+docs/EXTERNAL_PLAN_CLAUDE_CODE_ROUTING_2026-07-07.md for the external
+routing plan merged on 2026-07-07.
 
 ## Gateway
 
