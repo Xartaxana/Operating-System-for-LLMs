@@ -136,9 +136,13 @@ cc_usage not counted yet").
 ## Remaining Lead-tier Queue
 
 - Routing policy text (queue item 1 above) — Lead-tier.
-- White Paper: §7 upkeep against the evidence log; Architect review
-  of the draft; sync with D-0034..D-0038 once the unified plan's
-  first steps land.
+- White Paper: Architect review IN PROGRESS (started 2026-07-07).
+  Comment 1 addressed same day (v0.1.1): §4 diagram replaced with the
+  full target scheme — judge loop and deferred Router — in Mermaid;
+  ARCHITECTURE.md diagrams converted to Mermaid too. Awaiting further
+  review comments. Still queued: §7 upkeep against the evidence log;
+  full sync with D-0034..D-0038 (two contours, 4-state statuses in
+  §5) once the unified plan's first steps land.
 
 ## Environment Notes (this machine)
 

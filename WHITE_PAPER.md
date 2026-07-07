@@ -1,11 +1,16 @@
 # Supervised Delegation: an Operating System Approach to LLM Cost
 
-**White Paper — living draft v0.1 (2026-07-04)**
+**White Paper — living draft v0.1.1 (2026-07-07)**
 
 Status: draft. Every claim in section 7 is backed by repository
 evidence (commits, DELEGATION_TABLE.md log, requests.db); numbers
 will be revised as telemetry volume grows. Deliverable #1 of
 PROJECT_CHARTER.md.
+
+Changelog: v0.1.1 (2026-07-07) — §4 diagram replaced with the full
+target scheme (judge loop, deferred Router) in Mermaid, per the first
+Architect review comment. Full sync with D-0034..D-0038 (two
+contours, 4-state statuses) is still queued.
 
 ---
 
@@ -80,18 +85,51 @@ decomposition.
 
 ## 4. Architecture
 
+```mermaid
+flowchart TB
+    USER([User])
+
+    subgraph path["Request path — synchronous, deterministic"]
+        GW["Gateway — LiteLLM proxy<br/>single interception point"]
+        GUARD["Guard — budget counters, no LLM<br/>80% warn / 100% cutoff"]
+        MODELS["Lead / worker models<br/>Intern 4B · Junior 8B · Middle 70B · Lead frontier"]
+        GW --> GUARD --> MODELS
+    end
+
+    USER --> GW
+    GW --> LOG[("requests.db — SQLite<br/>tokens, accounted cost, traffic_kind")]
+    LOG -. budget counters .-> GUARD
+
+    subgraph loop["Supervision loop — asynchronous"]
+        LEDGER["Ledger — metrics.py<br/>deterministic analytics, no LLM"]
+        ANALYST["Analyst — small local model,<br/>narrates telemetry on demand"]
+        SHADOW["Shadow Evaluation —<br/>offline replay on cheaper tiers"]
+        JUDGE["Judge — supervised LLM worker<br/>calibration set, temperature 0,<br/>own accounting alias"]
+        CHIEF["Chief-judge review (Lead / human),<br/>mandatory for table status changes"]
+        LEDGER --> ANALYST
+        SHADOW --> JUDGE --> CHIEF
+    end
+
+    LOG --> LEDGER
+    LOG --> SHADOW
+    SHADOW --> TABLE["DELEGATION_TABLE.md —<br/>4-state evidence log (D-0035)"]
+    CHIEF --> TABLE
+    TABLE -.-> ROUTER["Router — DEFERRED (D-0029):<br/>built only if the R-gate opens;<br/>first task = evaluate RouteLLM"]
+    ROUTER -.->|"would route scoped tasks"| GW
+    ARCHITECT([Architect — human]) -->|"policies, gate signatures"| TABLE
 ```
-User ──► Gateway (LiteLLM proxy) ──► Lead / worker models
-             │
-             ▼  every request, synchronous, no LLM
-          Guard    — budget counters, 80% warning, 100% cutoff
-             │
-             ▼  request log (SQLite)
-          Ledger   — cost, task categories, context-repetition ratio
-             │
-             ▼  on demand, small local model
-          Analyst  — narrates telemetry, runs Shadow Evaluation
-```
+
+This is the target scheme, drawn honestly: everything with solid
+edges is operational today; the Router is drawn dashed because it is
+deliberately deferred (D-0029) — it earns its place in the diagram
+because the rest of the system exists largely to decide, with
+receipts, whether it should ever be built. The judge and chief-judge
+loop (§6) is part of the core scheme, not an appendix: it is the
+component that turns replay output into evidence. Since 2026-07-07
+the same discipline also runs on a second, subscription contour
+(Claude Code with tiered subagents, D-0034 — see ARCHITECTURE.md,
+"Two Contours"); its full treatment lands in this paper's next
+iteration.
 
 The full specification is ARCHITECTURE.md; the reference
 implementation is `gateway/`. Design choices that matter for the
@@ -295,6 +333,6 @@ but not yet measured locally.
 ---
 
 *Canonical sources: ARCHITECTURE.md (specification), DECISIONS.md
-(D-0001…D-0033), DELEGATION_TABLE.md (evidence log),
+(D-0001…D-0038), DELEGATION_TABLE.md (evidence log),
 PROCESS/JUDGE_CALIBRATION_PROTOCOL.md, docs/RELATED_WORK.md,
 gateway/ (reference implementation).*

@@ -34,19 +34,34 @@ The operator's real Lead is a Claude Code subscription; it cannot be
 routed through a proxy. The system therefore runs on two substrates
 with one discipline:
 
-```
-Subscription contour (the real Lead)          API contour (the lab)
-Claude Code (Fable) --delegates--> subagents  Gateway (LiteLLM)
-  scout=Haiku  builder=Sonnet  critic=Opus      intern/analyst/middle/judge aliases
-        |                                             |
-   transcripts ~/.claude/projects/**.jsonl       sqlite callback (traffic_kind)
-        |                                             |
-        +----------> one Ledger (SQLite + reports) <--+
-                          |
-              DELEGATION_TABLE.md (4-state, D-0035)
-              evidence: escalation journal | Shadow Evaluation + judge
-                          |
-                  Architect signs gates (D-0033)
+```mermaid
+flowchart TB
+    subgraph SUB["Subscription contour — the real Lead"]
+        CC["Claude Code Lead session (Fable)"]
+        AGENTS["Subagents: scout=Haiku ·<br/>builder=Sonnet · critic=Opus"]
+        TRANS[("Transcripts<br/>~/.claude/projects/**.jsonl")]
+        EJ["Escalation journal +<br/>acceptance verdicts"]
+        CC -->|"delegates (flat, D-0037)"| AGENTS
+        CC --> TRANS
+        AGENTS --> EJ
+    end
+
+    subgraph APIC["API contour — the lab"]
+        GW2["Gateway (LiteLLM)"]
+        ALIASES["intern · analyst · middle ·<br/>judge aliases"]
+        DB2[("requests.db —<br/>traffic_kind tagging")]
+        SE2["Shadow Evaluation + judge"]
+        GW2 --> ALIASES
+        GW2 --> DB2
+        DB2 --> SE2
+    end
+
+    TRANS --> LEDGER1["One Ledger — SQLite + reports<br/>(metrics.py, usage_report.py)"]
+    DB2 --> LEDGER1
+    EJ -->|evidence| TABLE1["DELEGATION_TABLE.md<br/>(4-state, D-0035)"]
+    SE2 -->|evidence| TABLE1
+    LEDGER1 --> TABLE1
+    TABLE1 --> ARCH1["Architect signs gates (D-0033)"]
 ```
 
 Rule #1, accounting prices (D-0032), evidence-gated statuses and
@@ -70,20 +85,42 @@ tier and moves down only via delegation-table evidence.
 
 ## Components (API contour)
 
-```
-User ──► Gateway (LiteLLM proxy) ──► Lead / worker models
-             │
-             ▼  every request, synchronous, no LLM
-          Guard    — budget counters, limits, warnings, hard cutoff
-             │
-             ▼  request log (SQLite)
-          Ledger   — tokens, cost, latency, task category,
-                     context-repetition metric (pure Python/SQL)
-             │
-             ▼  on demand or daily digest, small local model
-          Analyst  — answers "where did tokens go?",
-                     runs Shadow Evaluation,
-                     proposes delegation and context compression
+The full scheme, including the evidence loop (judge) and the deferred
+Router. Solid edges are operational today; dashed edges are gated
+future behavior.
+
+```mermaid
+flowchart TB
+    USER([User])
+
+    subgraph path["Request path — synchronous, deterministic"]
+        GW["Gateway — LiteLLM proxy<br/>single interception point"]
+        GUARD["Guard — budget counters, no LLM<br/>80% warn / 100% cutoff"]
+        MODELS["Lead / worker models<br/>Intern 4B · Junior 8B · Middle 70B · Lead frontier"]
+        GW --> GUARD --> MODELS
+    end
+
+    USER --> GW
+    GW --> LOG[("requests.db — SQLite<br/>tokens, accounted cost, traffic_kind")]
+    LOG -. budget counters .-> GUARD
+
+    subgraph loop["Supervision loop — asynchronous"]
+        LEDGER["Ledger — metrics.py<br/>deterministic analytics, no LLM"]
+        ANALYST["Analyst — small local model,<br/>narrates telemetry on demand"]
+        SHADOW["Shadow Evaluation —<br/>offline replay on cheaper tiers"]
+        JUDGE["Judge — supervised LLM worker<br/>calibration set, temperature 0,<br/>own accounting alias (D-0031)"]
+        CHIEF["Chief-judge review (Lead / human),<br/>mandatory for table status changes"]
+        LEDGER --> ANALYST
+        SHADOW --> JUDGE --> CHIEF
+    end
+
+    LOG --> LEDGER
+    LOG --> SHADOW
+    SHADOW --> TABLE["DELEGATION_TABLE.md —<br/>4-state evidence log (D-0035)"]
+    CHIEF --> TABLE
+    TABLE -.-> ROUTER["Router — DEFERRED (D-0029):<br/>built only if the R-gate opens;<br/>first task = evaluate RouteLLM"]
+    ROUTER -.->|"would route scoped tasks"| GW
+    ARCHITECT([Architect — human]) -->|"policies, gate signatures"| TABLE
 ```
 
 ### Gateway
