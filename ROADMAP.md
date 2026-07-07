@@ -47,11 +47,14 @@ useful on its own:
    in transcripts, verified 2026-07-07). First deliverable: a
    baseline report over the existing transcript history, BEFORE any
    routing changes behavior.
-2. [ ] Routing in Claude Code: tiered subagents (scout=Haiku,
+2. [~] Routing in Claude Code: tiered subagents (scout=Haiku,
    builder=Sonnet, critic=Opus), routing policy + escalation rule in
-   the project CLAUDE.md, delegation journal via hook. Every routed
-   category enters DELEGATION_TABLE.md as `estimated` (D-0028,
-   D-0035); the escalation journal is its evidence stream.
+   the project CLAUDE.md, delegation journal. Every routed category
+   enters DELEGATION_TABLE.md as `estimated` (D-0028, D-0035); the
+   escalation journal is its evidence stream. DEPLOYED 2026-07-07 as
+   a pilot on the operator's second project (D:\AO3_tests, see
+   CURRENT_CONTEXT.md), including Lead degradation/restore (D-0039);
+   remaining: >=1 week of routed traffic, then step 3's first loop.
 3. [ ] Weekly calibration loop: escalation journal + usage report
    reviewed, table statuses upgraded/downgraded on evidence, routing
    rules adjusted. This is Shadow Evaluation's philosophy applied to

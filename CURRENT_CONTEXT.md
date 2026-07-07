@@ -20,9 +20,10 @@ docs/UNIFIED_PLAN_2026-07-07.md (D-0034..D-0036).
 
 ## Current Task (Authoritative, D-0025): Delegated Task 3
 
-Phase 2 readiness digest in metrics.py. Spec (Lead, 2026-07-07);
-Middle-class task; executor does not self-certify — Lead/Architect
-reviews before the next task starts.
+For a CHEAPER model session (Middle-class — per our own table this
+is builder-tier work, not Lead work). Phase 2 readiness digest in
+metrics.py. Spec (Lead, 2026-07-07); executor does not self-certify —
+Lead/Architect reviews before the next task starts.
 
 Add a "Phase 2 readiness" section to the metrics.py text and JSON
 digest: one line per ROADMAP gate criterion (G1, G2, R1-R5, C1-C3)
@@ -51,22 +52,34 @@ G1). The digest should count G1 days over BOTH requests
 deferred, the G1 line must say so explicitly ("gateway contour only;
 cc_usage not counted yet").
 
-## Queue After Task 3 (unified plan §3)
+## Routing MVP — DEPLOYED (2026-07-07, Architect-approved
+## reprioritization ahead of Task 3)
 
-1. Claude Code routing (Phase 1.5 step 2): .claude/agents/
-   scout|builder|critic.md with model frontmatter, routing policy +
-   escalation rule in the project CLAUDE.md, delegation journal hook
-   (logs/routing-log.jsonl). Lead-tier: policy wording decides real
-   behavior; needs Architect acceptance of the policy text. The
-   policy MUST encode D-0037 flat delegation: subagents never spawn
-   subagents; parallelism is Lead-side; "task is decomposable" is an
-   escalation-journal category.
-2. Weekly calibration loop (Phase 1.5 step 3): escalation journal +
-   usage report reviewed, table statuses moved on evidence, policy
-   adjusted. First loop after >=1 week of routed traffic.
-3. Context Management Evaluation spec (D-0036): written only after
-   the routing baseline exists; C3 is measured net of provider
-   caching.
+Phase 1.5 step 2 is LIVE as a pilot on the operator's second project
+D:\AO3_tests (its own git repo, commit b8125a0):
+
+- CLAUDE.md routing policy (tiers, flat delegation D-0037, escalation
+  rule, Lead degradation/restore D-0039, journal format);
+- new generic agents scout (haiku) / builder (sonnet) / critic (opus);
+- model frontmatter assigned to all nine existing QA-pipeline agents
+  (mechanics -> haiku/sonnet; failure-analyst, test-strategist ->
+  opus). ALL assignments status=estimated (D-0028);
+- logs/routing-log.jsonl journal (events: delegated, accepted,
+  escalated, decomposable, lead_degraded, lead_restored).
+
+Retro baseline for AO3_tests (from cc_usage, pre-routing): 1422
+turns, $276.70 accounted; opus $125.63 + fable $124.18 vs sonnet
+$26.88 — 90% of spend on frontier tiers. This is the number the
+weekly loop compares against (per accepted unit + escalation rate,
+NOT share alone — see Architect correction below).
+
+Next for this workstream: accumulate >=1 week of routed traffic,
+then the first weekly calibration loop (journal + usage_report ->
+table status moves). Note: an untracked agent test-reviewer.md
+appeared in AO3_tests during deployment (parallel session?) — no
+model assigned to it; assign on the next touch.
+
+## Current Task (Authoritative, D-0025): Delegated Task 3
 
 ## System State (condensed, 2026-07-07)
 
