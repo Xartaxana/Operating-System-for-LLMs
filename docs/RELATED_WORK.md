@@ -50,6 +50,41 @@ JUDGE_CALIBRATION_PROTOCOL, not a feeling. External confirmation:
 "measure the system, not the model" is our D-0034 evidence-stream
 design; "vibes don't scale" is D-0028.
 
+## Agent orchestration with evidence gates (validates D-0037/D-0046, feeds the acceptance plan)
+
+### pi-autopilot (Salikhodjaev, npm/GitHub, 2026)
+https://github.com/ismailsaleekh/pi-autopilot
+
+Extension for the Pi coding agent: dependency-cleared child-agent
+orchestration. v0.6.1 published 2026-07-08, single author — young,
+not battle-tested; surveyed same day at operator's request. Parent
+session decomposes work into unit specs with roles
+(strategy/implement/validate/fix/bughunt) — flat orchestration like
+our D-0037; blocker-escalation ≈ our `decomposable`. No cost-tier
+routing at all — adjacent problem (execution evidence + isolation),
+which is why its mechanisms transfer without competing with our
+table. Three mechanisms we lack:
+
+1. **Witness coverage.** Execution audits reject
+   declared-but-unwitnessed commands, fake-green tests,
+   self-certification; work sits in audit-review states until
+   evidence is clean and an INDEPENDENT validation unit confirms.
+   Take: builder acceptance requires attached run artifacts
+   (witness), symmetric to our D-0046 trail rule — adoption plan
+   stage 1 (F-17).
+2. **context_budget as an enforced tool**, not discipline: the
+   parent cannot read project files before the budget gate reports
+   ok (85% threshold). Take: a PreToolUse hook is our analog IF
+   calibration checks 10/11 show the discipline actually leaks —
+   plan stage 3, data-gated (Rule #1: don't build before evidence).
+3. **Path claims.** WRITE on owned_paths / READ on read_only_paths
+   per unit; "WRITE scope never expands silently — a child needing
+   new edit authority must emit a blocker". Take: parallel builder
+   specs declare owned paths, Lead checks intersection before
+   launch — plan stage 2, at first parallel dispatch. Per-unit git
+   worktrees NOT taken (Rule #1: harness worktree isolation already
+   exists; no volume to justify our own).
+
 ## Routing / cascades (validates our Phase 2, D-0029)
 
 ### FrugalGPT (Stanford, 2023)
