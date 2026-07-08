@@ -11,6 +11,8 @@ BOOT REPORT
 
 Repository Loaded: YES/NO
 
+Working Tree at Boot: CLEAN / DIRTY (n files) / UNPUSHED (n commits)
+
 Constitution Loaded: YES/NO
 
 Decisions Loaded: YES/NO
@@ -48,6 +50,11 @@ Confidence:
    traffic began, when NONE), mark the line OVERDUE (D-0047). This is
    the external detector for the calibration loop itself — the one
    mechanism whose absence calibration cannot detect.
+6. Working Tree at Boot = `git status --short` plus the unpushed
+   commit count at session start. DIRTY or UNPUSHED means the
+   previous session ended without the session-handoff check (D-0050):
+   record it as a finding, do not silently absorb it into the new
+   session's work.
 
 Rationale for 1–2 (added 2026-07-03): a session that starts with a
 silent series of file reads buries the report in tool noise; the

@@ -18,5 +18,9 @@ Before ending a session:
   (D-0038).
 - Commit directly to git (D-0026); produce a Patch only as fallback
   when repository access is unavailable (PROCESS/PATCH_PROTOCOL.md).
+- Run the session-handoff check (.claude/skills/session-handoff/,
+  D-0050): git clean and pushed in both repos, journal closed, boot
+  budget measured, boot chain alive. Its report is the session's
+  last output; the final commit+push is the session's last action.
 
 No important knowledge should remain only inside chat history.

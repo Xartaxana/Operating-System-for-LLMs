@@ -59,6 +59,11 @@ scout / builder / critic (х2 деплоя) + Lead-правила в CLAUDE.md +
   приоры): факт заходит в один из двух, по происхождению.
 - CURRENT_CONTEXT.md <-> docs/task_reports/ (D-0038: закрыто — в архив,
   указатель остаётся).
+- Закрытие сессии <-> открытие сессии (D-0050):
+  PROCESS/SESSION_PROTOCOL.md (Session End) + skills/session-handoff
+  <-> BOOT.md + PROCESS/BOOT_REPORT_PROTOCOL.md. Проверка, добавленная
+  на одной стороне, требует вопроса «а на другой?» (handoff проверяет
+  вечером то, что Boot прочитает утром).
 
 ## Ось 5 — Тестовая обвязка
 

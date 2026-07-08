@@ -292,6 +292,20 @@ D-0042.
   calibration are our frequency tiers) and a full execution-based
   bench harness (Rule #1: golden sets + trail-based acceptance are
   our scale).
+- AO3 adaptation of the session-handoff skill (D-0050): its boot
+  path is CLAUDE.md + docs/HANDOFF.md + state/, no BOOT.md — the
+  check steps translate but paths differ. Explicit queue per D-0043.
+- Boot-diet decision (measured 2026-07-08: boot path ~99 KB /
+  ~1700 lines ~= 30-35K tokens per session start, and it is re-sent
+  with context accumulation — see RELATED_WORK 50-62% prior).
+  Candidates by size: DECISIONS.md 26KB (split: one-line index stays
+  on the boot path, full texts to docs/, point-read on demand);
+  CURRENT_CONTEXT.md 19KB (overdue D-0038 archiving pass);
+  CLAUDE.md 18KB (doubled 2026-07-08 by rule expansions — trim
+  narrative/history from rules, keep operative text, move rationale
+  to DECISIONS/FINDINGS references; F-1 caution: operative parts
+  must stay in autoloaded context). Architecture-level decision —
+  full Lead, with operator.
 - White Paper: Architect review IN PROGRESS (started 2026-07-07).
   Comment 1 addressed same day (v0.1.1): §4 diagram replaced with the
   full target scheme — judge loop and deferred Router — in Mermaid;

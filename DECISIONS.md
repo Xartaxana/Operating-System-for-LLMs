@@ -363,3 +363,28 @@ calibration check 8 verifies registration of every new decision's
 detector; check 8's own failure is visible because the `calibrated`
 event must reference the checks run, and the Boot Report watches for
 calibration absence (D-0047).
+
+## D-0050
+Session close is checked symmetrically to session open. Operator
+directive (2026-07-08): before ending a session, verify the handoff —
+everything the next session needs is committed AND pushed, not only
+written. Measurement that motivated it: the boot path (CLAUDE.md +
+BOOT.md's 11 files) is ~99 KB / ~1700 lines (~30-35K tokens), and at
+the time of the directive 25 commits in the OS repo and 14 in AO3
+had never been pushed — a machine failure would have lost a full day
+of policy work. Mechanism: the session-handoff skill
+(.claude/skills/session-handoff/) runs at Session End
+(SESSION_PROTOCOL.md): git clean+pushed in both repos, journal closed
+(no unpaired delegated / lead_degraded), CURRENT_CONTEXT archived per
+D-0038, boot budget measured against the previous run, boot chain
+paths alive. Rule 10 answers: (a) cost — one run per session close,
+a handful of wc/git commands, paid by the Lead; (b) axes — a NEW
+axis-4 pair recorded in SIBLING_MAP the same commit (session close
+<-> session open: a check added on one side must ask "and on the
+other?"); the AO3 sibling is its existing HANDOFF discipline — a
+skill adaptation for AO3's boot path (CLAUDE.md + docs/HANDOFF.md +
+state/) is explicitly queued; (c) detector — registered per D-0049:
+the NEXT session's Boot Report line "Working Tree at Boot"
+(BOOT_REPORT_PROTOCOL.md rule 6) mechanically exposes a skipped
+handoff (dirty tree or unpushed commits at boot = finding), and
+calibration check 10 tracks the boot-budget numbers weekly.
