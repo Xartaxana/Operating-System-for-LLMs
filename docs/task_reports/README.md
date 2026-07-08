@@ -39,3 +39,8 @@ Evidence is never deleted, only relocated.
   2026-07-08, commit 2f026f0). First journaled-at-dispatch delegation
   in this repo and first critic-tier dispatch; per-agent cost
   breakdown unlocked (R4/F-3 input).
+- [2026-07-08_routing-dogfooding-day.md](2026-07-08_routing-dogfooding-day.md) —
+  interim 18h routed-traffic read, dead-tier revival, F-1
+  formalization (D-0041/D-0042), first degradation cycle, and the
+  mechanism day: operator questions F-12..F-16 -> D-0044..D-0051
+  (rejected/trail/calibration/map/handoff/boot-diet mechanisms).

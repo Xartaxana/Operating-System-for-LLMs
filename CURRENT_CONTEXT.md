@@ -20,10 +20,10 @@ docs/UNIFIED_PLAN_2026-07-07.md (D-0034..D-0036).
 
 ## Current Task (Authoritative, D-0025): Delegated Task 3
 
-For a CHEAPER model session (Middle-class — per our own table this
-is builder-tier work, not Lead work). Phase 2 readiness digest in
-metrics.py. Spec (Lead, 2026-07-07); executor does not self-certify —
-Lead/Architect reviews before the next task starts.
+For a CHEAPER model session (builder-tier work, not Lead work).
+Phase 2 readiness digest in metrics.py. Spec (Lead, 2026-07-07);
+executor does not self-certify — Lead/Architect reviews before the
+next task starts.
 
 Add a "Phase 2 readiness" section to the metrics.py text and JSON
 digest: one line per ROADMAP gate criterion (G1, G2, R1-R5, C1-C3)
@@ -45,146 +45,32 @@ showing current value vs. threshold and met / not met /
 Acceptance: `python metrics.py --days 14` prints the section; JSON
 output carries a `phase2_readiness` object with the same content.
 
-Note (post-spec, Task 5 landed): cc_usage now exists in the same DB
-as a second real-traffic source (D-0034 — transcripts count toward
-G1). The digest should count G1 days over BOTH requests
-(traffic_kind='real') and cc_usage rows; if reading cc_usage is
-deferred, the G1 line must say so explicitly ("gateway contour only;
-cc_usage not counted yet").
+Note (post-spec, Task 5 landed): the digest should count G1 days
+over BOTH requests (traffic_kind='real') and cc_usage rows; if
+reading cc_usage is deferred, the G1 line must say so explicitly.
 
-## Routing MVP — DEPLOYED (2026-07-07, Architect-approved
-## reprioritization ahead of Task 3)
+## Routing MVP — LIVE on both deployments
 
-Phase 1.5 step 2 is LIVE as a pilot on the operator's second project
-D:\AO3_tests (its own git repo, commit b8125a0):
-
-- CLAUDE.md routing policy (tiers, flat delegation D-0037, escalation
-  rule, Lead degradation/restore D-0039, journal format);
-- new generic agents scout (haiku) / builder (sonnet) / critic (opus);
-- model frontmatter assigned to all nine existing QA-pipeline agents
-  (mechanics -> haiku/sonnet; failure-analyst, test-strategist ->
-  opus). ALL assignments status=estimated (D-0028);
-- logs/routing-log.jsonl journal (events: delegated, accepted,
-  escalated, decomposable, lead_degraded, lead_restored).
-
-Retro baseline for AO3_tests (from cc_usage, pre-routing): 1422
-turns, $276.70 accounted; opus $125.63 + fable $124.18 vs sonnet
-$26.88 — 90% of spend on frontier tiers. This is the number the
-weekly loop compares against (per accepted unit + escalation rate,
-NOT share alone — see Architect correction below).
-
-Next for this workstream: accumulate >=1 week of routed traffic,
-then the first weekly calibration loop (journal + usage_report ->
-table status moves).
-
-INTERIM READ AFTER FIRST ROUTED ~18h (2026-07-08; NOT the weekly
-loop — no status moves): journal 5 delegated / 4 accepted /
-0 escalated, all category=implementation (builder). Transcripts:
-sidechain 406 turns, all sonnet-5, $19.05 ($0.047/turn) vs Lead main
-chain $0.242/turn — 63% of window turn volume ran off-frontier at 28%
-of window spend. Journal-vs-transcript cross-check consistent on tier,
-but three leaks: (a) 'model' field missing on all 5 delegated events
-(AO3's log_append.py now enforces it); (b) one delegated (badge,
-00:15) has no accepted event — reconcile; (c) /qa-loop dispatches
-still unjournaled (known), so the 406 sidechain turns >> the 5
-journaled delegations — category labels exist only for the journaled
-subset. scout (haiku) and critic (opus): ZERO dispatches — those
-delegation-table rows are accumulating no evidence at all.
-Router implications (D-0029): all observed dispatch is ONE
-deterministic rule (scoped implementation -> sonnet) and zero
-escalations = zero boundary data; a router trained on this would
-learn "always sonnet", which a static rule already does. Router
-stays deferred; the informative events for it are escalations and
-category diversity, neither present yet.
-Both interim-read action items CLOSED same day (2026-07-08,
-operator-directed "telemetry first, then revive tiers"):
-
-1. TELEMETRY GAPS -> Delegated Task 7 ACCEPTED (commit 2f026f0,
-   archived: docs/task_reports/task-7_agent-attribution.md).
-   agent_id/agent_type live in cc_usage (1759/1759 sidechain rows
-   attributed, backfilled; the per-line type field is
-   attributionAgent, NOT agentType — spec errata), haiku 4.5 priced,
-   0 NULL-cost rows. Per-agent cost per project now computable (F-3
-   metric, R4 input). Tests 80/80 (31 tools + 49 gateway).
-   Process firsts: delegation journaled at dispatch time in THIS
-   repo's journal, and the acceptance ran through a critic (Opus)
-   dispatch — first critic evidence (ПРИНЯТЬ, 0 correctness findings,
-   consistent with independent Lead verification). Evidence so far:
-   builder n=2 accepted / 0 escalations, critic n=1 accepted; all
-   statuses stay estimated (Update Rule 1).
-
-2. DEAD TIERS REVIVED by policy (commits 3736ecd here, e32d955 AO3):
-   rule 1 — scout is the DEFAULT for recon (>1-2 known files or any
-   repo search; non-dispatch on a recon task is a journal event);
-   rule 3 — critic verdict is a mandatory acceptance input for diffs
-   >~100 lines / schema / core logic / cost accounting and for
-   unclear bugs before the Lead debugs; acceptance stays with the
-   Lead (D-0037). Watch scout dispatches — still zero anywhere.
-
-Note on test-reviewer.md (AO3): resolved — a parallel AO3 session
-assigned it model: opus (all 13 AO3 agents now carry a model;
-verified 2026-07-08).
-
-D-0043 ADOPTED (2026-07-08, operator directive; finding F-10): "fix
-the class, not the instance" — constitution level (SYSTEM_PROMPT.md),
-rule 9 in both deployments' CLAUDE.md, builder/critic role duties in
-both. QUEUED sweep remainder (per D-0043 itself): add the
-"report sibling defects you notice" line to the nine AO3 QA-pipeline
-agent prompts on their next touch (not rewritten now — their prompts
-belong to the AO3 pipeline's own change cycle).
-
-FIRST LIVE VERIFICATION (2026-07-07, same day): routing WORKS —
-the operator's fresh AO3 session dispatched test-maintainer and it
-ran on sonnet-5 (isSidechain=true), Lead stayed on Fable. The
-journal gap found then (dispatch via /qa-loop wrote no delegated
-event) is CLOSED 2026-07-08: /qa-loop SKILL.md now journals
-delegated/accepted/escalated via log_append.py (AO3 commit a2cc949),
-readiness checklist enforces it. The
-telemetry bug found the same day (subagent transcripts invisible to
-cc_usage) was fixed as Delegated Task 6 (ACCEPTED 2026-07-08, see
-Archive): sidechain traffic is now counted — 7.2% of all tokens,
-$100.03 accounted, of which AO3_tests $57.82. The AO3 retro baseline
-($276.70) therefore self-corrected upward by that amount.
-
-DOGFOODING NOTE (2026-07-08): Task 6 was the first task dispatched to
-a live Claude Code subagent (Sonnet builder, background, D-0040) and
-accepted on first review — first evidence point for the "builder"
-row (n=1, status stays estimated). The dispatch was manual because
-the routing policy was not yet deployed here — now fixed.
-
-ROUTING MVP — DEPLOYED TO THIS REPO (2026-07-08, reference/dogfooding
-deployment; second after the AO3_tests pilot). Added: CLAUDE.md
-(routing policy, journal format, degradation D-0039, permission
-hygiene adapted to this repo's commands — pytest tools/gateway,
-proxy from gateway/), .claude/agents/{scout,builder,critic}.md
-(haiku/sonnet/opus, generic, encode D-0037), logs/routing-log.jsonl
-(seeded journal_created + lead_degraded). CLAUDE.md kept lean and
-defers to BOOT.md for full recovery (D-0038 tension noted in-file).
-
-FINDING F-1 RECORDED (docs/FINDINGS.md, new file for dogfooding
-findings): the default Claude Code harness does NOT initiate
-delegation on its own ("Do not spawn agents unless the user asks");
-left alone, the Lead does delegable work itself on the most expensive
-tier. Consequence: the routing policy MUST auto-load into the Lead's
-context per-project (CLAUDE.md) — agent definitions alone are not
-enough. White Paper material (contrapoint to "frameworks maximize
-agent count" — the production default is the opposite, conservative).
-F-1 FORMALIZED (2026-07-08, restored Lead, operator approval):
-D-0041 — delegation on the subscription contour is opt-in; deploying
-routing = auto-loaded policy + tier agents + journal, always together.
-D-0042 — operator-initiated downward model switch is a lead_degraded
-trigger; initiator goes in the event's notes, telemetry cross-check
-is the backstop for unjournaled switches.
-
-DEGRADATION CYCLE COMPLETE (2026-07-08): operator switched
-Fable->Opus 4.8 via /model and back (~5 min window). Full D-0039
-cycle recorded in logs/routing-log.jsonl (lead_degraded ->
-lead_restored); while degraded only authorized work was done (routing
-deploy + F-1 record, commit 7f60273), decisions were deferred and
-adopted after restore. First live exercise of the mechanism.
-Deployment divergence found and fixed: the operator-switch trigger
-wording was missing from the AO3_tests pilot CLAUDE.md — synced per
-D-0042.
+- Pilot: D:\AO3_tests (2026-07-07, commit b8125a0). Reference/
+  dogfooding: THIS repo (2026-07-08). Each = auto-loaded CLAUDE.md
+  policy + agents scout/builder/critic + logs/routing-log.jsonl
+  (D-0041: always the three together).
+- Evidence so far: builder n=2 accepted, critic n=1 accepted, scout
+  n=1 accepted (first dispatch 2026-07-08, full D-0046 cycle:
+  Trail block + both negative claims spot-checked); 0 escalations,
+  0 rejected. ALL statuses estimated (Update Rule 1).
+- Retro baseline AO3 (cc_usage, pre-routing): $276.70 accounted +
+  $57.82 sidechain self-correction (Task 6). Weekly loop compares
+  cost per accepted unit + escalation rate, NOT frontier share alone
+  (Architect correction — see baseline section below).
+- Next: accumulate >=1 week of routed traffic, then the FIRST weekly
+  calibration (PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md, 12 checks;
+  run ends with a `calibrated` journal event; staleness watched by
+  the Boot Report's Last Calibration line, D-0047).
+- 2026-07-08 day narrative (interim 18h read, Task 7 closure,
+  dead-tier revival, F-1/D-0041/D-0042, first degradation cycle,
+  mechanism day F-12..F-16 / D-0044..D-0051): archived —
+  docs/task_reports/2026-07-08_routing-dogfooding-day.md.
 
 ## System State (condensed, 2026-07-08)
 
@@ -208,21 +94,19 @@ D-0042.
   counts only 'real'. The tag travels via extra_body metadata —
   litellm's metadata= kwarg does NOT reach the wire (verified; see
   comments in sqlite_logger.py / shadow_eval.py).
-- Tests: gateway 49/49, tools 18/18 green. gateway/conftest.py
+- Tests: gateway 49/49, tools 31/31 green. gateway/conftest.py
   isolates every test (tmp DB + full litellm callback-list
-  snapshot/restore — restoring litellm.callbacks alone is NOT enough,
-  litellm copies the logger into six lists at call time).
+  snapshot/restore — restoring litellm.callbacks alone is NOT
+  enough, litellm copies the logger into six lists at call time).
 - requests.db: 199 rows (judge 149, synthetic 50, real 0 — the API
   contour has carried no real traffic yet); cc_usage table alongside
-  (Claude Code transcript telemetry, 11149+ turns of which 1759+
-  sidechain, idempotent import; both transcript layouts scanned since
-  Task 6; agent_id/agent_type attribution + haiku pricing since
-  Task 7, 0 NULL-cost rows).
+  (11149+ turns of which 1759+ sidechain, idempotent import, both
+  transcript layouts, agent_id/agent_type attribution + haiku
+  pricing, 0 NULL-cost rows).
 - DELEGATION_TABLE.md: 4-state model (D-0035).
-  provisionally_validated: coding -> Middle (tier-matching evidence),
-  summarization / extraction / formatting -> intern; rejected:
-  classification -> intern. Claude Code workstream rows: estimated.
-  Flat delegation rule D-0037 recorded 2026-07-07.
+  provisionally_validated: coding -> Middle, summarization /
+  extraction / formatting -> intern; rejected: classification ->
+  intern. Claude Code workstream rows: estimated.
 - Delegated Tasks 1, 2, 4, 5, 6, 7: ACCEPTED and archived
   (docs/task_reports/ — see Archive below).
 
@@ -232,87 +116,56 @@ D-0042.
   Per model: sonnet-4-6 $735 / opus-4-8 $206 / fable-5 $198 /
   sonnet-5 $39.
 - CACHE READS DOMINATE: 97.6% of input-side tokens are cache reads;
-  accounted savings vs uncached $7,117 on a $1,178 total. Provider
-  caching already absorbs nearly all context repetition on the
-  subscription contour — first hard evidence for the D-0036 ordering
-  (measure net-of-cache before building any compression).
-- G1 LOOKS GREEN RETROACTIVELY: real traffic every day
-  2026-06-18..2026-07-07 (20 consecutive days, >=14 required).
-  Formal check = Task 3 digest + written gate report + Architect
-  signature (D-0033). G2 (judge 13/13) also holds.
+  accounted savings vs uncached $7,117 on a $1,178 total — first
+  hard evidence for the D-0036 ordering (measure net-of-cache before
+  building any compression).
+- G1 LOOKS GREEN RETROACTIVELY: real traffic 20 consecutive days
+  (>=14 required). Formal check = Task 3 digest + written gate
+  report + Architect signature (D-0033). G2 (judge 13/13) holds.
 - SPEND MIX — ARCHITECT CORRECTION (2026-07-07): the baseline is
-  CENSORED data (the operator rationed frontier usage because limits
-  run out), so it cannot refute "the smartest model burns most". The
-  correct reading — frontier burns FASTEST per unit of work — is
-  confirmed: opus-4-8 $0.264/turn, fable-5 $0.216 vs sonnet-4-6
-  $0.114, sonnet-5 $0.063 (2-4x). Consequences for Phase 1.5:
-  (a) success metric is cost per accepted unit of work by tier + the
-  escalation rate, NOT frontier-share-of-spend alone (freeing limits
-  may legitimately RAISE Fable's share on architecture work);
-  (b) the escalation journal is the instrument that measures the
-  true tier boundary — it only produces data once routing is live.
-  The weekly loop watches the recent-window trend, not the all-time
-  total (history mixes pre-Fable weeks).
+  CENSORED data (operator rationed frontier usage), so it cannot
+  refute "the smartest model burns most". Correct reading — frontier
+  burns FASTEST per unit: opus $0.264/turn, fable $0.216 vs sonnet
+  $0.063-0.114 (2-4x). Consequences: (a) success metric is cost per
+  accepted unit by tier + escalation rate, NOT frontier share;
+  (b) the escalation journal measures the true tier boundary; the
+  weekly loop watches the recent-window trend, not all-time totals.
 
 ## Remaining Lead-tier Queue
 
 - Routing policy text (queue item 1 above) — Lead-tier.
+- D-0043 sweep remainder: add the "report sibling defects" line to
+  the nine AO3 QA-pipeline agent prompts on their next touch.
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
-  (D-0028..D-0043 were written before the axis map existed
-  2026-07-08 and never had an axis sweep; today's operator questions
-  already surfaced three of their unswept siblings — F-12/F-13/F-14).
-  Point-lookup matrix per the map, NOT a repo rescan; siblings found
-  → fix or queue per D-0043. Schedule: with/after the first weekly
-  calibration run. Rule-10(a) retro-audit deliberately NOT queued:
-  its data stream is cc_usage, covered by calibration check 11
-  (evidence over paper estimates, D-0028).
-- Eval plan, stage 1 (from Habr evals articles, 2026-07-08; priors in
-  docs/RELATED_WORK.md "Evals" section; operator-approved plan):
-  (1) failure-class word in rejected-event notes (spec / capability /
-  recon / tooling) — policy line in both CLAUDE.md, so the FIRST
-  calibration already sees where tiers break (MCP-Atlas prior: 63%
-  failures are cognitive); (2) scout golden set — 5–10 recon
-  questions about our own repos with known answers, incl. 1–2
-  unanswerable and 1–2 negative-claim cases ("I don't know" eval,
-  F-14); run on tier-model swap or scout.md edit; (3) regression rule
-  for agent-prompt edits: editing .claude/agents/*.md requires a
-  golden-set run of that tier before commit (2026-07-08 three agent
-  prompts were edited with zero verification — own example). Each
-  item = new mechanism -> rule 10 answers + registered detector
-  (D-0049) at implementation time.
-- Eval plan, stage 2 (needs >=1 week of routed traffic): journal's
-  accepted tasks recycled as a regression set, replayed on the API
-  contour via Shadow Evaluation on model/price changes (model-swap
-  eval; daoxe's router-eval comment = our D-0029 loop); minimum-n /
-  pass^k discipline written into DELEGATION_TABLE Update Rules with
-  thresholds chosen from first-calibration data; judge-human
-  agreement as a recorded number in JUDGE_CALIBRATION_PROTOCOL
-  (Bloom prior: Spearman 0.86) when the judge contour reactivates.
-  NOT taken: per-PR CI (no PR flow here; Boot Report + weekly
-  calibration are our frequency tiers) and a full execution-based
-  bench harness (Rule #1: golden sets + trail-based acceptance are
-  our scale).
+  (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
+  unswept siblings). Point-lookup matrix per the map, NOT a rescan.
+  Schedule: with/after the first weekly calibration. Rule-10(a)
+  retro-audit deliberately NOT queued: its data stream is cc_usage,
+  covered by calibration check 11.
+- Eval plan, stage 1 (Habr evals articles 2026-07-08; priors in
+  docs/RELATED_WORK.md "Evals"; operator-approved): (1) failure-class
+  word in rejected-event notes (spec / capability / recon / tooling);
+  (2) scout golden set — 5-10 recon questions with known answers,
+  incl. unanswerable and negative-claim cases (F-14); run on
+  tier-model swap or scout.md edit; (3) regression rule for
+  agent-prompt edits (editing .claude/agents/*.md requires a
+  golden-set run of that tier before commit). Each item = new
+  mechanism -> rule 10 answers + registered detector (D-0049).
+- Eval plan, stage 2 (needs >=1 week routed traffic): journal's
+  accepted tasks as a regression set replayed on the API contour on
+  model/price changes; minimum-n / pass^k in DELEGATION_TABLE Update
+  Rules (thresholds from first-calibration data); numeric judge-human
+  agreement in JUDGE_CALIBRATION_PROTOCOL. NOT taken: per-PR CI, full
+  execution-based bench harness (Rule #1).
 - AO3 adaptation of the session-handoff skill (D-0050): its boot
-  path is CLAUDE.md + docs/HANDOFF.md + state/, no BOOT.md — the
-  check steps translate but paths differ. Explicit queue per D-0043.
-- Boot-diet decision (measured 2026-07-08: boot path ~99 KB /
-  ~1700 lines ~= 30-35K tokens per session start, and it is re-sent
-  with context accumulation — see RELATED_WORK 50-62% prior).
-  Candidates by size: DECISIONS.md 26KB (split: one-line index stays
-  on the boot path, full texts to docs/, point-read on demand);
-  CURRENT_CONTEXT.md 19KB (overdue D-0038 archiving pass);
-  CLAUDE.md 18KB (doubled 2026-07-08 by rule expansions — trim
-  narrative/history from rules, keep operative text, move rationale
-  to DECISIONS/FINDINGS references; F-1 caution: operative parts
-  must stay in autoloaded context). Architecture-level decision —
-  full Lead, with operator.
+  path is CLAUDE.md + docs/HANDOFF.md + state/, no BOOT.md.
+- AO3 CLAUDE.md boot-diet trim (D-0051 pairing duty, next touch):
+  operative content is already in sync; narrative trim analogous to
+  this repo's 2026-07-08 diet.
 - White Paper: Architect review IN PROGRESS (started 2026-07-07).
-  Comment 1 addressed same day (v0.1.1): §4 diagram replaced with the
-  full target scheme — judge loop and deferred Router — in Mermaid;
-  ARCHITECTURE.md diagrams converted to Mermaid too. Awaiting further
-  review comments. Still queued: §7 upkeep against the evidence log;
-  full sync with D-0034..D-0038 (two contours, 4-state statuses in
-  §5) once the unified plan's first steps land.
+  Comment 1 addressed same day (v0.1.1). Still queued: §7 upkeep
+  against the evidence log; full sync with D-0034..D-0038 once the
+  unified plan's first steps land.
 
 ## Environment Notes (this machine)
 
@@ -337,25 +190,22 @@ D-0042.
 Closed work lives in docs/task_reports/ (index in its README.md):
 
 - 2026-07-03_shadow-evaluation-and-llm-judge.md — first Shadow
-  Evaluation runs; judge build, contamination and judge-bias lessons,
-  calibration history, local-judge fallback measurement.
+  Evaluation runs; judge build, contamination and judge-bias lessons.
 - 2026-07-03_research-notes.md — related-work priors (canonical:
   docs/RELATED_WORK.md).
 - 2026-07-04_white-paper-iteration.md — White Paper v0.1 log, Phase 2
   gate definition, external review recording.
-- task-1-2_cost-accounting-and-traffic-kind.md — Tasks 1-2 specs,
-  execution reports, joint Lead review (ACCEPTED 2026-07-07).
-- task-4_test-isolation.md — Task 4 spec, execution report, Lead
-  review (ACCEPTED 2026-07-07, commit 80b29b2), mock-row cleanups.
-- task-5_usage-report.md — Task 5 execution report, Lead review
-  (ACCEPTED 2026-07-07, commit 7e645e7), full strategic findings
-  text.
-- task-6_subagent-transcripts.md — Task 6 spec, execution report
-  (Sonnet builder subagent), Lead review (ACCEPTED 2026-07-08,
-  commit 75af5b5), sidechain telemetry numbers and spec errata.
-- task-7_agent-attribution.md — Task 7 spec, execution report
-  (builder), critic review (first critic dispatch), Lead review
-  (ACCEPTED 2026-07-08, commit 2f026f0); attributionAgent errata,
-  per-agent cost breakdown unlocked.
+- task-1-2_cost-accounting-and-traffic-kind.md — Tasks 1-2 (ACCEPTED
+  2026-07-07).
+- task-4_test-isolation.md — Task 4 (ACCEPTED 2026-07-07).
+- task-5_usage-report.md — Task 5 (ACCEPTED 2026-07-07), full
+  strategic findings text.
+- task-6_subagent-transcripts.md — Task 6 (ACCEPTED 2026-07-08),
+  sidechain telemetry, spec errata.
+- task-7_agent-attribution.md — Task 7 (ACCEPTED 2026-07-08), first
+  critic dispatch, per-agent cost breakdown unlocked.
+- 2026-07-08_routing-dogfooding-day.md — interim 18h read, dead-tier
+  revival, F-1 formalization, first degradation cycle, mechanism day
+  (F-12..F-16 / D-0044..D-0051).
 
 This file is intended to be updated frequently.

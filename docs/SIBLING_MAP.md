@@ -52,6 +52,9 @@ scout / builder / critic (х2 деплоя) + Lead-правила в CLAUDE.md +
 
 - DECISIONS.md <-> CLAUDE.md обоих деплоев (решение принято — политика
   отражает; F-9/D-0042 были рассинхроном именно здесь).
+- DECISIONS.md (индекс) <-> docs/DECISIONS_FULL.md (полные тексты,
+  D-0051): число записей D-XXXX обязано совпадать (чек 12 калибровки);
+  новое решение — обе стороны тем же коммитом.
 - ROADMAP.md — единственный владелец фаз/гейтов; ARCHITECTURE.md и
   WHITE_PAPER.md ссылаются, не дублируют.
 - BOOT.md <-> MEMORY_ARCHITECTURE.md (слои и список загрузки).
