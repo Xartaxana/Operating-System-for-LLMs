@@ -28,3 +28,8 @@ Evidence is never deleted, only relocated.
   Delegated Task 5: execution report, Lead review (ACCEPTED
   2026-07-07, commit 7e645e7), full strategic baseline findings text
   including the Architect's censored-data correction.
+- [task-6_subagent-transcripts.md](task-6_subagent-transcripts.md) —
+  Delegated Task 6: subagent transcripts visible to cc_usage; spec,
+  execution report, Lead review (ACCEPTED 2026-07-08, commit
+  75af5b5). First task executed by a live Sonnet builder subagent
+  (D-0037/D-0040); sidechain telemetry = 7.2% of tokens, $100.03.
