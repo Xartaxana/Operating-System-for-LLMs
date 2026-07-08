@@ -23,7 +23,7 @@ critic проверяет классовую полноту фикса ПО КА
 
 | Это репо | D:\AO3_tests |
 |---|---|
-| CLAUDE.md (политика, правила 1–10, вокабуляр событий) | CLAUDE.md (то же + дисциплина команд конвейера) |
+| CLAUDE.md (политика, правила 1–11, вокабуляр событий) | CLAUDE.md (то же + дисциплина команд конвейера) |
 | .claude/agents/{scout,builder,critic}.md | те же три + 10 QA-агентов конвейера |
 | logs/routing-log.jsonl (формат событий) | logs/routing-log.jsonl + scripts/log_append.py (enforce формата) |
 | — | .claude/skills/qa-loop/SKILL.md (журналирование диспатчей) |

@@ -155,6 +155,11 @@ reading cc_usage is deferred, the G1 line must say so explicitly.
     script for checks 3/13 (Lead spec -> builder, AFTER the first
     manual calibration validates what it should compute); structured
     worker-report frames deferred until dispatch volume (Rule #1).
+  - Stage 1.6 DONE 2026-07-08: D-0054 tier-shaped DoD in EVERY
+    dispatch (rule 11 both deploys + all three role files; F-19 —
+    the draft was builder-only, operator's axis-3 question widened
+    it before commit; detector = failure_class=spec stream,
+    check 13(г)).
   - Stage 2 (Lead, one policy line; trigger = first parallel builder
     dispatch or first calibration, whichever comes first): rule 4
     addendum — parallel specs declare owned paths, Lead checks

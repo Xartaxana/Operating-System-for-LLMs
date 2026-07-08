@@ -495,3 +495,38 @@ REGISTERED: AO3 side, log_append.py rejects events missing required
 fields (tested); OS side, calibration checks 3 and 13 consume the
 fields and flag their absence on post-D-0053 events (protocol
 amended same commit).
+
+## D-0054
+Every dispatch carries a tier-shaped DoD (definition of done):
+what "done" means and how acceptance will verify it. External prior:
+pi-autopilot author's advice relayed by the operator ("each task
+needs a clear DoD with a verification plan, or the orchestrator
+drifts and delivers broken work after days"); our spec practice
+already did this (e.g. Task 3's Acceptance block) but no written
+norm required it — the F-9/F-13 lesson is that unwritten practice
+silently decays. Tier shapes: builder — acceptance criteria + the
+verification run whose output becomes the witness (D-0052); scout —
+the explicit question(s) and a completeness criterion ("X is nowhere"
+is a valid outcome and requires the Trail, D-0046); critic — what to
+review AGAINST: the dispatch attaches the spec/DoD of the work under
+review, otherwise only generic quality is checkable, not fitness for
+the task. A worker returns a DoD-less dispatch with questions before
+starting work. Lead's own work is covered by existing mechanisms
+(D-0025: the single current task carries acceptance; D-0047:
+calibration runs against a checklist; D-0044: degraded-window
+acceptance), the judge by its calibration set (D-0031), AO3's QA
+pipeline agents by axis-6 machinery (schemas/agent-output +
+transitions). History: the first draft of this decision was
+builder-only; the operator's question "why only builder — we have
+several layers" widened it before commit (F-19, tenth F-11 case —
+an axis-3 sweep skipped at proposal stage). Rule 10 answers:
+(a) cost — a few DoD lines per dispatch the Lead already writes when
+specs are healthy; the worker-side return fires only on defective
+dispatches and costs one round-trip against days of drift; (b) axes —
+axis 3 swept explicitly across all tiers (see above); axis 1: rule 11
+in both deployments' CLAUDE.md + scout/builder/critic role files of
+both; axis 4: index + full text this commit; (c) detector —
+REGISTERED via the D-0053 field stream: systematic failure_class=spec
+rejections per tier flag DoD-less dispatches (check 13 amended same
+commit); a worker starting work on a DoD-less dispatch that later
+fails lands in the same stream.
