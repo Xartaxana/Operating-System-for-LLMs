@@ -160,6 +160,15 @@ reading cc_usage is deferred, the G1 line must say so explicitly.
     the draft was builder-only, operator's axis-3 question widened
     it before commit; detector = failure_class=spec stream,
     check 13(г)).
+  - Stage 1.7 DONE 2026-07-08: D-0055 (F-20) — rule 10(b) answered
+    by ENUMERATION over the current map's axes (axis list parsed
+    from SIBLING_MAP at each run, never hardcoded) + commit-msg gate
+    in both repos (.githooks + mechanism_gate.py twins; hooksPath
+    set). First full-discipline dispatch cycle on the gate itself:
+    t-001 delegated(critic) -> rejected (confirmed blocker F-A:
+    diff-quoted skip syntax self-bypassed the gate) -> fixed with
+    regression tests -> accepted. Detector: check 8 (hooksPath
+    liveness + skip-line audit).
   - Stage 2 (Lead, one policy line; trigger = first parallel builder
     dispatch or first calibration, whichever comes first): rule 4
     addendum — parallel specs declare owned paths, Lead checks

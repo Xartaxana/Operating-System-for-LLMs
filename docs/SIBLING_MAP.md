@@ -26,6 +26,7 @@ critic проверяет классовую полноту фикса ПО КА
 | CLAUDE.md (политика, правила 1–11, вокабуляр событий) | CLAUDE.md (то же + дисциплина команд конвейера) |
 | .claude/agents/{scout,builder,critic}.md | те же три + 10 QA-агентов конвейера |
 | logs/routing-log.jsonl (формат событий) | logs/routing-log.jsonl + scripts/log_append.py (enforce формата) |
+| .githooks/commit-msg + tools/mechanism_gate.py (enforce правила 10б, D-0055) | .githooks/commit-msg + scripts/mechanism_gate.py (карта читается из OS-репо) |
 | — | .claude/skills/qa-loop/SKILL.md (журналирование диспатчей) |
 
 ## Ось 2 — Контуры измерения (Rule #1, D-0032: учёт честен на обоих)

@@ -530,3 +530,67 @@ REGISTERED via the D-0053 field stream: systematic failure_class=spec
 rejections per tier flag DoD-less dispatches (check 13 amended same
 commit); a worker starting work on a DoD-less dispatch that later
 fails lands in the same stream.
+
+## D-0055
+Rule 10(b) is answered by ENUMERATION and enforced at the commit
+chokepoint (F-20; operator question "how could you ignore the rule,
+and how do we make it unignorable — SYSTEM_PROMPT prose doesn't
+work"). Constitutional prose is not self-enforcing anywhere (F-9
+generalized to the compliance mechanism itself); what works is the
+triple "cheap explicit action + mechanical chokepoint + external
+detector". Two parts: (1) FORMAT — the (b) answer is one verdict
+line per axis of the CURRENT docs/SIBLING_MAP.md ("ось N: покрыта /
+в очередь / н-п <why>"); the axis list is parsed from the map's
+headings at every run, never hardcoded — the map grows and shrinks
+(D-0048, operator correction) and the gate follows it; recall fails
+silently, enumeration fails loudly (skipping an axis now requires
+writing an explicit lie). (2) GATE — a commit-msg hook (.githooks/
++ tools/mechanism_gate.py; AO3 twin scripts/mechanism_gate.py reads
+the single map from the OS repo, fail-closed if unreachable) rejects
+commits touching mechanism paths without the axis block; the block
+counts from the commit message plus the staged diff of
+docs/DECISIONS_FULL.md ONLY (extraneous staged content must not
+close axes — critic finding F-B); the explicit skip line
+"оси: не-механизм (<причина>)" counts from the commit MESSAGE only
+(a decision text quoting the skip syntax must not self-bypass the
+gate — critic finding F-A, confirmed blocker); merge commits pass
+(their parts were gated individually — F-C); file prefixes match
+exactly, directories by prefix (F-D). AO3 trigger paths: policy,
+roles, skills, schemas/, state/rules.yaml; the pipeline's scripts/
+are deliberately OUTSIDE the trigger — script changes are covered by
+tests and review, and false positives train --no-verify, killing the
+gate. History: the gate itself went through the full D-0052..54
+discipline as task t-001 — builder-tier work done inline by Lead
+(dispatch_skipped with witness), critic dispatched per rule 3
+(>100 lines), verdict REWORK with confirmed blocker F-A; fixes
+carry regression tests. Honest limits, stated: the hook checks
+PRESENCE of the block, not its quality; a "н-п" verdict can be
+stamped thoughtlessly; the chat/proposal stage has no hook; bypass
+via --no-verify remains possible and is forbidden, not prevented.
+Residual detectors: the map's recurrence rule (D-0048), calibration
+check 8 (audits answer quality and skip-line honesty), the operator.
+Rule 10 answers: (a) cost — six-ish short lines per mechanism commit
+(the block), paid by the committer; one hook run per commit
+(~100 ms); repaid by turning silent axis omission into visible
+refusal; (b) axes, by this decision's own format:
+ось 1: покрыта — правило 10 в CLAUDE.md обоих деплоев; хук-твины
+  .githooks/ + tools/mechanism_gate.py (OS) и scripts/mechanism_gate.py
+  (AO3), новая парная строка внесена в ось 1 карты этим же коммитом;
+ось 2: н-п — учёта денег/токенов не касается;
+ось 3: покрыта — гейт стоит на ДЕЙСТВИИ (коммит), не на роли: любой
+  коммиттер механизмных путей (Lead, builder, деградированный Lead)
+  проходит один и тот же турникет;
+ось 4: покрыта — DECISIONS индекс + полный текст этим коммитом;
+  новая пара «текст правила 10(б) ↔ его enforce-код» зафиксирована
+  строкой оси 1;
+ось 5: покрыта — тесты гейта: tools/test_mechanism_gate.py (OS,
+  40 passed) и scripts/tests/test_mechanism_gate.py (AO3, 249 passed),
+  регрессионные тесты на все находки critic;
+ось 6: покрыта частично, остаток решением — schemas/ и
+  state/rules.yaml в триггере AO3-твина; scripts/ конвейера вне
+  триггера сознательно (см. выше), это записанное решение, не пропуск;
+(c) detector — REGISTERED: calibration check 8 amended same commit
+(hooksPath liveness in both repos, spot-audit of skip lines and of
+axis-block presence on the period's mechanism commits); the gate's
+own silent-death mode (hook unset/broken) is exactly what the
+hooksPath check catches.
