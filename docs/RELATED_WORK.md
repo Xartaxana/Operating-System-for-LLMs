@@ -2,7 +2,53 @@
 
 External projects, papers and articles overlapping with this project's
 ideas. Surveyed 2026-07-03; context-compression section added
-2026-07-04. Each entry states what we can take from it.
+2026-07-04; evals section added 2026-07-08. Each entry states what we
+can take from it.
+
+## Evals / component-wise verification (validates D-0045..D-0049, feeds the eval plan)
+
+### Тарасов, «Evals для чайников» (Habr, 2026)
+https://habr.com/ru/articles/1042924/
+
+Component-wise evals instead of end-to-end success rate: retrieval
+precision, tool-call schema, state-consistency, retry/error
+propagation, structured output, "I don't know" (unanswerable
+questions must produce refusal, not hallucination), model swap.
+Smoke-suite size 20–50 cases.
+
+Take: per-tier golden sets for our agents — scout's recon eval with
+known answers, including unanswerable and negative-claim cases, is
+the direct application of the "I don't know" eval to F-14; run on
+tier-model swap or agent-prompt edits.
+
+### Тарасов, «Evals: что должен знать каждый AI-инженер в 2026» (Habr, 2026)
+https://habr.com/ru/articles/1050736/
+
+Eval stack: capability vs regression (regression suites hold ~100%),
+online metrics, human golden sets, LLM-judge only as calibrated
+first-pass (Bloom/Anthropic: judge-human Spearman 0.86 on 40
+transcripts), execution-based evals as gold standard (verify results,
+not words — SWE-bench Verified pattern). Statistical honesty:
+confidence intervals, pass^k vs pass@k, never trust one run.
+MCP-Atlas (1000 tasks, 220 tools): **63% of agent failures are
+cognitive, not tool-call errors** — diagnostic breakdown beats a
+single pass rate. CORE-Bench: a model jumped 42%→95% after fixing
+grading bugs — fix the eval before blaming the model (our F-6
+independently found the same failure mode in the judge). Comment
+(daoxe): a routing eval layer — regression set of real requests,
+periodic multi-model runs tracking latency/cost/errors — is exactly
+our deferred Router loop (D-0029) described from the outside.
+
+Take: (1) rejected-event notes classify the failure (spec / model
+capability / recon / tooling) so calibration sees WHERE a tier
+breaks, not just that it broke; (2) journal's accepted tasks are a
+free regression set — replayable on the API contour via Shadow
+Evaluation on model/price changes; (3) minimum-n and pass^k
+discipline belongs in DELEGATION_TABLE Update Rules before statuses
+move; (4) judge-human agreement should be a recorded number in
+JUDGE_CALIBRATION_PROTOCOL, not a feeling. External confirmation:
+"measure the system, not the model" is our D-0034 evidence-stream
+design; "vibes don't scale" is D-0028.
 
 ## Routing / cascades (validates our Phase 2, D-0029)
 

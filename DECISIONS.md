@@ -337,3 +337,29 @@ to everything else (axis 3 in spirit); (c) failure detection — checks
 missed axes surface through the recurrence rule, and calibration
 check 9 already verifies that finding-closing commits name their
 axes.
+
+## D-0049
+Rule 10's question (c) is a lifecycle invariant, not a birth
+formality. Operator directive (2026-07-08, after the F-12..F-16
+series): every mechanism needs a verification system — old and new
+alike. Reformulation: question (c) now reads "where is the failure
+detector REGISTERED", and a mechanism is in force only while it has
+either a check in PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md or an
+external detector explicitly named in its own text (Boot Report,
+operator at a gate, constructive impossibility of silent failure).
+"Calibration will notice" without a check added to the protocol in
+the same commit is not an answer (D-0047). A mechanism without a
+registered detector is a wish, not a mechanism; discovering one is a
+finding. Existing mechanisms were brought under the invariant by the
+2026-07-08 audit (F-15) and the checklist it produced; new ones are
+held to it by calibration check 8, which now verifies registration,
+not just the presence of prose answers. Rule 10 answers for D-0049
+itself: (a) cost — zero marginal at authoring time (the (c) answer
+was already mandatory; registration is a line in the protocol that
+D-0047 already required for calibration-routed promises); (b) axes —
+rule 10 text is paired across both deployments' CLAUDE.md (axis
+1/4), the protocol stays single-copy in the OS repo; (c) detector —
+calibration check 8 verifies registration of every new decision's
+detector; check 8's own failure is visible because the `calibrated`
+event must reference the checks run, and the Boot Report watches for
+calibration absence (D-0047).

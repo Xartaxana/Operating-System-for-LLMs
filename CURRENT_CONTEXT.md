@@ -266,6 +266,32 @@ D-0042.
   calibration run. Rule-10(a) retro-audit deliberately NOT queued:
   its data stream is cc_usage, covered by calibration check 11
   (evidence over paper estimates, D-0028).
+- Eval plan, stage 1 (from Habr evals articles, 2026-07-08; priors in
+  docs/RELATED_WORK.md "Evals" section; operator-approved plan):
+  (1) failure-class word in rejected-event notes (spec / capability /
+  recon / tooling) — policy line in both CLAUDE.md, so the FIRST
+  calibration already sees where tiers break (MCP-Atlas prior: 63%
+  failures are cognitive); (2) scout golden set — 5–10 recon
+  questions about our own repos with known answers, incl. 1–2
+  unanswerable and 1–2 negative-claim cases ("I don't know" eval,
+  F-14); run on tier-model swap or scout.md edit; (3) regression rule
+  for agent-prompt edits: editing .claude/agents/*.md requires a
+  golden-set run of that tier before commit (2026-07-08 three agent
+  prompts were edited with zero verification — own example). Each
+  item = new mechanism -> rule 10 answers + registered detector
+  (D-0049) at implementation time.
+- Eval plan, stage 2 (needs >=1 week of routed traffic): journal's
+  accepted tasks recycled as a regression set, replayed on the API
+  contour via Shadow Evaluation on model/price changes (model-swap
+  eval; daoxe's router-eval comment = our D-0029 loop); minimum-n /
+  pass^k discipline written into DELEGATION_TABLE Update Rules with
+  thresholds chosen from first-calibration data; judge-human
+  agreement as a recorded number in JUDGE_CALIBRATION_PROTOCOL
+  (Bloom prior: Spearman 0.86) when the judge contour reactivates.
+  NOT taken: per-PR CI (no PR flow here; Boot Report + weekly
+  calibration are our frequency tiers) and a full execution-based
+  bench harness (Rule #1: golden sets + trail-based acceptance are
+  our scale).
 - White Paper: Architect review IN PROGRESS (started 2026-07-07).
   Comment 1 addressed same day (v0.1.1): §4 diagram replaced with the
   full target scheme — judge loop and deferred Router — in Mermaid;
