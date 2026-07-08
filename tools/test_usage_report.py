@@ -16,7 +16,9 @@ from usage_report import (
     CACHE_READ_MULTIPLIER,
     CACHE_WRITE_MULTIPLIER,
     PRICES_PER_TOKEN_USD,
+    SCHEMA,
     accounted_cost,
+    backfill_costs,
     build_report,
     import_transcripts,
     iter_assistant_turns,
@@ -378,6 +380,168 @@ def test_import_transcripts_subagent_layout_is_idempotent(tmp_path, db_file):
     conn = sqlite3.connect(db_file)
     count = conn.execute("SELECT COUNT(*) FROM cc_usage").fetchone()[0]
     assert count == 1
+
+
+
+# ---- agent attribution + haiku pricing (Delegated Task 7) ----
+
+def test_migration_adds_columns_to_old_schema_db_without_data_loss(db_file):
+    # Simulate a pre-Task-7 database: the OLD schema (no agent_id/
+    # agent_type columns), with a real row already in it.
+    conn = sqlite3.connect(db_file)
+    conn.execute(
+        """
+        CREATE TABLE cc_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            project TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            turn_index INTEGER NOT NULL,
+            model TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            cache_creation_tokens INTEGER NOT NULL,
+            cache_read_tokens INTEGER NOT NULL,
+            accounted_cost_usd REAL,
+            traffic_kind TEXT NOT NULL DEFAULT 'real',
+            is_sidechain INTEGER NOT NULL DEFAULT 0,
+            dedupe_key TEXT NOT NULL UNIQUE
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO cc_usage
+            (ts, project, session_id, turn_index, model, input_tokens,
+             output_tokens, cache_creation_tokens, cache_read_tokens,
+             accounted_cost_usd, traffic_kind, is_sidechain, dedupe_key)
+        VALUES ('2026-07-01T00:00:00Z', 'oldproj', 'old-session', 0,
+                'claude-sonnet-5', 100, 50, 0, 0, 0.001, 'real', 0, 'old-session:req-old')
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    # Any import (even of an empty/unrelated transcript set) goes
+    # through _connect(), which must migrate the existing table
+    # in-place rather than erroring or dropping data.
+    import_transcripts(FIXTURE, db_file)
+
+    conn = sqlite3.connect(db_file)
+    conn.row_factory = sqlite3.Row
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(cc_usage)")}
+    assert "agent_id" in columns
+    assert "agent_type" in columns
+
+    old_row = conn.execute(
+        "SELECT * FROM cc_usage WHERE dedupe_key = 'old-session:req-old'"
+    ).fetchone()
+    assert old_row is not None
+    assert old_row["model"] == "claude-sonnet-5"
+    assert old_row["accounted_cost_usd"] == pytest.approx(0.001)
+    assert old_row["agent_id"] is None
+    assert old_row["agent_type"] is None
+
+
+def test_agent_id_and_type_stored_for_subagent_layout_line(tmp_path, db_file):
+    path = tmp_path / "myproj" / "session-1" / "subagents" / "agent-x.jsonl"
+    _write_jsonl(path, [
+        _assistant_line(
+            session_id="session-1", is_sidechain=True,
+            extra={"agentId": "agent-x-id", "attributionAgent": "test-maintainer"},
+        ),
+    ])
+    turns = list(iter_assistant_turns(str(path)))
+    assert len(turns) == 1
+    assert turns[0]["agent_id"] == "agent-x-id"
+    assert turns[0]["agent_type"] == "test-maintainer"
+
+    import_transcripts(str(tmp_path / "*" / "*" / "subagents" / "*.jsonl"), db_file)
+    conn = sqlite3.connect(db_file)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT * FROM cc_usage WHERE session_id = 'session-1'"
+    ).fetchone()
+    assert row["agent_id"] == "agent-x-id"
+    assert row["agent_type"] == "test-maintainer"
+
+
+def test_top_level_line_gets_null_agent_id():
+    # The fixture's top-level lines carry neither agentId nor
+    # attributionAgent (real top-level transcripts never do either,
+    # per the module docstring).
+    turns = list(iter_assistant_turns(FIXTURE))
+    assert all(t["agent_id"] is None for t in turns)
+    assert all(t["agent_type"] is None for t in turns)
+
+
+def test_haiku_cost_computed_no_warning():
+    cost, warning = accounted_cost(
+        "claude-haiku-4-5-20251001",
+        input_tokens=1_000_000, output_tokens=1_000_000,
+        cache_creation_tokens=0, cache_read_tokens=0,
+    )
+    assert warning is None
+    assert cost == pytest.approx(1.00 + 5.00)
+
+
+def test_haiku_bare_id_also_priced():
+    cost, warning = accounted_cost("claude-haiku-4-5", 1_000_000, 0, 0, 0)
+    assert warning is None
+    assert cost == pytest.approx(1.00)
+
+
+def test_backfill_fills_agent_fields_and_null_costs_idempotently(tmp_path, db_file):
+    # Simulate a row imported BEFORE Task 7: no agent_id/agent_type,
+    # and a NULL cost because its model (haiku) wasn't priced yet at
+    # import time.
+    sub = tmp_path / "projB" / "session-9" / "subagents" / "agent-b9.jsonl"
+    _write_jsonl(sub, [
+        _assistant_line(
+            session_id="session-9", request_id="req-b9", is_sidechain=True,
+            model="claude-haiku-4-5-20251001",
+            extra={"agentId": "agent-b9-id", "attributionAgent": "builder"},
+        ),
+    ])
+
+    conn = sqlite3.connect(db_file)
+    conn.execute(SCHEMA)
+    conn.execute(
+        """
+        INSERT INTO cc_usage
+            (ts, project, session_id, turn_index, model, input_tokens,
+             output_tokens, cache_creation_tokens, cache_read_tokens,
+             accounted_cost_usd, traffic_kind, is_sidechain, agent_id,
+             agent_type, dedupe_key)
+        VALUES ('2026-07-07T12:00:00.000Z', 'projB', 'session-9', 0,
+                'claude-haiku-4-5-20251001', 10, 5, 0, 0, NULL, 'real', 1,
+                NULL, NULL, 'session-9:req-b9')
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    patterns = str(tmp_path / "*" / "*" / "subagents" / "*.jsonl")
+    rows1, _, _ = import_transcripts(patterns, db_file)
+    assert rows1 == 0  # the row already existed; nothing NEW inserted
+
+    conn = sqlite3.connect(db_file)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM cc_usage WHERE dedupe_key = 'session-9:req-b9'").fetchone()
+    assert row["agent_id"] == "agent-b9-id"
+    assert row["agent_type"] == "builder"
+    assert row["accounted_cost_usd"] is not None
+    assert row["accounted_cost_usd"] > 0
+    conn.close()
+
+    # Idempotent: a second run updates 0 rows (the columns are already filled).
+    rows2, _, _ = import_transcripts(patterns, db_file)
+    assert rows2 == 0
+    conn = sqlite3.connect(db_file)
+    updated_again = backfill_costs(conn)
+    conn.commit()
+    conn.close()
+    assert updated_again == 0
 
 
 def test_import_transcripts_accepts_single_string_pattern_backward_compat(tmp_path, db_file):

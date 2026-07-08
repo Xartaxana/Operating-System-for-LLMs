@@ -61,6 +61,43 @@ Re-verified empirically across all 61 such files on this machine
   between a parent session's own turns and its subagents' turns, nor
   between sibling subagent files of the same session (checked across
   all 14 sessions on this machine that have a subagents/ directory).
+
+Delegated Task 7 (2026-07-08 follow-up): agent attribution + haiku
+pricing gaps closed. Re-verified empirically across all 62 subagent
+files on this machine (6631 lines total, 3917 assistant lines) before
+wiring in the two new columns:
+- `agentId` is a per-line top-level field on EVERY line of a subagent
+  file (assistant and non-assistant alike; 6631 of 6631) -- confirms
+  the module docstring's earlier claim and gives a stable per-row
+  agent identity key.
+- `agentType` (the human-readable subagent slug, e.g.
+  "test-maintainer") does NOT appear anywhere as a literal JSON key on
+  any of the 6631 lines checked -- contradicts the Task 6 report's
+  phrasing ("agentType: test-maintainer"), which turns out to have
+  been describing a value, not a literal key. The literal key holding
+  that exact value is `attributionAgent`, present as a TOP-LEVEL field
+  on 3911 of 3917 assistant lines (the 6 missing are all
+  `model == "<synthetic>"` harness stop-sequence lines, already
+  skipped by SKIP_MODELS regardless). Every agentId maps to exactly
+  one attributionAgent value across all 62 files (0 files with a
+  varying value) -- confirmed identical to the *sidecar*
+  `agent-<id>.meta.json` file's own `agentType` field (spot-checked:
+  agent-aade8b2de22556abd's meta.json says
+  `"agentType":"fix-verifier"`, and every assistant line in that same
+  agent's .jsonl carries `"attributionAgent":"fix-verifier"`) -- so
+  `attributionAgent` is the reliable, per-line, no-extra-file-read
+  source used for the new `agent_type` column below. The .meta.json
+  sidecars (one per subagent file, holding agentType/description/
+  toolUseId/spawnDepth) are session-level metadata files, NOT matched
+  by any existing transcript glob, and are intentionally left unread --
+  `attributionAgent` already gives the same value per-line.
+- Top-level (non-subagent) transcript lines carry neither `agentId`
+  nor `attributionAgent`; both new columns are NULL there, as
+  expected.
+- Model `claude-haiku-4-5-20251001` was observed with `NULL`
+  accounted_cost_usd (unpriced) in this machine's existing
+  gateway/requests.db (7 rows, all NULL) before this task's pricing
+  fix.
 """
 
 import argparse
@@ -86,9 +123,24 @@ CREATE TABLE IF NOT EXISTS cc_usage (
     accounted_cost_usd REAL,
     traffic_kind TEXT NOT NULL DEFAULT 'real',
     is_sidechain INTEGER NOT NULL DEFAULT 0,
+    agent_id TEXT,
+    agent_type TEXT,
     dedupe_key TEXT NOT NULL UNIQUE
 );
 """
+
+# agent_id / agent_type (Delegated Task 7): nullable, populated only for
+# subagent/sidechain rows (see module docstring for the empirical
+# source of each -- `agentId` and `attributionAgent` respectively,
+# both top-level JSONL fields). NULL on every top-level/non-subagent
+# row, which is the correct "not applicable" value, not a missing-data
+# bug.
+
+# Column set added by Delegated Task 7, for the ALTER TABLE migration
+# in _connect() (existing databases predate these columns; SCHEMA
+# above is CREATE TABLE IF NOT EXISTS so it never retrofits an
+# already-existing table).
+_TASK7_NEW_COLUMNS = ("agent_id", "agent_type")
 
 # dedupe_key convention: session_id + ":" + requestId. Verified empirically
 # 2026-07-07 that a single API turn can be split across multiple JSONL
@@ -125,6 +177,16 @@ PRICES_PER_TOKEN_USD = {
     "claude-opus-4-8": (5.00 / 1_000_000, 25.00 / 1_000_000),
     "claude-sonnet-5": (3.00 / 1_000_000, 15.00 / 1_000_000),
     "claude-sonnet-4-6": (3.00 / 1_000_000, 15.00 / 1_000_000),
+    # Scout tier (Delegated Task 7, GAP 2): $1.00/$5.00 per 1M tokens,
+    # API list price. Every other model above happens to appear in
+    # real transcripts under its bare id (no date suffix); haiku is
+    # the one exception observed on this machine --
+    # "claude-haiku-4-5-20251001" (7 rows in gateway/requests.db,
+    # verified 2026-07-08) -- so both the exact dated id AND the bare
+    # id are keyed here, mapping to the same price tuple, in case a
+    # future transcript ever reports the bare form instead.
+    "claude-haiku-4-5-20251001": (1.00 / 1_000_000, 5.00 / 1_000_000),
+    "claude-haiku-4-5": (1.00 / 1_000_000, 5.00 / 1_000_000),
 }
 
 SKIP_MODELS = {"<synthetic>"}
@@ -214,6 +276,16 @@ def iter_assistant_turns(path: str):
                 "cache_creation_tokens": usage.get("cache_creation_input_tokens") or 0,
                 "cache_read_tokens": usage.get("cache_read_input_tokens") or 0,
                 "is_sidechain": 1 if obj.get("isSidechain") else 0,
+                # agent_id / agent_type (Delegated Task 7, GAP 1): both
+                # None on top-level (non-subagent) lines, which never
+                # carry either field -- verified empirically, see
+                # module docstring. `attributionAgent` (not a made-up
+                # "agentType" key -- that literal key was NOT found
+                # anywhere in real data) is the per-line field that
+                # matches the subagent's sidecar meta.json `agentType`
+                # value exactly.
+                "agent_id": obj.get("agentId"),
+                "agent_type": obj.get("attributionAgent"),
                 "dedupe_key": f"{session_id}:{request_id}",
             }
             turn_index += 1
@@ -241,9 +313,56 @@ def db_path() -> Path:
 
 
 def _connect(path: Path) -> sqlite3.Connection:
+    """Opens the DB and ensures the schema is current.
+
+    SCHEMA above is CREATE TABLE IF NOT EXISTS, so it only creates the
+    table with the NEW columns on a fresh DB -- it never adds a column
+    to a table that already exists from before Delegated Task 7. The
+    ALTER TABLE loop below is the idempotent migration for EXISTING
+    databases: it checks PRAGMA table_info first and only adds a
+    column that is actually missing, so re-running this function
+    (i.e. every normal import) is always a safe no-op once the columns
+    exist."""
     conn = sqlite3.connect(path)
     conn.execute(SCHEMA)
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(cc_usage)")}
+    for col in _TASK7_NEW_COLUMNS:
+        if col not in existing_cols:
+            conn.execute(f"ALTER TABLE cc_usage ADD COLUMN {col} TEXT")
+    conn.commit()
     return conn
+
+
+def backfill_costs(conn: sqlite3.Connection) -> int:
+    """Recomputes accounted_cost_usd for rows where it is currently
+    NULL, using the CURRENT PRICES_PER_TOKEN_USD and each row's
+    already-stored token counts (no transcript re-read needed).
+
+    Exists so that adding a new model's price (e.g. haiku, Delegated
+    Task 7 GAP 2) retroactively prices rows imported before that price
+    existed, instead of leaving them permanently NULL. Idempotent: a
+    row only qualifies while its cost is NULL, so a second call with
+    no newly-priced models updates 0 rows. Returns the number of rows
+    updated."""
+    rows = conn.execute(
+        """
+        SELECT id, model, input_tokens, output_tokens,
+               cache_creation_tokens, cache_read_tokens
+        FROM cc_usage WHERE accounted_cost_usd IS NULL
+        """
+    ).fetchall()
+    updated = 0
+    for row_id, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens in rows:
+        cost, _warning = accounted_cost(
+            model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens
+        )
+        if cost is not None:
+            conn.execute(
+                "UPDATE cc_usage SET accounted_cost_usd = ? WHERE id = ?",
+                (cost, row_id),
+            )
+            updated += 1
+    return updated
 
 
 def import_transcripts(glob_pattern, db_file: Path):
@@ -256,7 +375,23 @@ def import_transcripts(glob_pattern, db_file: Path):
     list/tuple of glob strings, as returned by transcript_glob()'s
     default (one pattern per transcript directory layout, Delegated
     Task 6). Paths matched by more than one pattern are processed only
-    once."""
+    once.
+
+    Backfill (Delegated Task 7): this function ALSO backfills rows
+    that were already imported before agent_id/agent_type existed as
+    columns, or before their model had a price. There is no separate
+    --backfill flag -- backfilling runs automatically as part of every
+    normal import, since both passes are naturally idempotent (a
+    second run touches 0 rows once caught up):
+    - agent fields: when INSERT OR IGNORE finds a dedupe_key already
+      present (rowcount == 0) and this transcript line carries an
+      agent_id/agent_type, an UPDATE ... WHERE agent_id IS NULL OR
+      agent_type IS NULL fills the existing row's NULL column(s)
+      without touching a row that already has them.
+    - costs: backfill_costs() runs once at the end over the whole
+      table, recomputing accounted_cost_usd for any row still NULL
+      (covers rows whose model has since been added to
+      PRICES_PER_TOKEN_USD, e.g. haiku, GAP 2)."""
     patterns = [glob_pattern] if isinstance(glob_pattern, str) else list(glob_pattern)
     warnings = []
     sessions_seen = set()
@@ -281,18 +416,34 @@ def import_transcripts(glob_pattern, db_file: Path):
                         (ts, project, session_id, turn_index, model,
                          input_tokens, output_tokens, cache_creation_tokens,
                          cache_read_tokens, accounted_cost_usd, traffic_kind,
-                         is_sidechain, dedupe_key)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'real', ?, ?)
+                         is_sidechain, agent_id, agent_type, dedupe_key)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'real', ?, ?, ?, ?)
                     """,
                     (
                         turn["ts"], turn["project"], turn["session_id"],
                         turn["turn_index"], turn["model"],
                         turn["input_tokens"], turn["output_tokens"],
                         turn["cache_creation_tokens"], turn["cache_read_tokens"],
-                        cost, turn["is_sidechain"], turn["dedupe_key"],
+                        cost, turn["is_sidechain"],
+                        turn["agent_id"], turn["agent_type"], turn["dedupe_key"],
                     ),
                 )
                 rows_imported += cur.rowcount
+                if cur.rowcount == 0 and (turn["agent_id"] is not None or turn["agent_type"] is not None):
+                    # Row already existed (pre-Task-7 import, or a prior
+                    # run of this same loop) -- backfill its agent
+                    # fields if still NULL. COALESCE keeps whatever is
+                    # already there, so this is a no-op once filled.
+                    conn.execute(
+                        """
+                        UPDATE cc_usage
+                        SET agent_id = COALESCE(agent_id, ?),
+                            agent_type = COALESCE(agent_type, ?)
+                        WHERE dedupe_key = ? AND (agent_id IS NULL OR agent_type IS NULL)
+                        """,
+                        (turn["agent_id"], turn["agent_type"], turn["dedupe_key"]),
+                    )
+        backfill_costs(conn)
         conn.commit()
     finally:
         conn.close()
