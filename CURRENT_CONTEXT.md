@@ -75,7 +75,34 @@ NOT share alone — see Architect correction below).
 
 Next for this workstream: accumulate >=1 week of routed traffic,
 then the first weekly calibration loop (journal + usage_report ->
-table status moves). Note: an untracked agent test-reviewer.md
+table status moves).
+
+INTERIM READ AFTER FIRST ROUTED ~18h (2026-07-08; NOT the weekly
+loop — no status moves): journal 5 delegated / 4 accepted /
+0 escalated, all category=implementation (builder). Transcripts:
+sidechain 406 turns, all sonnet-5, $19.05 ($0.047/turn) vs Lead main
+chain $0.242/turn — 63% of window turn volume ran off-frontier at 28%
+of window spend. Journal-vs-transcript cross-check consistent on tier,
+but three leaks: (a) 'model' field missing on all 5 delegated events
+(AO3's log_append.py now enforces it); (b) one delegated (badge,
+00:15) has no accepted event — reconcile; (c) /qa-loop dispatches
+still unjournaled (known), so the 406 sidechain turns >> the 5
+journaled delegations — category labels exist only for the journaled
+subset. scout (haiku) and critic (opus): ZERO dispatches — those
+delegation-table rows are accumulating no evidence at all.
+Router implications (D-0029): all observed dispatch is ONE
+deterministic rule (scoped implementation -> sonnet) and zero
+escalations = zero boundary data; a router trained on this would
+learn "always sonnet", which a static rule already does. Router
+stays deferred; the informative events for it are escalations and
+category diversity, neither present yet.
+TELEMETRY GAPS to fix before volume accumulates: (1) cc_usage has no
+agent attribution (transcripts carry agentId; not stored) — without
+it cost per ACCEPTED UNIT per category (the F-3 metric, R4 input) is
+not computable; (2) claude-haiku-4-5-20251001 has no price in
+usage_report.py — scout-tier traffic would import with cost=None
+(F-7 pattern: silent gap, at least it warns). Candidate Delegated
+Task 7 (builder-tier): agentId column + haiku 4.5 pricing + tests. Note: an untracked agent test-reviewer.md
 appeared in AO3_tests during deployment (parallel session?) — no
 model assigned to it; assign on the next touch.
 
