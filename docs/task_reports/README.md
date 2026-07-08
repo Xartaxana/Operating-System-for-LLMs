@@ -44,3 +44,9 @@ Evidence is never deleted, only relocated.
   formalization (D-0041/D-0042), first degradation cycle, and the
   mechanism day: operator questions F-12..F-16 -> D-0044..D-0051
   (rejected/trail/calibration/map/handoff/boot-diet mechanisms).
+- [task-3_phase2-readiness.md](task-3_phase2-readiness.md) —
+  Delegated Task 3: Phase 2 readiness digest in metrics.py; spec,
+  execution report, critic review (ПРИНЯТЬ, 3 non-blocking findings),
+  Lead acceptance decisions (ACCEPTED 2026-07-09, task_id t-002).
+  First gate-criteria readout: G1/C2 met, R1 not met, rest honest
+  gaps; G1 streak follow-up and traffic_kind drift check queued.

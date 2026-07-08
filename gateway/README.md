@@ -97,8 +97,10 @@ The request is logged like any other, so a `success` row for model
 ## Ledger digest
 
 ```
-python metrics.py [--db PATH] [--days N] [--json]
+python metrics.py [--db PATH] [--days N] [--json] [--delegation-table PATH]
 ```
+
+Run from gateway/ (same cwd-relative import convention as the proxy).
 
 Reports per model per day: requests, failures, tokens, cost, latency,
 answer length; the context-repetition ratio (share of prompt characters
@@ -107,6 +109,13 @@ common-prefix overlap, which matches append-only conversation history);
 task categories by transparent keyword heuristics (estimates for the
 delegation table, refined later by the Analyst); and budget events.
 `--json` emits the same digest machine-readable for the Analyst (step 4).
+
+The digest ends with a "Phase 2 readiness" section (Delegated Task 3):
+one line per ROADMAP Phase 2 gate criterion (G1, G2, R1-R5, C1-C3) —
+met / not met / not computable yet (needs <what>) / manual check
+(pointer); computed deterministically over requests.db + cc_usage +
+the DELEGATION_TABLE.md Shadow Evaluation Log, never guessed. In JSON
+the same content is the `phase2_readiness` object.
 
 ## Analyst
 

@@ -18,36 +18,18 @@ Phase 1.5 — Real Telemetry and Claude Code Routing (D-0034), on top
 of a complete Phase 1 MVP. Plan of record:
 docs/UNIFIED_PLAN_2026-07-07.md (D-0034..D-0036).
 
-## Current Task (Authoritative, D-0025): Delegated Task 3
+## Current Task (Authoritative, D-0025)
 
-For a CHEAPER model session (builder-tier work, not Lead work).
-Phase 2 readiness digest in metrics.py. Spec (Lead, 2026-07-07);
-executor does not self-certify — Lead/Architect reviews before the
-next task starts.
+Task 3 (Phase 2 readiness digest) ACCEPTED 2026-07-09 and archived:
+docs/task_reports/task-3_phase2-readiness.md (task_id t-002; builder
++ critic ПРИНЯТЬ + Lead witness 108/108). Digest first output: G1
+met (15 days, consecutiveness not yet verified — follow-up queued),
+C2 met (32 sessions), R1 not met (4/30 pairs), rest honestly not
+computable / manual check.
 
-Add a "Phase 2 readiness" section to the metrics.py text and JSON
-digest: one line per ROADMAP gate criterion (G1, G2, R1-R5, C1-C3)
-showing current value vs. threshold and met / not met /
-"not computable yet (needs <what>)". Rules:
-
-1. Deterministic Python/SQL over requests.db and
-   DELEGATION_TABLE.md only — no LLM calls.
-2. G1 counts DISTINCT days with traffic_kind='real' rows. R1 parses
-   judged evidence lines from the Shadow Evaluation Log. G2, R5 and
-   anything not derivable from telemetry print as "manual check"
-   with a pointer — never a guessed value.
-3. Criteria whose inputs do not exist yet (e.g. C2 sessions before
-   session identity lands, R2 spend shares before real traffic)
-   MUST print "not computable yet" with the missing prerequisite —
-   an honest gap, not a fake 0% (Rule #1 spirit).
-4. Tests over a seeded tmp DB; existing tests stay green.
-
-Acceptance: `python metrics.py --days 14` prints the section; JSON
-output carries a `phase2_readiness` object with the same content.
-
-Note (post-spec, Task 5 landed): the digest should count G1 days
-over BOTH requests (traffic_kind='real') and cc_usage rows; if
-reading cc_usage is deferred, the G1 line must say so explicitly.
+NEXT task awaits operator pick; Lead's recommendation: eval plan
+stage 1 items (2) scout golden set + (3) agent-prompt regression
+rule (see queue below).
 
 ## Routing MVP — LIVE on both deployments
 
@@ -55,10 +37,10 @@ reading cc_usage is deferred, the G1 line must say so explicitly.
   dogfooding: THIS repo (2026-07-08). Each = auto-loaded CLAUDE.md
   policy + agents scout/builder/critic + logs/routing-log.jsonl
   (D-0041: always the three together).
-- Evidence so far: builder n=2 accepted, critic n=1 accepted, scout
-  n=1 accepted (first dispatch 2026-07-08, full D-0046 cycle:
-  Trail block + both negative claims spot-checked); 0 escalations,
-  0 rejected. ALL statuses estimated (Update Rule 1).
+- Evidence so far (2026-07-09): builder n=3 accepted, critic n=3
+  accepted, scout n=2 accepted (D-0046 cycles with spot-checks);
+  1 rejected (t-001 attempt 1, failure_class=capability), 0
+  escalations. ALL statuses estimated (Update Rule 1).
 - Retro baseline AO3 (cc_usage, pre-routing): $276.70 accounted +
   $57.82 sidechain self-correction (Task 6). Weekly loop compares
   cost per accepted unit + escalation rate, NOT frontier share alone
@@ -107,7 +89,7 @@ reading cc_usage is deferred, the G1 line must say so explicitly.
   provisionally_validated: coding -> Middle, summarization /
   extraction / formatting -> intern; rejected: classification ->
   intern. Claude Code workstream rows: estimated.
-- Delegated Tasks 1, 2, 4, 5, 6, 7: ACCEPTED and archived
+- Delegated Tasks 1, 2, 3, 4, 5, 6, 7: ACCEPTED and archived
   (docs/task_reports/ — see Archive below).
 
 ## Claude Code Baseline (Task 5, 2026-07-07 — live guidance)
@@ -133,7 +115,21 @@ reading cc_usage is deferred, the G1 line must say so explicitly.
 
 ## Remaining Lead-tier Queue
 
-- Routing policy text (queue item 1 above) — Lead-tier.
+- Routing policy text — RESOLVED REFERENCE (2026-07-09): the line
+  pointed at Phase 1.5 step 2 "queue item 1" of the pre-diet file
+  (4d41ef3); the policy itself is written and live on both deploys
+  since 2026-07-07/08. Residual: Architect acceptance of the policy
+  text (CLAUDE.md rules 1-11) — operator decision, not Lead work.
+- G1 consecutive-streak follow-up (builder-tier, small): compute the
+  max consecutive-day run in _g1_readiness and emit met only at
+  >=14; distinct count stays in detail (critic finding 1 on Task 3;
+  ROADMAP gate text unchanged, D-0033).
+- traffic_kind default drift check (Lead point-lookup): live
+  requests.db column default 'synthetic' vs SCHEMA 'real' vs
+  migration 'synthetic' (sqlite_logger.py:33/58) — verify against
+  Tasks 1-2 report whether intentional (old rows = synthetic
+  semantics); if a defect → defect_found with ref (D-0052). Reported
+  by builder, independently confirmed by critic on Task 3.
 - D-0043 sweep remainder: add the "report sibling defects" line to
   the nine AO3 QA-pipeline agent prompts on their next touch.
 - Env-negative discipline port (queued from AO3 2026-07-09, commit
@@ -248,6 +244,9 @@ Closed work lives in docs/task_reports/ (index in its README.md):
   sidechain telemetry, spec errata.
 - task-7_agent-attribution.md — Task 7 (ACCEPTED 2026-07-08), first
   critic dispatch, per-agent cost breakdown unlocked.
+- task-3_phase2-readiness.md — Task 3 (ACCEPTED 2026-07-09), Phase 2
+  readiness digest, first gate-criteria readout (G1/C2 met, R1 not
+  met, rest honest gaps).
 - 2026-07-08_routing-dogfooding-day.md — interim 18h read, dead-tier
   revival, F-1 formalization, first degradation cycle, mechanism day
   (F-12..F-16 / D-0044..D-0051).
