@@ -134,8 +134,28 @@ reading cc_usage is deferred, the G1 line must say so explicitly.
 ## Remaining Lead-tier Queue
 
 - Routing policy text (queue item 1 above) — Lead-tier.
+- F-21 fix (Lead-tier, candidate in docs/FINDINGS.md F-21 + two
+  addenda; queued from AO3 session 2026-07-09): silent Lead
+  degradation had no detector — three-point fix: (1) entry check
+  before the first Lead action of a session (own model vs Lead
+  tier), (2) visible model ascent = proof of a window regardless of
+  journal, (3) calibration check "actual Lead-session model in
+  transcripts vs lead_degraded/lead_restored window coverage"
+  (extends the D-0034 model-vs-transcript check from workers to
+  Lead). Points (1)+(2) already LANDED on the AO3 side (its
+  CLAUDE.md "Деградация Lead" п.4 а/б/в + qa-loop SKILL.md preflight
+  step 0; commits 1efef9f, 642dc30); REMAINING here: port п.4 into
+  this repo's CLAUDE.md degradation section (lines ~143-155),
+  register check (3) in WEEKLY_CALIBRATION_PROTOCOL.md, decide on a
+  D-number (axis 4).
 - D-0043 sweep remainder: add the "report sibling defects" line to
   the nine AO3 QA-pipeline agent prompts on their next touch.
+- Env-negative discipline port (queued from AO3 2026-07-09, commit
+  fb41872 there; class "empty output of a mis-invoked env tool read
+  as absence of the object" — see F-21 addendum kinship): add the
+  rule to this repo's scout/builder/critic role files on their next
+  touch + a calibration line (negative environment claims require a
+  positive canonical-form check).
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
   (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
   unswept siblings). Point-lookup matrix per the map, NOT a rescan.
