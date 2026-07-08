@@ -27,14 +27,40 @@ CURRENT_CONTEXT.md "Delegated Task 5" for detail):
 - `message.model == "<synthetic>"` rows are harness-internal
   rate-limit notices ("You've hit your session limit..."), always
   carrying all-zero usage. Skipped per spec.
-- No `isSidechain: true` assistant rows exist anywhere on this
-  machine (0 of ~16k), but the column is populated regardless since
-  subagent traffic is real traffic that must stay distinguishable
-  (Lead clarification, item 2 of the spec).
+- No `isSidechain: true` assistant rows exist anywhere among the
+  TOP-LEVEL `<project>/*.jsonl` transcripts on this machine (0 of
+  ~16k), but the column is populated regardless since subagent
+  traffic is real traffic that must stay distinguishable (Lead
+  clarification, item 2 of the spec). Sidechain traffic DOES exist,
+  just not in that glob -- see Delegated Task 6 below.
 - Non-assistant line `type`s observed: user, ai-title, last-prompt,
   queue-operation, system, mode, permission-mode, file-history-
   snapshot, pr-link, attachment. None carry a `usage` field; all are
   skipped (only `type == "assistant"` is read).
+
+Delegated Task 6 (2026-07-07/08 follow-up): subagent/sidechain
+transcripts live at a SECOND, deeper path --
+`<project>/<session-id>/subagents/agent-*.jsonl` -- one file per
+dispatched subagent, invisible to the original single glob above.
+Re-verified empirically across all 61 such files on this machine
+(3829 assistant lines total) before wiring in the second glob:
+- every line's `sessionId` JSON field equals the PARENT session's
+  UUID (the `<session-id>` directory name one level above
+  `subagents/`), 0 mismatches -- so these files' turns correctly
+  attach to their parent session, not a synthetic "subagents"
+  session.
+- `isSidechain` is true on all of them.
+- `requestId` is present on all of them (0 missing; the uuid
+  fallback below remains untested on real data but is kept for the
+  same defensive reason as the top-level case).
+- `agentId` is present on all of them. `promptId` was NOT found on
+  any (0 of 3829) on this machine, despite being listed as an
+  expected extra field in the spec -- noted here since it contradicts
+  that assumption; harmless either way since neither field is read.
+- No `dedupe_key` (session_id + requestId) collisions were found
+  between a parent session's own turns and its subagents' turns, nor
+  between sibling subagent files of the same session (checked across
+  all 14 sessions on this machine that have a subagents/ directory).
 """
 
 import argparse
@@ -104,9 +130,23 @@ PRICES_PER_TOKEN_USD = {
 SKIP_MODELS = {"<synthetic>"}
 
 
-def transcript_glob(base_dir: Path = None) -> str:
+def transcript_glob(base_dir: Path = None) -> list:
+    """Returns the default glob PATTERNS (plural -- a list, not a
+    single string) for Claude Code transcripts on this machine:
+
+    1. top-level session transcripts: <project>/<session>.jsonl
+    2. subagent/sidechain transcripts, one directory layer deeper
+       (Delegated Task 6): <project>/<session>/subagents/agent-*.jsonl
+
+    The two layouts do not share a single glob pattern, hence the
+    list. import_transcripts() accepts either this list or a single
+    pattern string (the latter for CLI-override / backward-compat
+    with existing callers/tests that pass one path)."""
     base = base_dir or (Path.home() / ".claude" / "projects")
-    return str(base / "*" / "*.jsonl")
+    return [
+        str(base / "*" / "*.jsonl"),
+        str(base / "*" / "*" / "subagents" / "*.jsonl"),
+    ]
 
 
 def iter_assistant_turns(path: str):
@@ -114,14 +154,31 @@ def iter_assistant_turns(path: str):
     every other line type (none of which carry a usage field) and
     <synthetic> rows (harness-internal, always zero usage).
 
-    session_id: the filename stem is used as the fallback; verified
-    empirically 2026-07-07 that every real transcript's per-line
-    "sessionId" field always equals its own filename stem (0
-    mismatches across all assistant lines on this machine), so the
-    JSON field is preferred when present (defensive / test-fixture
-    friendly) and the filename is the documented real-world source."""
-    filename_session_id = Path(path).stem
-    project = Path(path).parent.name
+    session_id: the JSON "sessionId" field is preferred when present
+    (defensive / test-fixture friendly); the fallback depends on the
+    transcript's directory layout (see below).
+
+    project / fallback session_id derivation handles BOTH transcript
+    layouts (Delegated Task 6):
+    - top-level: <project>/<session>.jsonl -- verified empirically
+      2026-07-07 that every real transcript's per-line "sessionId"
+      always equals its own filename stem (0 mismatches), so the
+      filename stem is both the project's session and the fallback.
+    - subagent/sidechain: <project>/<session>/subagents/agent-*.jsonl
+      -- the file's OWN stem is the sub-agent id (e.g. "agent-a6d8..."),
+      not a session id, so it would be wrong as a session_id fallback;
+      the real parent session id is the directory name one level above
+      "subagents/". Detected by checking whether the immediate parent
+      directory is literally named "subagents" (re-verified across 61
+      real subagent files, 0 sessionId mismatches against this
+      directory name -- see module docstring)."""
+    p = Path(path)
+    if p.parent.name == "subagents":
+        project = p.parent.parent.parent.name
+        filename_session_id = p.parent.parent.name
+    else:
+        project = p.parent.name
+        filename_session_id = p.stem
     turn_index = 0
     with open(path, encoding="utf-8") as f:
         for line in f:
@@ -189,16 +246,27 @@ def _connect(path: Path) -> sqlite3.Connection:
     return conn
 
 
-def import_transcripts(glob_pattern: str, db_file: Path):
+def import_transcripts(glob_pattern, db_file: Path):
     """Idempotent import: re-running over the same transcripts does not
     duplicate rows, enforced by the UNIQUE constraint on dedupe_key
-    (INSERT OR IGNORE). Returns (rows_imported, sessions_seen, warnings)."""
+    (INSERT OR IGNORE). Returns (rows_imported, sessions_seen, warnings).
+
+    glob_pattern accepts either a single glob string (backward
+    compatible with existing callers/tests and the CLI override) or a
+    list/tuple of glob strings, as returned by transcript_glob()'s
+    default (one pattern per transcript directory layout, Delegated
+    Task 6). Paths matched by more than one pattern are processed only
+    once."""
+    patterns = [glob_pattern] if isinstance(glob_pattern, str) else list(glob_pattern)
     warnings = []
     sessions_seen = set()
     rows_imported = 0
     conn = _connect(db_file)
+    paths = set()
+    for pattern in patterns:
+        paths.update(glob.glob(pattern))
     try:
-        for path in sorted(glob.glob(glob_pattern)):
+        for path in sorted(paths):
             for turn in iter_assistant_turns(path):
                 sessions_seen.add(turn["session_id"])
                 cost, warning = accounted_cost(
@@ -439,7 +507,14 @@ def main():
     parser.add_argument(
         "--transcripts-glob",
         default=None,
-        help="Override the transcript glob (default: ~/.claude/projects/*/*.jsonl)",
+        help=(
+            "Override the transcript glob with a SINGLE custom pattern "
+            "(default, with no override: TWO patterns are scanned -- "
+            "~/.claude/projects/*/*.jsonl for session transcripts and "
+            "~/.claude/projects/*/*/subagents/*.jsonl for subagent/"
+            "sidechain transcripts, Delegated Task 6). Passing this flag "
+            "replaces both default patterns with just this one."
+        ),
     )
     parser.add_argument(
         "--db",
@@ -468,9 +543,10 @@ def main():
     else:
         print(format_report(report, warnings))
         print("")
+        pattern_desc = pattern if isinstance(pattern, str) else " + ".join(pattern)
         print(
             f"(this run: {rows_imported} new row(s) imported from"
-            f" {len(sessions_seen)} session file(s) matching {pattern})"
+            f" {len(sessions_seen)} session file(s) matching {pattern_desc})"
         )
 
 

@@ -6,6 +6,7 @@ no real prompt content).
 Run from tools/: python -m pytest test_usage_report.py
 """
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -19,9 +20,48 @@ from usage_report import (
     build_report,
     import_transcripts,
     iter_assistant_turns,
+    transcript_glob,
 )
 
 FIXTURE = str(Path(__file__).parent / "fixtures" / "sample_transcript.jsonl")
+
+
+def _write_jsonl(path: Path, lines: list):
+    """Test helper: write a list of dicts as a JSONL transcript file,
+    creating parent directories as needed (used to build the nested
+    <project>/<session>/subagents/agent-*.jsonl layout in tmp dirs,
+    since the projects root cannot be hardcoded -- Delegated Task 6)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        for obj in lines:
+            f.write(json.dumps(obj) + "\n")
+
+
+def _assistant_line(session_id=None, request_id="req-x", is_sidechain=False,
+                     model="claude-sonnet-5", uuid="uuid-x", extra=None):
+    obj = {
+        "type": "assistant",
+        "uuid": uuid,
+        "requestId": request_id,
+        "isSidechain": is_sidechain,
+        "timestamp": "2026-07-07T12:00:00.000Z",
+        "parentUuid": None,
+        "message": {
+            "id": f"msg_{uuid}",
+            "model": model,
+            "role": "assistant",
+            "usage": {
+                "input_tokens": 10, "output_tokens": 5,
+                "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+            },
+            "content": [{"type": "text", "text": "synthetic fixture text"}],
+        },
+    }
+    if session_id is not None:
+        obj["sessionId"] = session_id
+    if extra:
+        obj.update(extra)
+    return obj
 
 
 @pytest.fixture()
@@ -232,3 +272,123 @@ def test_build_report_days_filter_excludes_old_rows(db_file):
     import_transcripts(FIXTURE, db_file)
     report = build_report(db_file, days=1)
     assert report["totals"]["rows"] == 0
+
+
+# ---- subagent/sidechain transcripts (Delegated Task 6) ----
+#
+# Real subagent transcripts live at
+# <project>/<session-id>/subagents/agent-*.jsonl, one directory layer
+# deeper than the top-level <project>/<session>.jsonl layout. The
+# projects root cannot be hardcoded here (real path is
+# ~/.claude/projects, but tests must not depend on the developer
+# machine's home directory), so each test below builds its own tmp_path
+# tree with both layouts and points transcript_glob()/import_transcripts
+# at it via the base_dir override.
+
+def test_project_attribution_top_level_layout(tmp_path):
+    path = tmp_path / "myproj" / "session-1.jsonl"
+    _write_jsonl(path, [_assistant_line(session_id="session-1")])
+    turns = list(iter_assistant_turns(str(path)))
+    assert len(turns) == 1
+    assert turns[0]["project"] == "myproj"
+    assert turns[0]["session_id"] == "session-1"
+
+
+def test_project_attribution_subagent_layout(tmp_path):
+    path = tmp_path / "myproj" / "session-1" / "subagents" / "agent-x.jsonl"
+    _write_jsonl(path, [_assistant_line(session_id="session-1", is_sidechain=True)])
+    turns = list(iter_assistant_turns(str(path)))
+    assert len(turns) == 1
+    # Must be "myproj" (the real project), NOT "subagents" (the file's
+    # immediate parent dir name) and not "session-1" either.
+    assert turns[0]["project"] == "myproj"
+    assert turns[0]["session_id"] == "session-1"
+    assert turns[0]["is_sidechain"] == 1
+
+
+def test_subagent_layout_session_id_fallback_uses_directory_not_agent_filename(tmp_path):
+    # No "sessionId" JSON field at all -- the fallback must derive the
+    # session id from the <session-id> directory name one level above
+    # subagents/, NOT from the file's own stem (which is the sub-agent
+    # id, e.g. "agent-y", and would be wrong as a session id).
+    path = tmp_path / "myproj2" / "sess-xyz" / "subagents" / "agent-y.jsonl"
+    _write_jsonl(path, [_assistant_line(session_id=None, is_sidechain=True)])
+    turns = list(iter_assistant_turns(str(path)))
+    assert len(turns) == 1
+    assert turns[0]["session_id"] == "sess-xyz"
+    assert turns[0]["project"] == "myproj2"
+
+
+def test_transcript_glob_returns_two_patterns(tmp_path):
+    patterns = transcript_glob(base_dir=tmp_path)
+    assert isinstance(patterns, list)
+    assert len(patterns) == 2
+    assert str(tmp_path) in patterns[0]
+    assert patterns[0].endswith("*.jsonl")
+    assert "subagents" in patterns[1]
+    assert patterns[1].endswith("*.jsonl")
+
+
+def test_import_transcripts_scans_both_layouts_together(tmp_path, db_file):
+    top_level = tmp_path / "projA" / "session-1.jsonl"
+    _write_jsonl(top_level, [
+        _assistant_line(session_id="session-1", request_id="req-parent-1"),
+    ])
+    sub = tmp_path / "projA" / "session-1" / "subagents" / "agent-a1.jsonl"
+    _write_jsonl(sub, [
+        _assistant_line(session_id="session-1", request_id="req-sub-1", is_sidechain=True),
+    ])
+
+    patterns = transcript_glob(base_dir=tmp_path)
+    rows_imported, sessions_seen, warnings = import_transcripts(patterns, db_file)
+
+    assert rows_imported == 2
+    assert sessions_seen == {"session-1"}
+
+    conn = sqlite3.connect(db_file)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("SELECT * FROM cc_usage ORDER BY dedupe_key").fetchall()
+    assert len(rows) == 2
+    by_sidechain = {r["is_sidechain"] for r in rows}
+    assert by_sidechain == {0, 1}
+    for r in rows:
+        # Both rows must attribute to the real project "projA", never
+        # "subagents" or the session id.
+        assert r["project"] == "projA"
+        assert r["session_id"] == "session-1"
+    # No dedupe_key collision between the parent-session row and the
+    # subagent row sharing the same session_id.
+    dedupe_keys = {r["dedupe_key"] for r in rows}
+    assert len(dedupe_keys) == 2
+
+
+def test_import_transcripts_subagent_layout_is_idempotent(tmp_path, db_file):
+    sub = tmp_path / "projB" / "session-2" / "subagents" / "agent-b1.jsonl"
+    _write_jsonl(sub, [
+        _assistant_line(session_id="session-2", request_id="req-sub-2", is_sidechain=True),
+    ])
+    patterns = transcript_glob(base_dir=tmp_path)
+
+    rows1, _, _ = import_transcripts(patterns, db_file)
+    rows2, _, _ = import_transcripts(patterns, db_file)
+
+    assert rows1 == 1
+    assert rows2 == 0  # second run finds nothing new
+
+    conn = sqlite3.connect(db_file)
+    count = conn.execute("SELECT COUNT(*) FROM cc_usage").fetchone()[0]
+    assert count == 1
+
+
+def test_import_transcripts_accepts_single_string_pattern_backward_compat(tmp_path, db_file):
+    # The pre-Task-6 API (single glob string) must keep working, since
+    # both the CLI --transcripts-glob override and any external caller
+    # may still pass a plain string.
+    sub = tmp_path / "projC" / "session-3" / "subagents" / "agent-c1.jsonl"
+    _write_jsonl(sub, [
+        _assistant_line(session_id="session-3", request_id="req-sub-3", is_sidechain=True),
+    ])
+    single_pattern = str(tmp_path / "*" / "*" / "subagents" / "*.jsonl")
+    rows_imported, sessions_seen, _ = import_transcripts(single_pattern, db_file)
+    assert rows_imported == 1
+    assert sessions_seen == {"session-3"}
