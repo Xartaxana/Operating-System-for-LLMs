@@ -126,3 +126,35 @@ The Lead itself can degrade, and degradation must be explicit, scoped and revers
 
 ## D-0040
 Workers are dispatched in the background by default. A coordinator blocked waiting on a worker wastes the scarcest subscription-contour resource — Lead availability (wall-clock time and operator interactivity, not tokens): while a multi-hour worker runs, the Lead can plan, review other results, answer the operator, or dispatch parallel workers. Synchronous (blocking) dispatch is justified only when the coordinator's immediate next action depends on the worker's result AND no other useful work or operator interaction is pending (e.g. strictly sequential pipeline steps). The acceptance duty is unchanged (D-0037): every completed worker's result is reviewed when it arrives. Applies to both contours; on the API contour the same principle reads as async dispatch wherever the harness supports it.
+
+## D-0041
+Delegation on the subscription contour is opt-in, not emergent. The
+default Claude Code harness does not initiate subagent dispatch on its
+own ("Do not spawn agents unless the user asks" — finding F-1,
+docs/FINDINGS.md, observed 2026-07-08): left alone, the coordinator
+does delegable work itself on the most expensive tier. Therefore the
+routing policy must auto-load into the coordinator's context in every
+project where routing is expected (in Claude Code: the project's
+CLAUDE.md); tier-agent definitions alone are insufficient — they
+describe the tiers but do not prompt their use. "Deploying the routing
+MVP" to a project means deploying three things together: the
+auto-loaded policy, the tier agents, and the delegation journal.
+Corollary for the White Paper: the production-harness default is
+conservative (zero delegation), so the architecture's job on this
+contour is raising delegation from zero to an evidence-governed level,
+not restraining agent sprawl (ANTI_GOALS.md addresses the opposite
+failure mode).
+
+## D-0042
+An explicit operator-initiated switch of the Lead model to a lower
+tier is a lead_degraded trigger, alongside D-0039's original triggers
+(safety refusals, subscription limits, unavailability). Journal event
+types stay lead_degraded / lead_restored; the initiator and reason are
+recorded in the event's notes field, not as a separate event type. The
+journal is self-declaration: weekly calibration cross-checks declared
+models against per-turn transcript telemetry (cc_usage), so a switch
+nobody journaled (e.g. made before session start) still surfaces — the
+discrepancy is itself a calibration finding. Switches up or sideways
+are not degradation events and are currently untracked; tracking them
+would be a new decision. First live cycle: 2026-07-08 (Fable -> Opus
+4.8 -> Fable, logs/routing-log.jsonl).

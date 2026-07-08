@@ -115,16 +115,22 @@ tier. Consequence: the routing policy MUST auto-load into the Lead's
 context per-project (CLAUDE.md) — agent definitions alone are not
 enough. White Paper material (contrapoint to "frameworks maximize
 agent count" — the production default is the opposite, conservative).
-QUEUED FOR RESTORED LEAD: decide whether to formalize F-1's
-consequence as a DECISIONS.md entry (not done now — session is
-degraded on Opus 4.8, D-0039).
+F-1 FORMALIZED (2026-07-08, restored Lead, operator approval):
+D-0041 — delegation on the subscription contour is opt-in; deploying
+routing = auto-loaded policy + tier agents + journal, always together.
+D-0042 — operator-initiated downward model switch is a lead_degraded
+trigger; initiator goes in the event's notes, telemetry cross-check
+is the backstop for unjournaled switches.
 
-DEGRADATION ACTIVE (2026-07-08): operator switched Fable->Opus 4.8
-via /model. Recorded as lead_degraded in the new journal. This
-session did routine/authorized work only (Task 6 acceptance was on
-Fable; this deploy + F-1 record on Opus); no new decisions, no table
-status changes, no gate signatures. Return to Fable -> lead_restored
-at next session/task boundary.
+DEGRADATION CYCLE COMPLETE (2026-07-08): operator switched
+Fable->Opus 4.8 via /model and back (~5 min window). Full D-0039
+cycle recorded in logs/routing-log.jsonl (lead_degraded ->
+lead_restored); while degraded only authorized work was done (routing
+deploy + F-1 record, commit 7f60273), decisions were deferred and
+adopted after restore. First live exercise of the mechanism.
+Deployment divergence found and fixed: the operator-switch trigger
+wording was missing from the AO3_tests pilot CLAUDE.md — synced per
+D-0042.
 
 ## System State (condensed, 2026-07-08)
 
