@@ -179,3 +179,29 @@ class-completeness of every fix as a standard finding category, the
 coordinator owns the sweep and the rule placement. Recorded in
 SYSTEM_PROMPT.md (constitution, always loaded) because it must bind
 any LLM in any session — routed or not.
+
+## D-0044
+Restoration from Lead degradation includes acceptance of the degraded
+window. D-0039 specified entering degradation and returning from it
+but left the return without a review step: work done while degraded
+re-entered the mainline unreviewed — the degraded coordinator was
+effectively the only worker in the system whose output bypassed the
+D-0037 acceptance duty (gap found by an operator question, finding
+F-12; the first live cycle 2026-07-08 confirms it — `lead_restored`
+only unblocked the decision queue, the window's commit was never
+reviewed). Therefore: on `lead_restored` the restored Lead reviews the
+degradation window — the journal events and the diffs/commits produced
+while degraded — as standard D-0037 acceptance, and the
+`lead_restored` event's notes must state what was reviewed and the
+verdict (an empty window is noted explicitly). Processing the
+deferred-decisions queue is separate work and does not substitute for
+this review. Rule 10 answers: (a) cost — one review per degradation
+cycle, paid by the restored Lead in Lead-tier tokens; bounded by the
+window itself, since the journal delimits which diffs are in scope (a
+five-minute window costs minutes); (b) axes — the policy edit is
+paired across both deployments' CLAUDE.md (axes 1/4), and the rule is
+the axis-3 extension of the D-0037 acceptance duty to the role
+"coordinator temporarily working at a lower tier"; (c) failure
+detection — weekly calibration already reads the journal, and a
+`lead_restored` event without a window-review note is mechanically
+visible as a violation, same class as a silent skip (F-9).
