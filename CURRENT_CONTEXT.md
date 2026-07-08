@@ -257,6 +257,15 @@ D-0042.
 ## Remaining Lead-tier Queue
 
 - Routing policy text (queue item 1 above) — Lead-tier.
+- One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
+  (D-0028..D-0043 were written before the axis map existed
+  2026-07-08 and never had an axis sweep; today's operator questions
+  already surfaced three of their unswept siblings — F-12/F-13/F-14).
+  Point-lookup matrix per the map, NOT a repo rescan; siblings found
+  → fix or queue per D-0043. Schedule: with/after the first weekly
+  calibration run. Rule-10(a) retro-audit deliberately NOT queued:
+  its data stream is cc_usage, covered by calibration check 11
+  (evidence over paper estimates, D-0028).
 - White Paper: Architect review IN PROGRESS (started 2026-07-07).
   Comment 1 addressed same day (v0.1.1): §4 diagram replaced with the
   full target scheme — judge loop and deferred Router — in Mermaid;
