@@ -236,3 +236,38 @@ failure detection — weekly calibration checks both directions
 mechanically: two `rejected` without a subsequent `escalated` is a
 violation, and an `escalated` with no `rejected` trail questions the
 self-declaration.
+
+## D-0046
+Information workers are accepted by trail, not by trust. A scout
+digest, a critic verdict and a judge label are claims, not artifacts:
+without an attached trail they cannot be verified cheaper than
+redoing the work, so the D-0037 acceptance duty had no executable
+form for them — the digest was taken on faith (gap found by an
+operator question, finding F-14; the judge half of the class was
+already fixed by D-0031, scout was its unswept axis-3 sibling).
+Therefore: (1) a scout digest must end with a Trail block — searches
+run (patterns/globs/commands) and files read (paths); negative claims
+("X exists nowhere") are valid only with the trail, since a bad
+search is indistinguishable from absence; (2) the Lead accepts a
+digest by checking coverage against the question and spot-checking at
+least one load-bearing claim (mandatory for negative ones), noting
+the spot-check in the accepted event; a digest without a trail is
+`rejected` (D-0045); (3) a critic's ACCEPT verdict is itself a
+negative claim ("no blocking findings") and requires its trail — what
+was checked (files, traced scenarios, tests run); (4) downstream
+attribution: when a later builder/critic failure traces back to bad
+recon, the `rejected`/`escalated` notes name the digest as root
+cause — this is the evidence stream for scout's delegation-table row,
+which otherwise accumulates nothing even when scout is used. Builder
+is outside the class: its output is code and tests, verifiable as
+artifacts. Rule 10 answers: (a) cost — the trail is ~free (the worker
+lists what it already did); the spot-check is one targeted read/grep
+per digest, paid by the Lead, bounded to one claim; attribution is
+notes in events already written; (b) axes — role files and policy
+paired across both deployments (axes 1/4); the duty covers the
+information-worker family uniformly: scout, critic, judge-per-D-0031
+(axis 3); the API-contour counterpart is Shadow Evaluation /
+chief-judge review, already in place (axis 2); (c) failure detection
+— weekly calibration flags scout `accepted` events lacking a
+spot-check note, and the downstream-attribution notes feed the scout
+row; a trail-less digest surfaces immediately as `rejected`.
