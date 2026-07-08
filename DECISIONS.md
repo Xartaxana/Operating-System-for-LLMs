@@ -305,3 +305,35 @@ detection — the Boot Report line is the detector, and its absence
 from a Boot Report is visible to the operator who reads every such
 report (rule 4 of the boot protocol guarantees the report is read:
 the session stops on it).
+
+## D-0048
+The sibling map is verified externally and shrinks as well as grows.
+SIBLING_MAP.md had an add rule ("new symmetry -> new axis, same
+commit") but no verification and no removal rule (gap found by an
+operator question, finding F-16 — the third watcher-without-a-watcher
+in a row after the journal and the calibration loop). A registry with
+an add operation but no verify/remove operations monotonically
+diverges from reality. Three streams, all external to the map: (1)
+liveness — calibration check 12 verifies every concrete path named in
+the map exists in both repos and the referenced mechanisms are still
+in force; a dead path is a violation of the map's same-commit rule;
+(2) completeness — by recurrence: a defect of an already-class-fixed
+class surfacing OUTSIDE the places the map pointed to is a finding
+about the MAP (missed or wrong axis), recorded in FINDINGS with the
+axis fixed in the same commit as the defect; (3) growth — the map's
+line count joins calibration check 10's counters, and axes die
+symmetrically to their birth: when a symmetry disappears (deployment
+closed, mechanism removed), its axis is removed in the same commit
+that killed the symmetry. Rule 10 answers: (a) cost — check 12 is a
+path-existence pass over a ~100-line file once a week; the recurrence
+rule costs nothing extra (it fires during normal defect closing);
+the growth counter is one number per run; (b) axes — the map is
+single-copy by design (its own header: two maps would diverge), so
+there is no deployment pair to edit; the AO3 reporting duty for new
+axes already exists and is audited by check 9; the verify/remove
+symmetry applies the same discipline to the map that the map applies
+to everything else (axis 3 in spirit); (c) failure detection — checks
+10 and 12 surface staleness and bloat in the `calibrated` record;
+missed axes surface through the recurrence rule, and calibration
+check 9 already verifies that finding-closing commits name their
+axes.
