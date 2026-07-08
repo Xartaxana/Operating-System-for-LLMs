@@ -96,13 +96,32 @@ escalations = zero boundary data; a router trained on this would
 learn "always sonnet", which a static rule already does. Router
 stays deferred; the informative events for it are escalations and
 category diversity, neither present yet.
-TELEMETRY GAPS to fix before volume accumulates: (1) cc_usage has no
-agent attribution (transcripts carry agentId; not stored) — without
-it cost per ACCEPTED UNIT per category (the F-3 metric, R4 input) is
-not computable; (2) claude-haiku-4-5-20251001 has no price in
-usage_report.py — scout-tier traffic would import with cost=None
-(F-7 pattern: silent gap, at least it warns). Candidate Delegated
-Task 7 (builder-tier): agentId column + haiku 4.5 pricing + tests. Note: an untracked agent test-reviewer.md
+Both interim-read action items CLOSED same day (2026-07-08,
+operator-directed "telemetry first, then revive tiers"):
+
+1. TELEMETRY GAPS -> Delegated Task 7 ACCEPTED (commit 2f026f0,
+   archived: docs/task_reports/task-7_agent-attribution.md).
+   agent_id/agent_type live in cc_usage (1759/1759 sidechain rows
+   attributed, backfilled; the per-line type field is
+   attributionAgent, NOT agentType — spec errata), haiku 4.5 priced,
+   0 NULL-cost rows. Per-agent cost per project now computable (F-3
+   metric, R4 input). Tests 80/80 (31 tools + 49 gateway).
+   Process firsts: delegation journaled at dispatch time in THIS
+   repo's journal, and the acceptance ran through a critic (Opus)
+   dispatch — first critic evidence (ПРИНЯТЬ, 0 correctness findings,
+   consistent with independent Lead verification). Evidence so far:
+   builder n=2 accepted / 0 escalations, critic n=1 accepted; all
+   statuses stay estimated (Update Rule 1).
+
+2. DEAD TIERS REVIVED by policy (commits 3736ecd here, e32d955 AO3):
+   rule 1 — scout is the DEFAULT for recon (>1-2 known files or any
+   repo search; non-dispatch on a recon task is a journal event);
+   rule 3 — critic verdict is a mandatory acceptance input for diffs
+   >~100 lines / schema / core logic / cost accounting and for
+   unclear bugs before the Lead debugs; acceptance stays with the
+   Lead (D-0037). Watch scout dispatches — still zero anywhere.
+
+Note: an untracked agent test-reviewer.md
 appeared in AO3_tests during deployment (parallel session?) — no
 model assigned to it; assign on the next touch.
 
@@ -187,15 +206,16 @@ D-0042.
   litellm copies the logger into six lists at call time).
 - requests.db: 199 rows (judge 149, synthetic 50, real 0 — the API
   contour has carried no real traffic yet); cc_usage table alongside
-  (Claude Code transcript telemetry, 10986+ turns of which 1706
-  sidechain, idempotent import; both transcript layouts scanned
-  since Task 6).
+  (Claude Code transcript telemetry, 11149+ turns of which 1759+
+  sidechain, idempotent import; both transcript layouts scanned since
+  Task 6; agent_id/agent_type attribution + haiku pricing since
+  Task 7, 0 NULL-cost rows).
 - DELEGATION_TABLE.md: 4-state model (D-0035).
   provisionally_validated: coding -> Middle (tier-matching evidence),
   summarization / extraction / formatting -> intern; rejected:
   classification -> intern. Claude Code workstream rows: estimated.
   Flat delegation rule D-0037 recorded 2026-07-07.
-- Delegated Tasks 1, 2, 4, 5, 6: ACCEPTED and archived
+- Delegated Tasks 1, 2, 4, 5, 6, 7: ACCEPTED and archived
   (docs/task_reports/ — see Archive below).
 
 ## Claude Code Baseline (Task 5, 2026-07-07 — live guidance)
@@ -276,5 +296,9 @@ Closed work lives in docs/task_reports/ (index in its README.md):
 - task-6_subagent-transcripts.md — Task 6 spec, execution report
   (Sonnet builder subagent), Lead review (ACCEPTED 2026-07-08,
   commit 75af5b5), sidechain telemetry numbers and spec errata.
+- task-7_agent-attribution.md — Task 7 spec, execution report
+  (builder), critic review (first critic dispatch), Lead review
+  (ACCEPTED 2026-07-08, commit 2f026f0); attributionAgent errata,
+  per-agent cost breakdown unlocked.
 
 This file is intended to be updated frequently.

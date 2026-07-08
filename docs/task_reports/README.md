@@ -33,3 +33,9 @@ Evidence is never deleted, only relocated.
   execution report, Lead review (ACCEPTED 2026-07-08, commit
   75af5b5). First task executed by a live Sonnet builder subagent
   (D-0037/D-0040); sidechain telemetry = 7.2% of tokens, $100.03.
+- [task-7_agent-attribution.md](task-7_agent-attribution.md) —
+  Delegated Task 7: agent_id/agent_type in cc_usage + haiku pricing;
+  spec, execution report, critic review, Lead review (ACCEPTED
+  2026-07-08, commit 2f026f0). First journaled-at-dispatch delegation
+  in this repo and first critic-tier dispatch; per-agent cost
+  breakdown unlocked (R4/F-3 input).
