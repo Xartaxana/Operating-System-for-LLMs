@@ -31,9 +31,10 @@ routing plan merged on 2026-07-07.
 
 ## Findings
 
-See docs/FINDINGS.md — empirical findings from dogfooding the
-architecture on the Claude Code subscription contour (distinct from
-docs/RELATED_WORK.md, which holds external priors). Routing policy for
+See docs/FINDINGS.md — the registry of empirical findings from
+dogfooding the architecture on both contours (distinct from
+docs/RELATED_WORK.md, which holds external priors); entries summarize
+and point to the canonical evidence, which stays in place. Routing policy for
 this repository lives in CLAUDE.md (auto-loaded) with tiered subagents
 in .claude/agents/ and the delegation journal in logs/routing-log.jsonl.
 
