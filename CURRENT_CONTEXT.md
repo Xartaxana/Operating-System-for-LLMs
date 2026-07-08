@@ -121,17 +121,17 @@ operator-directed "telemetry first, then revive tiers"):
    unclear bugs before the Lead debugs; acceptance stays with the
    Lead (D-0037). Watch scout dispatches — still zero anywhere.
 
-Note: an untracked agent test-reviewer.md
-appeared in AO3_tests during deployment (parallel session?) — no
-model assigned to it; assign on the next touch.
+Note on test-reviewer.md (AO3): resolved — a parallel AO3 session
+assigned it model: opus (all 13 AO3 agents now carry a model;
+verified 2026-07-08).
 
 FIRST LIVE VERIFICATION (2026-07-07, same day): routing WORKS —
 the operator's fresh AO3 session dispatched test-maintainer and it
-ran on sonnet-5 (isSidechain=true), Lead stayed on Fable. Open
-finding: the session did NOT write the delegated event to
-routing-log.jsonl (dispatch went through /qa-loop, whose prompt
-predates the policy) — watch for a few days, then either duplicate
-the journal rule inside /qa-loop or strengthen CLAUDE.md. The
+ran on sonnet-5 (isSidechain=true), Lead stayed on Fable. The
+journal gap found then (dispatch via /qa-loop wrote no delegated
+event) is CLOSED 2026-07-08: /qa-loop SKILL.md now journals
+delegated/accepted/escalated via log_append.py (AO3 commit a2cc949),
+readiness checklist enforces it. The
 telemetry bug found the same day (subagent transcripts invisible to
 cc_usage) was fixed as Delegated Task 6 (ACCEPTED 2026-07-08, see
 Archive): sidechain traffic is now counted — 7.2% of all tokens,
