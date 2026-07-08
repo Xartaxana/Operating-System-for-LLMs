@@ -2,6 +2,11 @@
 
 The repository is the only source of truth.
 
+Note: in Claude Code sessions the harness auto-loads CLAUDE.md
+(routing policy; D-0041 — delegation is opt-in, so the policy must be
+in context before any task). That auto-load is NOT a boot: full state
+recovery is still this sequence, executed on the operator's request.
+
 When starting a new conversation:
 
 1. Read README.md.

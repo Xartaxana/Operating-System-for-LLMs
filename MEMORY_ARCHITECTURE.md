@@ -29,6 +29,9 @@ Includes:
 - PROJECT_PHILOSOPHY.md
 - ANTI_GOALS.md
 - SYSTEM_PROMPT.md
+- CLAUDE.md (auto-loaded by the Claude Code harness itself at session
+  start — routing policy; D-0041: delegation is opt-in, the policy
+  must precede any task, so it cannot wait for an on-request boot)
 
 ### Layer 2 — Decisions and Process
 

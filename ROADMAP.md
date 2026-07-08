@@ -52,9 +52,14 @@ useful on its own:
    the project CLAUDE.md, delegation journal. Every routed category
    enters DELEGATION_TABLE.md as `estimated` (D-0028, D-0035); the
    escalation journal is its evidence stream. DEPLOYED 2026-07-07 as
-   a pilot on the operator's second project (D:\AO3_tests, see
-   CURRENT_CONTEXT.md), including Lead degradation/restore (D-0039);
-   remaining: >=1 week of routed traffic, then step 3's first loop.
+   a pilot on the operator's second project (D:\AO3_tests) and
+   2026-07-08 on this repository itself (reference deployment,
+   D-0041), including Lead degradation/restore (D-0039/D-0042),
+   universal skip events, class-fix discipline with the sibling map
+   (D-0043) and /qa-loop journaling; builder/critic tiers have first
+   accepted evidence (Tasks 6-7), agent-attributed telemetry live
+   (cc_usage agent_id/agent_type). Remaining: >=1 week of routed
+   traffic incl. scout dispatches, then step 3's first loop.
 3. [ ] Weekly calibration loop: escalation journal + usage report
    reviewed, table statuses upgraded/downgraded on evidence, routing
    rules adjusted. This is Shadow Evaluation's philosophy applied to
