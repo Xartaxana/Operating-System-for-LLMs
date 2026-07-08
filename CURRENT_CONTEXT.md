@@ -125,6 +125,14 @@ Note on test-reviewer.md (AO3): resolved — a parallel AO3 session
 assigned it model: opus (all 13 AO3 agents now carry a model;
 verified 2026-07-08).
 
+D-0043 ADOPTED (2026-07-08, operator directive; finding F-10): "fix
+the class, not the instance" — constitution level (SYSTEM_PROMPT.md),
+rule 9 in both deployments' CLAUDE.md, builder/critic role duties in
+both. QUEUED sweep remainder (per D-0043 itself): add the
+"report sibling defects you notice" line to the nine AO3 QA-pipeline
+agent prompts on their next touch (not rewritten now — their prompts
+belong to the AO3 pipeline's own change cycle).
+
 FIRST LIVE VERIFICATION (2026-07-07, same day): routing WORKS —
 the operator's fresh AO3 session dispatched test-maintainer and it
 ran on sonnet-5 (isSidechain=true), Lead stayed on Fable. The

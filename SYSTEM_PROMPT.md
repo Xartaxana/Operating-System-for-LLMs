@@ -13,3 +13,9 @@ Core principles:
 - Always retrieve project knowledge from the repository.
 - Repository content overrides chat history.
 - Every architectural decision should eventually be documented.
+- Fix the class, not the instance (D-0043): a found defect is an
+  instance of a class until shown otherwise. Name the class, sweep
+  the known analogous places (other deployment, other contour,
+  sibling tiers and documents) fixing or explicitly queueing them,
+  and prevent recurrence at the highest binding level. Knowingly
+  leaving a sibling defect silently unfixed is a violation.

@@ -158,3 +158,24 @@ discrepancy is itself a calibration finding. Switches up or sideways
 are not degradation events and are currently untracked; tracking them
 would be a new decision. First live cycle: 2026-07-08 (Fable -> Opus
 4.8 -> Fable, logs/routing-log.jsonl).
+
+## D-0043
+Fix the class, not the instance. Operator directive (2026-07-08,
+finding F-10): every tier and model was repeatedly caught patching the
+found occurrence of a defect while leaving known analogous places
+untouched and writing no general rule. Therefore closing ANY defect
+requires three steps: (1) name the class — state what the general
+failure is, not just the local symptom; (2) sweep the known analogous
+places (the other deployment, the other contour, the sibling tiers,
+the sibling documents/rules) and fix them now or explicitly queue or
+journal what remains — a knowingly unfixed sibling left silent is a
+violation, exactly as a silent skip is under F-9; (3) if a rule can
+prevent recurrence, write it at the highest level that binds all
+future instances (constitution > DECISIONS.md > deployment policy >
+local file), never only in the file where the defect was found.
+Division of duty follows D-0037: workers REPORT sibling defects they
+notice (they do not expand scope themselves), reviewers check
+class-completeness of every fix as a standard finding category, the
+coordinator owns the sweep and the rule placement. Recorded in
+SYSTEM_PROMPT.md (constitution, always loaded) because it must bind
+any LLM in any session — routed or not.
