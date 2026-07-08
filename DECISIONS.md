@@ -271,3 +271,37 @@ chief-judge review, already in place (axis 2); (c) failure detection
 — weekly calibration flags scout `accepted` events lacking a
 spot-check note, and the downstream-attribution notes feed the scout
 row; a trail-less digest surfaces immediately as `rejected`.
+
+## D-0047
+The calibration loop leaves a run record and has an external
+staleness detector; its checks live in one executable protocol. A
+rule-10(c) audit of all existing mechanisms (operator-commissioned,
+finding F-15) showed that nearly every detection promise made by the
+policy routes through "weekly calibration will notice it in the
+journal/cc_usage" — while calibration itself had no schedule, no
+mention in the session protocol, no record of ever having run, and
+its checks were scattered across decision texts with no executable
+list. A detector cannot detect its own absence. Therefore: (1)
+PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md is the canonical home of all
+mechanical checks — any new mechanism whose rule-10(c) answer is
+"calibration will notice" must add its check there in the same
+commit, or the answer is empty; (2) every calibration run ends with a
+`calibrated` journal event (period, events reviewed, table-status
+changes, boot-file line counts for the F-8 check); (3) the external
+detector is the Boot Report's Last Calibration line
+(BOOT_REPORT_PROTOCOL.md rule 5): NONE or older than 7 days with live
+routed traffic = OVERDUE, visible to the operator at every session
+start — a simpler, more frequent process watches the watcher. Rule 10
+answers: (a) cost — one protocol read per weekly run; one journal
+line per run; one Boot Report line per session; all bounded and
+Lead-tier; (b) axes — the protocol is a single file in the OS repo
+(like SIBLING_MAP: two copies would themselves diverge) and reads
+both deployments' journals; the `calibrated` event is deliberately
+NOT paired into AO3's vocabulary — it is only ever legitimate in the
+OS journal where the delegation table lives, and AO3's format
+enforcement should keep rejecting it; axis-2 counterpart on the API
+contour is gateway/metrics.py digests, already in place; (c) failure
+detection — the Boot Report line is the detector, and its absence
+from a Boot Report is visible to the operator who reads every such
+report (rule 4 of the boot protocol guarantees the report is read:
+the session stops on it).

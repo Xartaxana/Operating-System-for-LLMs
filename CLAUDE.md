@@ -141,9 +141,11 @@ tools/usage_report.py — расхождение само по себе собы
 доработок для Update Rule 4; D-0045), `escalated`, `decomposable`,
 `dispatch_skipped` (ярус подходил, но Lead обоснованно сделал сам —
 причина обязательна; молчаливый пропуск = нарушение), `lead_degraded`,
-`lead_restored`, `journal_created`. Журнал — evidence для еженедельной
-калибровки (статусы в DELEGATION_TABLE.md двигаются только по этим
-данным, Update Rule 1).
+`lead_restored`, `journal_created`, `calibrated` (факт прогона
+еженедельной калибровки; D-0047). Журнал — evidence для еженедельной
+калибровки (чек-лист: PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md; статусы
+в DELEGATION_TABLE.md двигаются только по этим данным, Update Rule 1;
+просрочка >7 дней видна строкой Last Calibration в Boot Report).
 
 ## Деградация Lead (D-0039)
 

@@ -64,7 +64,10 @@ useful on its own:
    reviewed, table statuses upgraded/downgraded on evidence, routing
    rules adjusted. This is Shadow Evaluation's philosophy applied to
    the subscription contour (replay is impossible there; acceptance
-   verdicts and escalations are the measurements).
+   verdicts and escalations are the measurements). Executable
+   checklist: PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md; each run ends
+   with a `calibrated` journal event, staleness is surfaced by the
+   Boot Report's Last Calibration line (D-0047).
 
 This workstream is NOT the deferred Router (D-0029): routing policy
 is executed by the Lead session itself following documented rules,

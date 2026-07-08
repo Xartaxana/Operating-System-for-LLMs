@@ -19,6 +19,8 @@ Current Context Loaded: YES/NO
 
 Current Phase:
 
+Last Calibration:
+
 Current Objective:
 
 Next Required Action:
@@ -39,6 +41,13 @@ Confidence:
    confirmation before starting any task. Boot recovery is not work
    authorization; neither BOOT.md's queue nor an unblocked task in
    CURRENT_CONTEXT.md overrides this stop.
+
+5. Last Calibration = the timestamp of the most recent `calibrated`
+   event in logs/routing-log.jsonl, or NONE. If routed traffic exists
+   and more than 7 days have passed since that event (or since routed
+   traffic began, when NONE), mark the line OVERDUE (D-0047). This is
+   the external detector for the calibration loop itself — the one
+   mechanism whose absence calibration cannot detect.
 
 Rationale for 1–2 (added 2026-07-03): a session that starts with a
 silent series of file reads buries the report in tool noise; the
