@@ -148,6 +148,13 @@ reading cc_usage is deferred, the G1 line must say so explicitly.
     `defect_found` event, failure-class word in rejected notes —
     absorbs eval-stage-1 item (1)); CLAUDE.md + roles both deploys,
     AO3 log_append.py vocabulary + tests, calibration check 13.
+  - Stage 1.5 DONE 2026-07-08: D-0053 typed journal fields (F-18,
+    external review by pi-autopilot author: task_id / attempt /
+    failure_class / witness / ref; AO3 log_append enforce + tests;
+    checks 3/13 amended). Queued from it: deterministic counting
+    script for checks 3/13 (Lead spec -> builder, AFTER the first
+    manual calibration validates what it should compute); structured
+    worker-report frames deferred until dispatch volume (Rule #1).
   - Stage 2 (Lead, one policy line; trigger = first parallel builder
     dispatch or first calibration, whichever comes first): rule 4
     addendum — parallel specs declare owned paths, Lead checks

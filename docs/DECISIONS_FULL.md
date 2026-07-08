@@ -459,3 +459,39 @@ DECISIONS index + full text this commit. (c) detector — REGISTERED
 without witness = violation; defect_found stream is counted into a
 per-tier false-accept rate reported in the `calibrated` event notes;
 rejected without a failure-class word = violation.
+
+## D-0053
+Load-bearing journal facts are typed fields, not prose (F-18;
+external review by the pi-autopilot author, relayed by the operator:
+"you missed structured output"). The critique landed on hour-old
+D-0052: the defect_found -> accepted link, the rule-6 "two rejected
+on one task" counter, witness, failure class and attempt number all
+lived inside the free-text notes field — so calibration checks
+3/6/13 could only be executed by Lead-tier prose reading, while
+their nature is "Ledger (no LLM)" per our own delegation table.
+Vocabulary: `task_id` — a per-task identifier threading
+delegated/accepted/rejected/escalated/defect_found (required for
+those events); `attempt` (integer) and `failure_class`
+(spec/capability/recon/tooling) on rejected; `witness` (actual
+verification-run output) on builder-accepted; `ref` (the original
+accepted's task_id) on defect_found. `notes` remains the
+human-readable surplus, never the carrier of gate-consumed facts.
+The journal is append-only: pre-D-0053 events are NOT rewritten; the
+first weekly calibration reads them manually. A deterministic
+counting script for checks 3/13 is queued (builder to a Lead spec,
+after the first calibration — the manual first run validates what
+the script should compute). Structured frames for WORKER REPORTS
+(Trail/verdict as schema blocks) are deliberately deferred until
+dispatch volume justifies them (Rule #1); the sibling precedent
+already exists on axis 6 (AO3 schemas/agent-output). Rule 10
+answers: (a) cost — a few short typed fields per event the Lead
+already writes; near-zero at write time, repaid by making three
+calibration checks script-computable (check 11 overhead reduction);
+(b) axes — axis 1: CLAUDE.md journal sections of both deployments +
+AO3 log_append.py enforce + its tests (axis 6) same day; axis 4:
+DECISIONS index + full text this commit; axis 3 untouched (fields
+are the Lead's journaling duty, not the workers'); (c) detector —
+REGISTERED: AO3 side, log_append.py rejects events missing required
+fields (tested); OS side, calibration checks 3 and 13 consume the
+fields and flag their absence on post-D-0053 events (protocol
+amended same commit).
