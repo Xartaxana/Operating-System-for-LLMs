@@ -34,7 +34,9 @@ routing plan merged on 2026-07-07.
 See docs/FINDINGS.md — the registry of empirical findings from
 dogfooding the architecture on both contours (distinct from
 docs/RELATED_WORK.md, which holds external priors); entries summarize
-and point to the canonical evidence, which stays in place. Routing policy for
+and point to the canonical evidence, which stays in place.
+docs/SIBLING_MAP.md is the symmetry-axis map that makes the D-0043
+"fix the class" sweep a targeted lookup instead of a repo rescan. Routing policy for
 this repository lives in CLAUDE.md (auto-loaded) with tiered subagents
 in .claude/agents/ and the delegation journal in logs/routing-log.jsonl.
 
