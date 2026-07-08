@@ -95,11 +95,36 @@ $100.03 accounted, of which AO3_tests $57.82. The AO3 retro baseline
 DOGFOODING NOTE (2026-07-08): Task 6 was the first task dispatched to
 a live Claude Code subagent (Sonnet builder, background, D-0040) and
 accepted on first review — first evidence point for the "builder"
-row (n=1, status stays estimated). The dispatch was manual: this
-repository has NO routing policy deployed (no CLAUDE.md, no
-scout/builder/critic agents, no routing-log.jsonl — the pilot covers
-AO3_tests only), so nothing would have routed automatically.
-Candidate queue item: extend the routing MVP to this repository.
+row (n=1, status stays estimated). The dispatch was manual because
+the routing policy was not yet deployed here — now fixed.
+
+ROUTING MVP — DEPLOYED TO THIS REPO (2026-07-08, reference/dogfooding
+deployment; second after the AO3_tests pilot). Added: CLAUDE.md
+(routing policy, journal format, degradation D-0039, permission
+hygiene adapted to this repo's commands — pytest tools/gateway,
+proxy from gateway/), .claude/agents/{scout,builder,critic}.md
+(haiku/sonnet/opus, generic, encode D-0037), logs/routing-log.jsonl
+(seeded journal_created + lead_degraded). CLAUDE.md kept lean and
+defers to BOOT.md for full recovery (D-0038 tension noted in-file).
+
+FINDING F-1 RECORDED (docs/FINDINGS.md, new file for dogfooding
+findings): the default Claude Code harness does NOT initiate
+delegation on its own ("Do not spawn agents unless the user asks");
+left alone, the Lead does delegable work itself on the most expensive
+tier. Consequence: the routing policy MUST auto-load into the Lead's
+context per-project (CLAUDE.md) — agent definitions alone are not
+enough. White Paper material (contrapoint to "frameworks maximize
+agent count" — the production default is the opposite, conservative).
+QUEUED FOR RESTORED LEAD: decide whether to formalize F-1's
+consequence as a DECISIONS.md entry (not done now — session is
+degraded on Opus 4.8, D-0039).
+
+DEGRADATION ACTIVE (2026-07-08): operator switched Fable->Opus 4.8
+via /model. Recorded as lead_degraded in the new journal. This
+session did routine/authorized work only (Task 6 acceptance was on
+Fable; this deploy + F-1 record on Opus); no new decisions, no table
+status changes, no gate signatures. Return to Fable -> lead_restored
+at next session/task boundary.
 
 ## System State (condensed, 2026-07-08)
 

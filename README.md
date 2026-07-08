@@ -29,6 +29,14 @@ and Phase 2 development options, and
 docs/EXTERNAL_PLAN_CLAUDE_CODE_ROUTING_2026-07-07.md for the external
 routing plan merged on 2026-07-07.
 
+## Findings
+
+See docs/FINDINGS.md — empirical findings from dogfooding the
+architecture on the Claude Code subscription contour (distinct from
+docs/RELATED_WORK.md, which holds external priors). Routing policy for
+this repository lives in CLAUDE.md (auto-loaded) with tiered subagents
+in .claude/agents/ and the delegation journal in logs/routing-log.jsonl.
+
 ## Gateway
 
 gateway/ contains the Phase 1 LiteLLM proxy with SQLite request logging.
