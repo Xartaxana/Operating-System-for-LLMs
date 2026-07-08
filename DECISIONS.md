@@ -205,3 +205,34 @@ the axis-3 extension of the D-0037 acceptance duty to the role
 detection — weekly calibration already reads the journal, and a
 `lead_restored` event without a window-review note is mechanically
 visible as a violation, same class as a silent skip (F-9).
+
+## D-0045
+Rejections are journaled; rule 6's escalation trigger is defined by
+them. The escalation rule ("2 failed attempts -> tier up") had no
+mechanical substrate: "failed attempt" was undefined (does a critic
+rejection count?) and left no journal trace — the vocabulary had
+`accepted` with no negative counterpart, so a silent third retry on
+the same tier was invisible to calibration, and retry loops could not
+be counted per task for Update Rule 4 (gap found by an operator
+question, finding F-13). Therefore: a worker result rejected at
+acceptance (blocking critic findings or the Lead's own check) IS a
+failed attempt and is journaled as `rejected` (agent = the worker,
+model required, notes: task, reason, attempt number). Two `rejected`
+on the same task at the same tier make escalation mandatory; a third
+attempt at that tier is a violation. Deliberately NO in-flight dollar
+stop-loss: the subscription contour has no live per-task cost meter,
+so the attempt counter is the cheap operational proxy for the cost
+crossover ("cheap tier with retries costs more than the upper tier
+outright"); the true crossover is measured weekly by Update Rule 4
+from cc_usage + the journal. Rule 10 answers: (a) cost — one journal
+line per rejection, written during an acceptance step that already
+happens; paid by the Lead; (b) axes — policy text and event vocabulary
+paired across both deployments' CLAUDE.md (axes 1/4); AO3's format
+enforcement updated in the same change (scripts/log_append.py
+ROUTING_EVENTS/MODEL_REQUIRED_EVENTS plus its test); the rule applies
+uniformly to all tiers (axis 3); `rejected` supplies the journal side
+of the loop count whose cost side lives in cc_usage (axis 2); (c)
+failure detection — weekly calibration checks both directions
+mechanically: two `rejected` without a subsequent `escalated` is a
+violation, and an `escalated` with no `rejected` trail questions the
+self-declaration.
