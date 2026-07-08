@@ -421,3 +421,41 @@ which is unchanged; its own trim is the pilot's next-touch duty);
 (c) detector — boot-budget counters in session-handoff step 4 and
 calibration check 10 catch regrowth; calibration check 12 verifies
 the index and DECISIONS_FULL entry counts match.
+
+## D-0052
+Acceptance is evidence-based in both directions (F-17; external
+prior: pi-autopilot witness coverage, RELATED_WORK "Agent
+orchestration with evidence gates"). The journal recorded negative
+acceptance outcomes (D-0045) but let positive ones stay
+self-certified: "tests pass" was accepted as a retelling, and work
+that broke AFTER acceptance left no trace back to the tier that
+produced it — the false-accept rate was uncomputable, so
+DELEGATION_TABLE statuses could only move on defects caught at
+acceptance time. Three vocabulary/procedure changes: (1) WITNESS on
+builder acceptance — an accepted event for a builder dispatch must
+carry (or explicitly reference in the worker's report) the actual
+output of the verification run (test command + result), not a
+retelling; a report without a witness is returned → `rejected`.
+Symmetric to the D-0046 trail rule: an acceptance verdict is itself
+an information-worker claim (F-17 class). (2) `defect_found` journal
+event — the session that finds a defect in previously ACCEPTED work
+writes it (agent = the original worker tier; notes: what broke +
+reference to the original accepted dispatch by ts/task; model
+optional — the original dispatch carries it). This gives calibration
+the per-tier false-accept rate — the missing downward evidence
+stream for Update Rule 1. (3) Failure-class word in `rejected` notes
+(spec / capability / recon / tooling) — eval-plan stage 1 item (1),
+merged here as the same vocabulary change: calibration sees WHERE a
+tier breaks, not only that it broke. Rule 10 answers: (a) cost — one
+paste of run output per builder acceptance, one journal line per
+late defect, one word per rejection; paid by Lead at acceptance
+time; negligible against the calibration data it makes usable.
+(b) axes — axis 1: CLAUDE.md + builder/critic role files of both
+deployments, AO3's log_append.py vocabulary + its tests (axis 6),
+all same-day; axis 3: witness duty lands in the builder role file,
+scout/judge/critic already covered (D-0046/D-0031); axis 4:
+DECISIONS index + full text this commit. (c) detector — REGISTERED
+(D-0049) as calibration check 13 same commit: accepted(builder)
+without witness = violation; defect_found stream is counted into a
+per-tier false-accept rate reported in the `calibrated` event notes;
+rejected without a failure-class word = violation.

@@ -57,3 +57,4 @@ line and the full text in the same commit; entry counts must match
 - D-0049 — Rule 10(c) is a lifecycle invariant: every mechanism has a REGISTERED failure detector, or it is not a mechanism.
 - D-0050 — Session close is checked symmetrically to open: session-handoff skill at Session End; the next Boot Report detects skipped handoffs.
 - D-0051 — Boot diet: DECISIONS.md is this index; full texts in docs/DECISIONS_FULL.md; CLAUDE.md operative-only; CURRENT_CONTEXT archived per D-0038.
+- D-0052 — Acceptance is evidence-based both ways: builder-accepted carries a witness (actual run output); `defect_found` retro-attributes late defects to the original dispatch; rejected notes carry a failure-class word.

@@ -144,16 +144,10 @@ reading cc_usage is deferred, the G1 line must say so explicitly.
   covered by calibration check 11.
 - Evidence-acceptance adoption plan (F-17 + pi-autopilot priors in
   RELATED_WORK "Agent orchestration"; operator-approved 2026-07-08):
-  - Stage 1 (Lead, BEFORE first weekly calibration — every
-    witness-less accept until then is unusable calibration data):
-    D-0052 — builder-accepted carries witness (actual test/run
-    output attached, not a retelling; symmetric to D-0046) + new
-    journal event `defect_found` (links a later-found defect to the
-    original accepted dispatch -> false-accept rate per tier, the
-    missing downward stream for Update Rule 1). Merges eval-stage-1
-    item (1) (same journal-vocabulary change). Same commit: CLAUDE.md
-    both deploys (axis 1) + builder/critic role files (axis 3) +
-    calibration checks (rule 10c) + DECISIONS index/full (axis 4).
+  - Stage 1 DONE 2026-07-08: D-0052 (witness on builder-accepted,
+    `defect_found` event, failure-class word in rejected notes —
+    absorbs eval-stage-1 item (1)); CLAUDE.md + roles both deploys,
+    AO3 log_append.py vocabulary + tests, calibration check 13.
   - Stage 2 (Lead, one policy line; trigger = first parallel builder
     dispatch or first calibration, whichever comes first): rule 4
     addendum — parallel specs declare owned paths, Lead checks
@@ -167,7 +161,7 @@ reading cc_usage is deferred, the G1 line must say so explicitly.
 - Eval plan, stage 1 (Habr evals articles 2026-07-08; priors in
   docs/RELATED_WORK.md "Evals"; operator-approved): (1) failure-class
   word in rejected-event notes (spec / capability / recon / tooling)
-  — lands with D-0052 stage 1 above;
+  — LANDED with D-0052;
   (2) scout golden set — 5-10 recon questions with known answers,
   incl. unanswerable and negative-claim cases (F-14); run on
   tier-model swap or scout.md edit; (3) regression rule for
