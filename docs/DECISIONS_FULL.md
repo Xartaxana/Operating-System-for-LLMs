@@ -594,3 +594,75 @@ refusal; (b) axes, by this decision's own format:
 axis-block presence on the period's mechanism commits); the gate's
 own silent-death mode (hook unset/broken) is exactly what the
 hooksPath check catches.
+
+## D-0056
+Lead tier is verified at both ends and externally (F-21, the twelfth
+F-11 case; three operator questions across AO3 sessions 2026-07-08/09).
+Silent Lead degradation had no detector: D-0039 entrusted the
+`lead_degraded` event to the very party whose downgrade it must
+catch, and a restored Lead read the ABSENCE of the event as absence
+of the fact (circular; same inference class as "empty output of a
+mis-invoked env tool = the object does not exist"). Precedent: an
+AO3 session ran a full /qa-loop pass — dispatches, acceptance,
+mechanism commits — on Opus (critic tier) with no event; the
+restored Lead then denied the window until the operator pointed at
+the visible /model command. Neither in-session point suffices alone:
+entry fails by self-detection-by-the-degraded (unreliable by
+construction), and the ascent may never happen (safety fallback
+Fable→Opus that never returns — the session dies degraded). Hence
+THREE points: (1) ENTRY — before the FIRST Lead action of a session
+(worker dispatch, acceptance, mechanism commit, status change),
+compare own model per the last visible signal (session system
+prompt; switch command if any) against the Lead tier; below it with
+no journal-open window → write `lead_degraded` BEFORE the action.
+The trigger is anchored to the action, not to session start: entry
+failure is a missing recognized TRIGGER, not a missing signal
+(F-20 class). (2) EXIT — a visible ascent is BY ITSELF proof a
+window existed, regardless of the journal: same move writes the
+retroactive `lead_degraded` (marked retroactive, factual bounds),
+performs the D-0044 window acceptance, then `lead_restored`.
+(3) EXTERNAL NET — weekly calibration check 5 amended: actual
+Lead-session models from transcripts (cc_usage main chains, not
+sidechains) vs window coverage by event pairs in both journals; Lead
+activity below Fable outside a declared window = silent degradation.
+This extends the D-0034/D-0042 model-vs-transcript cross-check from
+workers to the Lead itself — the only tier that had no gate (F-20
+diagnosis confirmed). Points (1)+(2) landed on AO3 first (CLAUDE.md
+"Деградация Lead" п.4 а/б/в; /qa-loop preflight step 0 as the
+pipeline's entry turnstile — commits 1efef9f, 642dc30); this commit
+ports п.4 into the OS CLAUDE.md degradation section and registers
+point (3). Honest limits: both in-session points remain voluntary
+self-checks (the entry check is performed by the possibly-degraded
+model); what makes the mechanism a mechanism is the external net —
+a self-check failure is caught within one calibration period.
+Rule 10 answers: (a) cost — one model-vs-tier comparison before the
+first Lead action of a session (seconds, paid by the Lead session);
+retroactive pair + window acceptance only on an actual ascent; one
+sweep line per calibration run (cc_usage query + journal grep), paid
+by the calibrator; repaid by closing the only ungated tier — the
+precedent's unfixed window silently carried mechanism commits;
+(b) axes, by enumeration over the current map:
+ось 1: покрыта — п.4 а/б/в теперь в CLAUDE.md ОБОИХ деплоев (AO3:
+  коммиты 1efef9f/642dc30; OS: этот коммит); журнальный вокабуляр
+  (lead_degraded/lead_restored, ретро-пометка) уже общий; qa-loop
+  preflight — AO3-специфичный турникет, у OS конвейерного скилла
+  нет (записанное различие, не пропуск);
+ось 2: н-п — сверка модели, не денег; калибровочная выборка читает
+  cc_usage как есть, ничего в учёт не добавляя;
+ось 3: покрыта — механизм закрывает единственную роль без сверки
+  (Lead); воркеры уже покрыты чеком 4 (D-0042), судья — D-0031;
+ось 4: покрыта — DECISIONS индекс + полный текст этим же коммитом
+  (чек 12); наблюдение остаётся в docs/FINDINGS.md F-21 со ссылкой
+  на решение (статус-строка обновлена тем же коммитом);
+ось 5: н-п — правка политики и протокола, кода нет; счётного
+  скрипта у чека 5 нет (как и у остальных чеков — общий queued item
+  «deterministic counting script» уже стоит в очереди);
+ось 6: покрыта — вход конвейера AO3 несёт шаг 0 preflight (SKILL.md
+  qa-loop, коммит 642dc30); прочие звенья цепочки Lead-действий не
+  совершают и сверки не требуют;
+(c) detector — REGISTERED: calibration check 5 amended same commit
+(actual Lead-session models vs window coverage, both journals);
+this net is precisely the detector for silent failure of both
+in-session points; staleness of the net itself is caught by the
+Boot Report's Last Calibration line (D-0047), and check-5 quality
+falls under the standing check-8 audit of answer quality.

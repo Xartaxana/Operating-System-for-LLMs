@@ -61,3 +61,4 @@ line and the full text in the same commit; entry counts must match
 - D-0053 — Load-bearing journal facts are typed fields, not prose: task_id links a task's events; attempt/failure_class on rejected, witness on builder-accepted, ref on defect_found; notes is human-readable surplus.
 - D-0054 — Every dispatch carries a tier-shaped DoD: what "done" means and how acceptance will verify it; a worker returns a DoD-less dispatch with questions before starting work.
 - D-0055 — Rule 10(b) is answered by enumeration over the CURRENT map's axes and enforced by a commit-msg hook: a mechanism commit without the axis block is rejected; explicit skip line only from the commit message.
+- D-0056 — Lead tier is verified at both ends and externally: entry check before the first Lead action of a session, visible ascent proves a degradation window regardless of the journal, weekly calibration sweeps actual Lead-session models vs window coverage.
