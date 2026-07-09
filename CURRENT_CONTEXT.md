@@ -173,12 +173,24 @@ pick.
   built-in permissions, read-only scout profile = restricted tool
   set via SDK. GSD Pi (ex gsd-2) = standalone agent+methodology,
   overlaps our policy layer, not a harness; vibe-engineer immature
-  (v0.1); aider noted from priors. REMAINING (awaits operator
-  pick): (3) prototype Pi profiles — scout (read/grep-only, local
-  Qwen3-4B; entrance exam = D-0057 golden set, negative-claim and
-  judgment-refusal traps are the bar, prior: 4B judge 11/13) and
-  builder (builder-groq); (4) table row "recon -> local intern"
-  enters as estimated (D-0035) only if the exam passes.
+  (v0.1); aider noted from priors. STEP 3 DONE 2026-07-09
+  (operator-ordered): Pi prototype LIVE — npm
+  @earendil-works/pi-coding-agent 0.80.3, provider os-gateway in
+  ~/.pi/agent/models.json (intern + builder-groq through our
+  proxy, accounting lands in requests.db). ENTRANCE EXAM (t-011):
+  qwen3:4b FAILED 0/7 — zero tool calls, all answers fabricated
+  incl. both mandatory traps and a fabricated "verified" claim
+  (Runs log in PROCESS/SCOUT_GOLDEN_SET.md); (4) row "recon ->
+  local intern" does NOT enter the table. Infrastructure
+  separately VALIDATED: Pi -> gateway -> ollama_chat structured
+  tool calling works (setup lessons: Pi -p needs closed stdin;
+  models.json cost requires cacheRead/cacheWrite; litellm ollama/
+  prefix drops tools — intern moved to ollama_chat/ in
+  config.yaml). REMAINING: local scout CLOSED until a stronger
+  local candidate fits 6GB VRAM (qwen3:8b-class quant) — the exam
+  stays the entrance bar; Pi builder profile on builder-groq
+  (cloud, tool-enabled) — natural next pilot step, awaits
+  operator pick.
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
   (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
   unswept siblings). Point-lookup matrix per the map, NOT a rescan.
@@ -287,6 +299,15 @@ pick.
   $0 cash.
 - Open operational item (Architect): route real API-contour traffic
   through the gateway; lead needs ANTHROPIC_API_KEY (paid).
+- BSOD 2026-07-09 15:02 (bugcheck 0x3B in aehd.sys — Android
+  Emulator Hypervisor Driver, minidump 070926-7359-01.dmp) while
+  the AO3 pipeline exercised the emulator; gateway/Pi processes were
+  idle userspace (no intern request had reached the proxy). Rule of
+  thumb recorded: do NOT run the Android emulator (AO3 QA pipeline)
+  and local GPU inference (Ollama exam runs) simultaneously on this
+  machine; sequence heavy workloads. The AO3 session died with
+  uncommitted work — its next boot must record the dirty tree per
+  Boot Report rule 6.
 
 ## Archive (D-0038 pointers)
 

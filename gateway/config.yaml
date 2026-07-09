@@ -62,7 +62,11 @@ model_list:
   # (roughly Haiku-class pricing) without real spend.
   - model_name: intern
     litellm_params:
-      model: ollama/qwen3:4b
+      # ollama_chat/ = native /api/chat: passes TOOLS through (t-011:
+      # with legacy ollama/ the model wrote tool calls as text inside
+      # reasoning_content and agents saw empty answers). analyst stays
+      # on ollama/ - it never tool-calls.
+      model: ollama_chat/qwen3:4b
       api_base: http://localhost:11434
       input_cost_per_token: 0.0000001
       output_cost_per_token: 0.0000004
