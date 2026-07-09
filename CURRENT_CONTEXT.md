@@ -215,7 +215,9 @@ pick.
   Comment 1 addressed same day (v0.1.1). Portability + contour
   asymmetry FOLDED IN 2026-07-09 (v0.1.2, §4.1 + §5.1, operator-
   ordered). Still queued: §7 upkeep against the evidence log; full
-  sync with D-0034..D-0038 once the unified plan's first steps land.
+  sync with D-0034..D-0038 once the unified plan's first steps land;
+  fold the D-0062 Two-Vocabularies bridge into §4.1 (functions vs
+  grades).
 
 ## Environment Notes (this machine)
 

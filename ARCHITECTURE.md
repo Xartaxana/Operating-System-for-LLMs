@@ -134,6 +134,40 @@ through its own acceptance stream or Shadow Evaluation — the policy
 tells a new deployment HOW to decide and how to accumulate evidence,
 not where its tier boundaries lie.
 
+## Two Vocabularies: Functions and Grades (D-0062)
+
+The two contours name their tiers differently, and the difference is
+load-bearing. The POLICY speaks only the FUNCTION vocabulary; the
+GRADE vocabulary belongs to models and accounting.
+
+| Function (canonical policy name) | Duty | Subscription binding (this repo) | API-contour service today |
+|---|---|---|---|
+| **scout** — recon | search/read, digest with a trail (D-0046) | Haiku subagent | — (no repository access on this contour; recorded difference) |
+| **builder** — implementation to a written spec | code/tests, witness (D-0052) | Sonnet subagent | `middle` alias for routine-coding task categories |
+| **critic** — review | verdict with a trail | Opus subagent | judge + chief-judge (D-0031) — empirically Senior-tier work (White Paper §6) |
+| **Lead** — decomposition, specs, acceptance | coordinator; full authority only on the Lead tier (D-0058) | Fable session | harness + human driving Shadow Evaluation; no autonomous coordinator |
+| **analyst** — telemetry narration | reads Ledger output only | folded into the Lead session | `analyst` alias (Qwen3-4B) |
+
+Grades — intern (4B) / junior (8B) / middle (70B) / senior
+(frontier) — are rungs of the price/capability ladder: they classify
+MODELS and price task categories in DELEGATION_TABLE.md. Function
+names classify WORK and carry duties (role files: trail, witness,
+flat delegation); every policy rule references functions
+(D-0037, D-0045..D-0058) and none references a grade.
+
+Consequences:
+
+- Every rule naming scout/builder/critic/Lead ports to any
+  deployment by supplying the function→model binding (requirement 1
+  above) — the rule text never changes.
+- A deployment may leave a function unbound where the work shape
+  lacks it (today's API contour has no recon and no autonomous
+  coordinator) — a recorded difference, not a porting failure.
+- The vocabularies never substitute for each other in evidence:
+  statuses bind task types to CONCRETE models, not to either name.
+  A grade word inside a routing rule is a smell — it would bind a
+  duty to a price rung.
+
 ## Components (API contour)
 
 The full scheme, including the evidence loop (judge) and the deferred

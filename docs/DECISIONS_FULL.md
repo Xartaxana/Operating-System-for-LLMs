@@ -937,3 +937,55 @@ by calibration checks 1/3/6/13, and a priority violation is visible
 to the NEXT session as a Current-Task-vs-commits mismatch in the
 Boot Report (D-0025). Skill-file staleness against policy is caught
 by the SIBLING_MAP axis-4 pair (check 12 liveness).
+
+## D-0062
+Two vocabularies, one bridge (operator question 2026-07-09: "our
+policies name roles — they will not land on an API-contour project
+if we cannot share a vocabulary"). Adopted answer: the vocabularies
+are intentionally TWO, bound by an explicit normative bridge,
+because they name different stable things. FUNCTION names
+(scout=recon, builder=implementation-to-spec, critic=review,
+Lead=decomposition-and-acceptance; also analyst and judge) classify
+WORK: they carry duties (role files: trail, witness, flat
+delegation, judgment-refusal) and are the ONLY vocabulary policy
+rules speak — a rule naming a grade would bind a duty to a price
+rung. GRADE names (intern/junior/middle/senior) classify MODELS:
+rungs of the price/capability ladder used by DELEGATION_TABLE task
+categories and accounting. Porting the policy to any deployment —
+including an API-contour-shaped agentic project — means supplying
+the function→model binding (Portability requirement 1); no rule
+text changes. A deployment may leave a function unbound where its
+work shape lacks it (today's API contour has no recon and no
+autonomous coordinator) — a recorded difference, not a porting
+failure. The bridge table (functions × both contours, including
+judge/analyst) lives in ARCHITECTURE.md "Two Vocabularies";
+one-line anchors sit in the «Ярусы» sections of both deploys'
+CLAUDE.md. Evidence stays bound to CONCRETE models under either
+vocabulary (D-0035; Portability).
+Rule 10 answers: (a) cost — zero runtime obligation: one bridge
+table and two policy lines, loaded where those files already load;
+paid once by this session; repaid whenever the policy is read on a
+deployment whose model set differs from this repo's;
+(b) axes, by enumeration over the current map:
+ось 1: покрыта — строка в «Ярусы» CLAUDE.md обоих деплоев (OS этим
+  коммитом, AO3 — коммитом той же сессии); мост ОДИН, в
+  ARCHITECTURE OS-репо (два моста стали бы расходящимися
+  собратьями — тот же принцип, что единственная карта осей);
+ось 2: покрыта — мост и есть связка словарей двух контуров; учёт и
+  строки таблицы не меняются;
+ось 3: покрыта — таблица моста перечисляет ВСЕ роли, включая
+  analyst и judge (их функциональные имена — тот же словарь, не
+  исключение);
+ось 4: покрыта — DECISIONS индекс + полный текст тем же коммитом
+  (чек 12); новая пара ARCHITECTURE «Two Vocabularies» <->
+  CLAUDE.md «Ярусы» добавлена в карту тем же коммитом; фолд моста в
+  White Paper добавлен в его очередь (§4.1 уже несёт функциональное
+  определение ярусов);
+ось 5: н-п — кода нет;
+ось 6: н-п — QA-агенты AO3 уже носят функциональные имена и
+  привязку frontmatter'ом;
+(c) detector — the SIBLING_MAP axis-4 pair added this commit puts
+bridge/policy divergence under calibration check 12 (pair
+liveness): a new role or grade landing without a bridge update is
+exactly the pair-desync class check 12 audits; "a grade word inside
+a routing rule" is named in the map line as a vocabulary defect.

@@ -71,6 +71,10 @@ scout / builder / critic (х2 деплоя) + Lead-правила в CLAUDE.md +
   порядок шагов, политика — правила; правило меняется только в
   CLAUDE.md, skill ссылается и не дублирует формулировок; при
   расхождении политика выигрывает).
+- ARCHITECTURE.md «Two Vocabularies» <-> CLAUDE.md «Ярусы» обоих
+  деплоев (D-0062: новая функция/грейд или смена привязки — мост и
+  политика правятся вместе; грейд внутри правила маршрутизации —
+  дефект словаря).
 - Закрытие сессии <-> открытие сессии (D-0050):
   PROCESS/SESSION_PROTOCOL.md (Session End) + skills/session-handoff
   <-> BOOT.md + PROCESS/BOOT_REPORT_PROTOCOL.md. Проверка, добавленная
