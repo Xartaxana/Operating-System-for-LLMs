@@ -134,6 +134,39 @@ through its own acceptance stream or Shadow Evaluation — the policy
 tells a new deployment HOW to decide and how to accumulate evidence,
 not where its tier boundaries lie.
 
+### Deployment targets (operator direction, 2026-07-09)
+
+The system is built to be adopted by OTHER projects. Three target
+shapes, in order of validation status:
+
+1. **A Claude Code subscription project** — being validated in
+   production NOW: AO3 is the pilot, this repository the reference
+   (dogfooding) deployment. The harness supplies dispatch
+   (subagents) and telemetry (transcripts); the project supplies
+   CLAUDE.md and role files.
+2. **A project holding API keys to one or more model vendors** —
+   the gateway variant: bindings = gateway aliases, dispatch = calls
+   through the gateway, telemetry = requests.db. NOT yet validated
+   as an agentic deployment: today's gateway instance serves the lab
+   role (prompt→text validation of quality and prices) and lacks an
+   API-side coordinator, a tool harness for workers (recon is blind
+   without read/grep) and a journal writer. Cheap entry steps exist:
+   survey of agent harnesses over an OpenAI-compatible API (D-0030)
+   and the local-scout evaluation (queued 2026-07-09, D-0057 golden
+   set as the entrance exam). This is the future second pilot — the
+   API-world analog of AO3.
+3. **A different vendor's subscription harness** (a GPT-class
+   assistant, etc.) — the policy ports verbatim because it speaks
+   function names (D-0062); that harness must supply the four
+   requirements above, notably auto-loading the policy (F-1: without
+   it delegation silently dies). Not validated; no pilot planned
+   until (2) lands.
+
+"Lab" is the CURRENT ROLE of this repo's gateway instance, not the
+ceiling of the API substrate: in shape (2) the same gateway carries
+a full agentic deployment, and every function — including recon —
+gets a binding.
+
 ## Two Vocabularies: Functions and Grades (D-0062)
 
 The two contours name their tiers differently, and the difference is
