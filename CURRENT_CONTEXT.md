@@ -41,7 +41,13 @@ tier; capability matrix per actual session model; acceptance only
 from above; critic-skip concession only above the worker; the
 planned "coordinate from Sonnet, batch Fable" mode legalized as
 the normal regime). Landed in both deploys; detector = calibration
-check 6 (amended). NEXT task awaits operator pick.
+check 6 (amended). Later same day: a PARALLEL session committed
+D-0059 (task-pipeline gate, c2e2d98) while this one worked — the
+resulting task_id collision (t-008 x2) became F-23 + D-0060
+(parallel-session discipline; eval-plan Stage 2 landed by its real
+trigger). First calibration should also tier-check the D-0059
+commit's session per D-0058 (check 5/6). NEXT task awaits operator
+pick.
 
 ## Routing MVP — LIVE on both deployments
 
@@ -168,11 +174,13 @@ check 6 (amended). NEXT task awaits operator pick.
     diff-quoted skip syntax self-bypassed the gate) -> fixed with
     regression tests -> accepted. Detector: check 8 (hooksPath
     liveness + skip-line audit).
-  - Stage 2 (Lead, one policy line; trigger = first parallel builder
-    dispatch or first calibration, whichever comes first): rule 4
-    addendum — parallel specs declare owned paths, Lead checks
-    intersection before launch; detector: calibration check on
-    time-overlapping delegated without claims.
+  - Stage 2 LANDED 2026-07-09 as D-0060, fired by the first real
+    parallel-session incident (F-23: task_id t-008 allocated to two
+    unrelated tasks by concurrent sessions): rule 4 addendum (owned
+    paths, both for parallel specs and parallel sessions) + task_id
+    allocation by journal-tail re-read at write time; detector =
+    check 13(д). Queued from it: AO3 scripts/log_append.py
+    task_id-uniqueness enforce (builder, small).
   - Stage 3 (data-gated: only if first calibration's checks 10/11
     show the context/overhead discipline actually leaks): PreToolUse
     hook as context_budget analog — Lead spec -> builder implements

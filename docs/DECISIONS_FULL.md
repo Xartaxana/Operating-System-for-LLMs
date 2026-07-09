@@ -828,3 +828,50 @@ built under it will owe its own Rule 10 answers at its own commit.
 Distinct from the Router (D-0029): the Router dispatches an
 already-scoped subtask to a model; the allocate stage is its manual
 precursor, and their gates are independent.
+
+## D-0060
+Parallel-session discipline for the shared journal and working tree
+(F-23, fired by the first real parallel-session incident: two
+concurrent sessions allocated task_id t-008 to two unrelated tasks,
+2026-07-09 — the golden-set run 12:42/12:55 and the task-pipeline
+recon 13:20/13:28). The queued Stage-2 rule (owned paths) fired on
+its trigger, but the actual collision hit an axis it did not name:
+identifier allocation in an append-only shared log — silent, unlike
+a path collision which git surfaces itself. Decision: (1) task_id
+is allocated by RE-READING the journal tail immediately before
+writing the `delegated` event: max existing t-NNN + 1; an id
+remembered from earlier in the session is re-derived, never reused.
+(2) Parallel dispatches AND parallel sessions declare owned paths
+before launch (rule 4 addendum); another session's uncommitted
+paths are not touched and not committed. (3) A collision discovered
+after the fact is never rewritten (journal append-only): it is
+flagged in the notes of the next event of the same task and
+recorded in FINDINGS; counting mechanisms treat the duplicated id
+as DISTINCT tasks. (4) AO3's log_append.py can enforce id
+uniqueness in code — queued (builder, small); the policy line lands
+on both deploys now.
+Rule 10 answers: (a) cost — one journal-tail re-read per dispatch
+(the coordinator re-reads a file it is about to edit anyway — near
+zero) plus one owned-paths line per parallel spec; paid by
+coordinators, repaid by keeping every journal-derived count (checks
+3/13, the queued counting script, calibration evidence) honest;
+(b) axes, by enumeration over the current map:
+ось 1: покрыта частично — политика (правило 4 + строка в разделе
+  журнала) в CLAUDE.md обоих деплоев этим ходом; AO3
+  log_append.py code-enforce уникальности — в очередь явной
+  строкой (builder, мелкое);
+ось 2: н-п — идентификаторы журнала, не учёт денег;
+ось 3: н-п — task_id выдаёт координатор; воркеры id не выдают и
+  журнал не пишут;
+ось 4: покрыта — DECISIONS индекс + полный текст тем же коммитом
+  (чек 12); F-23 в FINDINGS; двусмысленная ссылка «recon t-008» в
+  docs/TASK_PIPELINE.md уточнена тем же коммитом;
+ось 5: н-п — кода нет (enforce уйдёт AO3-стороной из очереди);
+ось 6: в очередь — вместе с log_append enforce (конвейер пишет
+  журнал только через scripts/log_append.py);
+(c) detector — REGISTERED: check 13(д) added same commit (scan for
+duplicate t-NNN across unrelated tasks; the known t-008 duplicate
+is pinned there as counting as TWO tasks). Path-claim violations
+surface as git conflicts / cross-session dirty-tree incidents and
+are recorded as findings (the F-23 pattern); the queued counting
+script for checks 3/13 inherits the (д) scan.
