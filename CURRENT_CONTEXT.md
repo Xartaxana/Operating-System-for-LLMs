@@ -205,7 +205,10 @@ rule (see queue below).
 - White Paper: Architect review IN PROGRESS (started 2026-07-07).
   Comment 1 addressed same day (v0.1.1). Still queued: §7 upkeep
   against the evidence log; full sync with D-0034..D-0038 once the
-  unified plan's first steps land.
+  unified plan's first steps land; fold in the ARCHITECTURE.md
+  "Portability" and "Contour asymmetry and the regression bridge"
+  sections (2026-07-09, operator-ordered record of the
+  policy-portability / Shadow-Eval-asymmetry discussion).
 
 ## Environment Notes (this machine)
 

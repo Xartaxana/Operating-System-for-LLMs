@@ -91,6 +91,49 @@ parallel workers. Blocking waits are reserved for strictly sequential
 steps where the next action depends on the result and nothing else is
 pending. Acceptance on completion stays mandatory (D-0037).
 
+## Portability (the policy is the router)
+
+Nothing in the running system is a routing component: routing
+decisions are made by the Lead session itself, reading an auto-loaded
+policy (CLAUDE.md). Claude Code supplies only the dispatch mechanism
+(subagents with a model bound per tier); the deferred Router (D-0029)
+would replace the Lead's judgment for already-scoped dispatch only if
+its gate ever opens. Porting the system to a different model family
+or harness therefore means porting a POLICY, not software.
+
+Substrate-independent by design (D-0005):
+
+- tiers are defined by FUNCTION (recon / implementation-to-spec /
+  review / decomposition-and-acceptance), not by vendor models;
+- the routing rules themselves: delegation down by default,
+  escalation after two rejections, flat delegation (D-0037), a DoD in
+  every dispatch (D-0054), trail/witness acceptance (D-0046/D-0052),
+  and the journal event vocabulary (D-0053);
+- DELEGATION_TABLE.md with its four evidence statuses (D-0035) and
+  the weekly calibration loop (D-0047).
+
+The API contour already runs non-Claude models under this exact
+discipline (Qwen3-4B as intern, Llama-3.3-70B as middle, Gemini as a
+lead alias) — the discipline was never Claude-specific.
+
+A new deployment must supply four things:
+
+1. a tier→model binding (this repo: agent frontmatter plus the tier
+   list in CLAUDE.md; API contour: gateway aliases in config.yaml);
+2. a dispatch mechanism the coordinator can physically call
+   (subagents, tool calls into other models, gateway aliases);
+3. the policy AUTO-LOADED into the coordinator's context — delegation
+   is opt-in and silently dies without this (D-0041, finding F-1);
+4. a telemetry source for calibration (transcripts or a request log).
+
+Evidence does NOT port with the policy: table statuses bind a task
+type to a CONCRETE model, not to a tier label (classification→intern
+is `rejected` for Qwen3-4B, not for every small model). A new model
+set starts at `estimated` (D-0028, D-0035) and earns its statuses
+through its own acceptance stream or Shadow Evaluation — the policy
+tells a new deployment HOW to decide and how to accumulate evidence,
+not where its tier boundaries lie.
+
 ## Components (API contour)
 
 The full scheme, including the evidence loop (judge) and the deferred
@@ -190,6 +233,37 @@ The initial Delegation Table is an estimate produced up front
 (see D-0028); Shadow Evaluation refines it continuously during
 implementation rather than blocking implementation on a long
 measurement phase.
+
+### Contour asymmetry and the regression bridge
+
+Shadow Evaluation exists only on the API contour, by design (D-0034):
+replay needs an interception point and a prompt→text task shape, and
+the subscription contour has neither — the subscription Lead cannot
+be proxied, and interactive agentic work (tools, repository state,
+multi-turn sessions) does not reduce to a replayable prompt. The
+subscription contour therefore validates delegation in production
+instead of counterfactually: work is dispatched down by default and
+the journal measures whether the tier coped (`rejected` with a
+failure class, `escalated`, `defect_found` false-accepts, acceptance
+by trail/witness), aggregated by the weekly calibration. The one
+question replay answers and this stream cannot — could the work the
+Lead kept for itself have gone down? — is compensated by
+`dispatch_skipped` events (every self-exemption is visible and
+audited by calibration check 1) and by the default-down policy
+itself.
+
+The two streams are bridged, not merged (eval plan stage 2, queued):
+accepted journal tasks that distill to a replayable form (recon
+questions, spec→diff, summarization, extraction) become a regression
+set run by this harness on the API contour when tier models or
+prices change. The set is biased toward text-shaped tasks and its
+evidence is labeled per category, never as "the whole tier". Replayed
+traffic is tagged traffic_kind='replay' and never counts toward phase
+gates — G1/R2/C1/C3 feed on REAL traffic only (D-0033), and that
+real-traffic diet is supplied by the subscription contour (cc_usage).
+This is also why the API contour needs no working project of its own
+to do its lab job: it validates quality and prices; the money-on-the-
+table questions are measured where the real work happens.
 
 ## Deliberately Deferred
 
