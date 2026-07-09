@@ -180,8 +180,14 @@ pick.
     unrelated tasks by concurrent sessions): rule 4 addendum (owned
     paths, both for parallel specs and parallel sessions) + task_id
     allocation by journal-tail re-read at write time; detector =
-    check 13(д). Queued from it: AO3 scripts/log_append.py
-    task_id-uniqueness enforce (builder, small).
+    check 13(д). AO3 log_append.py enforce LANDED 2026-07-09
+    (t-009, AO3 commit 5a26fe3: full-match t-NNN max+1, --reopen-task
+    on closed ids, descriptive ids free; TOCTOU accepted best-effort,
+    residual detector = check 13(д)). Minor hardening queued (critic
+    F-C/F-D, next log_append touch): task_id strip/normalization
+    ("T-009"/" t-009" silently pass as descriptive now); a test
+    pinning that non-delegated events with a fresh t-NNN deliberately
+    skip the sequence check (they can jump the max).
   - Stage 3 (data-gated: only if first calibration's checks 10/11
     show the context/overhead discipline actually leaks): PreToolUse
     hook as context_budget analog — Lead spec -> builder implements
