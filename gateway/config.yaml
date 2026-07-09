@@ -43,6 +43,20 @@ model_list:
       model: groq/openai/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
 
+  # Builder-binding candidate on the API contour (operator direction
+  # 2026-07-09, after the t-010 pilot): same free key, stronger model
+  # than middle-groq for text-shaped implementation — its judge twin
+  # passed 13/13 calibration incl. the code-tracing pair the 70B
+  # failed. Named by FUNCTION (D-0062); separate from judge-groq so
+  # work spend and supervision spend stay separable (D-0031, Rule #1).
+  # Caveat: same underlying model as the judge — Shadow Evaluation
+  # over this binding is SELF-JUDGING; use chief-judge/manual review
+  # for its pairs.
+  - model_name: builder-groq
+    litellm_params:
+      model: groq/openai/gpt-oss-120b
+      api_key: os.environ/GROQ_API_KEY
+
   # Intern: local worker (ARCHITECTURE.md hierarchy), free to run.
   # Synthetic per-token prices exercise the Guard/Ledger money paths
   # (roughly Haiku-class pricing) without real spend.

@@ -152,8 +152,11 @@ pick.
 - Local scout evaluation (operator-approved 2026-07-09; D-0062
   function→model rebinding, NOT a build): (1) pull the scout tier's
   accounted spend from cc_usage (per-agent attribution, Task 7);
-  (2) survey existing tool harnesses for Ollama-class local models
-  (D-0030: evaluate before building any tool-loop); (3) run the
+  (2) survey existing tool harnesses for GATEWAY WORKERS generally
+  (broadened 2026-07-09, operator direction): one harness serves
+  both the Groq builder (read/grep + patches via OpenAI-style
+  function calling, which Groq supports) and the local scout —
+  D-0030: evaluate before building any tool-loop; (3) run the
   D-0057 golden set through the local candidate (Qwen3-4B first) —
   the negative-claim and judgment-refusal traps are the capability
   bar (prior: 4B judge scored 11/13, below threshold); (4) table row
@@ -209,6 +212,13 @@ pick.
     2 attempts (rejected capability + accepted with documented
     Lead repairs), $0.0035 accounted real traffic, witness 262
     passed. Update Rule 4 datapoint recorded in the journal.
+    Follow-up (operator direction, same day): builder-groq alias
+    added to gateway/config.yaml — gpt-oss-120b as the CANDIDATE
+    API-contour builder binding (judge twin, 13/13 incl. the
+    code-tracing pair the 70B failed); next text-shaped cycles
+    dispatch there, binding decided on journal evidence (D-0028).
+    Caveat pinned in config: same model as judge -> Shadow Eval on
+    this binding is self-judging, chief-judge review required.
   - Stage 3 (data-gated: only if first calibration's checks 10/11
     show the context/overhead discipline actually leaks): PreToolUse
     hook as context_budget analog — Lead spec -> builder implements
