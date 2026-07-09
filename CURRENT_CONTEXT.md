@@ -294,6 +294,15 @@ pick.
     crash recovery (inseparable from their runtime; our analog is
     session handoff), supply-chain audit tags (no third-party-dep
     loop in this repo today), WXP (not confirmed in official docs).
+- OS boot-diet pass (D-0038/D-0051; handoff 2026-07-09 measured the
+  boot path at 104,052 bytes — first breach of the 100KB protocol
+  threshold; per-file numbers in the handoff commit message). Prime
+  candidate: CURRENT_CONTEXT.md 26.3KB/453 lines — the local-scout/
+  Pi-harness item is largely DONE narrative, archive to
+  docs/task_reports/ keeping live queue lines (D-0038); re-measure
+  at next handoff. Growth this session is explained (3
+  operator-driven mechanisms D-0063/64/65 + GSD Pi plan), the
+  breach predates it only partially.
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
   (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
   unswept siblings). Point-lookup matrix per the map, NOT a rescan.
