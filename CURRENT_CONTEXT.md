@@ -20,7 +20,17 @@ docs/UNIFIED_PLAN_2026-07-07.md (D-0034..D-0036).
 
 ## Current Task (Authoritative, D-0025)
 
-Task 3 (Phase 2 readiness digest) ACCEPTED 2026-07-09 and archived:
+t-013 — streaming tool-calls fix Pi<->litellm<->groq (top queue
+item, operator-confirmed 2026-07-09 via /next-task): builder
+dispatched in background with spec+DoD (isolation script persisted
+to gateway/, fix candidates litellm-upgrade / Pi compat /
+non-streaming, class sweep over both groq aliases, Pi e2e smoke as
+witness). After acceptance: re-exam of scout candidates (t-011/t-012)
+on the hardened profile and unblocking the Pi builder profile.
+Parallel coordinator work (rule of /next-task step 4): t-014 scout
+recon of AO3 anchors for the R14-guard calibration check.
+
+Previous: Task 3 (Phase 2 readiness digest) ACCEPTED 2026-07-09 and archived:
 docs/task_reports/task-3_phase2-readiness.md (task_id t-002; builder
 + critic ПРИНЯТЬ + Lead witness 108/108). Digest first output: G1
 met (15 days, consecutiveness not yet verified — follow-up queued),
