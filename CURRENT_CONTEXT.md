@@ -186,11 +186,22 @@ pick.
   tool calling works (setup lessons: Pi -p needs closed stdin;
   models.json cost requires cacheRead/cacheWrite; litellm ollama/
   prefix drops tools — intern moved to ollama_chat/ in
-  config.yaml). REMAINING: local scout CLOSED until a stronger
-  local candidate fits 6GB VRAM (qwen3:8b-class quant) — the exam
-  stays the entrance bar; Pi builder profile on builder-groq
-  (cloud, tool-enabled) — natural next pilot step, awaits
-  operator pick.
+  config.yaml). CANDIDATE #2 (t-012, operator question): 70B
+  middle-groq as scout — attempt 1 FAILED 0/7 on the permissive
+  profile with a fully FABRICATED Trail block; attempt 2 (hardened
+  profile) exposed a HARNESS BREAK: streaming tool-call deltas do
+  not survive the Pi<->litellm<->groq path (direct non-streaming
+  request returns proper tool_calls; ollama_chat streaming works).
+  Model verdict INCONCLUSIVE pending the fix. QUEUED (tooling,
+  builder-class): investigate/fix streaming tool-calls for groq
+  through the proxy (candidates: litellm upgrade, Pi provider
+  compat field, non-streaming mode); then RE-EXAM both candidates
+  on the hardened profile (qwen3:4b FAIL stands meanwhile — its
+  tool path was smoke-proven and the fabricated-verified claim
+  disqualifies regardless). Local scout otherwise CLOSED until a
+  stronger local candidate fits 6GB VRAM; Pi builder profile on
+  builder-groq blocked by the same streaming break — same queue
+  item.
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
   (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
   unswept siblings). Point-lookup matrix per the map, NOT a rescan.
