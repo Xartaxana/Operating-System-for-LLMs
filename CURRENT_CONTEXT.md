@@ -35,8 +35,13 @@ RE-EXAMS (tail of the same operator-confirmed queue item):
   local candidate fits 6GB VRAM (re-exam debt cleared).
 - t-015 llama-70B re-exam: attempt 1 aborted by Groq TPD quota
   (rejected/tooling, NOT a model verdict); RETRY after quota reset
-  ~21:05 local 2026-07-09 - the one open item of this task. Exam
-  files ready in session scratchpad; proxy left running for it.
+  ~21:05 local 2026-07-09 - the one open item of this task. Recipe
+  for the retry session: hardened profile text + Pi call form =
+  gateway/PI_HARNESS.md; the 7 questions verbatim =
+  PROCESS/SCOUT_GOLDEN_SET.md (key liveness re-verified 2026-07-09,
+  t-015 delegated notes); start the proxy per PI_HARNESS "Прокси
+  перед запуском" (session-local proxy/scratchpad do not survive);
+  journal the retry as t-015 attempt 2 (continuation).
 Coordinator work done meanwhile: t-014 scout (AO3 R14 anchors)
 accepted; calibration check 15 landed (commit 47b185c).
 
