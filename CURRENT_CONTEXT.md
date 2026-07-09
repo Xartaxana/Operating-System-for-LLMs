@@ -201,7 +201,9 @@ pick.
   disqualifies regardless). Local scout otherwise CLOSED until a
   stronger local candidate fits 6GB VRAM; Pi builder profile on
   builder-groq blocked by the same streaming break — same queue
-  item.
+  item. Working recipe, hardened scout profile and known breaks
+  persisted in gateway/PI_HARNESS.md (session scratchpad does not
+  survive sessions).
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
   (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
   unswept siblings). Point-lookup matrix per the map, NOT a rescan.
