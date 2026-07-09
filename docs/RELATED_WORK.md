@@ -239,6 +239,52 @@ combination (Guard/Ledger/Analyst + Shadow Evaluation) is our niche;
 routing itself is commoditized (RouteLLM), so our contribution is the
 supervision economics, not the router.
 
+## Agent tool harnesses for gateway workers (survey 2026-07-09, D-0030)
+
+Question: an existing tool-loop that lets gateway-bound models (Groq
+builder, local scout) read/grep/patch a repository through OpenAI-style
+function calling, pointed at OUR proxy so accounting stays in
+requests.db. Operator-named candidates + survey additions; WebFetch
+digests are small-model output — verify specifics at adoption time.
+
+- **Pi (pi.dev, github.com/earendil-works/pi)** — the RECOMMENDED
+  candidate. MIT, TypeScript, 69k stars, v0.80.3 (June 2026), active.
+  Confirmed on the load-bearing criterion: custom providers via
+  `registerProvider(..., {baseUrl, api: "openai-completions"})` or
+  `~/.pi/agent/models.json`, with a native Ollama example
+  (docs/custom-provider) — our gateway is a drop-in endpoint, local
+  models included. Scriptable dispatch (print/JSON, RPC, SDK modes) fits
+  a coordinator calling it per task. Extensible tools via SDK.
+  Weakness: NO built-in permission system — a read-only scout profile
+  means supplying a restricted tool set via the SDK/extension (or
+  containerizing), not flipping a flag. Ecosystem kinship: pi-autopilot
+  (whose author's external review shaped D-0053/F-18) builds on it.
+- **GSD Pi (github.com/open-gsd/gsd-pi; operator-named as gsd-2, since
+  moved)** — NOT a harness: a standalone local-first coding agent plus
+  meta-prompting / spec-driven methodology (MIT, v1.9.0, 849 stars; can
+  wrap Claude Code/Cursor as providers). Its process layer overlaps
+  what OUR policy already owns (specs, routing, acceptance) — adopting
+  it would duplicate the coordinator role, not equip workers. Kept as a
+  source of meta-prompting techniques; custom base_url unconfirmed.
+- **vibe-engineer (github.com/ismailsaleekh/vibe-engineer)** — v0.1,
+  4 stars, provider integration undocumented; agent-native TS workflow
+  harness (skills/memory/verification) rather than a model-agnostic
+  tool-loop. Not a candidate now; revisit if it matures.
+- **Aider (aider.chat)** — survey addition from priors: Python,
+  git-aware repo edits, repo-map, native OPENAI_API_BASE override —
+  the classic builder-harness over an OpenAI-compatible endpoint.
+  Not operator-named; verify current state at adoption.
+
+Take: prototype path = Pi + registerProvider(gateway): a scout profile
+(read/grep-only tool set via SDK) bound to the local model with the
+D-0057 golden set as its entrance exam, and a builder profile bound to
+builder-groq. Measured context (2026-07-09 fresh import): the scout
+tier's all-time accounted spend is $1.33 (141 turns) — the economic
+case for a local scout is ~zero; the case that stands is RESILIENCE
+(subscription outage/limit fallback, D-0039-adjacent) plus the
+API-contour second pilot needing recon at all (Deployment targets,
+ARCHITECTURE.md).
+
 ## Implications recorded
 
 1. Router (Phase 2): evaluate RouteLLM before building (D-0030).

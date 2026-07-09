@@ -162,15 +162,23 @@ pick.
   D-0053/F-18; priors in RELATED_WORK), vibe-engineer
   (https://github.com/ismailsaleekh/vibe-engineer), gsd-2
   (https://github.com/gsd-build/gsd-2); plus whatever the survey
-  itself surfaces; (3) run the
-  D-0057 golden set through the local candidate (Qwen3-4B first) —
-  the negative-claim and judgment-refusal traps are the capability
-  bar (prior: 4B judge scored 11/13, below threshold); (4) table row
-  "recon -> local intern" enters as estimated (D-0035) only if
-  (1)-(3) pass. Trigger: first calibration shows material recon
-  spend, OR operator prioritizes subscription-outage resilience
-  (local scout as D-0039-adjacent fallback). Value beyond cost:
-  degradation resilience.
+  itself surfaces. STEPS 1-2 DONE 2026-07-09 (operator-ordered run):
+  (1) scout spend measured — $1.33 all-time / 141 turns (fresh
+  cc_usage import): economic case ~zero, the standing case is
+  RESILIENCE + the API-contour second pilot needing recon at all
+  (Deployment targets); (2) survey recorded in RELATED_WORK «Agent
+  tool harnesses»: Pi (earendil-works) RECOMMENDED — MIT, 69k stars,
+  custom provider with baseUrl/openai-completions (gateway drop-in,
+  native Ollama example), scriptable JSON/RPC/SDK; caveat: no
+  built-in permissions, read-only scout profile = restricted tool
+  set via SDK. GSD Pi (ex gsd-2) = standalone agent+methodology,
+  overlaps our policy layer, not a harness; vibe-engineer immature
+  (v0.1); aider noted from priors. REMAINING (awaits operator
+  pick): (3) prototype Pi profiles — scout (read/grep-only, local
+  Qwen3-4B; entrance exam = D-0057 golden set, negative-claim and
+  judgment-refusal traps are the bar, prior: 4B judge 11/13) and
+  builder (builder-groq); (4) table row "recon -> local intern"
+  enters as estimated (D-0035) only if the exam passes.
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
   (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
   unswept siblings). Point-lookup matrix per the map, NOT a rescan.
