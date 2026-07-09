@@ -67,6 +67,10 @@ scout / builder / critic (х2 деплоя) + Lead-правила в CLAUDE.md +
   правка роли/модели яруса требует прогона набора тем же коммитом;
   ключи вопросов смотрят в живые файлы — verify-команды сверяются
   при каждом прогоне, живость — чек 14б).
+- .claude/skills/next-task/SKILL.md <-> CLAUDE.md (D-0061: skill —
+  порядок шагов, политика — правила; правило меняется только в
+  CLAUDE.md, skill ссылается и не дублирует формулировок; при
+  расхождении политика выигрывает).
 - Закрытие сессии <-> открытие сессии (D-0050):
   PROCESS/SESSION_PROTOCOL.md (Session End) + skills/session-handoff
   <-> BOOT.md + PROCESS/BOOT_REPORT_PROTOCOL.md. Проверка, добавленная

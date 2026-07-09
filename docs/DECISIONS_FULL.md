@@ -875,3 +875,53 @@ is pinned there as counting as TWO tasks). Path-claim violations
 surface as git conflicts / cross-session dirty-tree incidents and
 are recorded as findings (the F-23 pattern); the queued counting
 script for checks 3/13 inherits the (д) scan.
+
+## D-0061
+"Do the next priority task (dispatch independent parts to agents in
+the background)" is a COMMAND, not a chat phrase the operator
+retypes each session: .claude/skills/next-task/SKILL.md. Origin:
+operator request 2026-07-09 after two sessions driven by exactly
+this phrase. The skill sequences the existing mechanisms and adds
+no rules of its own — CLAUDE.md stays the single source of rules,
+the skill orders steps and loses to the policy on any divergence
+(same single-owner principle as ROADMAP for phases). Steps: tier
+check first (D-0056a) with the D-0058 matrix — the command is
+runnable from ANY tier and does not make the session a Lead (a
+sub-Fable session coordinates, accepts only below its tier, and
+accumulates Lead-class work as explicit queue lines); boot check
+(invoking the command IS the operator's work authorization,
+satisfying Boot Report protocol rule 4's STOP); priority pick from
+CURRENT_CONTEXT (D-0025 current task, else the first executable
+queue item; operator-decision items are skipped and reported);
+background dispatch with DoD before own work (D-0040/D-0054),
+task_id by journal-tail re-read and owned paths (D-0060);
+evidence acceptance per tier form and the matrix; rolling commits
+(D-0016, D-0055 gate, D-0057 golden-set triggers); final report +
+CURRENT_CONTEXT update; no scope beyond the picked task except
+explicit on-touch queue items.
+Rule 10 answers: (a) cost — the skill file loads only on
+invocation (not in the boot path); executing it adds nothing the
+policy did not already require; paid by the invoking session,
+repaid by removing a retyped operator prompt and by pinning the
+step ORDER (tier check before first action — the F-22 failure
+mode) into the entry point;
+(b) axes, by enumeration over the current map:
+ось 1: н-п — записанное различие, не пропуск: вход AO3-конвейера —
+  /qa-loop со своим preflight; /next-task — вход OS-репо; порт не
+  требуется;
+ось 2: н-п — порядок шагов, не учёт;
+ось 3: покрыта — шаг 0 ветвит по матрице D-0058: команда исполнима
+  с любого яруса, полномочия — от фактической модели;
+ось 4: покрыта — DECISIONS индекс + полный текст тем же коммитом
+  (чек 12); новая пара SKILL.md <-> CLAUDE.md добавлена в карту тем
+  же коммитом (skill не дублирует формулировок правил — против
+  расхождения);
+ось 5: н-п — кода и тестов нет;
+ось 6: н-п — см. ось 1 (/qa-loop уже несёт свой порядок шагов);
+(c) detector — named external (registered in the skill text): the
+skill only sequences mechanisms that each carry their own detector;
+its outputs (journal events, commits, CURRENT_CONTEXT) are audited
+by calibration checks 1/3/6/13, and a priority violation is visible
+to the NEXT session as a Current-Task-vs-commits mismatch in the
+Boot Report (D-0025). Skill-file staleness against policy is caught
+by the SIBLING_MAP axis-4 pair (check 12 liveness).
