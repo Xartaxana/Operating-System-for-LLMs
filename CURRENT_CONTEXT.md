@@ -156,7 +156,13 @@ pick.
   (broadened 2026-07-09, operator direction): one harness serves
   both the Groq builder (read/grep + patches via OpenAI-style
   function calling, which Groq supports) and the local scout —
-  D-0030: evaluate before building any tool-loop; (3) run the
+  D-0030: evaluate before building any tool-loop. Operator-named
+  candidates to include (2026-07-09): Pi-agent (https://pi.dev —
+  same ecosystem as pi-autopilot, whose author's review shaped
+  D-0053/F-18; priors in RELATED_WORK), vibe-engineer
+  (https://github.com/ismailsaleekh/vibe-engineer), gsd-2
+  (https://github.com/gsd-build/gsd-2); plus whatever the survey
+  itself surfaces; (3) run the
   D-0057 golden set through the local candidate (Qwen3-4B first) —
   the negative-claim and judgment-refusal traps are the capability
   bar (prior: 4B judge scored 11/13, below threshold); (4) table row
