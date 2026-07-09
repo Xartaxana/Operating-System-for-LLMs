@@ -33,15 +33,28 @@ RE-EXAMS (tail of the same operator-confirmed queue item):
   traps, fabricated Trail, thinking trace shows explicit
   simulation-mode decision. Local scout CLOSED until a stronger
   local candidate fits 6GB VRAM (re-exam debt cleared).
-- t-015 llama-70B re-exam: attempt 1 aborted by Groq TPD quota
-  (rejected/tooling, NOT a model verdict); RETRY after quota reset
-  ~21:05 local 2026-07-09 - the one open item of this task. Recipe
-  for the retry session: hardened profile text + Pi call form =
-  gateway/PI_HARNESS.md; the 7 questions verbatim =
-  PROCESS/SCOUT_GOLDEN_SET.md (key liveness re-verified 2026-07-09,
-  t-015 delegated notes); start the proxy per PI_HARNESS "Прокси
-  перед запуском" (session-local proxy/scratchpad do not survive);
-  journal the retry as t-015 attempt 2 (continuation).
+- t-015 llama-70B re-exam: attempts 1 AND 2 both aborted by Groq
+  TPD (rejected/tooling x2, NOT model verdicts) - the "reset ~21:05"
+  assumption was WRONG, Groq TPD is a ROLLING 24h window (evidence
+  in PI_HARNESS break #3). Rule-6 escalation journaled 2026-07-09
+  22:25; Lead decisions: quota walls dispatched as t-018 (A2), NO
+  cross-model fallback for exam traffic, ATTEMPT 3 must run as the
+  FIRST Groq traffic of a fresh quota window (~02:00+ local
+  2026-07-10 or next morning, BEFORE any other Groq-burning task).
+  Recipe unchanged: hardened profile + Pi call form =
+  gateway/PI_HARNESS.md; 7 questions verbatim =
+  PROCESS/SCOUT_GOLDEN_SET.md (re-verify key liveness per protocol
+  p.1); start the proxy per PI_HARNESS "Прокси перед запуском";
+  journal as t-015 attempt 3. Partial positive from attempt 2:
+  3 REAL executed tool calls on the hardened profile (opposite of
+  attempt-1 fabrication) - behavioral evidence, not a verdict.
+  In flight 2026-07-09 evening: t-017 builder = A1 zero-tool-call
+  guard (tools/pi_run_guard.py; MUST stamp exam reports before Lead
+  reads them - retro-run on t-016 in DoD); t-018 builder = A2
+  gateway quota walls (guard.py rolling-window token counters;
+  evaluate litellm-native first per D-0030; Pi prompt-slimming
+  explicitly descoped, stays queued). Acceptance per rule 3
+  (critic if >~100 lines).
 Coordinator work done meanwhile: t-014 scout (AO3 R14 anchors)
 accepted; calibration check 15 landed (commit 47b185c).
 
