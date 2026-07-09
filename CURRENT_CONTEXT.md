@@ -124,12 +124,6 @@ rule (see queue below).
   max consecutive-day run in _g1_readiness and emit met only at
   >=14; distinct count stays in detail (critic finding 1 on Task 3;
   ROADMAP gate text unchanged, D-0033).
-- traffic_kind default drift check (Lead point-lookup): live
-  requests.db column default 'synthetic' vs SCHEMA 'real' vs
-  migration 'synthetic' (sqlite_logger.py:33/58) — verify against
-  Tasks 1-2 report whether intentional (old rows = synthetic
-  semantics); if a defect → defect_found with ref (D-0052). Reported
-  by builder, independently confirmed by critic on Task 3.
 - D-0043 sweep remainder: add the "report sibling defects" line to
   the nine AO3 QA-pipeline agent prompts on their next touch.
 - Env-negative discipline port (queued from AO3 2026-07-09, commit

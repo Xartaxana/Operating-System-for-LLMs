@@ -60,6 +60,11 @@ def _connect() -> sqlite3.Connection:
         # Pre-migration rows predate any real gateway traffic (today's log
         # is working sets, replays and judge calls); the judge LIKE filter
         # is the same one sample_requests() uses for contamination.
+        # DEFAULT 'synthetic' here deliberately diverges from SCHEMA's
+        # 'real': on a migrated DB it is the fail-closed direction for
+        # gate G1, and the logger always writes the field explicitly.
+        # Accepted as finding 4 of the Tasks 1-2 review
+        # (docs/task_reports/task-1-2_cost-accounting-and-traffic-kind.md).
         conn.execute(
             "UPDATE requests SET traffic_kind = 'judge'"
             " WHERE prompt LIKE '%impartial judge comparing two answers%'"
