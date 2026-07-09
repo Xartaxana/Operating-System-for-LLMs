@@ -222,6 +222,51 @@ pick.
   item. Working recipe, hardened scout profile and known breaks
   persisted in gateway/PI_HARNESS.md (session scratchpad does not
   survive sessions).
+- GSD Pi adoption plan (operator-ordered deep-dive 2026-07-09;
+  facts + mechanism inventory in RELATED_WORK «GSD Pi deep-dive»;
+  verdict: EXTRACT mechanisms, do NOT adopt the agent — it would
+  replace the Lead coordinator and forfeit the cost-crossover loop
+  that is our niche). Items in priority order:
+  - A1 zero-tool-call guard (builder-class, small; WHEN: next
+    builder dispatch, BEFORE any further entrance/re-exam run —
+    the t-015 retry qualifies if it slips past one more session):
+    post-run check of a Pi worker transcript/requests.db — zero
+    structural tool calls + substantive answer => automatic
+    rejected-stamp before Lead reads the report. Deterministic
+    detector for the F-14 fabrication class (exact t-011/t-016
+    shape). DoD: script + tests + retro-run on the t-016 transcript
+    reproducing FAIL. Prior art: GSD Pi v1.3.0 zero-tool-call guard.
+  - A2 gateway fallback chains (builder-class, config-sized; WHEN:
+    with/before the t-015 retry or the next Groq-quota incident,
+    whichever first): litellm NATIVE fallbacks on the groq aliases
+    for 429 TPM/TPD (t-013/t-015 class «Pi prompt weight vs
+    free-tier ceilings»); D-0030 ordering — try native before
+    building. Same item: evaluate Pi prompt-slimming (skills/tools
+    trim) against the 8k TPM ceiling; GSD's budget-mode token
+    profile is the prior art.
+  - A3 dispatch context manifest (Lead-class, mechanism — full
+    rule-10 treatment; WHEN: next D-0054/rule-11 touch, not a
+    dedicated pass): the dispatch text enumerates the exact
+    files/data injected into the worker (GSD UnitContextManifest as
+    prior art) — makes inject-vs-recon choices auditable and cuts
+    worker context cost.
+  - A4 Rule-6 deterministic check (Lead-class; WHEN: first weekly
+    calibration): journal scan «two rejected, same task_id + tier,
+    no escalated» — mechanical enforcement of rule 6, GSD's
+    consecutive-dispatch caps as prior art. NOT a new tool: fold
+    into the deterministic counting script for checks 3/13 already
+    queued under the D-0053 follow-up.
+  - A5 witness auto-collection (builder-class; WHEN: once the Pi
+    builder profile is unblocked — after A2 clears the TPM path):
+    wrapper runs the canonical pytest form after a Pi builder
+    session and attaches verbatim output as a witness DRAFT (GSD
+    verification_commands + canonical-verdict-field analog);
+    acceptance itself stays with Lead (D-0037).
+  - NOT adopted (recorded to stop re-litigating): GSD as
+    coordinator (duplicates Lead), auto-mode SQLite state machine +
+    crash recovery (inseparable from their runtime; our analog is
+    session handoff), supply-chain audit tags (no third-party-dep
+    loop in this repo today), WXP (not confirmed in official docs).
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
   (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
   unswept siblings). Point-lookup matrix per the map, NOT a rescan.

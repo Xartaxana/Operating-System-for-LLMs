@@ -264,8 +264,9 @@ digests are small-model output — verify specifics at adoption time.
   meta-prompting / spec-driven methodology (MIT, v1.9.0, 849 stars; can
   wrap Claude Code/Cursor as providers). Its process layer overlaps
   what OUR policy already owns (specs, routing, acceptance) — adopting
-  it would duplicate the coordinator role, not equip workers. Kept as a
-  source of meta-prompting techniques; custom base_url unconfirmed.
+  it would duplicate the coordinator role, not equip workers. Custom
+  base_url CONFIRMED by the deep-dive (see «GSD Pi deep-dive» below);
+  mechanism-extraction plan in CURRENT_CONTEXT queue.
 - **vibe-engineer (github.com/ismailsaleekh/vibe-engineer)** — v0.1,
   4 stars, provider integration undocumented; agent-native TS workflow
   harness (skills/memory/verification) rather than a model-agnostic
@@ -284,6 +285,91 @@ case for a local scout is ~zero; the case that stands is RESILIENCE
 (subscription outage/limit fallback, D-0039-adjacent) plus the
 API-contour second pilot needing recon at all (Deployment targets,
 ARCHITECTURE.md).
+
+## GSD Pi deep-dive (survey 2026-07-09, operator-ordered)
+
+Full-project reading of open-gsd/gsd-pi (ex gsd-build/gsd-2; MIT,
+v1.9.0 of 2026-07-08, built on the Pi SDK; docs at lets-gsd.com).
+NOT to be confused with fulgidus/pi-gsd — an unrelated unofficial
+port of glittercowboy/get-shit-done to Pi. Sources: repo README,
+lets-gsd.com landing + docs (v2 auto-mode/configuration/providers,
+v1 architecture), releases v1.1.0–v1.9.0. WebFetch digests are
+small-model output (standing caveat) — verify specifics at adoption.
+
+Identity check on the load-bearing claim: custom OpenAI-compatible
+endpoint IS supported — `~/.gsd/agent/models.json` with
+`baseUrl`/`apiKey`/`api: "openai-completions"`, local providers
+Ollama/LM Studio/vLLM/SGLang. Cross-confirmed independently: GSD Pi
+runs on the Pi SDK, and this is the exact models.json mechanism our
+live Pi prototype already uses against the gateway (t-011+). Closes
+the «custom base_url unconfirmed» note above.
+
+Mechanism inventory, mapped to our system (their name → ours):
+
+1. **Per-phase model profiles with fallbacks** (`models:` per
+   research/planning/execution/execution_simple/completion/subagent,
+   each with `fallbacks:` list) → our DELEGATION_TABLE tiers; the
+   fallback chain is D-0039 degradation, automated at config level.
+2. **Budget enforcement**: `budget_ceiling` USD +
+   `budget_enforcement: warn|pause|halt`; per-unit token/cost capture
+   broken down by phase/slice/model; `per_unit_cost_cap_usd`
+   (v1.6.0) → our Guard (Phase 1 step 2) and Ledger concepts —
+   implemented and shipping in a same-space project. Prior art for
+   D-0030 «try LiteLLM native budgets first», not a refutation of it.
+3. **Stuck-loop detection**: sliding-window pattern analysis over
+   dispatch history (catches A→B→A→B, not just repeats),
+   same-unit consecutive-dispatch caps (2–3), one retry with a deep
+   diagnostic prompt then STOP for human → our Rule 6 (2 rejected →
+   escalate) enforced mechanically instead of by discipline.
+   **Zero-tool-call guard** (v1.3.0: «zero-tool-call rate-limit guard
+   distinguishes transient provider errors from genuine loops») →
+   deterministic detector for exactly our F-14 fabrication class
+   (t-011/t-016: 0 tool calls + confident fabricated answers).
+4. **Pre-dispatch preflight blocks**: dirty-file-overlap detection,
+   unmerged-conflict check, worktree validation; STATE.md writes
+   guarded by O_EXCL lockfile with 10s stale-lock detection → our
+   D-0060/F-23 parallel-sessions class, automated.
+5. **Verification machinery**: `verification_commands` (e.g. lint,
+   test) run post-execution with `verification_auto_fix` and
+   `verification_max_retries: 2`; artifact-presence verification
+   redispatches with failure context (cap 3); an assessment artifact
+   «only counts as completed when it contains a canonical verdict
+   field» → our witness/DoD (D-0052/D-0054), machine-checked.
+6. **Context hygiene**: fresh context per unit; `UnitContextManifest`
+   names the tool policies and files injected at dispatch; token
+   profiles (budget mode inlines minimal context, quality mode
+   everything); observation masking (`observation_mask_turns: 8`,
+   `tool_result_max_chars: 800`); `gsd_exec` caps noisy stdout/stderr
+   into `.gsd/exec/` files → directly relevant to our «Pi default
+   prompt weight vs free-tier ceilings» class (PI_HARNESS break #3,
+   t-015 TPD abort).
+7. **Crash recovery**: SQLite-backed unit/worker state; on death the
+   next run synthesizes a recovery briefing from persisted tool
+   calls; headless auto-restart with backoff; soft/idle/hard timeouts
+   (20/10/30 min) → their in-run analog of our session handoff; tied
+   to their auto-mode state machine, not portable piecemeal.
+8. **Planning-layer gates**: package legitimacy audit tags
+   `[SLOP]/[SUS]/[ASSUMED]` in RESEARCH.md (supply-chain);
+   decision-coverage gates (decisions must map to shipped artifacts,
+   one BLOCKING); codebase drift gate (last_mapped_commit..HEAD vs
+   STRUCTURE.md, auto-remap on threshold) → cousins of our
+   SIBLING_MAP axis-enumeration (rule 10b) and snapshot drift.
+
+WXP («XML preprocessing engine», v2.0 marketing): appears in search
+results only; nowhere in the official docs read — not confirmed, not
+carried further.
+
+Take (prior verdict STANDS, sharpened): GSD Pi is our closest
+same-space neighbor — a code-enforced version of much of our policy
+layer, single-project, workflow-driven. What it does NOT have is our
+core loop: cost-crossover-driven tier assignment validated by spend
+data (Shadow Evaluation / weekly calibration against cc_usage).
+Adopting the agent would replace the Lead coordinator and forfeit
+that loop; extracting mechanisms keeps it. Extraction plan (what:
+zero-tool-call guard, gateway fallback chains, dispatch context
+manifest, Rule-6 deterministic check, witness auto-collection; when:
+per item) lives in the CURRENT_CONTEXT queue, entry «GSD Pi adoption
+plan».
 
 ## Implications recorded
 
