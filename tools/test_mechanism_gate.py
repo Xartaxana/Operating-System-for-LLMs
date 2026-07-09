@@ -33,6 +33,18 @@ def test_mechanism_paths_filters_prefixes_with_boundary():
                                "gateway/metrics.py"]) == []
 
 
+def test_mechanism_paths_d0065_homes_and_self_protection():
+    # D-0065 (F-25): дома механизмов + самозащита цепочки в неводе.
+    extra = ["ARCHITECTURE.md", "BOOT.md", "gateway/PI_HARNESS.md",
+             "tools/mechanism_gate.py", ".githooks/commit-msg"]
+    assert mg.mechanism_paths(extra) == extra
+    # Узость сознательна (D-0055): прочие tools/ и gateway/ вне невода.
+    assert mg.mechanism_paths(["tools/usage_report.py",
+                               "tools/test_mechanism_gate.py",
+                               "gateway/config.yaml",
+                               "ARCHITECTURE.md.bak"]) == []
+
+
 def test_find_missing_reports_absent_axes_case_insensitive():
     text = "ось 1: покрыта — CLAUDE.md обоих деплоев\nОсь 2: н-п (денег не касается)\n"
     assert mg.find_missing(text, [1, 2, 6]) == [6]

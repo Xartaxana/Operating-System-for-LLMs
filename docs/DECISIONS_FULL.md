@@ -1117,3 +1117,75 @@ DECISIONS аудируются на (г)-строку; дисциплинный 
 записанный выбор «на дисциплине»: расширение mechanism_gate
 (парного, оба репо) отложено до evidence от чека 8; детектор утечки
 назван — чек 8.
+
+## D-0065
+Recognition defense-in-depth for rule 10 (operator question
+2026-07-09: «что нужно сделать, чтобы все четыре вопроса применялись
+ВСЕГДА? Помню случай, когда ИИ не распознал, что создаёт механизм»;
+finding F-25). Adopted premise: «always» is NOT achievable by code
+alone — «is this a mechanism?» is a semantic classification (D-0063
+layer 2), and the known failure mode is precisely the author not
+recognizing the moment. Answer: four echelons, each with its layer
+named. (1) RECOGNITION TEST in rule 10 of both deploys' CLAUDE.md —
+autoload guarantees the encounter (D-0041): a mechanism is any
+change that adds/alters a duty of future sessions/workers or a
+machine check (rule, role, journal event/field, schema, gate, check,
+worker profile, protocol convention), REGARDLESS of file; doubt is
+resolved AS mechanism — four questions or an explicit skip line.
+(2) SYNTACTIC NET widened: MECHANISM_PREFIXES gains the known
+mechanism homes ARCHITECTURE.md, BOOT.md, gateway/PI_HARNESS.md and
+the enforcement chain itself (tools/mechanism_gate.py, .githooks/ —
+F-15 kinship: the guard was unguarded). Evidence, not symmetry:
+near-miss on D-0063 itself (passed the gate only because DECISIONS.md
+rode the same commit) + operator testimony of an unrecognized case +
+the PI_HARNESS hardened-profile candidate. Broad directories stay
+OUT — the recorded D-0055 rationale stands (false positives train
+--no-verify); AO3 twin gains only its own gate file + .githooks/.
+(3) RECOGNITION AUDIT — check 8 sub-point: period commits of BOTH
+repos swept for mechanism-shaped changes lacking a rule-10 block and
+a decision; the verdict is the calibrating Lead's (layer 2), the net
+supplies candidates only. (4) RETRO BACKFILL — the queued 10(б)+(г)
+sweep additionally hunts already-born unrecognized mechanisms through
+the net's homes (first named candidate: PI_HARNESS hardened scout
+profile rule 0, born at t-012). The outermost echelon remains the
+operator (F-11) — this decision is itself its third firing today.
+Rule 10 answers: (а) cost — ~7 lines per CLAUDE.md (boot-path, the
+REAL cost, watched by check 10; third boot-path growth today —
+accepted deliberately, all three answer operator-found gaps of the
+same family) + 5 gate prefixes + tests + check-8 lines; new
+friction: non-mechanism edits of ARCHITECTURE/BOOT/PI_HARNESS/gate/
+hooks need one skip line per commit — these files change rarely, and
+the skip line IS the recorded-choice mechanism working; repaid by
+closing the hole that already produced ≥1 unrecognized mechanism and
+a same-day near-miss;
+(b) axes, by enumeration over the current map:
+ось 1: покрыта — CLAUDE.md «Распознавание» + гейт-твин + тесты в
+  ОБОИХ репо тем же ходом (AO3 точечным коммитом: CLAUDE.md,
+  scripts/mechanism_gate.py, scripts/tests/test_mechanism_gate.py;
+  чужие незакоммиченные пути параллельной сессии не тронуты,
+  D-0060);
+ось 2: н-п — учёт не меняется; gateway/config.yaml СОЗНАТЕЛЬНО вне
+  невода: цены/алиасы живут под осью 2 и журналом — записанный
+  выбор, не пропуск;
+ось 3: покрыта — распознавание — обязанность координирующей сессии
+  ЛЮБОГО яруса (нераспознанный механизм ставится в очередь Lead по
+  матрице D-0058; коммитит механизмы по-прежнему только полный
+  Lead); воркерам обязанностей не добавляется;
+ось 4: покрыта — DECISIONS индекс + полный текст, чек 8, F-25,
+  CURRENT_CONTEXT тем же коммитом; SIBLING_MAP не меняется (новых
+  парных документов нет; дрейф «невод ↔ реальные дома механизмов»
+  отдан аудиту распознавания чека 8);
+ось 5: покрыта — tools/test_mechanism_gate.py дополнен кейсом
+  D-0065 (113 passed), AO3 scripts/tests/test_mechanism_gate.py —
+  твин-кейсом (262 passed);
+ось 6: н-п — schemas/ и state/rules.yaml AO3 уже в неводе твина;
+  цепочки конвейера не трогаются;
+(c) detector — чек 8 «аудит распознавания», зарегистрирован этим же
+коммитом; отказ самой калибровки виден чеку-набору D-0047 (событие
+calibrated + Boot Report staleness), внешний контур — F-11;
+(d) enforcement по эшелонам, явно: тест распознавания — доставка
+гарантирована автозагрузкой CLAUDE.md (код), соблюдение — дисциплина
+с детектором (чек 8); невод — commit-msg-хук (код на пути); аудит —
+калибрующий Lead (слой 2); остаток (механизм вне невода при
+неотказавшем распознавании до калибровки) — честно на дисциплине и
+операторе: 100% кодом недостижимо и не обещается.

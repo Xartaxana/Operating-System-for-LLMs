@@ -21,6 +21,12 @@
    растёт и меняется (D-0048), гейт следует за ней.
 5. Карта не читается / ноль осей → fail-closed (F-7: молчаливый
    пропуск проверки неотличим от её прохождения).
+6. D-0065 (F-25): невод расширен на известные дома механизмов
+   (ARCHITECTURE.md, BOOT.md, gateway/PI_HARNESS.md) и самозащиту
+   enforcement-цепочки (этот файл, .githooks/ — правка гейта не должна
+   обходить гейт, родство F-15). Широкие каталоги (tools/, gateway/)
+   сознательно вне невода — записанный выбор D-0055: ложные
+   срабатывания приучают к --no-verify.
 """
 from __future__ import annotations
 
@@ -41,6 +47,12 @@ MECHANISM_PREFIXES = (
     "PROCESS/",
     ".claude/agents/",
     ".claude/skills/",
+    # D-0065: дома механизмов вне первоначального невода + самозащита
+    "ARCHITECTURE.md",
+    "BOOT.md",
+    "gateway/PI_HARNESS.md",
+    "tools/mechanism_gate.py",
+    ".githooks/",
 )
 
 AXIS_HEADING_RE = re.compile(r"^##\s+Ось\s+(\d+)", re.MULTILINE)

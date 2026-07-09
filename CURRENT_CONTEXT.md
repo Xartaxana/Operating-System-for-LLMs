@@ -302,7 +302,14 @@ pick.
   mechanism (чем триггерится / какой код на пути, либо «на
   дисциплине» + названный детектор); gaps land as queue items
   (B-series class, D-0063 promotion by evidence), not immediate
-  builds. Schedule: with/after the first weekly calibration. Rule-10(a)
+  builds. Further extended by D-0065 (F-25): the same pass HUNTS
+  already-born UNRECOGNIZED mechanisms through the net's homes
+  (ARCHITECTURE.md, BOOT.md, gateway/PI_HARNESS.md, PROCESS/,
+  roles/skills; first named candidate: PI_HARNESS hardened scout
+  profile rule 0, born at t-012 without the four questions) — each
+  find gets the four questions backfilled or an explicit
+  «не-механизм» verdict. Schedule: with/after the first weekly
+  calibration. Rule-10(a)
   retro-audit deliberately NOT queued: its data stream is cc_usage,
   covered by calibration check 11.
 - Evidence-acceptance adoption plan (F-17 + pi-autopilot priors in
