@@ -1,16 +1,20 @@
 # Supervised Delegation: an Operating System Approach to LLM Cost
 
-**White Paper — living draft v0.1.1 (2026-07-07)**
+**White Paper — living draft v0.1.2 (2026-07-09)**
 
 Status: draft. Every claim in section 7 is backed by repository
 evidence (commits, DELEGATION_TABLE.md log, requests.db); numbers
 will be revised as telemetry volume grows. Deliverable #1 of
 PROJECT_CHARTER.md.
 
-Changelog: v0.1.1 (2026-07-07) — §4 diagram replaced with the full
-target scheme (judge loop, deferred Router) in Mermaid, per the first
-Architect review comment. Full sync with D-0034..D-0038 (two
-contours, 4-state statuses) is still queued.
+Changelog: v0.1.2 (2026-07-09) — §4.1 (the second contour and policy
+portability) and §5.1 (contour asymmetry and the regression bridge)
+added, folding in the ARCHITECTURE.md sections of the same date
+(operator-ordered record of the policy-portability / Shadow-Eval-
+asymmetry discussion). v0.1.1 (2026-07-07) — §4 diagram replaced
+with the full target scheme (judge loop, deferred Router) in
+Mermaid, per the first Architect review comment. Full sync with
+D-0034..D-0038 (two contours, 4-state statuses) is still queued.
 
 ---
 
@@ -127,9 +131,9 @@ receipts, whether it should ever be built. The judge and chief-judge
 loop (§6) is part of the core scheme, not an appendix: it is the
 component that turns replay output into evidence. Since 2026-07-07
 the same discipline also runs on a second, subscription contour
-(Claude Code with tiered subagents, D-0034 — see ARCHITECTURE.md,
-"Two Contours"); its full treatment lands in this paper's next
-iteration.
+(Claude Code with tiered subagents, D-0034): §4.1 explains why that
+contour is a portability claim, and §5.1 why its evidence stream is
+different by design.
 
 The full specification is ARCHITECTURE.md; the reference
 implementation is `gateway/`. Design choices that matter for the
@@ -148,6 +152,45 @@ argument:
 - **The Router is deferred** (D-0029). Routing is commoditized
   (RouteLLM); building one before telemetry shows what is worth
   routing would be architecture for its own sake.
+
+## 4.1 The Second Contour: the Policy Is the Router
+
+The operator's real Lead is a Claude Code subscription session, and
+it cannot be routed through a proxy (D-0034). On that contour nothing
+in the running system is a routing component: routing decisions are
+made by the Lead session itself, reading an auto-loaded policy file
+(the project's CLAUDE.md); the harness supplies only the dispatch
+mechanism — subagents with a model bound per tier (recon on a small
+model, implementation-to-spec on a mid model, review on a strong
+model). Porting the system to a different model family or harness
+therefore means porting a POLICY, not software.
+
+What is substrate-independent by design (D-0005): tiers defined by
+FUNCTION (recon / implementation-to-spec / review /
+decomposition-and-acceptance), not by vendor models; delegation down
+by default with escalation after two rejected attempts; flat
+delegation — workers never spawn workers (D-0037); a definition of
+done in every dispatch (D-0054); acceptance by trail and witness
+(D-0046, D-0052); the journal event vocabulary (D-0053); and the
+four-state evidence table with its weekly calibration loop (D-0035,
+D-0047). A new deployment must supply exactly four things: a
+tier→model binding; a dispatch mechanism the coordinator can
+physically call; the policy AUTO-LOADED into the coordinator's
+context — delegation is opt-in and silently dies without this
+(D-0041; the finding that established it, F-1, is itself journal
+evidence); and a telemetry source for calibration (transcripts or a
+request log).
+
+Evidence does NOT port with the policy. Table statuses bind a task
+type to a CONCRETE model, not to a tier label: "classification →
+intern is rejected" is a fact about one 4B model, not about small
+models. A new model set starts at `estimated` (D-0028, D-0035) and
+earns its statuses through its own acceptance stream or Shadow
+Evaluation — the policy tells a new deployment HOW to decide and how
+to accumulate evidence, not where its tier boundaries lie. The API
+contour already runs non-Claude models under this exact discipline
+(a 4B local intern, a 70B middle, a Gemini lead alias): the
+discipline was never vendor-specific.
 
 ## 5. Evidence-Based Delegation
 
@@ -171,6 +214,41 @@ models; see §7) already overturned two intuitions: character
 similarity is unusable as a verdict (it rejects verbose-but-correct
 answers), and "classification is easy for small models" is false in
 the one case where reasoning quality mattered.
+
+## 5.1 Contour Asymmetry and the Regression Bridge
+
+Shadow Evaluation exists only on the API contour, and that is a
+design decision, not a gap. Replay needs an interception point and a
+prompt→text task shape; the subscription contour has neither — the
+subscription Lead cannot be proxied, and interactive agentic work
+(tools, repository state, multi-turn sessions) does not reduce to a
+replayable prompt.
+
+The subscription contour therefore validates delegation in
+PRODUCTION instead of counterfactually: work is dispatched down by
+default, and the journal measures whether the tier coped —
+rejections carrying a failure class, escalations, late defects of
+already-accepted work (`defect_found`), and acceptance that must
+present evidence (a search trail for recon, an actual test-run
+witness for implementation). The weekly calibration aggregates this
+stream into table-status movements. The one question replay answers
+and this stream cannot — could the work the Lead kept for itself
+have gone down? — is compensated structurally: every self-exemption
+is a visible journaled event (`dispatch_skipped`, reason mandatory)
+audited by calibration, and the policy default is down.
+
+The two streams are bridged, not merged. Accepted journal tasks that
+distill to a replayable form (recon questions, spec→diff,
+summarization, extraction) become a regression set run on the API
+contour when tier models or prices change. The set is biased toward
+text-shaped tasks and its evidence is labeled per category, never as
+"the whole tier". Replayed traffic is tagged `traffic_kind='replay'`
+and never counts toward phase gates — the gates feed on REAL traffic
+only (D-0033), and that real-traffic diet is supplied by the
+subscription contour. This is also why the API contour needs no
+working project of its own to do its lab job: it validates quality
+and prices; the money-on-the-table questions are measured where the
+real work happens.
 
 ## 6. The Judge Is a Supervised Worker
 
@@ -333,6 +411,6 @@ but not yet measured locally.
 ---
 
 *Canonical sources: ARCHITECTURE.md (specification), DECISIONS.md
-(D-0001…D-0038), DELEGATION_TABLE.md (evidence log),
+(D-0001…D-0061), DELEGATION_TABLE.md (evidence log),
 PROCESS/JUDGE_CALIBRATION_PROTOCOL.md, docs/RELATED_WORK.md,
 gateway/ (reference implementation).*
