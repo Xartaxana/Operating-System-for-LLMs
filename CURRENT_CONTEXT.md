@@ -281,8 +281,13 @@ above).
   Rules (thresholds from first-calibration data); numeric judge-human
   agreement in JUDGE_CALIBRATION_PROTOCOL. NOT taken: per-PR CI, full
   execution-based bench harness (Rule #1).
-- AO3 adaptation of the session-handoff skill (D-0050): its boot
-  path is CLAUDE.md + docs/HANDOFF.md + state/, no BOOT.md.
+- AO3 session-handoff skill — DONE 2026-07-10 (t-021, AO3 commit
+  0911cf6): six-step evening check mirroring the OS skill over AO3's
+  OWN morning path + Session Start detector rule in docs/HANDOFF.md;
+  first dry-run caught three real transfer gaps (unpushed dd72c4d,
+  a pre-task_id journal orphan of 2026-07-08, stale factory-status
+  missing AT-BUG-007/008) — all resolved at acceptance. SIBLING_MAP
+  axes 1/4 updated same move.
 - AO3 CLAUDE.md boot-diet trim (D-0051 pairing duty, next touch):
   operative content is already in sync; narrative trim analogous to
   this repo's 2026-07-08 diet.

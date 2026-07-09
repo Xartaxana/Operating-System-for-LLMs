@@ -28,6 +28,7 @@ critic проверяет классовую полноту фикса ПО КА
 | logs/routing-log.jsonl (формат событий) | logs/routing-log.jsonl + scripts/log_append.py (enforce формата) |
 | .githooks/commit-msg + tools/mechanism_gate.py (enforce правила 10б, D-0055) | .githooks/commit-msg + scripts/mechanism_gate.py (карта читается из OS-репо) |
 | — | .claude/skills/qa-loop/SKILL.md (журналирование диспатчей) |
+| .claude/skills/session-handoff (D-0050) | .claude/skills/session-handoff (порт t-021, коммит 0911cf6) |
 
 ## Ось 2 — Контуры измерения (Rule #1, D-0032: учёт честен на обоих)
 
@@ -85,7 +86,9 @@ scout / builder / critic (х2 деплоя) + Lead-правила в CLAUDE.md +
   PROCESS/SESSION_PROTOCOL.md (Session End) + skills/session-handoff
   <-> BOOT.md + PROCESS/BOOT_REPORT_PROTOCOL.md. Проверка, добавленная
   на одной стороне, требует вопроса «а на другой?» (handoff проверяет
-  вечером то, что Boot прочитает утром).
+  вечером то, что Boot прочитает утром). AO3-пара той же оси (t-021,
+  0911cf6): .claude/skills/session-handoff (вечер) <-> правило
+  Session Start в docs/HANDOFF.md (утро, детектор пропуска).
 
 ## Ось 5 — Тестовая обвязка
 
