@@ -875,6 +875,18 @@ is pinned there as counting as TWO tasks). Path-claim violations
 surface as git conflicts / cross-session dirty-tree incidents and
 are recorded as findings (the F-23 pattern); the queued counting
 script for checks 3/13 inherits the (д) scan.
+Addendum (2026-07-09, caught by t-009 attempt 1,
+failure_class=spec): max+1 is the OS-repo id SCHEME (t-NNN), not a
+universal format. AO3's journal uses descriptive ids (at-bug-003,
+r14-settings-theme-batch, ...) — the INVARIANT is what ports (no
+silent reuse; novelty checked against the journal at write time;
+reopening a closed task only with an explicit mark), the scheme is
+a deployment convention. AO3 mechanics, enforced in code by
+scripts/log_append.py (t-009): a new id must be genuinely new;
+full-match t-NNN ids, if used, follow max+1; a delegated on an id
+whose last lifecycle event is accepted requires --reopen-task
+<reason>. The Lead spec that assumed the OS scheme repo-wide is the
+recorded precedent of this class error.
 
 ## D-0061
 "Do the next priority task (dispatch independent parts to agents in
