@@ -120,10 +120,6 @@ rule (see queue below).
   (4d41ef3); the policy itself is written and live on both deploys
   since 2026-07-07/08. Residual: Architect acceptance of the policy
   text (CLAUDE.md rules 1-11) — operator decision, not Lead work.
-- G1 consecutive-streak follow-up (builder-tier, small): compute the
-  max consecutive-day run in _g1_readiness and emit met only at
-  >=14; distinct count stays in detail (critic finding 1 on Task 3;
-  ROADMAP gate text unchanged, D-0033).
 - D-0043 sweep remainder: add the "report sibling defects" line to
   the nine AO3 QA-pipeline agent prompts on their next touch.
 - Env-negative discipline port (queued from AO3 2026-07-09, commit

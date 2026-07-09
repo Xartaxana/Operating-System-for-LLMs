@@ -244,6 +244,58 @@ def test_g1_met_counts_requests_and_cc_usage_union(conn):
     assert "cc_usage real=4" in readiness["G1"]["detail"]
 
 
+def test_g1_not_met_when_distinct_days_enough_but_run_broken_by_gap(conn):
+    # 14 distinct real-traffic days total, but split into two runs of 7 by a
+    # 2-day gap -- the class-of-bug this task fixes (Task 3 critic finding
+    # 1): distinct-day count alone said "met" here, but no run reaches 14.
+    now = datetime.datetime.now()
+    for i in list(range(0, 7)) + list(range(9, 16)):
+        seed(conn, "lead", f"prompt {i}", ts=(now - datetime.timedelta(days=i)).isoformat())
+    conn.execute("UPDATE requests SET traffic_kind = 'real'")
+    conn.commit()
+    readiness = phase2_readiness(conn, days=30, delegation_table_path="/does/not/exist.md")
+    assert readiness["G1"]["max_consecutive_days"] == 7
+    assert readiness["G1"]["status"] == "not_met"
+    assert "14 distinct real-traffic day(s)" in readiness["G1"]["detail"]
+    assert "longest consecutive run = 7 day(s)" in readiness["G1"]["detail"]
+
+
+def test_g1_met_when_run_of_14_consecutive_days(conn):
+    now = datetime.datetime.now()
+    for i in range(14):
+        seed(conn, "lead", f"prompt {i}", ts=(now - datetime.timedelta(days=i)).isoformat())
+    conn.execute("UPDATE requests SET traffic_kind = 'real'")
+    conn.commit()
+    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    assert readiness["G1"]["max_consecutive_days"] == 14
+    assert readiness["G1"]["status"] == "met"
+
+
+def test_g1_max_consecutive_days_ignores_shorter_run_across_a_gap(conn):
+    # A short run (5 days), a gap, then a longer run (20 days) further back
+    # in the window; the reported max must be the longer run, not the sum
+    # and not the first-seen run.
+    now = datetime.datetime.now()
+    for i in list(range(0, 5)) + list(range(6, 26)):
+        seed(conn, "lead", f"prompt {i}", ts=(now - datetime.timedelta(days=i)).isoformat())
+    conn.execute("UPDATE requests SET traffic_kind = 'real'")
+    conn.commit()
+    readiness = phase2_readiness(conn, days=30, delegation_table_path="/does/not/exist.md")
+    assert readiness["G1"]["max_consecutive_days"] == 20
+    assert readiness["G1"]["status"] == "met"
+
+
+def test_g1_single_day_of_traffic(conn):
+    now = datetime.datetime.now()
+    seed(conn, "lead", "prompt", ts=now.isoformat())
+    conn.execute("UPDATE requests SET traffic_kind = 'real'")
+    conn.commit()
+    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    assert readiness["G1"]["max_consecutive_days"] == 1
+    assert readiness["G1"]["status"] == "not_met"
+    assert "1 distinct real-traffic day(s)" in readiness["G1"]["detail"]
+
+
 def test_c2_not_computable_when_cc_usage_absent(conn):
     readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
     assert readiness["C2"]["status"] == "not_computable_yet"

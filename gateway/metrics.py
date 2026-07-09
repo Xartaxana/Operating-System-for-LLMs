@@ -14,6 +14,7 @@ Usage:
 """
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -122,6 +123,24 @@ def parse_shadow_eval_log(text: str) -> dict:
     return dict(counts)
 
 
+def _max_consecutive_days(day_strs) -> int:
+    """Given an iterable of 'YYYY-MM-DD' strings, returns the length of the
+    longest run of calendar-consecutive days present in the set (gaps break
+    the run; duplicates are deduped via the set())."""
+    days = sorted(datetime.date.fromisoformat(d) for d in set(day_strs))
+    if not days:
+        return 0
+    best = 1
+    current = 1
+    for prev, curr in zip(days, days[1:]):
+        if (curr - prev).days == 1:
+            current += 1
+            best = max(best, current)
+        else:
+            current = 1
+    return best
+
+
 def _g1_readiness(conn: sqlite3.Connection, days: int) -> dict:
     since = f"-{days} days"
     req_days = {
@@ -148,17 +167,19 @@ def _g1_readiness(conn: sqlite3.Connection, days: int) -> dict:
 
     combined = req_days | cc_days
     value = len(combined)
-    status = "met" if value >= 14 else "not_met"
+    max_consecutive_days = _max_consecutive_days(combined)
+    status = "met" if max_consecutive_days >= 14 else "not_met"
     if cc_available:
         source_note = f"requests real={len(req_days)} + cc_usage real={len(cc_days)}, union"
     else:
         source_note = f"requests real={len(req_days)} only; cc_usage table absent in this DB"
     return {
         "status": status,
+        "max_consecutive_days": max_consecutive_days,
         "detail": (
             f"{value} distinct real-traffic day(s) in the last {days} day(s)"
-            f" ({source_note}; day COUNT, not verified for consecutiveness)"
-            " vs threshold >=14 consecutive days"
+            f" ({source_note}); longest consecutive run ="
+            f" {max_consecutive_days} day(s) vs threshold >=14 consecutive days"
         ),
     }
 
