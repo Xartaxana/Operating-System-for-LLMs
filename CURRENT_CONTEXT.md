@@ -135,12 +135,6 @@ check 6 (amended). NEXT task awaits operator pick.
   text (CLAUDE.md rules 1-11) — operator decision, not Lead work.
 - D-0043 sweep remainder: add the "report sibling defects" line to
   the nine AO3 QA-pipeline agent prompts on their next touch.
-- Env-negative discipline port (queued from AO3 2026-07-09, commit
-  fb41872 there; class "empty output of a mis-invoked env tool read
-  as absence of the object" — see F-21 addendum kinship): add the
-  rule to this repo's scout/builder/critic role files on their next
-  touch + a calibration line (negative environment claims require a
-  positive canonical-form check).
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
   (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
   unswept siblings). Point-lookup matrix per the map, NOT a rescan.
