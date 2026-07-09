@@ -55,6 +55,12 @@ pick.
   dogfooding: THIS repo (2026-07-08). Each = auto-loaded CLAUDE.md
   policy + agents scout/builder/critic + logs/routing-log.jsonl
   (D-0041: always the three together).
+- Policy text ARCHITECT-ACCEPTED 2026-07-09 (operator in-chat:
+  "текста политики CLAUDE.md — одобрено"): CLAUDE.md routing rules
+  as of commit 171078c (rules 1-11, Роль != ярус, degradation,
+  journal vocabulary, command hygiene). Later policy changes follow
+  the normal mechanism discipline; this acceptance closed the last
+  open item of Phase 1.5 step 2.
 - Evidence so far (2026-07-09, after t-004..t-006): builder n=4
   accepted, critic n=3 accepted, scout n=4 accepted (D-0046 cycles
   with spot-checks); 1 rejected (t-001 attempt 1,
@@ -134,11 +140,6 @@ pick.
 
 ## Remaining Lead-tier Queue
 
-- Routing policy text — RESOLVED REFERENCE (2026-07-09): the line
-  pointed at Phase 1.5 step 2 "queue item 1" of the pre-diet file
-  (4d41ef3); the policy itself is written and live on both deploys
-  since 2026-07-07/08. Residual: Architect acceptance of the policy
-  text (CLAUDE.md rules 1-11) — operator decision, not Lead work.
 - D-0043 sweep remainder: add the "report sibling defects" line to
   the nine AO3 QA-pipeline agent prompts on their next touch.
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
