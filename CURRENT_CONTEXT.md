@@ -142,6 +142,19 @@ pick.
 
 - D-0043 sweep remainder: add the "report sibling defects" line to
   the nine AO3 QA-pipeline agent prompts on their next touch.
+- Local scout evaluation (operator-approved 2026-07-09; D-0062
+  function→model rebinding, NOT a build): (1) pull the scout tier's
+  accounted spend from cc_usage (per-agent attribution, Task 7);
+  (2) survey existing tool harnesses for Ollama-class local models
+  (D-0030: evaluate before building any tool-loop); (3) run the
+  D-0057 golden set through the local candidate (Qwen3-4B first) —
+  the negative-claim and judgment-refusal traps are the capability
+  bar (prior: 4B judge scored 11/13, below threshold); (4) table row
+  "recon -> local intern" enters as estimated (D-0035) only if
+  (1)-(3) pass. Trigger: first calibration shows material recon
+  spend, OR operator prioritizes subscription-outage resilience
+  (local scout as D-0039-adjacent fallback). Value beyond cost:
+  degradation resilience.
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
   (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
   unswept siblings). Point-lookup matrix per the map, NOT a rescan.
