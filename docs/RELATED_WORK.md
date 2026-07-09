@@ -371,6 +371,87 @@ manifest, Rule-6 deterministic check, witness auto-collection; when:
 per item) lives in the CURRENT_CONTEXT queue, entry «GSD Pi adoption
 plan».
 
+## OpenClaw survey (2026-07-10, запрос оператора; t-022 + второй проход Lead — первое применение D-0066)
+
+https://github.com/openclaw/openclaw — «personal AI assistant» поверх
+20+ мессенджер-каналов. TypeScript monorepo, v2026.6.11, очень
+активный; Gateway = локальный control plane (sessions/channels/tools),
+multi-agent = привязка каналов к агентам, НЕ ярусная маршрутизация
+задач. Подтверждённые негативы (t-022, сверено grep'ом Lead): нет
+tier-routing по цене/способности, нет журнала делегирований с
+приёмкой, нет аналога weekly-калибровки — ядро нашей ниши не занято
+и здесь (согласуется с «LLM OS landscape» выше).
+
+След второго прохода (Lead читал сам, полный клон в scratchpad):
+docs/concepts/{delegate-architecture,model-failover,usage-tracking,
+parallel-specialist-lanes,context}.md целиком,
+docs/automation/cron-jobs.md (1–120), grep bootstrap-бюджетов по
+agent-loop/context/agent-workspace, сверка negative-хитов в src/.
+Итог второго прохода: delegate-architecture — пусто для нас
+(организационная identity, не ярусы); model-failover и context —
+несущие и в дайджесте отсутствовали/были поверхностны. Состав плана
+после второго прохода ИЗМЕНИЛСЯ — F-26 воспроизведён на месте.
+
+Механизмы, взятые в план (как и когда — очередь в CURRENT_CONTEXT):
+
+1. **Boot-бюджет per-file** (`/context list`: на каждый инжектируемый
+   файл «raw vs injected» + флаг TRUNCATED + warning-блок в промпт;
+   пер-файловый кап `bootstrapMaxChars` 20k + общий 60k chars).
+   Наш аналог: порог 100KB меряется одним числом на handoff (D-0050);
+   per-file разбивка делает виновника роста видимым сразу. КАК:
+   строка per-file в чек 4 session-handoff (следующее касание скилла)
+   + per-file вывод в B3 SessionStart hook при его постройке (уже в
+   очереди, gated первой калибровкой). Отдельной работы НЕ открывать.
+2. **Provider-reported квоты, не самоподсчёт** (usage-tracking: «no
+   estimated billing», тянуть usage/quota endpoint провайдера;
+   нормализация «X% left»). Наши quota-стены t-018 ведут скользящие
+   окна сами; Groq отдаёт фактический остаток в rate-limit-заголовках
+   ответа. КАК: сверка счётчиков стен с заголовками — data-gated
+   (Rule #1): строится только если калибровка/прогоны t-015 покажут
+   дрейф стен (ложный отказ или пропуск реального лимита).
+3. **Lane contract** (parallel-specialist-lanes: письменный контракт
+   лейна — Owns / Does-not-own / Chat budget / Handoff rule / Tool
+   posture; параллелизм как дефицитный ресурс, caps maxConcurrent).
+   КАК: поля Owns/Non-goals/Handoff влить в шаблон A3 dispatch
+   context manifest при его постройке (A3 уже в очереди). Не раньше.
+
+Prior art / валидация — записано, работ не открывается:
+
+- **Strict selection**: явный выбор модели пользователем НИКОГДА не
+  фолбэчится молча — «reports the failure instead of answering from
+  an unrelated fallback». Внешняя валидация нашего t-018-решения «no
+  cross-model fallback для экзаменационного трафика, стены отказывают
+  громко».
+- **Двухступенчатый failover** (model-failover.md): ротация
+  auth-профилей ВНУТРИ провайдера (счётчик
+  `rateLimitedProfileRotations`, дефолт 1) до перехода к следующей
+  модели; лестница cooldown'ов 30с/1м/5м с 24h-окном сброса;
+  раздельные lane'ы billing-disable vs transient rate-limit;
+  model-scoped cooldown (сосед по провайдеру ещё доступен); probe
+  первичной модели раз в 5 мин + sticky fallback + уведомление только
+  на смене состояния; структурные `fallbackStep*` поля в логах.
+  Готовый дизайн на случай второго ключа Groq/Gemini и словарь для
+  наших failure_class/quota-стен. Не строим: фолбэк-цепочки уже
+  сознательно отклонены (A2, t-018).
+- **Cron в gateway-процессе** (cron-jobs.md): персистентные job'ы в
+  SQLite с историей прогонов, `--model` на job (job primary с
+  конфигурируемыми fallbacks), event-триггеры (скрипт возвращает
+  `{fire, state}`, состояние персистится, 30s/5 tool-calls бюджет),
+  watchdog'и фаз запуска, reconciliation потерянных прогонов. Prior
+  art для штатного режима «оператор координирует с Sonnet, Fable
+  батчем на очередь Lead-задач» — если оператор захочет его
+  механизировать, дизайн брать отсюда.
+- **utilityModel per-function** (models.md:45): отдельная дешёвая
+  модель на короткие внутренние задачи. Это наша функция→модель
+  (D-0062) в миниатюре — валидация словаря, дубля не строим.
+
+NOT adopted (чтобы не ре-литигировать): каналы/мессенджеры и
+companion-приложения (не наш скоуп), delegate identity/sandboxing
+(харнесс + permission-гигиена уже покрывают), compaction/session
+pruning/context engine и memory-системы (внутрисессионный контекст
+владеет Claude Code; наш слой — межсессионный, repo-as-memory),
+usage-footer шаблоны (UI-поверхность).
+
 ## Implications recorded
 
 1. Router (Phase 2): evaluate RouteLLM before building (D-0030).

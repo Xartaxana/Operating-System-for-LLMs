@@ -290,7 +290,26 @@ above).
   axes 1/4 updated same move.
 - AO3 CLAUDE.md boot-diet trim (D-0051 pairing duty, next touch):
   operative content is already in sync; narrative trim analogous to
-  this repo's 2026-07-08 diet.
+  this repo's 2026-07-08 diet. SAME touch: port the rule-1 amendment
+  (D-0066 two-pass external surveys) — axis-1 remainder of the
+  2026-07-10 commit.
+- OpenClaw adoption plan (survey 2026-07-10, t-022 + Lead second
+  pass — first D-0066 application; facts and full plan: RELATED_WORK
+  «OpenClaw survey»). No standalone builds; each item rides an
+  already-queued vehicle: (1) per-file boot-budget breakdown (raw vs
+  injected + truncation flag, `/context list` as prior art) — into
+  session-handoff check 4 on next skill touch AND into B3
+  SessionStart hook when built; (2) quota-wall reconciliation with
+  provider-reported rate-limit headers (Groq) — data-gated, only on
+  wall-drift evidence from calibration/t-015 runs; (3) lane-contract
+  fields (Owns/Non-goals/Handoff) — into the A3 dispatch manifest
+  template when A3 lands. Recorded as prior art, no work: strict
+  selection (validates t-018 no-fallback), two-stage failover +
+  cooldown ladder (design ready if a second Groq/Gemini key appears),
+  gateway-process cron with per-job model (design source for the
+  batch-Lead mode if operator wants it mechanized). NOT adopted:
+  channels, delegate identity, compaction/memory (harness-owned),
+  utilityModel (duplicates D-0062 function→model).
 - White Paper: Architect review IN PROGRESS (started 2026-07-07).
   Comment 1 addressed same day (v0.1.1). Portability + contour
   asymmetry FOLDED IN 2026-07-09 (v0.1.2, §4.1 + §5.1, operator-
