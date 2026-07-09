@@ -27,9 +27,14 @@ met (15 days, consecutiveness not yet verified — follow-up queued),
 C2 met (32 sessions), R1 not met (4/30 pairs), rest honestly not
 computable / manual check.
 
-NEXT task awaits operator pick; Lead's recommendation: eval plan
-stage 1 items (2) scout golden set + (3) agent-prompt regression
-rule (see queue below).
+Eval stage 1 items 2+3 DONE 2026-07-09 (D-0057): scout golden set
+(PROCESS/SCOUT_GOLDEN_SET.md, baseline run t-006 = 7/7 PASS incl.
+both mandatory trap questions) + regression rule for agent-prompt
+edits (calibration check 14). Same day also closed: G1
+consecutive-streak follow-up (t-004, met now requires >=14
+CONSECUTIVE days) and traffic_kind default drift (intentional —
+Tasks 1-2 finding 4; pointer comment added at the migration site).
+NEXT task awaits operator pick.
 
 ## Routing MVP — LIVE on both deployments
 
@@ -37,10 +42,11 @@ rule (see queue below).
   dogfooding: THIS repo (2026-07-08). Each = auto-loaded CLAUDE.md
   policy + agents scout/builder/critic + logs/routing-log.jsonl
   (D-0041: always the three together).
-- Evidence so far (2026-07-09): builder n=3 accepted, critic n=3
-  accepted, scout n=2 accepted (D-0046 cycles with spot-checks);
-  1 rejected (t-001 attempt 1, failure_class=capability), 0
-  escalations. ALL statuses estimated (Update Rule 1).
+- Evidence so far (2026-07-09, after t-004..t-006): builder n=4
+  accepted, critic n=3 accepted, scout n=4 accepted (D-0046 cycles
+  with spot-checks); 1 rejected (t-001 attempt 1,
+  failure_class=capability), 0 escalations. ALL statuses estimated
+  (Update Rule 1).
 - Retro baseline AO3 (cc_usage, pre-routing): $276.70 accounted +
   $57.82 sidechain self-correction (Task 6). Weekly loop compares
   cost per accepted unit + escalation rate, NOT frontier share alone
@@ -175,12 +181,15 @@ rule (see queue below).
   docs/RELATED_WORK.md "Evals"; operator-approved): (1) failure-class
   word in rejected-event notes (spec / capability / recon / tooling)
   — LANDED with D-0052;
-  (2) scout golden set — 5-10 recon questions with known answers,
-  incl. unanswerable and negative-claim cases (F-14); run on
-  tier-model swap or scout.md edit; (3) regression rule for
-  agent-prompt edits (editing .claude/agents/*.md requires a
-  golden-set run of that tier before commit). Each item = new
-  mechanism -> rule 10 answers + registered detector (D-0049).
+  (2)+(3) LANDED 2026-07-09 as D-0057: PROCESS/SCOUT_GOLDEN_SET.md
+  (7 questions incl. negative usage-vs-mention and judgment-refusal
+  traps, pinned keys with verify commands, baseline t-006 7/7 PASS)
+  + regression rule on agent-prompt edits, detector = calibration
+  check 14. Queued from it: AO3 port of D-0057 (rule + set for the
+  three shared tiers on next role-file touch; the 13 QA-pipeline
+  agents decided separately on pipeline data — axes 1/6); critic
+  golden set (candidate design: diff with seeded defects; build
+  only if calibration shows critic drift, Rule #1).
 - Eval plan, stage 2 (needs >=1 week routed traffic): journal's
   accepted tasks as a regression set replayed on the API contour on
   model/price changes; minimum-n / pass^k in DELEGATION_TABLE Update

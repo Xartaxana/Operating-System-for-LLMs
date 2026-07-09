@@ -666,3 +666,67 @@ this net is precisely the detector for silent failure of both
 in-session points; staleness of the net itself is caught by the
 Boot Report's Last Calibration line (D-0047), and check-5 quality
 falls under the standing check-8 audit of answer quality.
+
+## D-0057
+Scout recon quality is regression-tested by a golden set; agent-prompt
+edits carry a regression rule (eval plan stage 1, items 2-3,
+operator-approved 2026-07-08; priors: docs/RELATED_WORK.md "Evals").
+D-0046 made every scout digest individually acceptable (trail +
+spot-checks), but nothing caught TIER-level drift: a scout.md edit or
+a tier-model swap could silently degrade recon quality, and the modes
+weak models fail quietest — negative claims and invented judgments —
+are exactly what per-dispatch acceptance samples least (F-14). The
+judge sibling was already fixed this way (D-0031 calibration set,
+recalibration on judge swap); this decision extends the same
+discipline to the subscription contour's information tier. Mechanism:
+PROCESS/SCOUT_GOLDEN_SET.md — 7 fixed recon questions with PINNED
+keys (5 point/multi-hop across process, code, policy and table; 1
+negative usage-vs-mention trap; 1 judgment-refusal trap), each with a
+verify command so the key is re-checked BEFORE every run (CORE-Bench
+lesson: fix the eval before blaming the model); dispatched as a plain
+recon task without eval marking (working behavior is measured, not a
+prepared exam); PASS >= 6/7 with the negative and judgment-refusal
+questions mandatory; runs recorded in the set's Runs log. Regression
+rule: editing the role file of a tier that HAS a set (today: scout),
+or swapping its model, requires a run before the commit, logged in
+the same commit. builder deliberately has no set: its output is
+verified by artifacts on every task (witness, D-0052) —
+execution-based acceptance beats a golden set (Rule #1). critic set
+queued (candidate design: review a diff with known seeded defects).
+Baseline run t-006 (2026-07-09, haiku, dispatched unmarked): 7/7,
+both mandatory questions passed.
+Rule 10 answers: (a) cost — one haiku dispatch plus minutes of Lead
+key-check and grading per run; triggers are rare (role-file edits,
+model swaps, calibration assignment); paid by the Lead session,
+repaid by catching recon degradation before it becomes a
+false-accept stream (F-14: bad recon surfaces later as builder
+failures without attribution);
+(b) axes, by enumeration over the current map:
+ось 1: в очередь — AO3-порт правила и набора (три общих яруса, на
+  следующем касании role-файлов; для 13 QA-агентов конвейера —
+  отдельное решение по данным); явная строка в очереди
+  CURRENT_CONTEXT этим же коммитом;
+ось 2: покрыта — API-контурный собрат уже существует (калибровочный
+  сет судьи, D-0031 / JUDGE_CALIBRATION_PROTOCOL: рекалибровка при
+  смене модели судьи); этот механизм — его субскрипционный близнец,
+  родство зафиксировано в F-14;
+ось 3: покрыта перечислением — scout: набор этим коммитом; critic:
+  в очередь (кандидатный дизайн в тексте набора); builder: н-п
+  (execution-based приёмка witness'ом на каждой задаче сильнее
+  набора, Rule #1); судья: уже D-0031; Lead: покрыт
+  D-0025/D-0047/D-0056;
+ось 4: покрыта — новая пара PROCESS/SCOUT_GOLDEN_SET.md <->
+  .claude/agents/scout.md добавлена в карту тем же коммитом; индекс
+  DECISIONS + полный текст тем же коммитом (чек 12);
+ось 5: н-п — механизм процедурный, тестового кода нет; счётного
+  скрипта у чека 14 нет, как и у прочих чеков (общий queued item
+  «deterministic counting script»);
+ось 6: в очередь — вместе с осью 1 (у qa-конвейера AO3 свои роли и
+  свой набор смыслов; порт после решения по 13 агентам);
+(c) detector — REGISTERED: calibration check 14 added same commit
+(edit-without-run audit via git log over .claude/agents/ of both
+deploys; key liveness via verify commands on >=2 questions;
+recon-failure growth without an unscheduled run triggers one). The
+set's own disappearance is caught by the SIBLING_MAP axis-4 pair
+(check 12 liveness sweep); check-14 answer quality falls under the
+standing check-8 audit.
