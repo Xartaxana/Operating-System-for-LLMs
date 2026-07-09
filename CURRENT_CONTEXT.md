@@ -34,7 +34,14 @@ edits (calibration check 14). Same day also closed: G1
 consecutive-streak follow-up (t-004, met now requires >=14
 CONSECUTIVE days) and traffic_kind default drift (intentional —
 Tasks 1-2 finding 4; pointer comment added at the migration site).
-NEXT task awaits operator pick.
+Operator-raised same day (screenshot of an AO3 Sonnet session
+self-certifying builder-class acceptances): sessions assume the
+Lead ROLE from the policy's addressee -> F-22 + D-0058 (role !=
+tier; capability matrix per actual session model; acceptance only
+from above; critic-skip concession only above the worker; the
+planned "coordinate from Sonnet, batch Fable" mode legalized as
+the normal regime). Landed in both deploys; detector = calibration
+check 6 (amended). NEXT task awaits operator pick.
 
 ## Routing MVP — LIVE on both deployments
 

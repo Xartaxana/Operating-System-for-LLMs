@@ -730,3 +730,68 @@ recon-failure growth without an unscheduled run triggers one). The
 set's own disappearance is caught by the SIBLING_MAP axis-4 pair
 (check 12 liveness sweep); check-14 answer quality falls under the
 standing check-8 audit.
+
+## D-0058
+Role ≠ tier: a session's authority comes from its ACTUAL model, not
+from the policy's addressee (F-22, the thirteenth F-11 case; operator
+screenshot of an AO3 session, 2026-07-09). CLAUDE.md auto-loads into
+every main-chain session and is addressed to "Lead" — so every model
+that read the policy assumed the whole role: a Sonnet coordinator
+"accepted" a Sonnet builder-class fix under the critic-skip
+concession and a fix-verifier report — same-tier self-certification,
+the session-level sibling of F-6 (judge) and F-14 (scout). D-0039
+p.2 fenced statuses/gates/DECISIONS off a degraded Lead but not
+ACCEPTANCE; D-0056 verifies the tier at entry but no matrix said
+what each tier MAY do. This also blocked the operator's planned mode
+(coordinate daily from Sonnet, batch Fable runs over an accumulated
+Lead queue). Decision: (1) the coordinator ROLE is tier-independent;
+FULL Lead = coordinator on the Fable tier, the only one changing
+mechanisms, DECISIONS, table statuses, gates. (2) Acceptance only
+FROM ABOVE: an `accepted` is legal when the acceptor's tier is
+strictly above the worker's, OR the decision carries an
+above-tier input (critic verdict), OR the acceptance is explicitly
+queued to the full Lead (notes mark). Same/higher tier without such
+input = session self-certification. (3) The critic-skip concession
+on small diffs belongs ONLY to an acceptor above the worker.
+(4) Capability matrix per actual coordinator model in CLAUDE.md of
+both deploys ("Роль ≠ ярус"): Fable — unrestricted; Opus — accepts
+scout/builder incl. skip concession, critic-class work queued, no
+mechanisms/statuses; Sonnet — accepts scout, builder diffs only
+with a critic input (no skip), critic-class and Lead-class queued;
+below Sonnet coordination is not provided for. (5) The planned
+Sonnet-coordinator mode is this same matrix as the NORMAL regime;
+degradation (D-0039) is an unplanned entry into it.
+Rule 10 answers: (a) cost — zero in the full-Lead regime (Fable is
+above every worker; nothing changes); in coordinator mode — a critic
+dispatch per builder-class diff (the price of honest acceptance) and
+a Lead queue for same/higher-tier work, paid by the operator's
+batched Fable sessions; repaid by removing session-level
+self-certification (the precedent accepted work on behalf of a tier
+the session was not on);
+(b) axes, by enumeration over the current map:
+ось 1: покрыта — CLAUDE.md («Роль ≠ ярус», деградация п.2, льгота в
+  правиле 3) и critic.md обоих деплоев + AO3 qa-loop SKILL.md
+  (шаги 0/3) — OS этим коммитом, AO3 коммитом той же сессии;
+ось 2: н-п — полномочия, не учёт; детектор читает cc_usage как
+  есть, ничего в учёт не добавляя;
+ось 3: покрыта перечислением — координатор/Lead: матрица; critic:
+  несущая опора приёмки при координаторе ниже Fable (п.9 файла роли
+  обоих деплоев); builder/scout: не принимают ничего — без
+  изменений (builder.md п.4 уже запрещает самосертификацию
+  исполнителя — воркерское зеркало этого же класса); судья: уже
+  D-0031 (chief-judge = приёмка сверху);
+ось 4: покрыта — DECISIONS индекс + полный текст тем же коммитом
+  (чек 12); F-22 в FINDINGS с перекрёстными ссылками; новая ось в
+  карту не нужна: правило лежит на существующих осях 1/3/4
+  (вертикаль «политика — роли — протокол» уже картирована);
+ось 5: н-п — механизм процедурный, кода и тестов нет;
+ось 6: покрыта — qa-loop SKILL.md: шаг 0 preflight уже сверяет
+  ярус (D-0056), дополняется матрицей полномочий; шаг 3 (accepted
+  при result: success) получает условие приёмки сверху; прочие
+  звенья цепочки accepted не пишут;
+(c) detector — REGISTERED: calibration check 6 amended same commit
+(acceptance-from-above audit: acceptor-session tier from cc_usage
+vs event agent tier on every accepted; equal/below requires a
+critic input or a full-Lead-queue mark in notes); works with check
+5 (degradation windows) which catches the windows themselves, and
+with the qa-loop preflight step 0 as the pipeline's entry point.
