@@ -20,19 +20,11 @@ docs/UNIFIED_PLAN_2026-07-07.md (D-0034..D-0036).
 
 ## Current Task (Authoritative, D-0025)
 
-t-013 CLOSED 2026-07-09 (builder+critic+Lead): the groq streaming
-tool-call break did NOT reproduce on identical litellm 1.90.2
-(critic verified install date - no upgrade confound); t-012
-observation reclassified as likely Groq-side transient. Artifact:
-gateway/tools_stream_check.py (persistent isolator); PI_HARNESS
-breaks rewritten - #1 closed, #3 = NEW class "Pi default prompt
-weight (~8.9k tok) vs Groq free-tier ceilings" (TPM 8000 blocks
-builder-groq; TPD 100k/day aborted the t-015 exam).
-RE-EXAMS (tail of the same operator-confirmed queue item):
-- t-016 qwen3:4b on hardened profile: FAIL 0/7 CONFIRMED, both
-  traps, fabricated Trail, thinking trace shows explicit
-  simulation-mode decision. Local scout CLOSED until a stronger
-  local candidate fits 6GB VRAM (re-exam debt cleared).
+t-015 llama-70B re-exam, attempt 3 — the one open exam of the
+local-scout thread (t-013 closure, t-016 re-exam FAIL and the
+2026-07-09 mechanism-day narrative: archived —
+docs/task_reports/2026-07-09_pi-exams-and-adoption-closures.md):
+
 - t-015 llama-70B re-exam: attempts 1 AND 2 both aborted by Groq
   TPD (rejected/tooling x2, NOT model verdicts) - the "reset ~21:05"
   assumption was WRONG, Groq TPD is a ROLLING 24h window (evidence
@@ -58,37 +50,14 @@ RE-EXAMS (tail of the same operator-confirmed queue item):
   evaluated and declined - no TPD primitive, fixed buckets,
   Router-scoped). RESTART the proxy before attempt 3 - the running
   instance predates the wall.
-Coordinator work done meanwhile: t-014 scout (AO3 R14 anchors)
-accepted; calibration check 15 landed (commit 47b185c).
+- t-019 DONE 2026-07-10: quota_events narrated in the Ledger digest
+  (gateway/metrics.py, mirror of the budget_events block; 159
+  passed; critic skipped — pattern-mirroring diff, note in accepted
+  event).
 
-Previous: Task 3 (Phase 2 readiness digest) ACCEPTED 2026-07-09 and archived:
-docs/task_reports/task-3_phase2-readiness.md (task_id t-002; builder
-+ critic ПРИНЯТЬ + Lead witness 108/108). Digest first output: G1
-met (15 days, consecutiveness not yet verified — follow-up queued),
-C2 met (32 sessions), R1 not met (4/30 pairs), rest honestly not
-computable / manual check.
-
-Eval stage 1 items 2+3 DONE 2026-07-09 (D-0057): scout golden set
-(PROCESS/SCOUT_GOLDEN_SET.md, baseline run t-006 = 7/7 PASS incl.
-both mandatory trap questions) + regression rule for agent-prompt
-edits (calibration check 14). Same day also closed: G1
-consecutive-streak follow-up (t-004, met now requires >=14
-CONSECUTIVE days) and traffic_kind default drift (intentional —
-Tasks 1-2 finding 4; pointer comment added at the migration site).
-Operator-raised same day (screenshot of an AO3 Sonnet session
-self-certifying builder-class acceptances): sessions assume the
-Lead ROLE from the policy's addressee -> F-22 + D-0058 (role !=
-tier; capability matrix per actual session model; acceptance only
-from above; critic-skip concession only above the worker; the
-planned "coordinate from Sonnet, batch Fable" mode legalized as
-the normal regime). Landed in both deploys; detector = calibration
-check 6 (amended). Later same day: a PARALLEL session committed
-D-0059 (task-pipeline gate, c2e2d98) while this one worked — the
-resulting task_id collision (t-008 x2) became F-23 + D-0060
-(parallel-session discipline; eval-plan Stage 2 landed by its real
-trigger). First calibration should also tier-check the D-0059
-commit's session per D-0058 (check 5/6). NEXT task awaits operator
-pick.
+Standing reminder for the first calibration: tier-check the D-0059
+commit's session per D-0058 (checks 5/6, F-23 context in the archive
+above).
 
 ## Routing MVP — LIVE on both deployments
 
@@ -96,17 +65,12 @@ pick.
   dogfooding: THIS repo (2026-07-08). Each = auto-loaded CLAUDE.md
   policy + agents scout/builder/critic + logs/routing-log.jsonl
   (D-0041: always the three together).
-- Policy text ARCHITECT-ACCEPTED 2026-07-09 (operator in-chat:
-  "текста политики CLAUDE.md — одобрено"): CLAUDE.md routing rules
-  as of commit 171078c (rules 1-11, Роль != ярус, degradation,
-  journal vocabulary, command hygiene). Later policy changes follow
-  the normal mechanism discipline; this acceptance closed the last
-  open item of Phase 1.5 step 2.
-- Evidence so far (2026-07-09, after t-004..t-006): builder n=4
-  accepted, critic n=3 accepted, scout n=4 accepted (D-0046 cycles
-  with spot-checks); 1 rejected (t-001 attempt 1,
-  failure_class=capability), 0 escalations. ALL statuses estimated
-  (Update Rule 1).
+- Policy text ARCHITECT-ACCEPTED 2026-07-09 (commit 171078c; closed
+  the last open item of Phase 1.5 step 2). Later policy changes
+  follow the normal mechanism discipline.
+- Evidence stream: logs/routing-log.jsonl (t-001..t-019 so far); ALL
+  table statuses estimated — counts and status moves belong to the
+  first weekly calibration (Update Rule 1, D-0047).
 - Retro baseline AO3 (cc_usage, pre-routing): $276.70 accounted +
   $57.82 sidechain self-correction (Task 6). Weekly loop compares
   cost per accepted unit + escalation rate, NOT frontier share alone
@@ -183,61 +147,20 @@ pick.
 
 - D-0043 sweep remainder: add the "report sibling defects" line to
   the nine AO3 QA-pipeline agent prompts on their next touch.
-- Local scout evaluation (operator-approved 2026-07-09; D-0062
-  function→model rebinding, NOT a build): (1) pull the scout tier's
-  accounted spend from cc_usage (per-agent attribution, Task 7);
-  (2) survey existing tool harnesses for GATEWAY WORKERS generally
-  (broadened 2026-07-09, operator direction): one harness serves
-  both the Groq builder (read/grep + patches via OpenAI-style
-  function calling, which Groq supports) and the local scout —
-  D-0030: evaluate before building any tool-loop. Operator-named
-  candidates to include (2026-07-09): Pi-agent (https://pi.dev —
-  same ecosystem as pi-autopilot, whose author's review shaped
-  D-0053/F-18; priors in RELATED_WORK), vibe-engineer
-  (https://github.com/ismailsaleekh/vibe-engineer), gsd-2
-  (https://github.com/gsd-build/gsd-2); plus whatever the survey
-  itself surfaces. STEPS 1-2 DONE 2026-07-09 (operator-ordered run):
-  (1) scout spend measured — $1.33 all-time / 141 turns (fresh
-  cc_usage import): economic case ~zero, the standing case is
-  RESILIENCE + the API-contour second pilot needing recon at all
-  (Deployment targets); (2) survey recorded in RELATED_WORK «Agent
-  tool harnesses»: Pi (earendil-works) RECOMMENDED — MIT, 69k stars,
-  custom provider with baseUrl/openai-completions (gateway drop-in,
-  native Ollama example), scriptable JSON/RPC/SDK; caveat: no
-  built-in permissions, read-only scout profile = restricted tool
-  set via SDK. GSD Pi (ex gsd-2) = standalone agent+methodology,
-  overlaps our policy layer, not a harness; vibe-engineer immature
-  (v0.1); aider noted from priors. STEP 3 DONE 2026-07-09
-  (operator-ordered): Pi prototype LIVE — npm
-  @earendil-works/pi-coding-agent 0.80.3, provider os-gateway in
-  ~/.pi/agent/models.json (intern + builder-groq through our
-  proxy, accounting lands in requests.db). ENTRANCE EXAM (t-011):
-  qwen3:4b FAILED 0/7 — zero tool calls, all answers fabricated
-  incl. both mandatory traps and a fabricated "verified" claim
-  (Runs log in PROCESS/SCOUT_GOLDEN_SET.md); (4) row "recon ->
-  local intern" does NOT enter the table. Infrastructure
-  separately VALIDATED: Pi -> gateway -> ollama_chat structured
-  tool calling works (setup lessons: Pi -p needs closed stdin;
-  models.json cost requires cacheRead/cacheWrite; litellm ollama/
-  prefix drops tools — intern moved to ollama_chat/ in
-  config.yaml). CANDIDATE #2 (t-012, operator question): 70B
-  middle-groq as scout — attempt 1 FAILED 0/7 on the permissive
-  profile with a fully FABRICATED Trail block; attempt 2 (hardened
-  profile) exposed a HARNESS BREAK: streaming tool-call deltas do
-  not survive the Pi<->litellm<->groq path (direct non-streaming
-  request returns proper tool_calls; ollama_chat streaming works).
-  Model verdict INCONCLUSIVE pending the fix. QUEUED (tooling,
-  builder-class): investigate/fix streaming tool-calls for groq
-  through the proxy (candidates: litellm upgrade, Pi provider
-  compat field, non-streaming mode); then RE-EXAM both candidates
-  on the hardened profile (qwen3:4b FAIL stands meanwhile — its
-  tool path was smoke-proven and the fabricated-verified claim
-  disqualifies regardless). Local scout otherwise CLOSED until a
-  stronger local candidate fits 6GB VRAM; Pi builder profile on
-  builder-groq blocked by the same streaming break — same queue
-  item. Working recipe, hardened scout profile and known breaks
-  persisted in gateway/PI_HARNESS.md (session scratchpad does not
-  survive sessions).
+- Local scout / gateway-worker harness evaluation: CLOSED 2026-07-09
+  except the t-015 attempt-3 exam (see Current Task). Standing
+  verdicts: Pi harness ADOPTED for gateway workers (recipe + known
+  breaks: gateway/PI_HARNESS.md; survey: RELATED_WORK «Agent tool
+  harnesses»); qwen3:4b FAILED entrance + hardened re-exam (0/7 x2,
+  fabrication) — local scout CLOSED until a stronger local candidate
+  fits 6GB VRAM; row «recon -> local intern» does NOT enter the
+  table; scout-tier economics ~zero ($1.33 all-time), standing case
+  is resilience + the API-contour second pilot needing recon. Pi
+  builder profile blocked by builder-groq TPM 8000 vs Pi prompt
+  weight — unblock path = prompt-slimming eval (A2 remainder below).
+  Full narrative (steps 1-3, t-011/t-012 exams, infrastructure
+  lessons): archived —
+  docs/task_reports/2026-07-09_pi-exams-and-adoption-closures.md.
 - GSD Pi adoption plan (operator-ordered deep-dive 2026-07-09;
   facts + mechanism inventory in RELATED_WORK «GSD Pi deep-dive»;
   verdict: EXTRACT mechanisms, do NOT adopt the agent — it would
@@ -253,11 +176,10 @@ pick.
     exam integrity, walls block loudly instead). REMAINS QUEUED from
     the original item: Pi prompt-slimming evaluation (skills/tools
     trim) against the builder-groq 8k TPM ceiling; GSD budget-mode
-    token profile as prior art. NEW from t-018 review (critic F4 +
-    siblings): metrics.py digest line for quota_events (builder-class,
-    small — budget_events narration is the in-file sibling);
-    requests(model,ts) index candidate (Rule #1: only on latency
-    evidence — spent_today shares the full-scan cost today).
+    token profile as prior art. From t-018 review: metrics.py
+    digest line for quota_events — DONE 2026-07-10 (t-019);
+    requests(model,ts) index candidate stays queued (Rule #1: only
+    on latency evidence — spent_today shares the full-scan cost).
   - A3 dispatch context manifest (Lead-class, mechanism — full
     rule-10 treatment; WHEN: next D-0054/rule-11 touch, not a
     dedicated pass): the dispatch text enumerates the exact
@@ -306,15 +228,15 @@ pick.
     crash recovery (inseparable from their runtime; our analog is
     session handoff), supply-chain audit tags (no third-party-dep
     loop in this repo today), WXP (not confirmed in official docs).
-- OS boot-diet pass (D-0038/D-0051; handoff 2026-07-09 measured the
-  boot path at 104,052 bytes — first breach of the 100KB protocol
-  threshold; per-file numbers in the handoff commit message). Prime
-  candidate: CURRENT_CONTEXT.md 26.3KB/453 lines — the local-scout/
-  Pi-harness item is largely DONE narrative, archive to
-  docs/task_reports/ keeping live queue lines (D-0038); re-measure
-  at next handoff. Growth this session is explained (3
-  operator-driven mechanisms D-0063/64/65 + GSD Pi plan), the
-  breach predates it only partially.
+- OS boot-diet pass — DONE 2026-07-10 (breach at 2026-07-09 handoff:
+  104,052; peaked 105,374): closed narrative archived per D-0038 to
+  docs/task_reports/2026-07-09_pi-exams-and-adoption-closures.md;
+  boot path now 97,511 bytes (< 100KB restored), CURRENT_CONTEXT
+  27.7 -> 19.8KB. Headroom is thin (~2.5KB): next-breach candidates
+  are CLAUDE.md 22.1KB and ARCHITECTURE.md 17.9KB — both
+  operative/mechanism homes, trimming them is a Lead+Architect
+  decision, not a mechanical cut. Re-measure at every handoff
+  (D-0050 check).
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
   (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
   unswept siblings). Point-lookup matrix per the map, NOT a rescan.
@@ -333,72 +255,26 @@ pick.
   calibration. Rule-10(a)
   retro-audit deliberately NOT queued: its data stream is cc_usage,
   covered by calibration check 11.
-- Evidence-acceptance adoption plan (F-17 + pi-autopilot priors in
-  RELATED_WORK "Agent orchestration"; operator-approved 2026-07-08):
-  - Stage 1 DONE 2026-07-08: D-0052 (witness on builder-accepted,
-    `defect_found` event, failure-class word in rejected notes —
-    absorbs eval-stage-1 item (1)); CLAUDE.md + roles both deploys,
-    AO3 log_append.py vocabulary + tests, calibration check 13.
-  - Stage 1.5 DONE 2026-07-08: D-0053 typed journal fields (F-18,
-    external review by pi-autopilot author: task_id / attempt /
-    failure_class / witness / ref; AO3 log_append enforce + tests;
-    checks 3/13 amended). Queued from it: deterministic counting
-    script for checks 3/13 (Lead spec -> builder, AFTER the first
-    manual calibration validates what it should compute); structured
-    worker-report frames deferred until dispatch volume (Rule #1).
-  - Stage 1.6 DONE 2026-07-08: D-0054 tier-shaped DoD in EVERY
-    dispatch (rule 11 both deploys + all three role files; F-19 —
-    the draft was builder-only, operator's axis-3 question widened
-    it before commit; detector = failure_class=spec stream,
-    check 13(г)).
-  - Stage 1.7 DONE 2026-07-08: D-0055 (F-20) — rule 10(b) answered
-    by ENUMERATION over the current map's axes (axis list parsed
-    from SIBLING_MAP at each run, never hardcoded) + commit-msg gate
-    in both repos (.githooks + mechanism_gate.py twins; hooksPath
-    set). First full-discipline dispatch cycle on the gate itself:
-    t-001 delegated(critic) -> rejected (confirmed blocker F-A:
-    diff-quoted skip syntax self-bypassed the gate) -> fixed with
-    regression tests -> accepted. Detector: check 8 (hooksPath
-    liveness + skip-line audit).
-  - Stage 2 LANDED 2026-07-09 as D-0060, fired by the first real
-    parallel-session incident (F-23: task_id t-008 allocated to two
-    unrelated tasks by concurrent sessions): rule 4 addendum (owned
-    paths, both for parallel specs and parallel sessions) + task_id
-    allocation by journal-tail re-read at write time; detector =
-    check 13(д). AO3 log_append.py enforce LANDED 2026-07-09
-    (t-009, AO3 commit 5a26fe3: full-match t-NNN max+1, --reopen-task
-    on closed ids, descriptive ids free; TOCTOU accepted best-effort,
-    residual detector = check 13(д)). F-C/F-D hardening LANDED via
-    t-010 (2026-07-09) — the first agentic API-contour dispatch
-    cycle: builder->middle-groq through the gateway (operator pilot),
-    2 attempts (rejected capability + accepted with documented
-    Lead repairs), $0.0035 accounted real traffic, witness 262
-    passed. Update Rule 4 datapoint recorded in the journal.
-    Follow-up (operator direction, same day): builder-groq alias
-    added to gateway/config.yaml — gpt-oss-120b as the CANDIDATE
-    API-contour builder binding (judge twin, 13/13 incl. the
-    code-tracing pair the 70B failed); next text-shaped cycles
-    dispatch there, binding decided on journal evidence (D-0028).
-    Caveat pinned in config: same model as judge -> Shadow Eval on
-    this binding is self-judging, chief-judge review required.
-  - Stage 3 (data-gated: only if first calibration's checks 10/11
-    show the context/overhead discipline actually leaks): PreToolUse
-    hook as context_budget analog — Lead spec -> builder implements
-    -> critic review per rule 3. Do NOT build before that evidence
-    (Rule #1).
-- Eval plan, stage 1 (Habr evals articles 2026-07-08; priors in
-  docs/RELATED_WORK.md "Evals"; operator-approved): (1) failure-class
-  word in rejected-event notes (spec / capability / recon / tooling)
-  — LANDED with D-0052;
-  (2)+(3) LANDED 2026-07-09 as D-0057: PROCESS/SCOUT_GOLDEN_SET.md
-  (7 questions incl. negative usage-vs-mention and judgment-refusal
-  traps, pinned keys with verify commands, baseline t-006 7/7 PASS)
-  + regression rule on agent-prompt edits, detector = calibration
-  check 14. Queued from it: AO3 port of D-0057 (rule + set for the
-  three shared tiers on next role-file touch; the 13 QA-pipeline
-  agents decided separately on pipeline data — axes 1/6); critic
-  golden set (candidate design: diff with seeded defects; build
-  only if calibration shows critic drift, Rule #1).
+- Evidence-acceptance adoption plan (F-17): stages 1 / 1.5 / 1.6 /
+  1.7 / 2 DONE 2026-07-08..09 (D-0052..D-0055, D-0060; stage details
+  archived —
+  docs/task_reports/2026-07-09_pi-exams-and-adoption-closures.md).
+  Live residuals: deterministic counting script for checks 3/13
+  (Lead spec -> builder AFTER the first manual calibration);
+  structured worker-report frames (deferred until dispatch volume,
+  Rule #1); builder-groq = CANDIDATE API-contour builder binding —
+  next text-shaped cycles dispatch there, binding decided on journal
+  evidence (D-0028; self-judging caveat pinned in config.yaml).
+  Stage 3 (data-gated: only if first calibration's checks 10/11
+  show the context/overhead discipline actually leaks): PreToolUse
+  hook as context_budget analog — Lead spec -> builder -> critic per
+  rule 3. Do NOT build before that evidence (Rule #1).
+- Eval plan, stage 1 — LANDED (D-0052 + D-0057; details archived —
+  same file as above). Live residuals: AO3 port of D-0057 (rule +
+  set for the three shared tiers on next role-file touch; the 13
+  QA-pipeline agents decided separately on pipeline data — axes
+  1/6); critic golden set (candidate design: diff with seeded
+  defects; build only if calibration shows critic drift, Rule #1).
 - Eval plan, stage 2 (needs >=1 week routed traffic): journal's
   accepted tasks as a regression set replayed on the API contour on
   model/price changes; minimum-n / pass^k in DELEGATION_TABLE Update
@@ -470,5 +346,10 @@ Closed work lives in docs/task_reports/ (index in its README.md):
 - 2026-07-08_routing-dogfooding-day.md — interim 18h read, dead-tier
   revival, F-1 formalization, first degradation cycle, mechanism day
   (F-12..F-16 / D-0044..D-0051).
+- 2026-07-09_pi-exams-and-adoption-closures.md — t-013 closure,
+  Pi-worker exam narrative (t-011/t-012/t-016), local-scout
+  evaluation steps 1-3, evidence-acceptance stages 1-2, eval-plan
+  stage 1, F-22/D-0058 + F-23/D-0060 day narrative (boot-diet
+  archive 2026-07-10).
 
 This file is intended to be updated frequently.

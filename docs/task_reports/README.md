@@ -44,6 +44,12 @@ Evidence is never deleted, only relocated.
   formalization (D-0041/D-0042), first degradation cycle, and the
   mechanism day: operator questions F-12..F-16 -> D-0044..D-0051
   (rejected/trail/calibration/map/handoff/boot-diet mechanisms).
+- [2026-07-09_pi-exams-and-adoption-closures.md](2026-07-09_pi-exams-and-adoption-closures.md) —
+  boot-diet archive (2026-07-10): t-013 closure, Pi-worker exam
+  narrative (t-011/t-012/t-016 fabrication evidence), local-scout
+  evaluation steps 1-3, evidence-acceptance stages 1-2
+  (D-0052..D-0055, D-0060), eval-plan stage 1 (D-0057), F-22/D-0058 +
+  F-23/D-0060 day narrative.
 - [task-3_phase2-readiness.md](task-3_phase2-readiness.md) —
   Delegated Task 3: Phase 2 readiness digest in metrics.py; spec,
   execution report, critic review (ПРИНЯТЬ, 3 non-blocking findings),
