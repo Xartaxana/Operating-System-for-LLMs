@@ -3,11 +3,12 @@
 ARCHITECTURE.md, "Ledger"; D-0027. Pure Python/SQL, no LLM.
 
 Produces a daily digest: requests, tokens, cost, latency and response
-length per model per day; budget events; task categories (transparent
-keyword heuristics, always marked as such); and the context-repetition
-ratio — the share of prompt characters already sent in the previous
-request of the same model. External priors to beat: 50-62% of spend is
-re-sent history (docs/RELATED_WORK.md).
+length per model per day; budget events; token-quota (sliding-window)
+events; task categories (transparent keyword heuristics, always marked
+as such); and the context-repetition ratio — the share of prompt
+characters already sent in the previous request of the same model.
+External priors to beat: 50-62% of spend is re-sent history
+(docs/RELATED_WORK.md).
 
 Usage:
     python metrics.py [--db PATH] [--days N] [--json]
@@ -399,6 +400,16 @@ def daily_digest(conn: sqlite3.Connection, days: int, delegation_table_path=None
     except sqlite3.OperationalError:
         events = []
 
+    try:
+        quota_events = conn.execute(
+            "SELECT substr(ts, 1, 10), model, window_seconds, level,"
+            " spent_tokens, limit_tokens FROM quota_events"
+            " WHERE substr(ts, 1, 10) >= date('now', ?) ORDER BY ts",
+            (since,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        quota_events = []
+
     return {
         "days": days,
         "per_day": [
@@ -416,6 +427,11 @@ def daily_digest(conn: sqlite3.Connection, days: int, delegation_table_path=None
             {"day": e[0], "model": e[1], "level": e[2],
              "spent_usd": e[3], "budget_usd": e[4]}
             for e in events
+        ],
+        "quota_events": [
+            {"day": e[0], "model": e[1], "window_seconds": e[2], "level": e[3],
+             "spent_tokens": e[4], "limit_tokens": e[5]}
+            for e in quota_events
         ],
         "phase2_readiness": phase2_readiness(conn, days, delegation_table_path),
     }
@@ -457,6 +473,16 @@ def format_digest(digest: dict) -> str:
         lines.append(
             f"  {e['day']}  {e['model']} {e['level'].upper()}:"
             f" ${e['spent_usd']:.4f} of ${e['budget_usd']:.2f}"
+        )
+
+    lines.append("")
+    lines.append("Token quota events (sliding windows):")
+    if not digest["quota_events"]:
+        lines.append("  none")
+    for e in digest["quota_events"]:
+        lines.append(
+            f"  {e['day']}  {e['model']} window={e['window_seconds']}s"
+            f" {e['level'].upper()}: {e['spent_tokens']} of {e['limit_tokens']} tok"
         )
 
     lines.append("")

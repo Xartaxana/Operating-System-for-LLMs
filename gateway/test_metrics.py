@@ -1,6 +1,7 @@
 """Tests for the Ledger digest. Run: python -m pytest gateway/test_metrics.py"""
 
 import datetime
+import json
 import sqlite3
 
 import pytest
@@ -9,13 +10,14 @@ from metrics import (
     categorize,
     common_prefix_len,
     daily_digest,
+    format_digest,
     format_phase2_line,
     parse_shadow_eval_log,
     phase2_readiness,
     repetition_by_model,
 )
 from sqlite_logger import SCHEMA
-from guard import EVENTS_SCHEMA
+from guard import EVENTS_SCHEMA, QUOTA_EVENTS_SCHEMA
 
 # Minimal mirror of tools/usage_report.py's cc_usage CREATE TABLE (Delegated
 # Task 5): only the columns phase2_readiness's G1/C2 queries touch are
@@ -62,6 +64,19 @@ def seed_cc_usage(conn, project, session_id, turn_index, model="sonnet",
             ts or datetime.datetime.now().isoformat(), project, session_id,
             turn_index, model, traffic_kind, is_sidechain,
             f"{session_id}:{turn_index}",
+        ),
+    )
+    conn.commit()
+
+
+def seed_quota_event(conn, model, window_seconds, level, spent_tokens, limit_tokens, ts=None):
+    conn.execute(QUOTA_EVENTS_SCHEMA)
+    conn.execute(
+        "INSERT INTO quota_events (ts, model, window_seconds, level, spent_tokens, limit_tokens)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            ts or datetime.datetime.now().isoformat(),
+            model, window_seconds, level, spent_tokens, limit_tokens,
         ),
     )
     conn.commit()
@@ -134,6 +149,65 @@ def test_old_rows_excluded(conn):
     seed(conn, "lead", "old prompt", ts=old)
     digest = daily_digest(conn, days=1)
     assert digest["per_day"] == []
+
+
+# --- quota_events digest (t-019, sibling of budget_events, D-0043 class,
+# SIBLING_MAP.md axis 2: "enforcement-events Guard <-> Ledger-digest") -----
+
+
+def test_daily_digest_survives_missing_quota_events_table(conn):
+    # The base `conn` fixture (SCHEMA + EVENTS_SCHEMA only) never creates
+    # quota_events -- the fail-safe case for a DB from before t-018's guard.py
+    # ever ran, mirroring budget_events' OperationalError handling.
+    seed(conn, "lead", "AB", cost=0.01)
+    digest = daily_digest(conn, days=1)
+    assert digest["quota_events"] == []
+    text = format_digest(digest)
+    assert "Token quota events (sliding windows):\n  none" in text
+
+
+def test_daily_digest_survives_empty_quota_events_table(conn):
+    # Table exists (guard.py ran at least once) but has no rows yet.
+    conn.execute(QUOTA_EVENTS_SCHEMA)
+    conn.commit()
+    digest = daily_digest(conn, days=1)
+    assert digest["quota_events"] == []
+    assert "Token quota events (sliding windows):\n  none" in format_digest(digest)
+
+
+def test_daily_digest_quota_events_warn_and_block(conn):
+    seed_quota_event(conn, "groq-70b", 86400, "warn", 8000, 10000)
+    seed_quota_event(conn, "groq-70b", 60, "block", 6000, 6000)
+
+    digest = daily_digest(conn, days=1)
+
+    levels = {e["level"] for e in digest["quota_events"]}
+    assert levels == {"warn", "block"}
+    warn = next(e for e in digest["quota_events"] if e["level"] == "warn")
+    assert warn["model"] == "groq-70b"
+    assert warn["window_seconds"] == 86400
+    assert warn["spent_tokens"] == 8000
+    assert warn["limit_tokens"] == 10000
+    block = next(e for e in digest["quota_events"] if e["level"] == "block")
+    assert block["window_seconds"] == 60
+    assert block["spent_tokens"] == 6000
+    assert block["limit_tokens"] == 6000
+
+    text = format_digest(digest)
+    assert "groq-70b window=86400s WARN: 8000 of 10000 tok" in text
+    assert "groq-70b window=60s BLOCK: 6000 of 6000 tok" in text
+
+    payload = json.dumps(digest)
+    reloaded = json.loads(payload)
+    reloaded_levels = {e["level"] for e in reloaded["quota_events"]}
+    assert reloaded_levels == {"warn", "block"}
+
+
+def test_daily_digest_quota_events_excludes_old_rows(conn):
+    old = (datetime.datetime.now() - datetime.timedelta(days=10)).isoformat()
+    seed_quota_event(conn, "groq-70b", 60, "warn", 100, 200, ts=old)
+    digest = daily_digest(conn, days=1)
+    assert digest["quota_events"] == []
 
 
 # --- Phase 2 readiness (Delegated Task 3) ---------------------------------
