@@ -1062,3 +1062,58 @@ proxy-judging gate that false-accepts surfaces as `defect_found` on
 gate-passed work — the false-accept stream calibration check 13
 already audits. The principle's own layer-1 half is rule 10(в)
 (D-0049), whose detector registry stands.
+
+## D-0064
+Rule 10 gains question (г) — the enforcement-layer question
+(operator direction 2026-07-09, direct corollary of D-0063; finding
+F-24): before a mechanism is committed, the Lead answers in writing
+WHAT PREVENTS SKIPPING IT — by what/when it TRIGGERS and what CODE
+stands on the execution path (D-0063 layer 1). «Held by discipline»
+remains a legal answer ONLY as an explicit line naming the (в)
+detector that would catch the leak — a recorded choice, never the
+silent default. (г) does NOT mandate building gates: promotion
+discipline→gate stays evidence-driven (D-0063, Rule #1); (г)
+mandates STATING the layer, so the difference between «enforced»
+and «hoped for» is visible at design time instead of at the
+post-mortem (F-9/F-21/F-22 were failures of exactly the
+unrecorded-discipline layer). Retroactive coverage: the queued
+one-time rule-10(б) sweep is EXTENDED to ask (г) of every decision
+D-0028..D-0063 in the same pass — one line per mechanism
+(trigger/code, or discipline + named detector); gaps land as queue
+items (B-series class), not immediate builds. Calibration check 8
+amended same commit: new DECISIONS entries are audited for the
+(г) line; a missing (г) line or a discipline answer without a named
+detector = finding (class F-24).
+Rule 10 answers: (а) cost — ~8 lines in each deploy's CLAUDE.md
+(boot-path files — the REAL cost, watched by check 10) + 5 lines in
+check 8 + this entry; the boot-path growth is paid every session and
+accepted deliberately: the question preempts the F-9/F-21/F-22
+finding class, each instance of which cost a full investigation;
+(б) axes, by enumeration over the current map:
+ось 1: покрыта — правило 10 обновлено в CLAUDE.md ОБОИХ деплоев тем
+  же ходом (AO3 — точечный коммит ТОЛЬКО CLAUDE.md: рабочее дерево
+  AO3 занято параллельной сессией, её незакоммиченные пути не
+  тронуты, D-0060);
+ось 2: н-п — учёт не меняется;
+ось 3: покрыта — вопрос адресован Lead-функции: механизмы коммитит
+  полный Lead (D-0058); обязанности воркеров не растут;
+ось 4: покрыта — DECISIONS индекс + полный текст тем же коммитом
+  (чек 12); чек 8 калибровки (владелец регистрации детекторов) —
+  тем же коммитом; FINDINGS F-24 — тем же коммитом (наблюдение
+  наше, по происхождению в FINDINGS); next-task SKILL.md ссылается
+  на правило, формулировок не дублирует (D-0061) — правки не
+  требует;
+ось 5: н-п — кода в этом коммите нет: mechanism_gate на (г) НЕ
+  расширяется — см. (г)-ответ ниже;
+ось 6: н-п — схемы/rules.yaml конвейера не трогаются; агенты AO3
+  механизмов не коммитят (Lead-функция);
+(в) detector — чек 8 расширен этим же коммитом: новые записи
+DECISIONS аудируются на (г)-строку; дисциплинный ответ без
+названного детектора = находка;
+(г) self-application — триггер: тот же chokepoint, что уже
+гарантирует встречу с правилом 10, — commit-msg-гейт механизмных
+путей ставит автора внутрь rule-10 блока (код на пути исполнения
+есть). ПРИСУТСТВИЕ самой (г)-строки гейт сегодня не проверяет —
+записанный выбор «на дисциплине»: расширение mechanism_gate
+(парного, оба репо) отложено до evidence от чека 8; детектор утечки
+назван — чек 8.

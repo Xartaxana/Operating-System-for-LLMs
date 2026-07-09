@@ -297,7 +297,12 @@ pick.
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
   (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
   unswept siblings). Point-lookup matrix per the map, NOT a rescan.
-  Schedule: with/after the first weekly calibration. Rule-10(a)
+  EXTENDED by D-0064 (operator direction 2026-07-09): the SAME pass
+  asks question (г) of EVERY decision D-0028..D-0063 — one line per
+  mechanism (чем триггерится / какой код на пути, либо «на
+  дисциплине» + названный детектор); gaps land as queue items
+  (B-series class, D-0063 promotion by evidence), not immediate
+  builds. Schedule: with/after the first weekly calibration. Rule-10(a)
   retro-audit deliberately NOT queued: its data stream is cc_usage,
   covered by calibration check 11.
 - Evidence-acceptance adoption plan (F-17 + pi-autopilot priors in
