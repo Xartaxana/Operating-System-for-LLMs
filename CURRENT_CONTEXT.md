@@ -152,13 +152,6 @@ pick.
 
 - D-0043 sweep remainder: add the "report sibling defects" line to
   the nine AO3 QA-pipeline agent prompts on their next touch.
-- R14-guard failure check (handed over by an AO3 session 2026-07-09
-  via the SIBLING_MAP axis-6 sub-axis note, per the map-maintenance
-  rule): add a weekly-calibration check for the failure of the AO3
-  "blocker -> test_debt bug at the source" guard (test-designer duty
-  + rules.yaml R14 entry guard) — the guard's own detector is not
-  registerable from an AO3 session (WEEKLY_CALIBRATION_PROTOCOL
-  lives here). Lead, small; with/before the first calibration.
 - Local scout evaluation (operator-approved 2026-07-09; D-0062
   function→model rebinding, NOT a build): (1) pull the scout tier's
   accounted spend from cc_usage (per-agent attribution, Task 7);
