@@ -38,6 +38,7 @@ critic проверяет классовую полноту фикса ПО КА
 | traffic_kind (real/synthetic/replay/judge) | is_sidechain + agent_id/agent_type |
 | evidence: Shadow Evaluation Log (DELEGATION_TABLE.md) | evidence: routing-журнал + вердикты приёмки |
 | gateway/metrics.py (дайджест) | tools/usage_report.py (отчёт) |
+| детектор фабрикации F-14: tools/pi_run_guard.py (код, Pi/gateway-воркеры) | приёмка по следу + точечная сверка D-0046 (дисциплина, Claude Code-воркеры) |
 
 Классические классы на этой оси: новая модель/цена (добавить в ОБА
 учёта), новый вид трафика/атрибуции, правило «никогда молчаливый $0».

@@ -44,6 +44,20 @@ PROCESS/SCOUT_GOLDEN_SET.md; обзор кандидатов — docs/RELATED_WO
        выше».
     5. Заверши блоком «След»: поиски и прочитанные файлы.
 
+## Пост-прогонный guard (t-017, обязателен для экзаменов)
+
+ДО чтения/оценки отчёта Pi-воркера координатором — детерминированный
+детектор фабрикации F-14 (ноль структурных tool-вызовов при
+содержательном ответе):
+
+    python tools/pi_run_guard.py --json <вывод.json>
+    python tools/pi_run_guard.py --db gateway/requests.db --model <alias> --since <ts> --until <ts>
+
+Exit: 0 PASS / 1 REJECTED (штамп rejected без оценки) / 2 INCONCLUSIVE
+(ops-абор, не вердикт). Окно --db обязано начинаться И заканчиваться
+на оцениваемом ответе (см. KNOWN GOTCHA в docstring guard'а).
+Детектор отказа самого guard'а — чек 14(д) еженедельной калибровки.
+
 ## Известные разрывы (очередь CURRENT_CONTEXT)
 
 1. ЗАКРЫТ КАК НЕ ВОСПРОИЗВЕДЁННЫЙ (t-013, 2026-07-09; builder +
