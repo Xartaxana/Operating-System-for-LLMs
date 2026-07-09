@@ -48,13 +48,16 @@ RE-EXAMS (tail of the same operator-confirmed queue item):
   journal as t-015 attempt 3. Partial positive from attempt 2:
   3 REAL executed tool calls on the hardened profile (opposite of
   attempt-1 fabrication) - behavioral evidence, not a verdict.
-  In flight 2026-07-09 evening: t-017 builder = A1 zero-tool-call
-  guard (tools/pi_run_guard.py; MUST stamp exam reports before Lead
-  reads them - retro-run on t-016 in DoD); t-018 builder = A2
-  gateway quota walls (guard.py rolling-window token counters;
-  evaluate litellm-native first per D-0030; Pi prompt-slimming
-  explicitly descoped, stays queued). Acceptance per rule 3
-  (critic if >~100 lines).
+  LANDED 2026-07-09 evening (full builder->critic->Lead cycles,
+  parallel disjoint-path dispatch): t-017 A1 zero-tool-call guard
+  (tools/pi_run_guard.py, all three verdict shapes validated on real
+  data; wired into SCOUT_GOLDEN_SET p.3 + PI_HARNESS + calibration
+  check 14(д)) and t-018 A2 quota walls (guard.py sliding-window
+  token counters middle-groq TPD 100k/TPM 12k + builder-groq TPM 8k,
+  warn 80/refuse 100, no cross-model fallbacks; litellm-native
+  evaluated and declined - no TPD primitive, fixed buckets,
+  Router-scoped). RESTART the proxy before attempt 3 - the running
+  instance predates the wall.
 Coordinator work done meanwhile: t-014 scout (AO3 R14 anchors)
 accepted; calibration check 15 landed (commit 47b185c).
 
@@ -240,25 +243,21 @@ pick.
   verdict: EXTRACT mechanisms, do NOT adopt the agent — it would
   replace the Lead coordinator and forfeit the cost-crossover loop
   that is our niche). Items in priority order:
-  - A1 zero-tool-call guard (builder-class, small; WHEN: next
-    builder dispatch, BEFORE any further entrance/re-exam run —
-    the t-015 retry qualifies if it slips past one more session):
-    post-run check of a Pi worker transcript/requests.db — zero
-    structural tool calls + substantive answer => automatic
-    rejected-stamp before Lead reads the report. Deterministic
-    detector for the F-14 fabrication class (exact t-011/t-016
-    shape). DoD: script + tests + retro-run on the t-016 transcript
-    reproducing FAIL. Prior art: GSD Pi v1.3.0 zero-tool-call guard.
-  - A2 gateway fallback chains (builder-class, config-sized; WHEN:
-    with/before the t-015 retry or the next Groq-quota incident,
-    whichever first): litellm NATIVE fallbacks on the groq aliases
-    for 429 TPM/TPD (t-013/t-015 class «Pi prompt weight vs
-    free-tier ceilings»); D-0030 ordering — try native before
-    building. Same item: evaluate Pi prompt-slimming (skills/tools
-    trim) against the 8k TPM ceiling; GSD's budget-mode token
-    profile is the prior art. Absorbs B2 (see below): litellm
-    native BUDGETS/rate-limits per alias — quota rationing as a
-    code wall, not session memory (D-0063).
+  - A1 zero-tool-call guard — DONE 2026-07-09 (t-017, builder+critic
+    ПРИНЯТЬ+Lead witness; commit with full rule-10 block). Known
+    limitations accepted (critic F2/F3, LOW): prose tool_call_id
+    could inflate later-turn counts; contradictory dual-source
+    aggregate untested.
+  - A2 quota walls — DONE 2026-07-09 (t-018, builder attempt 2 after
+    critic ДОРАБОТАТЬ; absorbed B2; NO fallback chains adopted —
+    exam integrity, walls block loudly instead). REMAINS QUEUED from
+    the original item: Pi prompt-slimming evaluation (skills/tools
+    trim) against the builder-groq 8k TPM ceiling; GSD budget-mode
+    token profile as prior art. NEW from t-018 review (critic F4 +
+    siblings): metrics.py digest line for quota_events (builder-class,
+    small — budget_events narration is the in-file sibling);
+    requests(model,ts) index candidate (Rule #1: only on latency
+    evidence — spent_today shares the full-scan cost today).
   - A3 dispatch context manifest (Lead-class, mechanism — full
     rule-10 treatment; WHEN: next D-0054/rule-11 touch, not a
     dedicated pass): the dispatch text enumerates the exact

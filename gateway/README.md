@@ -12,24 +12,49 @@ the request path: a `warn` event at 80% of budget (once per model per
 day), HTTP 429 refusal at 100%. Budgets live in `budgets.yaml` and are
 re-read on every request — edits apply without a proxy restart.
 
-Why not LiteLLM's native budgets (D-0030 evaluation): they require
-Postgres (and Redis for cross-worker counters), both explicitly
-deferred by ARCHITECTURE.md, and lack per-model 80%-warning semantics.
-The Guard is ~100 lines over the SQLite log the gateway already writes.
+The Guard also enforces sliding-window TOKEN quotas (t-018, D-0063) —
+separate from the $ budgets above, for provider-side free-tier limits
+(e.g. Groq's TPM/TPD) that are token-metered, not dollar-metered, and
+roll continuously rather than resetting at a calendar boundary
+(Groq's TPD is a rolling 24h window, not a calendar day — confirmed
+on t-015, CURRENT_CONTEXT.md). `quota_windows` in `budgets.yaml` lists
+one or more `{window_seconds, limit_tokens}` walls per gateway alias;
+each is a true rolling window over `prompt_tokens+completion_tokens`
+in `requests.db` — a request only ages out once it is individually
+older than `window_seconds`, never at a fixed clock boundary. Same
+warn-80%/refuse-100% semantics as the $ budgets, recorded in a
+separate `quota_events` table (tokens, not USD). No cross-model
+fallback: a wall blocks the request, it never redirects to another
+model — the exam/calibration traffic these walls protect validates a
+specific model, and a fallback would invalidate that.
+
+Why not LiteLLM's native budgets/rate-limits (D-0030 evaluation): the
+$ budgets require Postgres (and Redis for cross-worker counters), both
+explicitly deferred by ARCHITECTURE.md, and lack per-model
+80%-warning semantics. For the token quotas, litellm 1.90.2 ships a
+Redis-less per-deployment RPM/TPM limiter
+(`router_strategy/lowest_tpm_rpm_v2.py`, falls back to an in-memory
+cache) — but its window is a fixed calendar-minute bucket, not
+sliding, it has no daily (TPD) primitive at all, and it is a
+Router/multi-deployment mechanism, not a single-deployment gate; it
+doesn't cover the rolling-TPD wall these free tiers need, so it was
+not adopted (see `guard.py` docstring). The Guard is a few hundred
+lines over the SQLite log the gateway already writes.
 
 ## Files
 
 - `config.yaml` — proxy configuration (models, callback registration).
 - `sqlite_logger.py` — LiteLLM custom callback writing to SQLite.
-- `guard.py` — budget enforcement pre-call hook (no LLM).
-- `budgets.yaml` — daily budgets per gateway alias; `GATEWAY_BUDGETS_PATH` overrides.
+- `guard.py` — budget + sliding-window token quota enforcement pre-call hook (no LLM).
+- `budgets.yaml` — daily $ budgets and sliding-window token quotas (`quota_windows`) per gateway alias; `GATEWAY_BUDGETS_PATH` overrides.
 - `metrics.py` — the Ledger: daily digest over the request log (no LLM).
 - `analyst.py` — the Analyst: local small model narrating the digest.
 - `shadow_eval.py` — Shadow Evaluation: replay + compare, updates DELEGATION_TABLE.md.
 - `judge_calibration.json` — replay pairs manually labeled with semantic verdicts; the automated LLM judge is calibrated against it.
 - `test_sqlite_logger.py`, `test_guard.py`, `test_metrics.py`, `test_analyst.py`, `test_shadow_eval.py` — tests, no API keys required.
 - `requests.db` — the request log (created on first request, not committed).
-  Also holds the `budget_events` table (warn/block history for the Ledger).
+  Also holds the `budget_events` table ($ warn/block history) and the
+  `quota_events` table (token-quota warn/block history), both for the Ledger.
 
 ## Run
 

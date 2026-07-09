@@ -9,3 +9,37 @@ warn_ratio: 0.8
 daily_usd:
   default: 5.00
   lead: 10.00
+
+# quota_windows: sliding-window TOKEN quotas (t-018), one or more
+# {window_seconds, limit_tokens} walls per gateway alias. Each window
+# is a true rolling window over prompt_tokens+completion_tokens in
+# requests.db, not a calendar bucket -- Groq free-tier TPD is itself a
+# rolling 24h window (t-015, CURRENT_CONTEXT.md), so a calendar-day
+# reset would under-enforce it. No "default" fallback: a model absent
+# here has no token wall. No cross-model fallback either way (Lead
+# constraint, t-018): a wall blocks, it never redirects to another
+# model.
+#
+# middle-groq (llama-3.3-70b-versatile) limits per spec (TPD) and
+# empirical Groq docs (TPM, console.groq.com/docs/rate-limits,
+# checked 2026-07-09 -- the spec named the 60s TPM window but not its
+# token count):
+#   TPD 100000 tokens / 24h, TPM 12000 tokens / 60s.
+# builder-groq (openai/gpt-oss-120b) limit per spec: TPM 8000
+# tokens / 60s (matches CURRENT_CONTEXT.md task-5 usage report and
+# Groq's published TPM for this model; its TPD is 200000/24h per Groq
+# docs but that wall was not asked for here and is left out).
+#
+# Failure detector for the wall itself (rule 10(в), D-0049): weekly
+# calibration check 13 -- any NEW rejected/failure_class=tooling event
+# carrying a Groq 429 TPM/TPD error dated AFTER this wall landed means
+# the wall leaked (evidence to fix or tighten it, D-0063).
+quota_windows:
+  middle-groq:
+    - window_seconds: 86400
+      limit_tokens: 100000
+    - window_seconds: 60
+      limit_tokens: 12000
+  builder-groq:
+    - window_seconds: 60
+      limit_tokens: 8000
