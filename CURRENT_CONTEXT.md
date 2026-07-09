@@ -243,7 +243,9 @@ pick.
     free-tier ceilings»); D-0030 ordering — try native before
     building. Same item: evaluate Pi prompt-slimming (skills/tools
     trim) against the 8k TPM ceiling; GSD's budget-mode token
-    profile is the prior art.
+    profile is the prior art. Absorbs B2 (see below): litellm
+    native BUDGETS/rate-limits per alias — quota rationing as a
+    code wall, not session memory (D-0063).
   - A3 dispatch context manifest (Lead-class, mechanism — full
     rule-10 treatment; WHEN: next D-0054/rule-11 touch, not a
     dedicated pass): the dispatch text enumerates the exact
@@ -262,6 +264,31 @@ pick.
     session and attaches verbatim output as a witness DRAFT (GSD
     verification_commands + canonical-verdict-field analog);
     acceptance itself stays with Lead (D-0037).
+  - B-series (D-0063 two-layer enforcement, operator-confirmed
+    2026-07-09: code guarantees the encounter with a rule, AI
+    judges fulfillment in meaning — the selection axis for
+    everything above):
+  - B1 journal validator, OS repo (builder-class; WHEN: next
+    builder batch, natural pair with A1): pre-commit validation of
+    NEW routing-log.jsonl lines — D-0053 typed fields (attempt/
+    failure_class on rejected, witness on builder-accepted, model
+    presence), task_id novelty (t-NNN max+1, D-0060), D-0058
+    acceptance matrix as code (acceptor tier above worker, or
+    critic-input/queued-to-Lead flag present). REVISES the D-0060
+    choice of manual tail re-read — on F-23 evidence (collision
+    already happened here) + D-0063, recorded, not silent. Sibling
+    implementation: AO3 scripts/log_append.py (ось 1).
+  - B2 — FOLDED into A2: gateway budget walls are the same commit
+    class (litellm NATIVE budgets/rate-limits per alias; evidence:
+    t-015 TPD exhaustion — 98.5k/100k burned by earlier tasks
+    before the exam got one token out).
+  - B3 SessionStart hook (Lead spec -> builder; WHEN: after the
+    first weekly calibration validates what the Boot Report line
+    should show — same gating logic as the checks 3/13 counting
+    script): print actual model tier + open degradation window
+    (journal tail) + calibration staleness at session start, making
+    the D-0056 entry check unmissable (F-21/F-22 evidence).
+    Mechanism commit at build time -> full rule-10 then.
   - NOT adopted (recorded to stop re-litigating): GSD as
     coordinator (duplicates Lead), auto-mode SQLite state machine +
     crash recovery (inseparable from their runtime; our analog is

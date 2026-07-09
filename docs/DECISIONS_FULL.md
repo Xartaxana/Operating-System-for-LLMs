@@ -989,3 +989,76 @@ bridge/policy divergence under calibration check 12 (pair
 liveness): a new role or grade landing without a bridge update is
 exactly the pair-desync class check 12 audits; "a grade word inside
 a routing rule" is named in the map line as a vocabulary defect.
+
+## D-0063
+Two-layer enforcement (operator formulation 2026-07-09, out of the
+GSD Pi deep-dive discussion: «исполнение правила гарантируется
+кодом; как именно оно исполнено — проверяет ИИ, а не признаки»).
+A rule is held by two layers with different guarantees. LAYER 1 —
+code standing on the execution path (git hook, journal validator,
+budget wall, harness hook): policy text can go unread or be
+forgotten under context pressure; a gate cannot be skipped, so the
+ENCOUNTER with the rule is guaranteed. Code decides ONLY what is
+deterministically decidable: presence, shape, typed fields, counts,
+tier comparisons. LAYER 2 — the verdict on whether the rule was
+fulfilled IN MEANING (does the witness prove the DoD? is the trail
+faithful? is the axis line honest?) belongs to an AI tier above the
+performer (acceptance per D-0058, critic input, weekly calibration)
+and is never inferred from syntactic proxies. Forbidden zone: a gate
+that renders a semantic verdict from syntactic signs manufactures
+false confidence — worse than no gate (the F-14 class,
+signs-of-verification instead of verification, recurring as a SYSTEM
+defect rather than a worker defect). Two promotion rules follow:
+(1) a discipline-held mechanism is promoted to a code gate when the
+journal shows the discipline leaking (evidence-driven, Rule #1 —
+never for symmetry's sake); until then rule 10(в)'s registered
+detector (D-0049) is its minimum enforcement; (2) a deterministically
+decidable sub-question living inside an AI judgment moves INTO code
+(zero-tool-call ⇒ auto-reject), freeing AI attention for what only
+it can judge. Existing instances, named so the pattern is
+recognized: mechanism_gate forces the axis block to EXIST, while
+Lead/critic judge whether its lines are honest (D-0055/F-20 —
+enumeration is loud, prose fails silently); witness PRESENCE is
+checkable, witness SUFFICIENCY is the Lead's verdict (D-0052); trail
+presence vs trail spot-check (D-0046). Applications queued in
+CURRENT_CONTEXT «GSD Pi adoption plan»: B1 journal validator (typed
+fields, task_id novelty, D-0058 matrix as code — revises the D-0060
+choice of manual tail re-read on F-23 evidence, not silently), B2
+gateway budget walls (folded into A2), B3 SessionStart tier/window
+print. GSD Pi is prior art for the gate layer; its `--no-verify`
+escape hatches during parallel waves show the failure mode of gates
+WITHOUT a semantic layer above them — and why our acceptance tier
+is not replaceable by more gates.
+Rule 10 answers: (a) cost — two text blocks (this entry +
+ARCHITECTURE Core Insight extension), loaded only where those files
+already load (not in the boot path); zero runtime obligation by
+itself — the principle constrains future mechanism DESIGN; paid once
+by this session, repaid at every gate-design decision (it is the
+selection axis the adoption plan already used);
+(b) axes, by enumeration over the current map:
+ось 1: н-п — политика, роли и журнал не меняются; принцип живёт
+  ОДНИМ экземпляром в ARCHITECTURE OS-репо (как мост D-0062); в
+  CLAUDE.md не кладётся — boot-контекст платный (D-0038/D-0041),
+  а принцип нужен в момент ПРОЕКТИРОВАНИЯ механизма, не каждую
+  сессию;
+ось 2: н-п — учёт не меняется (B2 принесёт свои изменения своим
+  коммитом со своим rule-10);
+ось 3: покрыта — принцип связывает только Lead-функцию: механизмы
+  меняет полный Lead (D-0058); обязанности воркеров не растут;
+ось 4: покрыта — DECISIONS индекс + полный текст тем же коммитом
+  (чек 12); ARCHITECTURE расширяет Core Insight (владелец
+  архитектурных принципов), ROADMAP/White Paper не дублируются;
+  новых парных документов не создаётся;
+ось 5: н-п — кода в этом коммите нет (B1–B3 из очереди принесут
+  свои тесты);
+ось 6: н-п — конвейер AO3 не трогается; строительство гейтов AO3
+  читает принцип из OS-репо (единственный экземпляр);
+(c) detector — named external, two registered streams: (1) rule 3
+already makes critic a MANDATORY input on gate/core diffs, and rule
+11 requires the dispatch to attach what to review against — for a
+gate diff that is this decision, carrying the review question «где
+в этом гейте семантический вердикт и кто его выносит»; (2) a
+proxy-judging gate that false-accepts surfaces as `defect_found` on
+gate-passed work — the false-accept stream calibration check 13
+already audits. The principle's own layer-1 half is rule 10(в)
+(D-0049), whose detector registry stands.

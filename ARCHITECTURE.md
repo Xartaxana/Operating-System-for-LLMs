@@ -28,6 +28,24 @@ mechanisms with different reliability requirements:
 **Rule #1: the cost of supervision must be measurably lower than the
 savings it produces. A component that violates this rule is removed.**
 
+**Two-layer enforcement (D-0063): code guarantees the encounter,
+AI judges the meaning.** Policy text can go unread or be forgotten
+under context pressure; a gate on the execution path (git hook,
+journal validator, budget wall) cannot be skipped — so the rule is
+guaranteed to be MET. But code decides only what is deterministically
+decidable: presence, shape, typed fields, counts. The verdict on
+whether the rule was fulfilled in meaning (does the witness prove
+the DoD? is the trail faithful?) belongs to an AI tier above the
+performer — acceptance, critic, calibration — and is never inferred
+from syntactic proxies: a gate that judges semantics by signs
+manufactures false confidence (the F-14 class as a system defect).
+The inverse also holds: a deterministically decidable sub-question
+must not live on AI attention — it drifts and it costs (Rule #1).
+Discipline-held mechanisms are promoted to gates on journal evidence
+of leaks, never for symmetry. This refines mechanisms 1–3 above:
+enforcement is code, judgment is tiered AI, and weekly calibration
+audits both layers.
+
 ## Two Contours (D-0034)
 
 The operator's real Lead is a Claude Code subscription; it cannot be
