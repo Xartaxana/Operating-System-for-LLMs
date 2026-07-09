@@ -76,11 +76,11 @@ waits for the Phase 2 gate.
 
 ## Phase 2 — Routing and Context Management Evaluation (data-driven)
 
-Entered only on evidence (D-0029, D-0033). The two workstreams have
-separate gates because they attack different cost drivers; each gate
-is computable from existing telemetry (requests.db, evidence log) —
-no new infrastructure is needed to decide whether to build
-infrastructure.
+Entered only on evidence (D-0029, D-0033, D-0059). The workstreams
+have separate gates because they attack different cost drivers; each
+gate is computable from existing telemetry (requests.db, evidence
+log, routing journal) — no new infrastructure is needed to decide
+whether to build infrastructure.
 
 All thresholds below are initial calibrations (estimated up front per
 the D-0028 pattern); revising one requires a DECISIONS.md entry with
@@ -142,6 +142,44 @@ Letta-style recursive summarization (architectural) — validated by
 the existing Shadow Evaluation harness (compressed vs. full context,
 judge rules equivalence); never perplexity-compress code context
 without validation (docs/RELATED_WORK.md).
+
+### Task pipeline gate (externalize intake/scope/DAG/allocate, D-0059)
+
+The four stages a big task passes through — intake (formalize the
+request), scope (boundaries + task-level DoD), DAG generate
+(decompose into a dependency graph), allocate (assign a tier to each
+node) — currently run manually inside the Lead session per CLAUDE.md
+policy; recon t-008 confirmed no code components of this class
+exist, and per-dispatch DoD (D-0054) externalizes scope at dispatch
+granularity only. The task-level DAG lives nowhere but the Lead
+session's context and dies at the session boundary. Why this is
+worth externalizing, and what exactly is missing: docs/TASK_PIPELINE.md
+(rationale preserved per the operator's instruction, D-0059).
+
+- P1. Scale: ≥3 tasks in the G1 window each spanning ≥5 routing-log
+  events (delegated/rejected/escalated chains under one task_id or
+  an explicit task family) or crossing ≥2 sessions — the size where
+  an in-head DAG starts dropping edges.
+- P2. Driver confirmed: ≥1 `defect_found` or finding in the window
+  attributing a defect to a dependency/scope lost across a dispatch
+  or session boundary (the failure mode these artifacts prevent),
+  OR ≥2 `decomposable` returns showing decomposition arriving too
+  late.
+- P3. Economics (Rule #1): projected artifact upkeep (Lead minutes
+  per task) ≤ projected rework avoided over the window.
+
+First task when the gate opens: evaluate existing task-graph
+carriers (Claude Code native task tools, a plain markdown template
+in PROCESS/) against one real multi-session task — NOT build
+pipeline code (D-0030). Build-out order is fixed by D-0059: task
+brief (intake+scope) → explicit DAG artifact with node statuses →
+allocate column per node derived from the routing rules → code /
+automation last, and only if artifact discipline proves value.
+Distinct from the Router gate above: the Router dispatches an
+already-scoped subtask; the allocate stage is its manual precursor,
+and the gates are independent. Decomposition authority stays with
+the Lead (D-0037) — the artifacts externalize the stages' OUTPUT,
+not the right to perform them.
 
 ### Phase transition procedure
 

@@ -795,3 +795,36 @@ vs event agent tier on every accepted; equal/below requires a
 critic input or a full-Lead-queue mark in notes); works with check
 5 (degradation windows) which catches the windows themselves, and
 with the qa-loop preflight step 0 as the pipeline's entry point.
+
+## D-0059
+Phase 2 gains a third gated workstream: externalize the task
+pipeline — intake, scope, DAG generate, allocate — from the Lead
+session's head into explicit artifacts, artifacts before code.
+Origin: external advice to the operator (2026-07-09, "for bigger
+tasks, add intake/scope and DAG generate/allocate components at the
+very start"); operator direction same day. Recon t-008 established
+the current state: no code components of this class exist (negative
+spot-checked by the Lead's own grep over tools/ and gateway/); all
+four functions run manually per CLAUDE.md policy — D-0054 DoD
+externalizes scope at DISPATCH granularity only, the task-level DAG
+lives nowhere but the Lead session's context and dies at the session
+boundary. Full rationale preserved verbatim in docs/TASK_PIPELINE.md
+(operator: "so nothing is lost").
+Decision: (1) ROADMAP.md Phase 2 gets a "Task pipeline gate" beside
+the Router and Context gates, entered on journal evidence only
+(scale of multi-dispatch tasks, a confirmed loss across a
+dispatch/session boundary, Rule #1 economics). (2) Build-out order
+is fixed: task brief (intake+scope) → explicit DAG artifact with
+node statuses → allocate column per node from the routing rules →
+code/automation last, and only if artifact discipline proves value.
+(3) First task when the gate opens is an evaluation of existing
+carriers (Claude Code native task tools, a markdown template in
+PROCESS/), never a build (D-0030). (4) Authority does not move:
+decomposition stays Lead-tier work (D-0037) — what is externalized
+is the OUTPUT of the stages, not the right to perform them; flat
+delegation is unchanged. (5) This entry plans a workstream and
+changes no session behavior — not a mechanism; each artifact/gate
+built under it will owe its own Rule 10 answers at its own commit.
+Distinct from the Router (D-0029): the Router dispatches an
+already-scoped subtask to a model; the allocate stage is its manual
+precursor, and their gates are independent.
