@@ -211,6 +211,26 @@ D:\AO3_tests), cc_usage через tools/usage_report.py, git-история
     отсутствует) = находка класса F-26; механизмы из такого плана
     замораживаются в очереди до дочитывания.
 
+17. **Таймаут-гейт AO3 (AT-BUG-007) — «висящий Appium-вызов = fail
+    за конечное время, не клин suite».** Механизм (AO3 2026-07-10,
+    коммит be5ec05; регистрация детектора — вопрос 10(в) в его
+    сообщении): client read-timeout на command_executor
+    (D:\AO3_tests framework/config/settings.py APPIUM_HTTP_TIMEOUT;
+    framework/core/driver_factory.py client_config c retries=False)
+    + таргетный rerun (framework/pytest.ini `--reruns 1 --only-rerun
+    ReadTimeoutError|MaxRetryError`). Проверка окна:
+    (а) живость — три якоря на месте (точечный lookup:
+    APPIUM_HTTP_TIMEOUT в settings.py; retries=False в
+    driver_factory.py; --only-rerun-строка в pytest.ini);
+    (б) отказ — прогоны окна (runs/ AO3, журнал, заметки оператора):
+    зависание suite заметно дольше 2×APPIUM_HTTP_TIMEOUT (~8 мин при
+    дефолте 120с), потребовавшее ручного вмешательства = отказ гейта:
+    находка + `defect_found` (ref=at-bug-007) в журнал AO3;
+    (в) ложные срабатывания — таймаут-fail легитимного вызова в
+    триаже окна (известный риск: холодная докачка chromedriver на
+    SET_CONTEXT, задокументирован в settings.py) = пересмотр
+    величины (env AO3_APPIUM_HTTP_TIMEOUT), не снятие гейта.
+
 ## Завершение прогона
 
 Статусы DELEGATION_TABLE.md двигаются только по этим данным
