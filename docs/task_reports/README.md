@@ -61,6 +61,13 @@ Evidence is never deleted, only relocated.
   line), GSD adoption A1 (t-017) / A2 (t-018) / B2-folded closures
   with accepted limitations, boot-diet morning pass narrative,
   AO3 session-handoff port (t-021).
+- [2026-07-10_f30-defense-build.md](2026-07-10_f30-defense-build.md) —
+  t-027 F-30 defense layers 1-2: preflight_quota (measured GO/NO-GO,
+  multi-db F-27 math, provider_model normalization discovery) +
+  session_context SessionStart hook (clock, journal tail, calibration
+  age, quota windows); builder report + critic review (ДОРАБОТАТЬ →
+  B1/B2 closed by Lead: check 13ж detector, gate net extension) +
+  acceptance verbatim.
 - [2026-07-10_gemini-key-role-exam.md](2026-07-10_gemini-key-role-exam.md) —
   t-023/t-024 Gemini key exam (operator order, role ladder): key's
   pro tiers have zero free quota; gemini-3.5-flash 13/13 judge

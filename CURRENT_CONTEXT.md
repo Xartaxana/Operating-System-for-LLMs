@@ -207,6 +207,15 @@ above).
     2026-07-09: code guarantees the encounter with a rule, AI
     judges fulfillment in meaning — the selection axis for
     everything above):
+  - F-30 defense layers 1-2 BUILT 2026-07-10 (t-027, builder+critic
+    conveyor, archived: docs/task_reports/2026-07-10_f30-defense-build.md):
+    tools/preflight_quota.py (launch rule in PI_HARNESS §3) +
+    tools/session_context.py SessionStart hook (.claude/settings.json,
+    now in the gate net; detector = check 13ж). Follow-ups into the
+    next builder batch: N3 (go_at ignores probe truth), N4 (import-time
+    fail-open hole), N5 (locked-DB guard); provider column in
+    sqlite_logger (N1/N2 root, axis 2) — queued, evidence-gated.
+    B3 remainder: actual-model-tier line when hook input provides it.
   - B1 journal validator, OS repo (builder-class; WHEN: next
     builder batch, natural pair with A1): pre-commit validation of
     NEW routing-log.jsonl lines — D-0053 typed fields (attempt/

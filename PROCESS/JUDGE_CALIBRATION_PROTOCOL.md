@@ -61,3 +61,12 @@ not a guarantee.
    used as `--source-model`; `sample_requests()` additionally filters
    judge prompts by their first sentence (keep that sentence stable
    when editing JUDGE_SYSTEM_PROMPT).
+
+7. **A new measuring instrument is calibrated with a known-tier
+   control run before its verdicts are used** (F-30 layer 6). Any new
+   judge, golden set, exam or metric first runs on a candidate whose
+   tier is already known; saturation by a lower-tier control means
+   the instrument does not discriminate at the top (precedents: the
+   Lead exam saturated by Sonnet, F-28; the ranking exam's
+   pre-registered gap threshold firing on its first run, t-028).
+   The instrument's own failure detector stays rule 10(в)-mandatory.

@@ -146,6 +146,17 @@ D:\AO3_tests), cc_usage через tools/usage_report.py, git-история
     реальные границы в notes): НЕ переписаны, во всех таймлайновых
     счётах брать реальные времена из notes defect_found. Промоция
     в код — ts-sanity в объёме B1-валидатора (очередь).
+    (ж) Живость SessionStart-хука (t-027, критик B1): хук
+    tools/session_context.py fail-open — сломавшись, он молчит
+    (warning + exit 0), сессии продолжают жить без «реальности
+    фоном». Проверка: в 1-2 транскриптах окна строка «NOW: ...
+    (local system clock)» присутствует в начале сессии; её
+    отсутствие = хук сломан/разрегистрирован = нарушение. Тот же
+    чек ловит отказ preflight-правила запуска: НОВЫЙ
+    rejected/failure_class=tooling с Groq/Gemini 429 при
+    СУЩЕСТВУЮЩЕМ tools/preflight_quota.py = запуск мимо скрипта
+    (правило запуска в gateway/PI_HARNESS.md) либо утечка его
+    математики — разобрать, какой из двух.
 
 14. **D-0057 — golden set разведки и regression-правило правок
     агент-промптов.** (а) `git log` окна по `.claude/agents/*.md`

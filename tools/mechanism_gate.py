@@ -54,6 +54,8 @@ MECHANISM_PREFIXES = (
     "gateway/PI_HARNESS.md",
     "tools/mechanism_gate.py",
     ".githooks/",
+    # t-027 (critic B2): хуки харнесса = обязанности будущих сессий.
+    ".claude/settings.json",
 )
 
 AXIS_HEADING_RE = re.compile(r"^##\s+Ось\s+(\d+)", re.MULTILINE)

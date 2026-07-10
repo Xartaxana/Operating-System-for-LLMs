@@ -37,12 +37,14 @@ def test_mechanism_paths_d0065_homes_and_self_protection():
     # D-0065 (F-25): дома механизмов + самозащита цепочки в неводе.
     extra = ["ARCHITECTURE.md", "ARCHITECTURE_BOOT.md", "BOOT.md",
              "gateway/PI_HARNESS.md",
-             "tools/mechanism_gate.py", ".githooks/commit-msg"]
+             "tools/mechanism_gate.py", ".githooks/commit-msg",
+             ".claude/settings.json"]
     assert mg.mechanism_paths(extra) == extra
     # Узость сознательна (D-0055): прочие tools/ и gateway/ вне невода.
     assert mg.mechanism_paths(["tools/usage_report.py",
                                "tools/test_mechanism_gate.py",
                                "gateway/config.yaml",
+                               ".claude/settings.local.json",
                                "ARCHITECTURE.md.bak"]) == []
 
 
