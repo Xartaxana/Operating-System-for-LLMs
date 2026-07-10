@@ -369,6 +369,17 @@ above).
   batch-Lead mode if operator wants it mechanized). NOT adopted:
   channels, delegate identity, compaction/memory (harness-owned),
   utilityModel (duplicates D-0062 function→model).
+- Habr article thread (t-036, 2026-07-10): blind A/B done — A=Sonnet,
+  B=Opus, operator verdict B>A, neither publishable (role confusion,
+  over-enumeration; the selection-of-main-points step was done by NO
+  model — Lead/operator work). draft-C written by Lead, role fixes
+  v2 (d3e52d2) after operator findings → F-31 registered, policy
+  vocabulary section rewritten on both deploys (f5260e4 / AO3
+  5e80b93). NEXT: operator writes the final article based on
+  docs/draft-C.md and hands it to Lead for proofreading (fact-check
+  vs repo, roles, slop patterns) + comparison against the three AI
+  drafts. Brief + all drafts: docs/ARTICLE_BRIEF_2026-07-10.md,
+  docs/draft-{A,B,C}.md.
 - White Paper: v0.2.0 FULL REVISION done 2026-07-10 (operator order:
   beyond the three queued items, sweep the whole document against
   progress since v0.1) — abstract two-contour, §2 cache nuance, §4.1
