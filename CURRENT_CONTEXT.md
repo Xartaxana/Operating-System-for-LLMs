@@ -166,8 +166,12 @@ above).
 
 ## Remaining Lead-tier Queue
 
-- D-0043 sweep remainder: add the "report sibling defects" line to
-  the nine AO3 QA-pipeline agent prompts on their next touch.
+- D-0043 sweep remainder — CLOSED 2026-07-10 (AO3 commit 55aea06):
+  the sibling-report line added to the 7 QA-pipeline prompts that
+  lacked it (3 already carried it; measured by grep, t-032). NEW
+  residual: scout.md of BOTH deploys lacks the line — add on the
+  next scout-role touch TOGETHER with the mandatory golden-set run
+  (D-0057; one line does not justify the run cost, Rule #1).
 - Local scout / gateway-worker harness evaluation: CLOSED 2026-07-09
   except the t-015 attempt-3 exam (see Current Task). Standing
   verdicts: Pi harness ADOPTED for gateway workers (recipe + known
@@ -326,17 +330,13 @@ above).
 - AO3 session-handoff skill — DONE 2026-07-10 (t-021, AO3 commit
   0911cf6), archived
   (docs/task_reports/2026-07-10_queue-closures-archive.md).
-- AO3 CLAUDE.md boot-diet trim (D-0051 pairing duty, next touch):
-  operative content is already in sync; narrative trim analogous to
-  this repo's 2026-07-08 diet. SAME touch: port the rule-1 amendment
-  (D-0066 two-pass external surveys) — axis-1 remainder of the
-  2026-07-10 commit; port the breach-response ordering into AO3
-  session-handoff check 4 (archive sweep FIRST, deep-cut queue item
-  only after — added to the OS skill 2026-07-10, axis 1); port the
-  F-30 extension of hygiene rule 6 (any load-bearing environment
-  claim needs a measurement or an explicit "estimate" tag — their
-  fb41872 rule covers negatives only) — axis-1 remainder of the
-  F-30 commit.
+- AO3 CLAUDE.md boot-diet trim + three ports — CLOSED 2026-07-10
+  (AO3 commit 55aea06, recon t-032): D-0066 two-pass surveys into
+  their rule 1, F-30 extension into their hygiene rule 6,
+  breach-response ordering into their handoff check 4. Trim verdict:
+  NOT NEEDED — measured narrative share ~1.3KB of 33.2KB, no
+  material cut available (Rule #1); their check-4 budget watch
+  stands.
 - OpenClaw adoption plan (survey 2026-07-10, t-022 + Lead second
   pass — first D-0066 application; facts and full plan: RELATED_WORK
   «OpenClaw survey»). No standalone builds; each item rides an
