@@ -21,16 +21,25 @@ docs/UNIFIED_PLAN_2026-07-07.md (D-0034..D-0036).
 ## Current Task (Authoritative, D-0025)
 
 FIRST WEEKLY CALIBRATION (Phase 1.5 step 3,
-PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md) — TIME-GATED: needs >=1 week
-of routed traffic; routing live on this repo since 2026-07-08 →
-earliest run ~2026-07-15. No other queue item is executable without
-it: the retro rule-10(б/г) sweep, A4, the checks-3/13 counting
-script and B3 are all scheduled "with/after the first calibration";
-the rest waits on the operator (article final text, White Paper
-v0.2.0 review) or on ANTHROPIC_API_KEY. Until then: accumulate
-routed traffic; builder-groq is the CANDIDATE builder binding for
-text-shaped cycles (validated harness — see below; binding decided
-on journal evidence at calibration, D-0028).
+PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md) — AUTHORIZED EARLY by the
+operator 2026-07-10 (decision at session close; next session starts
+with it). The ROADMAP «>=1 week of routed traffic» was a proxy for
+evidence volume, and the volume is already there — measured over
+the journal 2026-07-08..10: 145 events, 37 tasks, 57 dispatches
+across all four tiers (scout 22 / builder 17 / critic 9 / lead 9),
+42 accepted, 15 rejected with failure_class, 2 escalated,
+2 defect_found, one full degradation cycle; remaining days until
+07-15 would add near-zero traffic (queue almost empty). Honesty
+marks for the run: window is ~3 days, not 7 — state it in the
+`calibrated` notes; week-over-week trend checks are baseline-only
+on a first run regardless. Standing reminder stays: tier-check the
+D-0059 commit's session per D-0058 (checks 5/6). The calibration
+also legally moves table statuses (lead-gemini, builder-groq
+candidacies) and can schedule the paid-Lead baseline run on the
+fresh ANTHROPIC_API_KEY. Everything else in the queue is gated on
+this run (A4, retro rule-10(б/г) sweep, checks-3/13 script spec,
+B3) or on the operator (article final text, White Paper v0.2.0
+review).
 
 - A2 remainder, LIVE part — DONE 2026-07-10 (t-037, accepted on
   attempt 3 after 2 tooling rejections + rule-6 escalation):
