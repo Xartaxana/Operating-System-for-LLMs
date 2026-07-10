@@ -226,6 +226,13 @@ above).
     script): print actual model tier + open degradation window
     (journal tail) + calibration staleness at session start, making
     the D-0056 entry check unmissable (F-21/F-22 evidence).
+    EXTENDED per F-30 design (operator direction 2026-07-10,
+    "reality made ambient" layer): also print the CURRENT CLOCK
+    (F-29 root cause: time was nowhere in context, so the model
+    narrated it) and the Groq/Gemini rolling-window state computed
+    from requests.db + side DBs (F-27 math) — the model cannot be
+    tempted to guess what is already printed. Plus per-file
+    boot-budget breakdown (OpenClaw item 1, already queued here).
     Mechanism commit at build time -> full rule-10 then.
   - NOT adopted (recorded to stop re-litigating): GSD as
     coordinator (duplicates Lead), auto-mode SQLite state machine +
@@ -321,7 +328,12 @@ above).
   provider-reported rate-limit headers (Groq) — TRIGGER FIRED
   2026-07-10 (t-015 attempt 3 / F-27: wall saw 14k, Groq 90.6k —
   side-DB t013.db invisible to it); build with the next builder
-  batch, natural pair with B1; (3) lane-contract
+  batch, natural pair with B1; EXTENDED per F-30 design
+  (2026-07-10): launch recipe for quota-bounded runs goes THROUGH
+  a pre-flight script that measures (provider probe + both-ledgers
+  sum, F-27 math) and REFUSES on shortfall — launching on an
+  unmeasured assumption becomes impossible by construction (D-0063
+  code-on-path; three t-015 aborts are the evidence); (3) lane-contract
   fields (Owns/Non-goals/Handoff) — into the A3 dispatch manifest
   template when A3 lands. Recorded as prior art, no work: strict
   selection (validates t-018 no-fallback), two-stage failover +
