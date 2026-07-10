@@ -74,8 +74,20 @@ Exit: 0 PASS / 1 REJECTED (штамп rejected без оценки) / 2 INCONCLU
    exit 0/1) — при рецидиве гонять его ПЕРЕД выводами о моделях.
 2. litellm-префикс `ollama/` НЕ пробрасывает tools — intern переведён
    на `ollama_chat/` (config.yaml, комментарий на месте).
-3. Pi-builder на builder-groq заблокирован НЕ разрывом №1 (опровергнуто
-   t-013), а TPM-ПОТОЛКОМ: gpt-oss-120b на Groq free tier имеет
+3. РАЗБЛОКИРОВАН (t-037, 2026-07-10): builder-Pi на builder-groq
+   работает по валидированному рецепту — урезанный тулсет
+   `-t read,bash,write,edit -nc` (= 1,659 prompt-ток. у скаута,
+   1,531 у builder-набора — ИЗМЕРЕНО, write/edit-набор легче) +
+   ЯВНЫЙ колпак `maxTokens: 1500` в models.json (admission Groq =
+   промпт + completion-надбавка; дефолтные 8192 надбавки пробивали
+   TPM 8000 в одиночку) + reasoning_format:hidden на шлюзе (разрыв
+   №5 ниже). Живой прогон: мультитёрн write→edit→bash, 5 success-
+   ходов, артефакт корректен (журнал t-037). Остаточная known
+   quirk: на бёрсте быстрых ходов возможен транзиентный 429 TPM
+   (Groq считает admission-вес, стена t-018 — фактические токены;
+   t-037 row 404) — litellm-ретрай поглощает его сам, вреда нет;
+   admission-математика в стене — кандидат по evidence калибровки.
+   Историческая диагностика TPM-потолка: gpt-oss-120b на Groq free tier имеет
    8000 токенов/мин, а дефолтный системный промпт Pi + один tool
    read ≈ 8879 токенов → 429 «Request too large» ещё до генерации
    (t013-лог, rows 36-51). Класс: «вес дефолтного Pi-промпта не
@@ -110,6 +122,16 @@ Exit: 0 PASS / 1 REJECTED (штамп rejected без оценки) / 2 INCONCLU
    go_at считается по локальным базам — при расхождении probe>локаль
    он оптимистичен (нижняя граница; критик t-027 N3). Детектор
    обхода правила — чек 13(ж) калибровки.
+5. ЗАКРЫТ В КОНФИГЕ (t-037 attempts 1-2, 2026-07-10): reasoning-эхо
+   Pi↔litellm↔Groq — gpt-oss возвращает reasoning в ответе, Pi
+   сохраняет его thinking-блоком (thinkingSignature=reasoning_content)
+   и эхом шлёт в следующем запросе, а Groq НА ВХОДЕ свойство
+   reasoning_content не принимает → 400 на КАЖДОМ мультитёрне.
+   models.json reasoning:false НЕ лечит (модель шлёт reasoning
+   независимо от Pi). Фикс: `reasoning_format: hidden` в
+   litellm_params алиаса builder-groq (config.yaml, пробой сверено:
+   ответ без reasoning-поля). judge-groq не тронут: судья
+   одноходовый, эха нет.
 4. Экзамены после t-013: ОБА ЗАКРЫТЫ. qwen3:4b — FAIL (t-016);
    llama-70B — FAIL (t-015 attempt 4, 2026-07-10): при чистой квоте
    (preflight GO) и доказанной в том же окне трубе

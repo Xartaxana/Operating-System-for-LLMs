@@ -20,11 +20,30 @@ docs/UNIFIED_PLAN_2026-07-07.md (D-0034..D-0036).
 
 ## Current Task (Authoritative, D-0025)
 
-A2 remainder, LIVE part — builder-Pi recipe validation on a
-builder-groq window (unblocked 2026-07-10 by the t-015 exam closure;
-recipe = trimmed prompt + toolset incl. write/edit + EXPLICIT
-max_tokens, measured offline by t-033 — details in the GSD queue
-item below). NOT STARTED — next /next-task picks it up.
+FIRST WEEKLY CALIBRATION (Phase 1.5 step 3,
+PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md) — TIME-GATED: needs >=1 week
+of routed traffic; routing live on this repo since 2026-07-08 →
+earliest run ~2026-07-15. No other queue item is executable without
+it: the retro rule-10(б/г) sweep, A4, the checks-3/13 counting
+script and B3 are all scheduled "with/after the first calibration";
+the rest waits on the operator (article final text, White Paper
+v0.2.0 review) or on ANTHROPIC_API_KEY. Until then: accumulate
+routed traffic; builder-groq is the CANDIDATE builder binding for
+text-shaped cycles (validated harness — see below; binding decided
+on journal evidence at calibration, D-0028).
+
+- A2 remainder, LIVE part — DONE 2026-07-10 (t-037, accepted on
+  attempt 3 after 2 tooling rejections + rule-6 escalation):
+  builder-Pi recipe VALIDATED live on builder-groq — trimmed toolset
+  1,531 prompt tok (measured), explicit maxTokens=1500 cap fits TPM
+  8000, NEW harness break found & closed in config (reasoning echo
+  Pi↔Groq → reasoning_format:hidden), multi-turn write→edit→bash
+  with real structured calls. Recipe + both breaks:
+  gateway/PI_HARNESS.md разрывы №3/№5; evidence: journal t-037.
+  Observation queued (evidence row 404): t-018 wall counts actual
+  tokens vs Groq admission weight — optimistic on fast-turn bursts;
+  transient 429 absorbed by litellm retry, harmless; admission math
+  in the wall = candidate on calibration evidence (Rule #1).
 
 - t-015 llama-70B re-exam — CLOSED 2026-07-10, verdict FAIL after
   4 attempts (3 tooling quota aborts + attempt-4 capability
@@ -184,15 +203,10 @@ above).
   - A1 zero-tool-call guard (t-017) + A2 quota walls (t-018) — DONE
     2026-07-09, archived with accepted limitations
     (docs/task_reports/2026-07-10_queue-closures-archive.md).
-    A2 remainder, offline part DONE 2026-07-10 (t-033): default Pi
-    prompt ~8,879 tok does NOT fit TPM 8000 (historical 429, t-013);
-    trimmed toolset read,bash = 1,659 tok measured (PI_HARNESS:90).
-    Builder-Pi unblock recipe: trimmed prompt + toolset incl.
-    write/edit (+hundreds tok, estimate unverified) + EXPLICIT
-    max_tokens cap (Groq limiter counts completion allowance:
-    Requested ~18.5k at 1.7k prompt). Remaining: LIVE validation of
-    the recipe on a builder-groq window (same key as t-015 exam —
-    sequence after it);
+    A2 remainder: offline part DONE 2026-07-10 (t-033), LIVE part
+    DONE 2026-07-10 (t-037) — builder-Pi recipe VALIDATED, item
+    CLOSED (details in Current Task section above; recipe home:
+    gateway/PI_HARNESS.md разрывы №3/№5).
     requests(model,ts) index candidate (Rule #1: only on latency
     evidence — spent_today shares the full-scan cost). Quota-wall
     reconciliation with provider headers — DONE 2026-07-10 within
@@ -212,8 +226,11 @@ above).
     consecutive-dispatch caps as prior art. NOT a new tool: fold
     into the deterministic counting script for checks 3/13 already
     queued under the D-0053 follow-up.
-  - A5 witness auto-collection (builder-class; WHEN: once the Pi
-    builder profile is unblocked — after A2 clears the TPM path):
+  - A5 witness auto-collection (builder-class; WHEN: unblock
+    condition MET 2026-07-10 by t-037, but build only with the
+    first REAL builder-Pi work cycle — Rule #1: no wrapper before
+    there are sessions to wrap; binding itself decided at
+    calibration):
     wrapper runs the canonical pytest form after a Pi builder
     session and attaches verbatim output as a witness DRAFT (GSD
     verification_commands + canonical-verdict-field analog);

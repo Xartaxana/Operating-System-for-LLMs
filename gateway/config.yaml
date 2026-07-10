@@ -76,6 +76,16 @@ model_list:
     litellm_params:
       model: groq/openai/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
+      # reasoning_format=hidden (Groq param, passed through by litellm):
+      # gpt-oss returns its reasoning in the response, agent harnesses
+      # (Pi) echo it back as assistant reasoning_content, and Groq
+      # REJECTS that property on input - 400 on every multi-turn
+      # tool session (t-037 attempts 1-2, 2026-07-10). Hidden removes
+      # reasoning from responses entirely (probe-verified). Same fix
+      # class as intern's ollama_chat/ note above. judge-groq is left
+      # untouched: judging is single-turn, reasoning in the response
+      # is harmless there and possibly useful.
+      reasoning_format: hidden
 
   # Intern: local worker (ARCHITECTURE.md hierarchy), free to run.
   # Synthetic per-token prices exercise the Guard/Ledger money paths
