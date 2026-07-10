@@ -98,11 +98,15 @@ above).
   Second judge judge-gemini (gemini-3.5-flash, 13/13, t-023) —
   cross-family point work only (20 req/day): builder-groq
   self-judging pairs.
-- Gemini key role exam DONE 2026-07-10 (t-023/t-024, operator
+- Gemini key role exam DONE 2026-07-10 (t-023/t-024/t-025, operator
   order): pro tiers zero free quota; 3.5-flash Lead-REJECTED
-  operationally (20 req/day) -> judge-gemini; 2.5-flash (lead-gemini)
-  12/13 + B-exam passed -> API-contour Lead-baseline CANDIDATE
-  (status moves await weekly calibration). Evidence:
+  operationally (20 req/day) -> judge-gemini (full exam confirmed);
+  2.5-flash (lead-gemini) 12/13 + B-exam passed -> API-contour
+  Lead-baseline CANDIDATE (status moves await weekly calibration).
+  Exam difficulty CALIBRATED same day (t-026, operator doubt):
+  Sonnet passed the same exam with the day's best score -> exam is
+  an ENTRANCE FILTER, not a Lead-tier discriminator (F-28); ranking
+  exam queued Rule #1-gated. Evidence:
   docs/task_reports/2026-07-10_gemini-key-role-exam.md.
 - traffic_kind tagging live: real/synthetic/replay/judge; gate G1
   counts only 'real'. The tag travels via extra_body metadata —
