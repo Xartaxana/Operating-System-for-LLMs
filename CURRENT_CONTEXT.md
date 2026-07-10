@@ -106,11 +106,21 @@ above).
   Exam difficulty CALIBRATED same day (t-026, operator doubt):
   Sonnet passed the same exam with the day's best score -> exam is
   an ENTRANCE FILTER, not a Lead-tier discriminator (F-28); ranking
-  exam queued Rule #1-gated — seed case bank = F-30 four instances
-  (unverified-inference-as-fact) + t-025 scope-creep; design
-  principle: cases feed a plausible incomplete signal and measure
-  whether the candidate demands verification. Evidence:
-  docs/task_reports/2026-07-10_gemini-key-role-exam.md.
+  exam BUILT and calibrated same day (PROCESS/LEAD_RANKING_EXAM.md,
+  t-028/t-029: weak ranker — control gap = threshold; the one
+  vignette-measurable frontier delta is the INDEPENDENT-reproduction
+  reflex, K3/K5). Run 3 (t-030, 2026-07-10, operator order):
+  2.5-flash took the ranking exam in the clean-of-F-30 condition —
+  11/12 no zeros, pre-registered Lead bar PASSED; sits between the
+  Sonnet control (10/12) and Opus (12/12); independence micro-rank
+  Opus 2/2 > Gemini 1/2 > Sonnet 0/2 (K5 lost the same way as
+  Sonnet: re-run from the same executor). CANDIDATE grade
+  strengthened (ranking instrument now, not just entrance filter);
+  status moves still await production journal + first calibration
+  (D-0028/D-0035); caveats: weak ranker, n=1. Evidence:
+  docs/task_reports/2026-07-10_gemini-key-role-exam.md +
+  docs/task_reports/2026-07-10_ranking-exam-run3-gemini-answers.md +
+  LEAD_RANKING_EXAM.md Runs log.
 - traffic_kind tagging live: real/synthetic/replay/judge; gate G1
   counts only 'real'. The tag travels via extra_body metadata —
   litellm's metadata= kwarg does NOT reach the wire (verified; see

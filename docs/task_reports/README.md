@@ -80,3 +80,10 @@ Evidence is never deleted, only relocated.
   as cross-family judge-gemini; gemini-2.5-flash 12/13 + B1/B2
   passed -> API-contour Lead-baseline CANDIDATE. Verbatim exam
   prompts, answers, chief-judge grading, accounting.
+- [2026-07-10_ranking-exam-run3-gemini-answers.md](2026-07-10_ranking-exam-run3-gemini-answers.md) —
+  t-030 ranking exam run 3, first cross-family candidate:
+  gemini-2.5-flash 11/12 no zeros — pre-registered Lead bar passed;
+  K5=1 same loss as Sonnet both runs (re-run requested from the same
+  executor, not independent reproduction); independence micro-rank
+  Opus 2/2 > Gemini 1/2 > Sonnet 0/2. Verbatim answers + conditions
+  (old-corpus digest, clean-of-F-30 condition per run-2 lesson (б)).
