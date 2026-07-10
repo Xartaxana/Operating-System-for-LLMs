@@ -94,8 +94,9 @@ above).
 - Shadow Evaluation (step 5) operational: shadow_eval.py with
   --judge-model, --calibrate, --categories, honest Rule #1 cost
   extraction (proxy-accounted costs; never a silent $0); sampler
-  excludes judge/replay traffic. Remaining: traffic volume, paid-Lead
-  baseline (needs ANTHROPIC_API_KEY).
+  excludes judge/replay traffic. Remaining: traffic volume; paid-Lead
+  baseline UNBLOCKED 2026-07-10 (ANTHROPIC_API_KEY live — Environment
+  Notes), run scheduled by queue/calibration.
 - Judge: judge-groq (groq/openai/gpt-oss-120b, free tier), calibrated
   13/13 at temperature=0, reproduced twice. Protocol:
   PROCESS/JUDGE_CALIBRATION_PROTOCOL.md (D-0031) — status-changing
@@ -410,13 +411,19 @@ above).
   rolling — pace >=13s, point work only). ZERO free quota on this
   key: 2.0-flash and ALL pro tiers (3.1-pro/3-pro/2.5-pro) — 429,
   don't use (probed 2026-07-10).
-- lead-sonnet alias (anthropic/claude-sonnet-5) exists in config.yaml
-  but is unused: no ANTHROPIC_API_KEY in this environment.
+- ANTHROPIC_API_KEY LIVE since 2026-07-10 (operator purchased key +
+  credits; key was added to gateway/.env bare — var name fixed same
+  day): lead-sonnet verified end-to-end through the proxy (200,
+  14 tok, cost_usd computed, requests.db row 407); lead (Fable) and
+  lead-sonnet aliases operational. Credits are prepaid and expire
+  12 months from purchase; auto-reload off.
 - Free-telemetry mode: intern/analyst (Ollama) carry synthetic
   Haiku-class accounting prices, so Guard/Ledger money paths work at
   $0 cash.
-- Open operational item (Architect): route real API-contour traffic
-  through the gateway; lead needs ANTHROPIC_API_KEY (paid).
+- Operational item CLOSED 2026-07-10: ANTHROPIC_API_KEY live (see
+  above) — the "paid Lead" blocker on Shadow Evaluation's paid-Lead
+  baseline and on gate R5 is gone; the runs themselves are scheduled
+  by the calibration/queue, not started ad hoc.
 - BSOD 2026-07-09 15:02 (bugcheck 0x3B in aehd.sys — Android
   Emulator Hypervisor Driver, minidump 070926-7359-01.dmp) while
   the AO3 pipeline exercised the emulator; gateway/Pi processes were
