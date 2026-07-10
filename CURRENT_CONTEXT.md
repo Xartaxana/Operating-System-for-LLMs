@@ -20,7 +20,7 @@ docs/UNIFIED_PLAN_2026-07-07.md (D-0034..D-0036).
 
 ## Current Task (Authoritative, D-0025)
 
-t-015 llama-70B re-exam, attempt 3 — the one open exam of the
+t-015 llama-70B re-exam, attempt 4 — the one open exam of the
 local-scout thread (t-013 closure, t-016 re-exam FAIL and the
 2026-07-09 mechanism-day narrative: archived —
 docs/task_reports/2026-07-09_pi-exams-and-adoption-closures.md):
@@ -45,10 +45,8 @@ docs/task_reports/2026-07-09_pi-exams-and-adoption-closures.md):
   PROCESS/SCOUT_GOLDEN_SET.md (keys re-verified 2026-07-10, Q3 line
   numbers refreshed); proxy carries the wall (started 02:16, keep or
   restart per PI_HARNESS); journal as t-015 attempt 4.
-- t-019 DONE 2026-07-10: quota_events narrated in the Ledger digest
-  (gateway/metrics.py, mirror of the budget_events block; 159
-  passed; critic skipped — pattern-mirroring diff, note in accepted
-  event).
+- t-019 quota_events digest line — DONE 2026-07-10, archived
+  (docs/task_reports/2026-07-10_queue-closures-archive.md).
 
 Standing reminder for the first calibration: tier-check the D-0059
 commit's session per D-0058 (checks 5/6, F-23 context in the archive
@@ -63,7 +61,7 @@ above).
 - Policy text ARCHITECT-ACCEPTED 2026-07-09 (commit 171078c; closed
   the last open item of Phase 1.5 step 2). Later policy changes
   follow the normal mechanism discipline.
-- Evidence stream: logs/routing-log.jsonl (t-001..t-019 so far); ALL
+- Evidence stream: logs/routing-log.jsonl (t-001..t-022 so far); ALL
   table statuses estimated — counts and status moves belong to the
   first weekly calibration (Update Rule 1, D-0047).
 - Retro baseline AO3 (cc_usage, pre-routing): $276.70 accounted +
@@ -101,10 +99,12 @@ above).
   counts only 'real'. The tag travels via extra_body metadata —
   litellm's metadata= kwarg does NOT reach the wire (verified; see
   comments in sqlite_logger.py / shadow_eval.py).
-- Tests: gateway 49/49, tools 31/31 green. gateway/conftest.py
-  isolates every test (tmp DB + full litellm callback-list
-  snapshot/restore — restoring litellm.callbacks alone is NOT
-  enough, litellm copies the logger into six lists at call time).
+- Tests: suite 159 passed (2026-07-10 witness, t-019 acceptance;
+  canonical form python -m pytest tools/ gateway/ -q).
+  gateway/conftest.py isolates every test (tmp DB + full litellm
+  callback-list snapshot/restore — restoring litellm.callbacks alone
+  is NOT enough, litellm copies the logger into six lists at call
+  time).
 - requests.db: 199 rows (judge 149, synthetic 50, real 0 — the API
   contour has carried no real traffic yet); cc_usage table alongside
   (11149+ turns of which 1759+ sidechain, idempotent import, both
@@ -161,20 +161,14 @@ above).
   verdict: EXTRACT mechanisms, do NOT adopt the agent — it would
   replace the Lead coordinator and forfeit the cost-crossover loop
   that is our niche). Items in priority order:
-  - A1 zero-tool-call guard — DONE 2026-07-09 (t-017, builder+critic
-    ПРИНЯТЬ+Lead witness; commit with full rule-10 block). Known
-    limitations accepted (critic F2/F3, LOW): prose tool_call_id
-    could inflate later-turn counts; contradictory dual-source
-    aggregate untested.
-  - A2 quota walls — DONE 2026-07-09 (t-018, builder attempt 2 after
-    critic ДОРАБОТАТЬ; absorbed B2; NO fallback chains adopted —
-    exam integrity, walls block loudly instead). REMAINS QUEUED from
-    the original item: Pi prompt-slimming evaluation (skills/tools
-    trim) against the builder-groq 8k TPM ceiling; GSD budget-mode
-    token profile as prior art. From t-018 review: metrics.py
-    digest line for quota_events — DONE 2026-07-10 (t-019);
-    requests(model,ts) index candidate stays queued (Rule #1: only
-    on latency evidence — spent_today shares the full-scan cost).
+  - A1 zero-tool-call guard (t-017) + A2 quota walls (t-018) — DONE
+    2026-07-09, archived with accepted limitations
+    (docs/task_reports/2026-07-10_queue-closures-archive.md).
+    OPEN remainders from A2: Pi prompt-slimming evaluation
+    (skills/tools trim) against the builder-groq 8k TPM ceiling
+    (GSD budget-mode token profile as prior art);
+    requests(model,ts) index candidate (Rule #1: only on latency
+    evidence — spent_today shares the full-scan cost).
   - A3 dispatch context manifest (Lead-class, mechanism — full
     rule-10 treatment; WHEN: next D-0054/rule-11 touch, not a
     dedicated pass): the dispatch text enumerates the exact
@@ -207,10 +201,7 @@ above).
     choice of manual tail re-read — on F-23 evidence (collision
     already happened here) + D-0063, recorded, not silent. Sibling
     implementation: AO3 scripts/log_append.py (ось 1).
-  - B2 — FOLDED into A2: gateway budget walls are the same commit
-    class (litellm NATIVE budgets/rate-limits per alias; evidence:
-    t-015 TPD exhaustion — 98.5k/100k burned by earlier tasks
-    before the exam got one token out).
+  - B2 — FOLDED into A2, closed with it (archived same file as A2).
   - B3 SessionStart hook (Lead spec -> builder; WHEN: after the
     first weekly calibration validates what the Boot Report line
     should show — same gating logic as the checks 3/13 counting
@@ -223,17 +214,16 @@ above).
     crash recovery (inseparable from their runtime; our analog is
     session handoff), supply-chain audit tags (no third-party-dep
     loop in this repo today), WXP (not confirmed in official docs).
-- OS boot-diet pass — DONE 2026-07-10 (breach at 2026-07-09 handoff:
-  104,052; peaked 105,374): closed narrative archived per D-0038 to
-  docs/task_reports/2026-07-09_pi-exams-and-adoption-closures.md;
-  boot path now 97,511 bytes (< 100KB restored), CURRENT_CONTEXT
-  27.7 -> 19.8KB. RE-BREACHED same evening (handoff measure 102,173
-  bytes; +4.8%/session, growth explained: D-0066 + OpenClaw plan +
-  Batch candidate). OPEN boot-diet item: mechanical cuts were
-  exhausted by the morning pass — next trim targets CLAUDE.md
-  (22.6KB) and ARCHITECTURE.md (17.9KB), operative/mechanism homes,
-  Lead+Architect decision required. Re-measure at every handoff
-  (D-0050 check).
+- Boot-diet, OPEN item (morning pass DONE 2026-07-10 and archived —
+  docs/task_reports/2026-07-10_queue-closures-archive.md): boot path
+  RE-BREACHED 2026-07-09 evening (102,173 bytes > 100KB;
+  +4.8%/session). Mechanical cuts exhausted — next trim targets
+  CLAUDE.md (22.6KB) and ARCHITECTURE.md (17.9KB), operative/
+  mechanism homes, Lead+Architect decision required. Re-measure at
+  every handoff (D-0050 check). Archiving pass 2026-07-10 restored
+  the budget: CURRENT_CONTEXT 19,985 bytes, boot path 99,775 < 100KB
+  (queue closures archived + Archive index de-duplicated to
+  task_reports/README.md as single owner).
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
   (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
   unswept siblings). Point-lookup matrix per the map, NOT a rescan.
@@ -290,12 +280,8 @@ above).
     in the same move (axis 2, never a silent $0). Interactive/agent
     sessions stay off batch by nature (dependent-call loops).
 - AO3 session-handoff skill — DONE 2026-07-10 (t-021, AO3 commit
-  0911cf6): six-step evening check mirroring the OS skill over AO3's
-  OWN morning path + Session Start detector rule in docs/HANDOFF.md;
-  first dry-run caught three real transfer gaps (unpushed dd72c4d,
-  a pre-task_id journal orphan of 2026-07-08, stale factory-status
-  missing AT-BUG-007/008) — all resolved at acceptance. SIBLING_MAP
-  axes 1/4 updated same move.
+  0911cf6), archived
+  (docs/task_reports/2026-07-10_queue-closures-archive.md).
 - AO3 CLAUDE.md boot-diet trim (D-0051 pairing duty, next touch):
   operative content is already in sync; narrative trim analogous to
   this repo's 2026-07-08 diet. SAME touch: port the rule-1 amendment
@@ -355,35 +341,10 @@ above).
   uncommitted work — its next boot must record the dirty tree per
   Boot Report rule 6.
 
-## Archive (D-0038 pointers)
+## Archive (D-0038 pointer)
 
-Closed work lives in docs/task_reports/ (index in its README.md):
-
-- 2026-07-03_shadow-evaluation-and-llm-judge.md — first Shadow
-  Evaluation runs; judge build, contamination and judge-bias lessons.
-- 2026-07-03_research-notes.md — related-work priors (canonical:
-  docs/RELATED_WORK.md).
-- 2026-07-04_white-paper-iteration.md — White Paper v0.1 log, Phase 2
-  gate definition, external review recording.
-- task-1-2_cost-accounting-and-traffic-kind.md — Tasks 1-2 (ACCEPTED
-  2026-07-07).
-- task-4_test-isolation.md — Task 4 (ACCEPTED 2026-07-07).
-- task-5_usage-report.md — Task 5 (ACCEPTED 2026-07-07), full
-  strategic findings text.
-- task-6_subagent-transcripts.md — Task 6 (ACCEPTED 2026-07-08),
-  sidechain telemetry, spec errata.
-- task-7_agent-attribution.md — Task 7 (ACCEPTED 2026-07-08), first
-  critic dispatch, per-agent cost breakdown unlocked.
-- task-3_phase2-readiness.md — Task 3 (ACCEPTED 2026-07-09), Phase 2
-  readiness digest, first gate-criteria readout (G1/C2 met, R1 not
-  met, rest honest gaps).
-- 2026-07-08_routing-dogfooding-day.md — interim 18h read, dead-tier
-  revival, F-1 formalization, first degradation cycle, mechanism day
-  (F-12..F-16 / D-0044..D-0051).
-- 2026-07-09_pi-exams-and-adoption-closures.md — t-013 closure,
-  Pi-worker exam narrative (t-011/t-012/t-016), local-scout
-  evaluation steps 1-3, evidence-acceptance stages 1-2, eval-plan
-  stage 1, F-22/D-0058 + F-23/D-0060 day narrative (boot-diet
-  archive 2026-07-10).
+Closed work lives in docs/task_reports/ — the annotated index is its
+README.md (single owner since 2026-07-10; per-file descriptions were
+duplicated here and are trimmed from the boot path).
 
 This file is intended to be updated frequently.

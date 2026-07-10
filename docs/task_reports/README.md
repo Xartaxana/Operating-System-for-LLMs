@@ -56,3 +56,8 @@ Evidence is never deleted, only relocated.
   Lead acceptance decisions (ACCEPTED 2026-07-09, task_id t-002).
   First gate-criteria readout: G1/C2 met, R1 not met, rest honest
   gaps; G1 streak follow-up and traffic_kind drift check queued.
+- [2026-07-10_queue-closures-archive.md](2026-07-10_queue-closures-archive.md) —
+  D-0038 archiving pass over the queue: t-019 (quota_events digest
+  line), GSD adoption A1 (t-017) / A2 (t-018) / B2-folded closures
+  with accepted limitations, boot-diet morning pass narrative,
+  AO3 session-handoff port (t-021).
