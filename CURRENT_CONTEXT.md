@@ -168,10 +168,11 @@ above).
 
 - D-0043 sweep remainder — CLOSED 2026-07-10 (AO3 commit 55aea06):
   the sibling-report line added to the 7 QA-pipeline prompts that
-  lacked it (3 already carried it; measured by grep, t-032). NEW
-  residual: scout.md of BOTH deploys lacks the line — add on the
-  next scout-role touch TOGETHER with the mandatory golden-set run
-  (D-0057; one line does not justify the run cost, Rule #1).
+  lacked it (3 already carried it; measured by grep, t-032).
+  Residual CLOSED same day (operator-authorized scout-touch bundle):
+  OS scout.md rule 8 + golden set run t-034 7/7 PASS (Runs log);
+  AO3 scout.md rules 7-8 + D-0057 port (their docs/SCOUT_GOLDEN_SET.md)
+  — see AO3 commit.
 - Local scout / gateway-worker harness evaluation: CLOSED 2026-07-09
   except the t-015 attempt-3 exam (see Current Task). Standing
   verdicts: Pi harness ADOPTED for gateway workers (recipe + known
@@ -194,9 +195,15 @@ above).
   - A1 zero-tool-call guard (t-017) + A2 quota walls (t-018) — DONE
     2026-07-09, archived with accepted limitations
     (docs/task_reports/2026-07-10_queue-closures-archive.md).
-    OPEN remainders from A2: Pi prompt-slimming evaluation
-    (skills/tools trim) against the builder-groq 8k TPM ceiling
-    (GSD budget-mode token profile as prior art);
+    A2 remainder, offline part DONE 2026-07-10 (t-033): default Pi
+    prompt ~8,879 tok does NOT fit TPM 8000 (historical 429, t-013);
+    trimmed toolset read,bash = 1,659 tok measured (PI_HARNESS:90).
+    Builder-Pi unblock recipe: trimmed prompt + toolset incl.
+    write/edit (+hundreds tok, estimate unverified) + EXPLICIT
+    max_tokens cap (Groq limiter counts completion allowance:
+    Requested ~18.5k at 1.7k prompt). Remaining: LIVE validation of
+    the recipe on a builder-groq window (same key as t-015 exam —
+    sequence after it);
     requests(model,ts) index candidate (Rule #1: only on latency
     evidence — spent_today shares the full-scan cost). Quota-wall
     reconciliation with provider headers — DONE 2026-07-10 within
