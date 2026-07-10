@@ -20,33 +20,21 @@ docs/UNIFIED_PLAN_2026-07-07.md (D-0034..D-0036).
 
 ## Current Task (Authoritative, D-0025)
 
-t-015 llama-70B re-exam, attempt 4 — the one open exam of the
-local-scout thread (t-013 closure, t-016 re-exam FAIL and the
-2026-07-09 mechanism-day narrative: archived —
-docs/task_reports/2026-07-09_pi-exams-and-adoption-closures.md):
+A2 remainder, LIVE part — builder-Pi recipe validation on a
+builder-groq window (unblocked 2026-07-10 by the t-015 exam closure;
+recipe = trimmed prompt + toolset incl. write/edit + EXPLICIT
+max_tokens, measured offline by t-033 — details in the GSD queue
+item below). NOT STARTED — next /next-task picks it up.
 
-- t-015 llama-70B re-exam: attempts 1-3 ALL aborted by Groq TPD
-  (rejected/tooling x3, NOT model verdicts). Attempt 3 ran 2026-07-10
-  02:18 as first Groq traffic of the "fresh" window and died on turn
-  2: rolling 24h still held Used 90,614 - the 429 hint frees room for
-  ONE request, not a multi-turn exam; yesterday's bulk (~68k, t-013
-  traffic in side-DB t013.db) falls out only ~18:56 today. F-27
-  registered: the t-018 wall counts requests.db ONLY (saw 14,175),
-  side-DB/off-proxy traffic is invisible to it - the check-13
-  (в)-detector fired exactly as registered at t-018 acceptance.
-  Behavioral positive again: 5 REAL tool calls on the hardened
-  profile, guard t-017 INCONCLUSIVE (ops abort) applied before
-  grading. ATTEMPT 4 (Lead decision at attempt-3 rejection): TODAY
-  >=19:15 local, pre-flight probe authorized (<=3 minimal middle-groq
-  requests through the proxy; a probe 429 yields exact Used numbers),
-  launch only with headroom ~70k. Recipe unchanged: hardened profile
-  + Pi call form = gateway/PI_HARNESS.md (break #3 has the
-  window-math addendum); 7 questions verbatim =
-  PROCESS/SCOUT_GOLDEN_SET.md (keys re-verified 2026-07-10, Q3 line
-  numbers refreshed); proxy carries the wall (started 02:16, keep or
-  restart per PI_HARNESS); journal as t-015 attempt 4.
-- t-019 quota_events digest line — DONE 2026-07-10, archived
-  (docs/task_reports/2026-07-10_queue-closures-archive.md).
+- t-015 llama-70B re-exam — CLOSED 2026-07-10, verdict FAIL after
+  4 attempts (3 tooling quota aborts + attempt-4 capability
+  rejection: pseudo tool-call TEXT + fabricated Trail; pipe excluded
+  in-window by tools_stream_check PASS; first F-30 measured launch,
+  preflight GO on 97,623 headroom). Local-scout thread FULLY closed:
+  both Pi-worker candidates failed on the fabrication axis, no
+  cheap-recon row enters the table; scout stays on Haiku (7/7 twice
+  today). Archived —
+  docs/task_reports/2026-07-10_t015-llama70b-exam-closure.md.
 
 Standing reminder for the first calibration: tier-check the D-0059
 commit's session per D-0058 (checks 5/6, F-23 context in the archive
@@ -173,15 +161,16 @@ above).
   OS scout.md rule 8 + golden set run t-034 7/7 PASS (Runs log);
   AO3 scout.md rules 7-8 + D-0057 port (their docs/SCOUT_GOLDEN_SET.md)
   — see AO3 commit.
-- Local scout / gateway-worker harness evaluation: CLOSED 2026-07-09
-  except the t-015 attempt-3 exam (see Current Task). Standing
-  verdicts: Pi harness ADOPTED for gateway workers (recipe + known
-  breaks: gateway/PI_HARNESS.md; survey: RELATED_WORK «Agent tool
-  harnesses»); qwen3:4b FAILED entrance + hardened re-exam (0/7 x2,
-  fabrication) — local scout CLOSED until a stronger local candidate
-  fits 6GB VRAM; row «recon -> local intern» does NOT enter the
-  table; scout-tier economics ~zero ($1.33 all-time), standing case
-  is resilience + the API-contour second pilot needing recon. Pi
+- Local scout / gateway-worker harness evaluation: FULLY CLOSED
+  2026-07-10 (t-015 verdict FAIL — see Current Task pointer).
+  Standing verdicts: Pi harness ADOPTED for gateway workers (recipe +
+  known breaks: gateway/PI_HARNESS.md; survey: RELATED_WORK «Agent
+  tool harnesses»); qwen3:4b FAILED entrance + hardened re-exam
+  (0/7 x2, fabrication); llama-70B (middle-groq) FAILED attempt 4
+  (fabricated Trail, F-14) — no cheap-Pi-worker recon row enters the
+  table; local scout CLOSED until a stronger local candidate fits
+  6GB VRAM; scout-tier economics ~zero ($1.33 all-time), standing
+  case is resilience + the API-contour second pilot needing recon. Pi
   builder profile blocked by builder-groq TPM 8000 vs Pi prompt
   weight — unblock path = prompt-slimming eval (A2 remainder below).
   Full narrative (steps 1-3, t-011/t-012 exams, infrastructure

@@ -80,6 +80,13 @@ Evidence is never deleted, only relocated.
   as cross-family judge-gemini; gemini-2.5-flash 12/13 + B1/B2
   passed -> API-contour Lead-baseline CANDIDATE. Verbatim exam
   prompts, answers, chief-judge grading, accounting.
+- [2026-07-10_t015-llama70b-exam-closure.md](2026-07-10_t015-llama70b-exam-closure.md) —
+  t-015 llama-70B scout re-exam closed FAIL after 4 attempts
+  (3 tooling quota aborts + attempt-4 capability rejection: pseudo
+  tool-call text + fabricated Trail, pipe excluded in-window by
+  tools_stream_check PASS); local-scout thread fully closed, no
+  cheap-Pi-worker recon row enters the table; first F-30 measured
+  launch (preflight GO).
 - [2026-07-10_ranking-exam-run3-gemini-answers.md](2026-07-10_ranking-exam-run3-gemini-answers.md) —
   t-030 ranking exam run 3, first cross-family candidate:
   gemini-2.5-flash 11/12 no zeros — pre-registered Lead bar passed;
