@@ -106,7 +106,10 @@ above).
   Exam difficulty CALIBRATED same day (t-026, operator doubt):
   Sonnet passed the same exam with the day's best score -> exam is
   an ENTRANCE FILTER, not a Lead-tier discriminator (F-28); ranking
-  exam queued Rule #1-gated. Evidence:
+  exam queued Rule #1-gated — seed case bank = F-30 four instances
+  (unverified-inference-as-fact) + t-025 scope-creep; design
+  principle: cases feed a plausible incomplete signal and measure
+  whether the candidate demands verification. Evidence:
   docs/task_reports/2026-07-10_gemini-key-role-exam.md.
 - traffic_kind tagging live: real/synthetic/replay/judge; gate G1
   counts only 'real'. The tag travels via extra_body metadata —
@@ -303,7 +306,11 @@ above).
   (D-0066 two-pass external surveys) — axis-1 remainder of the
   2026-07-10 commit; port the breach-response ordering into AO3
   session-handoff check 4 (archive sweep FIRST, deep-cut queue item
-  only after — added to the OS skill 2026-07-10, axis 1).
+  only after — added to the OS skill 2026-07-10, axis 1); port the
+  F-30 extension of hygiene rule 6 (any load-bearing environment
+  claim needs a measurement or an explicit "estimate" tag — their
+  fb41872 rule covers negatives only) — axis-1 remainder of the
+  F-30 commit.
 - OpenClaw adoption plan (survey 2026-07-10, t-022 + Lead second
   pass — first D-0066 application; facts and full plan: RELATED_WORK
   «OpenClaw survey»). No standalone builds; each item rides an
