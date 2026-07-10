@@ -214,16 +214,16 @@ above).
     crash recovery (inseparable from their runtime; our analog is
     session handoff), supply-chain audit tags (no third-party-dep
     loop in this repo today), WXP (not confirmed in official docs).
-- Boot-diet, OPEN item (morning pass DONE 2026-07-10 and archived —
-  docs/task_reports/2026-07-10_queue-closures-archive.md): boot path
-  RE-BREACHED 2026-07-09 evening (102,173 bytes > 100KB;
-  +4.8%/session). Mechanical cuts exhausted — next trim targets
-  CLAUDE.md (22.6KB) and ARCHITECTURE.md (17.9KB), operative/
-  mechanism homes, Lead+Architect decision required. Re-measure at
-  every handoff (D-0050 check). Archiving pass 2026-07-10 restored
-  the budget: CURRENT_CONTEXT 19,985 bytes, boot path 99,775 < 100KB
-  (queue closures archived + Archive index de-duplicated to
-  task_reports/README.md as single owner).
+- Boot-diet — RESOLVED for now (D-0067, Architect decision
+  2026-07-10; morning pass and re-breach history archived —
+  docs/task_reports/2026-07-10_queue-closures-archive.md). Round 1:
+  archiving pass restored 99,775 < 100KB. Round 2 (D-0067): boot
+  reads ARCHITECTURE_BOOT.md (~4KB core; full spec on demand),
+  Shadow Evaluation Log relocated to docs/SHADOW_EVALUATION_LOG.md —
+  boot path measure recorded in the D-0067 commit. CLAUDE.md
+  deliberately untouched (worst win/risk ratio — policy dies out of
+  context, F-1/F-9). Standing duty: re-measure at every handoff
+  (D-0050 check 4, breach-response ordering fixed 2026-07-10).
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
   (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
   unswept siblings). Point-lookup matrix per the map, NOT a rescan.

@@ -3,6 +3,11 @@
 This document is the authoritative architecture specification.
 It supersedes the draft document "LLM Hierarchical Architecture v2".
 
+Boot note (D-0067): sessions load the condensed core
+ARCHITECTURE_BOOT.md; this full specification is point-read on
+demand. Editing a section here — check whether the boot core must
+follow (SIBLING_MAP axis 4 pair).
+
 ## Problem
 
 The strongest available model (the Lead) consumes tokens faster than any

@@ -49,6 +49,7 @@ MECHANISM_PREFIXES = (
     ".claude/skills/",
     # D-0065: дома механизмов вне первоначального невода + самозащита
     "ARCHITECTURE.md",
+    "ARCHITECTURE_BOOT.md",  # D-0067: boot-ядро несёт механизменный текст
     "BOOT.md",
     "gateway/PI_HARNESS.md",
     "tools/mechanism_gate.py",

@@ -16,7 +16,8 @@ When starting a new conversation:
 5. Read SYSTEM_PROMPT.md.
 6. Read DECISIONS.md.
 7. Read MEMORY_ARCHITECTURE.md.
-8. Read ARCHITECTURE.md.
+8. Read ARCHITECTURE_BOOT.md (condensed operative core, D-0067;
+   the full specification ARCHITECTURE.md is point-read on demand).
 9. Read DELEGATION_TABLE.md.
 10. Read ROADMAP.md.
 11. Read CURRENT_CONTEXT.md.
