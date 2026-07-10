@@ -286,7 +286,9 @@ above).
   operative content is already in sync; narrative trim analogous to
   this repo's 2026-07-08 diet. SAME touch: port the rule-1 amendment
   (D-0066 two-pass external surveys) — axis-1 remainder of the
-  2026-07-10 commit.
+  2026-07-10 commit; port the breach-response ordering into AO3
+  session-handoff check 4 (archive sweep FIRST, deep-cut queue item
+  only after — added to the OS skill 2026-07-10, axis 1).
 - OpenClaw adoption plan (survey 2026-07-10, t-022 + Lead second
   pass — first D-0066 application; facts and full plan: RELATED_WORK
   «OpenClaw survey»). No standalone builds; each item rides an
