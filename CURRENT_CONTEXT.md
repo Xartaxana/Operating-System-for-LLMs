@@ -281,6 +281,17 @@ above).
   Rules (thresholds from first-calibration data); numeric judge-human
   agreement in JUDGE_CALIBRATION_PROTOCOL. NOT taken: per-PR CI, full
   execution-based bench harness (Rule #1).
+  - Batch API candidate (added 2026-07-10, operator-approved):
+    judge/replay/golden-set traffic = independent request sets with
+    no latency need — exactly the Message Batches profile (-50% on
+    input AND output tokens; most batches <1h, SLA 24h; results keyed
+    by custom_id; Groq/Gemini have analogs). TRIGGER (Rule #1, build
+    nothing before): ANTHROPIC_API_KEY lands AND stage-2 regression
+    replays run regularly — free-tier judge traffic gains $0 from the
+    discount today. At adoption: batch endpoints bypass the proxy's
+    request logging — the accounting path into requests.db must land
+    in the same move (axis 2, never a silent $0). Interactive/agent
+    sessions stay off batch by nature (dependent-call loops).
 - AO3 session-handoff skill — DONE 2026-07-10 (t-021, AO3 commit
   0911cf6): six-step evening check mirroring the OS skill over AO3's
   OWN morning path + Session Start detector rule in docs/HANDOFF.md;
