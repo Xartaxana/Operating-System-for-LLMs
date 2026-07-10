@@ -25,31 +25,26 @@ local-scout thread (t-013 closure, t-016 re-exam FAIL and the
 2026-07-09 mechanism-day narrative: archived —
 docs/task_reports/2026-07-09_pi-exams-and-adoption-closures.md):
 
-- t-015 llama-70B re-exam: attempts 1 AND 2 both aborted by Groq
-  TPD (rejected/tooling x2, NOT model verdicts) - the "reset ~21:05"
-  assumption was WRONG, Groq TPD is a ROLLING 24h window (evidence
-  in PI_HARNESS break #3). Rule-6 escalation journaled 2026-07-09
-  22:25; Lead decisions: quota walls dispatched as t-018 (A2), NO
-  cross-model fallback for exam traffic, ATTEMPT 3 must run as the
-  FIRST Groq traffic of a fresh quota window (~02:00+ local
-  2026-07-10 or next morning, BEFORE any other Groq-burning task).
-  Recipe unchanged: hardened profile + Pi call form =
-  gateway/PI_HARNESS.md; 7 questions verbatim =
-  PROCESS/SCOUT_GOLDEN_SET.md (re-verify key liveness per protocol
-  p.1); start the proxy per PI_HARNESS "Прокси перед запуском";
-  journal as t-015 attempt 3. Partial positive from attempt 2:
-  3 REAL executed tool calls on the hardened profile (opposite of
-  attempt-1 fabrication) - behavioral evidence, not a verdict.
-  LANDED 2026-07-09 evening (full builder->critic->Lead cycles,
-  parallel disjoint-path dispatch): t-017 A1 zero-tool-call guard
-  (tools/pi_run_guard.py, all three verdict shapes validated on real
-  data; wired into SCOUT_GOLDEN_SET p.3 + PI_HARNESS + calibration
-  check 14(д)) and t-018 A2 quota walls (guard.py sliding-window
-  token counters middle-groq TPD 100k/TPM 12k + builder-groq TPM 8k,
-  warn 80/refuse 100, no cross-model fallbacks; litellm-native
-  evaluated and declined - no TPD primitive, fixed buckets,
-  Router-scoped). RESTART the proxy before attempt 3 - the running
-  instance predates the wall.
+- t-015 llama-70B re-exam: attempts 1-3 ALL aborted by Groq TPD
+  (rejected/tooling x3, NOT model verdicts). Attempt 3 ran 2026-07-10
+  02:18 as first Groq traffic of the "fresh" window and died on turn
+  2: rolling 24h still held Used 90,614 - the 429 hint frees room for
+  ONE request, not a multi-turn exam; yesterday's bulk (~68k, t-013
+  traffic in side-DB t013.db) falls out only ~18:56 today. F-27
+  registered: the t-018 wall counts requests.db ONLY (saw 14,175),
+  side-DB/off-proxy traffic is invisible to it - the check-13
+  (в)-detector fired exactly as registered at t-018 acceptance.
+  Behavioral positive again: 5 REAL tool calls on the hardened
+  profile, guard t-017 INCONCLUSIVE (ops abort) applied before
+  grading. ATTEMPT 4 (Lead decision at attempt-3 rejection): TODAY
+  >=19:15 local, pre-flight probe authorized (<=3 minimal middle-groq
+  requests through the proxy; a probe 429 yields exact Used numbers),
+  launch only with headroom ~70k. Recipe unchanged: hardened profile
+  + Pi call form = gateway/PI_HARNESS.md (break #3 has the
+  window-math addendum); 7 questions verbatim =
+  PROCESS/SCOUT_GOLDEN_SET.md (keys re-verified 2026-07-10, Q3 line
+  numbers refreshed); proxy carries the wall (started 02:16, keep or
+  restart per PI_HARNESS); journal as t-015 attempt 4.
 - t-019 DONE 2026-07-10: quota_events narrated in the Ledger digest
   (gateway/metrics.py, mirror of the budget_events block; 159
   passed; critic skipped — pattern-mirroring diff, note in accepted
@@ -313,8 +308,10 @@ above).
   injected + truncation flag, `/context list` as prior art) — into
   session-handoff check 4 on next skill touch AND into B3
   SessionStart hook when built; (2) quota-wall reconciliation with
-  provider-reported rate-limit headers (Groq) — data-gated, only on
-  wall-drift evidence from calibration/t-015 runs; (3) lane-contract
+  provider-reported rate-limit headers (Groq) — TRIGGER FIRED
+  2026-07-10 (t-015 attempt 3 / F-27: wall saw 14k, Groq 90.6k —
+  side-DB t013.db invisible to it); build with the next builder
+  batch, natural pair with B1; (3) lane-contract
   fields (Owns/Non-goals/Handoff) — into the A3 dispatch manifest
   template when A3 lands. Recorded as prior art, no work: strict
   selection (validates t-018 no-fallback), two-stage failover +
