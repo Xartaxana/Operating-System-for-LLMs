@@ -90,6 +90,10 @@ scout / builder / critic (х2 деплоя) + Lead-правила в CLAUDE.md +
   docs/SHADOW_EVALUATION_LOG.md (лог прогонов, D-0067): новый прогон
   пишется в лог, смена статуса в таблице ссылается на строку лога
   (Update Rule 1).
+- PROCESS/LEAD_RANKING_EXAM.md (кейсы) <-> docs/FINDINGS.md
+  F-28/F-30 (банк-источник): новая находка класса
+  «непроверенный-вывод-как-факт» — кандидат в новый кейс экзамена;
+  ревизия экзамена ссылается на находки-источники.
 - Закрытие сессии <-> открытие сессии (D-0050):
   PROCESS/SESSION_PROTOCOL.md (Session End) + skills/session-handoff
   <-> BOOT.md + PROCESS/BOOT_REPORT_PROTOCOL.md. Проверка, добавленная
