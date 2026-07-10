@@ -361,13 +361,17 @@ above).
   batch-Lead mode if operator wants it mechanized). NOT adopted:
   channels, delegate identity, compaction/memory (harness-owned),
   utilityModel (duplicates D-0062 function→model).
-- White Paper: Architect review IN PROGRESS (started 2026-07-07).
-  Comment 1 addressed same day (v0.1.1). Portability + contour
-  asymmetry FOLDED IN 2026-07-09 (v0.1.2, §4.1 + §5.1, operator-
-  ordered). Still queued: §7 upkeep against the evidence log; full
-  sync with D-0034..D-0038 once the unified plan's first steps land;
-  fold the D-0062 Two-Vocabularies bridge into §4.1 (functions vs
-  grades).
+- White Paper: v0.2.0 FULL REVISION done 2026-07-10 (operator order:
+  beyond the three queued items, sweep the whole document against
+  progress since v0.1) — abstract two-contour, §2 cache nuance, §4.1
+  Two Vocabularies (D-0062), §5 4-state (D-0035), §5.1 deployed MVP
+  + typed journal + D-0058 matrix, §6 second judge + F-28 + ranking
+  exam, NEW §6.2 coordinator-as-supervised-worker (F-27/29/30,
+  D-0063, degradation), §7 refreshed both contours, §8 boot
+  economics + handoff symmetry, §9 harness surveys, §10 Phase 1.5 +
+  three gates, §11 honest new caveats. AWAITING Architect review of
+  the updated version (operator will review v0.2.0 directly; v0.1.x
+  review thread superseded).
 
 ## Environment Notes (this machine)
 
