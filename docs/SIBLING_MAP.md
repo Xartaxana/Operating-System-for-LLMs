@@ -73,7 +73,10 @@ scout / builder / critic (х2 деплоя) + Lead-правила в CLAUDE.md +
 - PROCESS/SCOUT_GOLDEN_SET.md <-> .claude/agents/scout.md (D-0057:
   правка роли/модели яруса требует прогона набора тем же коммитом;
   ключи вопросов смотрят в живые файлы — verify-команды сверяются
-  при каждом прогоне, живость — чек 14б).
+  при каждом прогоне, живость — чек 14б). AO3-пара той же оси
+  (порт 2026-07-10, AO3 коммит 72a16ad):
+  D:\AO3_tests\docs\SCOUT_GOLDEN_SET.md <-> их
+  .claude/agents/scout.md п.8.
 - .claude/skills/next-task/SKILL.md <-> CLAUDE.md (D-0061: skill —
   порядок шагов, политика — правила; правило меняется только в
   CLAUDE.md, skill ссылается и не дублирует формулировок; при
