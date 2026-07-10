@@ -210,7 +210,9 @@ above).
     failure_class on rejected, witness on builder-accepted, model
     presence), task_id novelty (t-NNN max+1, D-0060), D-0058
     acceptance matrix as code (acceptor tier above worker, or
-    critic-input/queued-to-Lead flag present). REVISES the D-0060
+    critic-input/queued-to-Lead flag present), ts sanity (F-29:
+    monotonic within a commit, near commit time — fabricated-
+    narrative timestamps caught 2026-07-10). REVISES the D-0060
     choice of manual tail re-read — on F-23 evidence (collision
     already happened here) + D-0063, recorded, not silent. Sibling
     implementation: AO3 scripts/log_append.py (ось 1).
