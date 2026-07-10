@@ -14,9 +14,11 @@ import pytest
 import yaml
 
 from preflight_quota import (
+    QuotaDatabaseLockedError,
     alias_provider_models,
     default_root,
     discover_dbs,
+    format_text,
     normalize_provider_model,
     parse_provider_429,
     parse_ts,
@@ -361,3 +363,155 @@ def test_main_limit_tokens_override_avoids_exit_two(tmp_path, capsys):
          "--limit-tokens", "5000", "--root", str(root)]
     )
     assert code in (0, 1)  # measured GO/NO-GO, not the exit-2 error path
+
+
+# ---- N5 (critic t-027): locked db fails loud, not silently, not a traceback ----
+
+def test_discover_dbs_raises_on_locked_database(tmp_path):
+    # Sibling fix (found while testing usage_in_window's guard): discover_dbs's
+    # own schema probe hits the identical lock and, before this fix, silently
+    # dropped the db from the discovered list via its bare 'except
+    # sqlite3.Error: continue' -- verified empirically the schema read itself
+    # blocks under another connection's BEGIN EXCLUSIVE.
+    root = _seed_root(tmp_path)
+    db_path = root / "requests.db"
+    _seed_db(db_path, [])
+    locker = sqlite3.connect(db_path)
+    locker.execute("BEGIN EXCLUSIVE")
+    try:
+        with pytest.raises(QuotaDatabaseLockedError) as exc_info:
+            discover_dbs(root)
+        assert "requests.db" in str(exc_info.value)
+    finally:
+        locker.rollback()
+        locker.close()
+
+
+def test_usage_in_window_raises_quota_database_locked_error(tmp_path):
+    # Real sqlite lock (no mocks): a second connection holding an EXCLUSIVE
+    # transaction open makes the reading connection inside usage_in_window
+    # genuinely hit sqlite3.OperationalError("database is locked").
+    root = _seed_root(tmp_path)
+    db_path = root / "requests.db"
+    _seed_db(db_path, [("2026-07-10T11:00:00", "llama-3.3-70b-versatile", "success", 100)])
+
+    locker = sqlite3.connect(db_path)
+    locker.execute("BEGIN EXCLUSIVE")
+    try:
+        now = datetime.datetime(2026, 7, 10, 12, 0, 0)
+        with pytest.raises(QuotaDatabaseLockedError) as exc_info:
+            usage_in_window(root, "llama-3.3-70b-versatile", 86400, now)
+        assert "requests.db" in str(exc_info.value)
+    finally:
+        locker.rollback()
+        locker.close()
+
+
+def test_main_exit_two_on_locked_database(tmp_path, capsys, monkeypatch):
+    # main()'s own catch/exit-2/message logic -- the underlying detection
+    # is proven for real above; here we isolate main()'s handling so this
+    # test does not also pay the sqlite busy-timeout wait.
+    import preflight_quota
+
+    root = _seed_root(tmp_path)
+
+    def fake_usage_in_window(*a, **kw):
+        raise QuotaDatabaseLockedError("requests.db")
+
+    monkeypatch.setattr(preflight_quota, "usage_in_window", fake_usage_in_window)
+    code = preflight_quota.main(["--alias", "middle-groq", "--need", "1000", "--root", str(root)])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "locked" in err
+    assert "requests.db" in err
+
+
+# ---- N3 (critic t-027): probe-informed conservative go_at + reconciliation line ----
+
+def test_format_text_reports_conservative_horizon_and_reconciliation():
+    now = datetime.datetime(2026, 7, 10, 12, 0, 0)
+    rows = [(now - datetime.timedelta(hours=1), 20000)]  # local corzina, ages out at +23h
+    schedule_opt, go_at_opt = release_schedule(rows, limit=100000, window_seconds=86400, need=20000, now=now)
+    delta = 70000
+    augmented_rows = rows + [(now, delta)]  # off-ledger delta ages out at exactly +24h
+    schedule_cons, go_at_cons = release_schedule(
+        augmented_rows, limit=100000, window_seconds=86400, need=20000, now=now
+    )
+
+    report = {
+        "alias": "middle-groq", "provider_model": "llama-3.3-70b-versatile",
+        "group_aliases": ["middle-groq"], "window_seconds": 86400,
+        "limit_tokens": 100000, "limit_source": "budgets.yaml",
+        "used_tokens": 90000, "local_used_tokens": 20000,
+        "headroom_tokens": 10000, "need_tokens": 20000, "verdict": "NO-GO",
+        "by_db": {"requests.db": 20000},
+        "since": (now - datetime.timedelta(seconds=86400)).isoformat(),
+        "now": now.isoformat(),
+        "schedule": [{**s, "bucket_end": s["bucket_end"].isoformat()} for s in schedule_opt],
+        "go_at": go_at_opt.isoformat() if go_at_opt else None,
+        "schedule_conservative": [{**s, "bucket_end": s["bucket_end"].isoformat()} for s in schedule_cons],
+        "go_at_conservative": go_at_cons.isoformat() if go_at_cons else None,
+        "reconciliation": {"provider_used": 90000, "local_used": 20000, "delta": 70000},
+        "probe": {
+            "ok": False, "status": 429,
+            "provider_429": {"limit": 100000, "used": 90000, "requested": 1000, "retry_after_text": "5s"},
+        },
+    }
+    text = format_text(report)
+    assert "RECONCILIATION: provider Used=90000 tok, local sum=20000 tok, delta=70000 tok" in text
+    assert "[optimistic: local corzinas only]" in text
+    assert "[conservative: off-ledger delta released at window end]" in text
+    # base usage is higher in the conservative model -> its go_at can never
+    # be earlier than the optimistic one.
+    assert go_at_cons is not None and go_at_opt is not None and go_at_cons >= go_at_opt
+
+
+def test_main_probe_delta_full_flow_reports_both_horizons(tmp_path, capsys, monkeypatch):
+    # End-to-end through main(): probe reveals provider Used (90000) far
+    # above our local sum (20000) -- verdict was already provider-based
+    # before this fix (headroom computed from bumped `used`); N3 fixes
+    # go_at, which used to stay optimistic (local-only) even then.
+    import preflight_quota
+
+    root = _seed_root(tmp_path)
+    now = datetime.datetime.now()
+    _seed_db(
+        root / "requests.db",
+        [((now - datetime.timedelta(hours=1)).isoformat(), "llama-3.3-70b-versatile", "success", 20000)],
+    )
+
+    def fake_probe(alias, *a, **kw):
+        return {
+            "ok": False, "status": 429, "raw_error": "...",
+            "provider_429": {"limit": 100000, "used": 90000, "requested": 1000, "retry_after_text": "5s"},
+        }
+
+    monkeypatch.setattr(preflight_quota, "probe", fake_probe)
+    code = preflight_quota.main(
+        ["--alias", "middle-groq", "--need", "20000", "--probe", "--root", str(root)]
+    )
+    out = capsys.readouterr().out
+    assert code == 1  # NO-GO: headroom 100000-90000=10000 < need 20000
+    assert "RECONCILIATION: provider Used=90000 tok, local sum=20000 tok, delta=70000 tok" in out
+    assert "[optimistic: local corzinas only]" in out
+    assert "[conservative: off-ledger delta released at window end]" in out
+
+
+def test_no_probe_output_unchanged_single_horizon(tmp_path, capsys):
+    # Backward compatibility: without --probe (or with no delta found),
+    # the single-horizon text is byte-for-byte the pre-N3 format (no
+    # "[optimistic...]"/"[conservative...]" labels, no RECONCILIATION line).
+    from preflight_quota import main
+
+    root = _seed_root(tmp_path)
+    now = datetime.datetime.now()
+    _seed_db(root / "requests.db", [(now.isoformat(), "llama-3.3-70b-versatile", "success", 99000)])
+    code = main(["--alias", "middle-groq", "--need", "50000", "--root", str(root)])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "RECONCILIATION" not in out
+    assert "[optimistic" not in out
+    assert "[conservative" not in out
+    assert "next possible GO (measured release schedule):" in out or (
+        "no hour in the next 24h reaches headroom >= need" in out
+    )

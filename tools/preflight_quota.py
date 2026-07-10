@@ -48,6 +48,33 @@ today merge aliases intern+analyst (both qwen3:4b tails) and lead+mock
 check this note before adding a second provider for an existing model
 tail. The data to fix it does not exist in the DB; fixing it means
 logging the provider (sqlite_logger) first.
+
+t-031 FIXES (critic t-027 review, N3/N5):
+- N3: go_at/release_schedule used to be computed from the local SQLite
+  sum alone even when --probe found the provider's own Used number
+  higher (verdict already trusted the provider number; the horizon did
+  not). Now two horizons are reported when a probe reveals such a
+  delta: "optimistic" (local corzinas only, old behavior, unchanged
+  when there is no delta) and "conservative" (base = provider Used;
+  the off-ledger delta is modeled as a synthetic row timestamped at
+  probe-time, so it is assumed to age out only at probe-time+window --
+  the last possible moment). An explicit RECONCILIATION line (provider
+  Used, local sum, delta) is always printed alongside a probe 429 with
+  delta > 0 (OpenClaw p.2 / F-27: reconcile the ledger against the
+  provider's own answer, don't just silently act on it).
+- N5: usage_in_window() used to let a locked gateway/*.db
+  (sqlite3.OperationalError: "database is locked") propagate as a bare
+  traceback. It now raises QuotaDatabaseLockedError (naming the locked
+  db); main() catches it, prints one clear line, and exits 2 -- loud
+  failure, not a silently understated quota number. Sibling fix found
+  while testing this (same class, not in the spec's own line range):
+  discover_dbs()'s schema-probe query hits the identical lock error and
+  had the SAME silent-swallow bug in its bare 'except sqlite3.Error:
+  continue' -- verified empirically that even a bare schema read blocks
+  under another connection's BEGIN EXCLUSIVE, which would have dropped
+  a locked db from the discovered list before usage_in_window's guard
+  ever saw it. Both sites now re-raise specifically on "locked" and
+  leave other sqlite3.Error types silently skipped, unchanged.
 """
 
 import argparse
@@ -63,6 +90,22 @@ from pathlib import Path
 import yaml
 
 DEFAULT_WINDOW_SECONDS = 86400
+
+
+class QuotaDatabaseLockedError(RuntimeError):
+    """Raised by usage_in_window() when a gateway/*.db file is locked
+    (sqlite3.OperationalError: 'database is locked') -- N5 (critic
+    t-027, preflight_quota.py:166-174 in that review's line numbers):
+    a locked db must fail LOUD (CLI exit 2, one clear line naming the
+    db) rather than have the caller's uncaught traceback stand in for
+    an error message, and rather than silently dropping that db's
+    usage out of the sum -- a quiet drop would understate real quota
+    burn exactly like a silent $0 would (same class as Ось 2's
+    'no silent $0' rule)."""
+
+    def __init__(self, db_name: str):
+        self.db_name = db_name
+        super().__init__(f"database is locked: {db_name}")
 
 
 def default_root() -> Path:
@@ -139,22 +182,42 @@ def resolve_target(config: dict, alias: str):
 
 def discover_dbs(root: Path) -> list:
     """Every *.db directly under root that has a `requests` table
-    (F-27: side DBs count too). Sorted for deterministic output."""
+    (F-27: side DBs count too). Sorted for deterministic output.
+
+    N5 sibling fix (found while testing the usage_in_window fix, not in
+    the spec's own line range): this schema check is itself a read and
+    hits the SAME sqlite3.OperationalError("database is locked") a
+    locked db produces -- verified empirically that even the bare
+    'SELECT 1 FROM sqlite_master' schema probe blocks under another
+    connection's BEGIN EXCLUSIVE. The pre-existing bare
+    'except sqlite3.Error: continue' below would have silently dropped
+    a locked db from the discovered list BEFORE usage_in_window's own
+    query ever ran on it, making that fix unreachable for a db locked
+    for the whole discover+sum sequence (the realistic, testable case).
+    Locked errors are re-raised (loud); any other sqlite3.Error (not a
+    database, corrupt file, etc.) still just skips that file, unchanged
+    from before."""
     dbs = []
     for f in sorted(Path(root).glob("*.db")):
+        conn = None
+        has_table = False
         try:
             conn = sqlite3.connect(f)
-            try:
-                has_table = (
-                    conn.execute(
-                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='requests'"
-                    ).fetchone()
-                    is not None
-                )
-            finally:
-                conn.close()
+            has_table = (
+                conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='requests'"
+                ).fetchone()
+                is not None
+            )
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower():
+                raise QuotaDatabaseLockedError(f.name) from e
+            continue
         except sqlite3.Error:
             continue
+        finally:
+            if conn is not None:
+                conn.close()
         if has_table:
             dbs.append(f)
     return dbs
@@ -181,6 +244,10 @@ def usage_in_window(root: Path, provider_model: str, window_seconds: int,
                 " WHERE status = 'success' AND provider_model = ?",
                 (provider_model,),
             ).fetchall()
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower():
+                raise QuotaDatabaseLockedError(db_file.name) from e
+            raise
         finally:
             conn.close()
         db_total = 0
@@ -342,6 +409,35 @@ def probe(alias: str, proxy_url: str = "http://localhost:4000/v1/chat/completion
         return {"ok": False, "status": None, "error": f"proxy unreachable: {e}"}
 
 
+def _append_horizon(lines: list, label: str | None, go_at, schedule: list) -> None:
+    """Renders one release-schedule horizon (N3: there can be two --
+    optimistic from local corzinas only, conservative when a probe
+    revealed off-ledger delta). label=None reproduces the pre-N3
+    single-horizon text verbatim (no prefix) so the no-probe path is
+    byte-for-byte unchanged."""
+    prefix = f"[{label}] " if label else ""
+    if go_at:
+        lines.append(
+            f"  {prefix}next possible GO (measured release schedule): ~{go_at}"
+            " (first hour headroom >= need)"
+        )
+    else:
+        lines.append(
+            f"  {prefix}no hour in the next 24h reaches headroom >= need at current usage"
+        )
+    lines.append(f"  {prefix}release schedule (hours where tokens fall out of the window, next 24h):")
+    any_release = False
+    for s in schedule:
+        if s["released_tokens"] > 0:
+            any_release = True
+            lines.append(
+                f"    +{s['hour_offset']}h ({s['bucket_end']}):"
+                f" -{s['released_tokens']} tok released, headroom={s['headroom_tokens']}"
+            )
+    if not any_release:
+        lines.append(f"  {prefix}(no tokens fall out of the window within the next 24h at current usage)")
+
+
 def format_text(report: dict) -> str:
     lines = [
         f"PREFLIGHT QUOTA CHECK -- alias={report['alias']}"
@@ -365,6 +461,7 @@ def format_text(report: dict) -> str:
     lines.append(f"  need: {report['need_tokens']} tokens")
 
     probe_result = report.get("probe")
+    recon = report.get("reconciliation")
     if probe_result:
         if probe_result.get("provider_429"):
             pp = probe_result["provider_429"]
@@ -372,16 +469,20 @@ def format_text(report: dict) -> str:
                 f"  PROBE 429 (provider truth): Limit={pp['limit']} Used={pp['used']}"
                 f" Requested={pp.get('requested')} retry_in={pp.get('retry_after_text')}"
             )
-            if pp["used"] > report["used_tokens"]:
+            if recon:
+                # N3 / OpenClaw p.2: explicit ledger-vs-provider reconciliation
+                # line, always printed when the probe found off-ledger delta --
+                # not just implied by the (possibly bumped) used_tokens total.
                 lines.append(
-                    f"  DISCREPANCY: provider Used={pp['used']} > our measured"
-                    f" {report['used_tokens']} -- our databases do not see all traffic;"
-                    " provider numbers were used for the verdict above (F-27)"
+                    f"  RECONCILIATION: provider Used={recon['provider_used']} tok,"
+                    f" local sum={recon['local_used']} tok, delta={recon['delta']} tok"
+                    " (off-ledger traffic our db does not see; provider number"
+                    " used for the verdict above, F-27)"
                 )
-            elif pp["used"] != report["used_tokens"]:
+            elif pp["used"] != report["local_used_tokens"]:
                 lines.append(
                     f"  note: provider Used={pp['used']} differs from our measured"
-                    f" {report['used_tokens']} (not greater -- verdict kept on our measurement)"
+                    f" {report['local_used_tokens']} (not greater -- verdict kept on our measurement)"
                 )
         elif probe_result.get("ok"):
             lines.append(f"  PROBE OK: usage={probe_result.get('usage')}")
@@ -392,26 +493,16 @@ def format_text(report: dict) -> str:
 
     lines.append(f"VERDICT: {report['verdict']} (exit {0 if report['verdict'] == 'GO' else 1})")
     if report["verdict"] == "NO-GO":
-        if report["go_at"]:
-            lines.append(
-                f"  next possible GO (measured release schedule): ~{report['go_at']}"
-                " (first hour headroom >= need)"
+        if recon:
+            # N3: go_at from local corzinas alone is optimistic once probe
+            # truth shows more is actually burned -- report BOTH horizons.
+            _append_horizon(lines, "optimistic: local corzinas only", report["go_at"], report["schedule"])
+            _append_horizon(
+                lines, "conservative: off-ledger delta released at window end",
+                report["go_at_conservative"], report["schedule_conservative"],
             )
         else:
-            lines.append(
-                "  no hour in the next 24h reaches headroom >= need at current usage"
-            )
-        lines.append("  release schedule (hours where tokens fall out of the window, next 24h):")
-        any_release = False
-        for s in report["schedule"]:
-            if s["released_tokens"] > 0:
-                any_release = True
-                lines.append(
-                    f"    +{s['hour_offset']}h ({s['bucket_end']}):"
-                    f" -{s['released_tokens']} tok released, headroom={s['headroom_tokens']}"
-                )
-        if not any_release:
-            lines.append("    (no tokens fall out of the window within the next 24h at current usage)")
+            _append_horizon(lines, None, report["go_at"], report["schedule"])
     return "\n".join(lines)
 
 
@@ -459,15 +550,41 @@ def main(argv=None) -> int:
     limit_source = "--limit-tokens" if args.limit_tokens is not None else "budgets.yaml"
 
     now = datetime.datetime.now()
-    usage = usage_in_window(root, provider_model, args.window, now)
-    used = usage["used_tokens"]
+    try:
+        usage = usage_in_window(root, provider_model, args.window, now)
+    except QuotaDatabaseLockedError as e:
+        print(f"error: {e} -- usage cannot be measured, aborting (N5: loud, not a silently understated number)",
+              file=sys.stderr)
+        return 2
+    local_used = usage["used_tokens"]
+    used = local_used
 
     probe_result = None
+    reconciliation = None
+    schedule_conservative = None
+    go_at_conservative = None
     if args.probe:
         probe_result = probe(args.alias)
         provider_429 = probe_result.get("provider_429") if probe_result else None
         if provider_429 and provider_429["used"] > used:
+            delta = provider_429["used"] - used
             used = provider_429["used"]
+            reconciliation = {
+                "provider_used": provider_429["used"],
+                "local_used": local_used,
+                "delta": delta,
+            }
+            # N3: conservative horizon -- base remaining on provider Used
+            # (not the local sum); known local corzinas still release on
+            # their own ts-based schedule, and the off-ledger delta is
+            # modeled as a synthetic row timestamped at probe-time (now),
+            # i.e. it ages out at probe-time + window -- the last possible
+            # moment, never earlier (release_schedule's own ts+window_seconds
+            # formula does this for free once the row is added).
+            augmented_rows = usage["rows"] + [(now, delta)]
+            schedule_conservative, go_at_conservative = release_schedule(
+                augmented_rows, limit, args.window, args.need, now
+            )
 
     headroom = limit - used
     schedule, go_at = release_schedule(usage["rows"], limit, args.window, args.need, now)
@@ -481,6 +598,7 @@ def main(argv=None) -> int:
         "limit_tokens": limit,
         "limit_source": limit_source,
         "used_tokens": used,
+        "local_used_tokens": local_used,
         "headroom_tokens": headroom,
         "need_tokens": args.need,
         "verdict": verdict,
@@ -491,6 +609,12 @@ def main(argv=None) -> int:
             {**s, "bucket_end": s["bucket_end"].isoformat()} for s in schedule
         ],
         "go_at": go_at.isoformat() if go_at else None,
+        "schedule_conservative": (
+            [{**s, "bucket_end": s["bucket_end"].isoformat()} for s in schedule_conservative]
+            if schedule_conservative is not None else None
+        ),
+        "go_at_conservative": go_at_conservative.isoformat() if go_at_conservative else None,
+        "reconciliation": reconciliation,
         "probe": probe_result,
     }
 

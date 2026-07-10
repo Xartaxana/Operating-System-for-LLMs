@@ -30,13 +30,36 @@ import json
 import sys
 from pathlib import Path
 
-from preflight_quota import (
-    alias_provider_models,
-    load_budgets,
-    load_config,
-    parse_ts,
-    usage_in_window,
-)
+# N4 (critic t-027): this import used to sit unguarded at module level --
+# a failure here (no yaml installed, a syntax error in preflight_quota.py,
+# any exception at all) happened DURING IMPORT of session_context.py
+# itself, before main()'s try/except boundary even exists yet, and
+# escaped as a bare traceback -- exactly the "session start breaks"
+# failure mode this whole hook exists to prevent (spec: fail-open is a
+# hard constraint, not best-effort). Deferring the failure into a stub
+# that raises only when CALLED means main()'s single try/except (see its
+# docstring for why it is deliberately the ONE boundary) now also covers
+# import-time failures of this dependency, not just runtime ones.
+_IMPORT_ERROR = None
+try:
+    from preflight_quota import (
+        alias_provider_models,
+        load_budgets,
+        load_config,
+        parse_ts,
+        usage_in_window,
+    )
+except Exception as _e:  # noqa: BLE001 -- deliberately broad, see comment above
+    _IMPORT_ERROR = _e
+
+    def _reraise_import_error(*_args, **_kwargs):
+        raise _IMPORT_ERROR
+
+    alias_provider_models = _reraise_import_error
+    load_budgets = _reraise_import_error
+    load_config = _reraise_import_error
+    parse_ts = _reraise_import_error
+    usage_in_window = _reraise_import_error
 
 MAX_LINES = 25
 QUOTA_WINDOW_SECONDS = 86400

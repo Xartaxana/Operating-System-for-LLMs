@@ -25,7 +25,7 @@ critic проверяет классовую полноту фикса ПО КА
 |---|---|
 | CLAUDE.md (политика, правила 1–11, вокабуляр событий) | CLAUDE.md (то же + дисциплина команд конвейера) |
 | .claude/agents/{scout,builder,critic}.md | те же три + 10 QA-агентов конвейера |
-| logs/routing-log.jsonl (формат событий) | logs/routing-log.jsonl + scripts/log_append.py (enforce формата) |
+| logs/routing-log.jsonl + tools/journal_validator.py + .githooks/pre-commit (enforce формата и матрицы D-0058, D-0069) | logs/routing-log.jsonl + scripts/log_append.py (enforce формата; порт by/basis и веток continuation/retry — в очереди, ось 1) |
 | .githooks/commit-msg + tools/mechanism_gate.py (enforce правила 10б, D-0055) | .githooks/commit-msg + scripts/mechanism_gate.py (карта читается из OS-репо) |
 | — | .claude/skills/qa-loop/SKILL.md (журналирование диспатчей) |
 | .claude/skills/session-handoff (D-0050) | .claude/skills/session-handoff (порт t-021, коммит 0911cf6) |

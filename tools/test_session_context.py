@@ -7,8 +7,10 @@ Run from the repo root: python -m pytest tools/test_session_context.py
 """
 
 import datetime
+import importlib
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
 import yaml
@@ -248,3 +250,65 @@ def test_main_success_path_prints_lines_and_exits_zero(tmp_path, capsys):
     assert len(out) >= 2  # at least NOW + LAST EVENT
     assert any(l.startswith("NOW:") for l in out)
     assert not any(l.startswith("session-context warning:") for l in out)
+
+
+# ---- N4 (critic t-027): import-time failure must ALSO fail open ----
+
+def test_deferred_import_error_reaches_mains_fail_open_boundary(tmp_path, capsys, monkeypatch):
+    # Runtime half of the fix: once import has failed and the stub raises
+    # on call, main()'s single try/except boundary must still catch it
+    # (proves the deferred-raise wiring, independent of the real import
+    # machinery exercised by the end-to-end test below).
+    import session_context as sc
+
+    def _boom(*_a, **_kw):
+        raise ImportError("simulated: no module named 'yaml'")
+
+    monkeypatch.setattr(sc, "load_config", _boom)
+    monkeypatch.setattr(sc, "load_budgets", _boom)
+    monkeypatch.setattr(sc, "alias_provider_models", _boom)
+    monkeypatch.setattr(sc, "usage_in_window", _boom)
+
+    root = _seed_repo(tmp_path, events=[_event("delegated", task_id="t-001")])
+    code = sc.main(root)
+    assert code == 0
+    out = capsys.readouterr().out.strip().splitlines()
+    assert len(out) == 1
+    assert out[0].startswith("session-context warning:")
+
+
+def test_module_survives_broken_preflight_quota_import_and_fails_open(tmp_path, capsys, monkeypatch):
+    # End-to-end, real import failure (no mock of the failure mode): a
+    # syntactically broken preflight_quota.py shadows the real one via
+    # sys.path priority. Before the N4 fix, this SyntaxError happened
+    # DURING `import session_context` itself (module-level code, outside
+    # main()'s try/except, which does not exist yet at that point) and
+    # would have crashed with a bare traceback instead of failing open --
+    # exactly the failure mode a SessionStart hook cannot afford.
+    broken_dir = tmp_path / "broken_pkg"
+    broken_dir.mkdir()
+    (broken_dir / "preflight_quota.py").write_text("def broken(:\n    pass\n", encoding="utf-8")
+
+    root = _seed_repo(tmp_path, events=[_event("delegated", task_id="t-001")])
+
+    saved_modules = {name: sys.modules.get(name) for name in ("session_context", "preflight_quota")}
+    for name in saved_modules:
+        sys.modules.pop(name, None)
+    monkeypatch.syspath_prepend(str(broken_dir))
+
+    try:
+        broken_sc = importlib.import_module("session_context")  # must NOT raise
+        code = broken_sc.main(root)
+    finally:
+        sys.modules.pop("session_context", None)
+        sys.modules.pop("preflight_quota", None)
+        for name, mod in saved_modules.items():
+            if mod is not None:
+                sys.modules[name] = mod
+            else:
+                importlib.import_module(name)
+
+    assert code == 0
+    out = capsys.readouterr().out.strip().splitlines()
+    assert len(out) == 1
+    assert out[0].startswith("session-context warning:")

@@ -198,7 +198,12 @@ above).
     (skills/tools trim) against the builder-groq 8k TPM ceiling
     (GSD budget-mode token profile as prior art);
     requests(model,ts) index candidate (Rule #1: only on latency
-    evidence — spent_today shares the full-scan cost).
+    evidence — spent_today shares the full-scan cost). Quota-wall
+    reconciliation with provider headers — DONE 2026-07-10 within
+    t-031 (N3: go_at from probe truth, conservative horizon,
+    RECONCILIATION line = both-ledgers delta, F-27 closed in code);
+    N4 import-time fail-open and N5+discover_dbs locked-DB loud-fail
+    landed same task.
   - A3 dispatch context manifest (Lead-class, mechanism — full
     rule-10 treatment; WHEN: next D-0054/rule-11 touch, not a
     dedicated pass): the dispatch text enumerates the exact
@@ -230,18 +235,14 @@ above).
     fail-open hole), N5 (locked-DB guard); provider column in
     sqlite_logger (N1/N2 root, axis 2) — queued, evidence-gated.
     B3 remainder: actual-model-tier line when hook input provides it.
-  - B1 journal validator, OS repo (builder-class; WHEN: next
-    builder batch, natural pair with A1): pre-commit validation of
-    NEW routing-log.jsonl lines — D-0053 typed fields (attempt/
-    failure_class on rejected, witness on builder-accepted, model
-    presence), task_id novelty (t-NNN max+1, D-0060), D-0058
-    acceptance matrix as code (acceptor tier above worker, or
-    critic-input/queued-to-Lead flag present), ts sanity (F-29:
-    monotonic within a commit, near commit time — fabricated-
-    narrative timestamps caught 2026-07-10). REVISES the D-0060
-    choice of manual tail re-read — on F-23 evidence (collision
-    already happened here) + D-0063, recorded, not silent. Sibling
-    implementation: AO3 scripts/log_append.py (ось 1).
+  - B1 journal validator — DONE 2026-07-10 (t-031, builder+critic
+    conveyor, D-0069): tools/journal_validator.py + .githooks/
+    pre-commit; new by/basis fields documented in CLAUDE.md; check-9
+    spec hole (continuation/retry dispatch) found by live use and
+    fixed same task. NEW residuals: (a) AO3 log_append.py port of
+    by/basis + continuation/retry branches (axis 1); (b)
+    usage_report.py loud-fail on locked cc_usage DB (critic
+    observation, axis-2 symmetry candidate — Rule #1, on evidence).
   - B2 — FOLDED into A2, closed with it (archived same file as A2).
   - B3 SessionStart hook (Lead spec -> builder; WHEN: after the
     first weekly calibration validates what the Boot Report line
