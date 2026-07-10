@@ -61,6 +61,11 @@ Evidence is never deleted, only relocated.
   line), GSD adoption A1 (t-017) / A2 (t-018) / B2-folded closures
   with accepted limitations, boot-diet morning pass narrative,
   AO3 session-handoff port (t-021).
+- [2026-07-10_ranking-exam-run2-answers.md](2026-07-10_ranking-exam-run2-answers.md) —
+  t-029 ranking-exam run 2 candidate answers verbatim (Sonnet 10/12,
+  Opus 12/12 clean condition, plus the invalid Opus run kept as the
+  policy-echo demonstration); grading lives in
+  PROCESS/LEAD_RANKING_EXAM.md Runs log.
 - [2026-07-10_f30-defense-build.md](2026-07-10_f30-defense-build.md) —
   t-027 F-30 defense layers 1-2: preflight_quota (measured GO/NO-GO,
   multi-db F-27 math, provider_model normalization discovery) +
