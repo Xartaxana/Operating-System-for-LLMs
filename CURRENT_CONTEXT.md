@@ -232,10 +232,12 @@ above).
   104,052; peaked 105,374): closed narrative archived per D-0038 to
   docs/task_reports/2026-07-09_pi-exams-and-adoption-closures.md;
   boot path now 97,511 bytes (< 100KB restored), CURRENT_CONTEXT
-  27.7 -> 19.8KB. Headroom is thin (~2.5KB): next-breach candidates
-  are CLAUDE.md 22.1KB and ARCHITECTURE.md 17.9KB — both
-  operative/mechanism homes, trimming them is a Lead+Architect
-  decision, not a mechanical cut. Re-measure at every handoff
+  27.7 -> 19.8KB. RE-BREACHED same evening (handoff measure 102,173
+  bytes; +4.8%/session, growth explained: D-0066 + OpenClaw plan +
+  Batch candidate). OPEN boot-diet item: mechanical cuts were
+  exhausted by the morning pass — next trim targets CLAUDE.md
+  (22.6KB) and ARCHITECTURE.md (17.9KB), operative/mechanism homes,
+  Lead+Architect decision required. Re-measure at every handoff
   (D-0050 check).
 - One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
   (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
