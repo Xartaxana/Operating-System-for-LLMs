@@ -20,9 +20,29 @@ model_list:
 
   # Frontier-ish baseline at $0 for Shadow Evaluation, until a paid
   # ANTHROPIC_API_KEY is available (D-0028; CURRENT_CONTEXT.md).
+  # EXAMINED for the Lead function 2026-07-10 (t-024): calibration
+  # 12/13 + decomposition/acceptance exam passed -> Lead-baseline
+  # CANDIDATE for the API contour (status moves stay with the weekly
+  # calibration, D-0035). Free tier: 10 req/min, 250 req/day.
+  # Evidence: docs/task_reports/2026-07-10_gemini-key-role-exam.md.
   - model_name: lead-gemini
     litellm_params:
       model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+  # Second judge, cross-family to judge-groq (t-023, 2026-07-10):
+  # gemini-3.5-flash passed judge calibration 13/13 — use it for
+  # pairs where builder-groq (same underlying model as judge-groq)
+  # would be SELF-JUDGING. Examined for Lead first (operator order):
+  # capability strong, but free tier is 20 req/day (rolling) — Lead
+  # role rejected operationally, judge point-work fits. The key's pro
+  # tiers (3.1-pro/3-pro/2.5-pro) 429 at zero free quota (probed
+  # 2026-07-10). NOT for volume replay; pace >=13s between calls
+  # (5 req/min). Named by role (D-0031, Rule #1: supervision spend
+  # stays separable).
+  - model_name: judge-gemini
+    litellm_params:
+      model: gemini/gemini-3.5-flash
       api_key: os.environ/GEMINI_API_KEY
 
   # Middle tier (ARCHITECTURE.md hierarchy: routine coding) via Groq
@@ -51,7 +71,7 @@ model_list:
   # work spend and supervision spend stay separable (D-0031, Rule #1).
   # Caveat: same underlying model as the judge — Shadow Evaluation
   # over this binding is SELF-JUDGING; use chief-judge/manual review
-  # for its pairs.
+  # for its pairs, or the cross-family judge-gemini (13/13, t-023).
   - model_name: builder-groq
     litellm_params:
       model: groq/openai/gpt-oss-120b

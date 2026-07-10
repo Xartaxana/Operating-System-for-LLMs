@@ -61,3 +61,10 @@ Evidence is never deleted, only relocated.
   line), GSD adoption A1 (t-017) / A2 (t-018) / B2-folded closures
   with accepted limitations, boot-diet morning pass narrative,
   AO3 session-handoff port (t-021).
+- [2026-07-10_gemini-key-role-exam.md](2026-07-10_gemini-key-role-exam.md) —
+  t-023/t-024 Gemini key exam (operator order, role ladder): key's
+  pro tiers have zero free quota; gemini-3.5-flash 13/13 judge
+  calibration but 20 req/day -> Lead rejected operationally, bound
+  as cross-family judge-gemini; gemini-2.5-flash 12/13 + B1/B2
+  passed -> API-contour Lead-baseline CANDIDATE. Verbatim exam
+  prompts, answers, chief-judge grading, accounting.

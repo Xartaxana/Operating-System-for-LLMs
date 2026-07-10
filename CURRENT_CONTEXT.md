@@ -95,6 +95,15 @@ above).
   verdicts need chief-judge review; 1-2 random audits per run. No
   local judge on this hardware (Qwen3-4B 11/13, below the 90% bar);
   fallback order: judge-groq > paid API judge > local 4B restricted.
+  Second judge judge-gemini (gemini-3.5-flash, 13/13, t-023) —
+  cross-family point work only (20 req/day): builder-groq
+  self-judging pairs.
+- Gemini key role exam DONE 2026-07-10 (t-023/t-024, operator
+  order): pro tiers zero free quota; 3.5-flash Lead-REJECTED
+  operationally (20 req/day) -> judge-gemini; 2.5-flash (lead-gemini)
+  12/13 + B-exam passed -> API-contour Lead-baseline CANDIDATE
+  (status moves await weekly calibration). Evidence:
+  docs/task_reports/2026-07-10_gemini-key-role-exam.md.
 - traffic_kind tagging live: real/synthetic/replay/judge; gate G1
   counts only 'real'. The tag travels via extra_body metadata —
   litellm's metadata= kwarg does NOT reach the wire (verified; see
@@ -323,9 +332,11 @@ above).
 - Proxy must be started from gateway/ (callback imports are
   cwd-relative). litellm does NOT auto-load gateway/.env — export
   GEMINI_API_KEY / GROQ_API_KEY before starting the proxy.
-- lead-gemini = gemini/gemini-2.5-flash (2.0-flash has ZERO free-tier
-  quota on this key — 429, don't use it). Gemini free tier is
-  5 req/min.
+- lead-gemini = gemini/gemini-2.5-flash (10 req/min, 250 req/day);
+  judge-gemini = gemini/gemini-3.5-flash (5 req/min, 20 req/day
+  rolling — pace >=13s, point work only). ZERO free quota on this
+  key: 2.0-flash and ALL pro tiers (3.1-pro/3-pro/2.5-pro) — 429,
+  don't use (probed 2026-07-10).
 - lead-sonnet alias (anthropic/claude-sonnet-5) exists in config.yaml
   but is unused: no ANTHROPIC_API_KEY in this environment.
 - Free-telemetry mode: intern/analyst (Ollama) carry synthetic

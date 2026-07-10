@@ -37,6 +37,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -376,12 +377,17 @@ def update_delegation_table(path: Path, date: str, source_model: str, target_mod
     path.write_text(text, encoding="utf-8")
 
 
-def calibrate(pairs: list, judge_model: str, gateway: str, **kwargs) -> dict:
+def calibrate(pairs: list, judge_model: str, gateway: str,
+              pace: float = 0.0, **kwargs) -> dict:
     """Runs the judge on manually labeled pairs (judge_calibration.json)
     and reports agreement with the human labels. The judge must
-    reproduce them before its verdicts are trusted in --update-table."""
+    reproduce them before its verdicts are trusted in --update-table.
+    pace: seconds to sleep between pairs (free-tier RPM ceilings, e.g.
+    Gemini free tier is 5 req/min)."""
     agreements, mismatches = 0, []
     for i, pair in enumerate(pairs):
+        if i and pace:
+            time.sleep(pace)
         verdict, _judge_cost = judge_pair(
             pair["prompt"], pair["source_response"], pair["target_response"],
             judge_model, gateway, **kwargs,
@@ -439,6 +445,8 @@ def main():
                         help="min share of 'equivalent' judge verdicts for 'validated'")
     parser.add_argument("--calibrate", metavar="PAIRS_JSON",
                         help="run --judge-model on labeled pairs and report agreement; no replay")
+    parser.add_argument("--pace", type=float, default=0.0,
+                        help="seconds between calibration pairs (free-tier RPM ceilings)")
     parser.add_argument("--categories",
                         help="comma-separated category whitelist (e.g. 'coding');"
                         " restricts the run to rows whose Delegate-to tier matches the target")
@@ -454,7 +462,7 @@ def main():
         if not args.judge_model:
             raise SystemExit("--calibrate requires --judge-model")
         pairs = json.loads(Path(args.calibrate).read_text(encoding="utf-8"))
-        report = calibrate(pairs, args.judge_model, args.gateway)
+        report = calibrate(pairs, args.judge_model, args.gateway, pace=args.pace)
         print(f"JUDGE CALIBRATION: {args.judge_model} on {report['n']} labeled pairs")
         print(f"  agreement: {report['agreements']}/{report['n']}")
         for m in report["mismatches"]:
