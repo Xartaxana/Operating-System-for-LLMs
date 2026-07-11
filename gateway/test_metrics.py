@@ -212,9 +212,11 @@ def test_daily_digest_quota_events_excludes_old_rows(conn):
 
 # --- Phase 2 readiness (Delegated Task 3) ---------------------------------
 
-SHADOW_EVAL_LOG_FIXTURE = """# Delegation Table
-
-## Shadow Evaluation Log
+# Mirrors the ACTUAL docs/SHADOW_EVALUATION_LOG.md layout post-D-0067: an H1
+# "# Shadow Evaluation Log" at the top of its own file (relocated verbatim
+# out of DELEGATION_TABLE.md, where the same title used to sit nested under
+# "##"), not a subsection of a bigger document.
+SHADOW_EVAL_LOG_FIXTURE = """# Shadow Evaluation Log
 
 - 2026-07-03  category=coding  source=lead-gemini target=intern  n=2  sim=0.10  cost_source=$0.0044 cost_target=$0.0000  -> rejected
 - 2026-07-03  category=coding  source=lead-gemini target=intern  n=4  sim=0.51  judge=middle-groq pass_rate=1.00  cost_source=$0.0023 cost_target=$0.0000  -> validated [RETRACTED]
@@ -239,17 +241,38 @@ def test_parse_shadow_eval_log_empty_when_no_judged_lines():
     assert parse_shadow_eval_log(text) == {}
 
 
+def test_parse_shadow_eval_log_h1_heading_matches():
+    # The ACTUAL docs/SHADOW_EVALUATION_LOG.md heading is an H1 ("#"), not
+    # the "##" it used to be as a subsection of DELEGATION_TABLE.md.
+    text = "# Shadow Evaluation Log\n\n- 2026-07-03  category=coding  n=2  -> rejected\n"
+    assert parse_shadow_eval_log(text) == {}  # no judge=, but header IS found
+
+
+def test_parse_shadow_eval_log_empty_when_header_missing_entirely():
+    # Removed hidden fragility: a former version fell back to scanning the
+    # WHOLE text when no "## Shadow Evaluation Log" heading was found, which
+    # happened to work only because DELEGATION_TABLE.md always carried the
+    # section somewhere. Now a missing heading means no section at all, even
+    # if judged-looking lines exist in the body -- no silent fallback.
+    text = (
+        "- 2026-07-03  category=coding  source=lead-gemini target=intern"
+        "  n=2  sim=0.10  judge=middle-groq pass_rate=1.00"
+        "  cost_source=$0.0044 cost_target=$0.0000  -> validated\n"
+    )
+    assert parse_shadow_eval_log(text) == {}
+
+
 def test_phase2_readiness_has_all_ten_criteria(conn, tmp_path):
-    dtable = tmp_path / "DELEGATION_TABLE.md"
-    dtable.write_text(SHADOW_EVAL_LOG_FIXTURE, encoding="utf-8")
-    readiness = phase2_readiness(conn, days=14, delegation_table_path=dtable)
+    shadow_log = tmp_path / "SHADOW_EVALUATION_LOG.md"
+    shadow_log.write_text(SHADOW_EVAL_LOG_FIXTURE, encoding="utf-8")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path=shadow_log)
     assert set(readiness.keys()) == {
         "G1", "G2", "R1", "R2", "R3", "R4", "R5", "C1", "C2", "C3",
     }
 
 
 def test_g2_and_r5_are_manual_check(conn):
-    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     assert readiness["G2"]["status"] == "manual_check"
     assert "pointer" in readiness["G2"]
     assert readiness["R5"]["status"] == "manual_check"
@@ -257,28 +280,28 @@ def test_g2_and_r5_are_manual_check(conn):
 
 
 def test_r2_r3_r4_c3_not_computable_yet_with_needs(conn):
-    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     for crit in ("R2", "R3", "R4", "C3"):
         assert readiness[crit]["status"] == "not_computable_yet"
         assert "needs" in readiness[crit]
 
 
-def test_r1_not_computable_when_delegation_table_missing(conn):
-    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+def test_r1_not_computable_when_shadow_log_missing(conn):
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     assert readiness["R1"]["status"] == "not_computable_yet"
     assert "not found" in readiness["R1"]["needs"]
 
 
 def test_r1_not_met_below_threshold(conn, tmp_path):
-    dtable = tmp_path / "DELEGATION_TABLE.md"
-    dtable.write_text(SHADOW_EVAL_LOG_FIXTURE, encoding="utf-8")
-    readiness = phase2_readiness(conn, days=14, delegation_table_path=dtable)
+    shadow_log = tmp_path / "SHADOW_EVALUATION_LOG.md"
+    shadow_log.write_text(SHADOW_EVAL_LOG_FIXTURE, encoding="utf-8")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path=shadow_log)
     assert readiness["R1"]["status"] == "not_met"
     assert "coding" in readiness["R1"]["detail"]
 
 
 def test_r1_met_when_threshold_reached(conn, tmp_path):
-    lines = ["## Shadow Evaluation Log", ""]
+    lines = ["# Shadow Evaluation Log", ""]
     # 16 judged, non-retracted runs of n=2 -> 32 pairs across 16 runs.
     for _ in range(16):
         lines.append(
@@ -286,16 +309,16 @@ def test_r1_met_when_threshold_reached(conn, tmp_path):
             "  n=2  sim=0.90  judge=judge-groq pass_rate=1.00"
             "  cost_source=$0.0044 cost_target=$0.0000  -> validated"
         )
-    dtable = tmp_path / "DELEGATION_TABLE.md"
-    dtable.write_text("\n".join(lines), encoding="utf-8")
-    readiness = phase2_readiness(conn, days=14, delegation_table_path=dtable)
+    shadow_log = tmp_path / "SHADOW_EVALUATION_LOG.md"
+    shadow_log.write_text("\n".join(lines), encoding="utf-8")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path=shadow_log)
     assert readiness["R1"]["status"] == "met"
 
 
 def test_g1_not_computable_gracefully_when_cc_usage_absent(conn):
     # The base `conn` fixture has no cc_usage table -- G1 must fall back to
     # requests-only and say so explicitly (post-spec note in CURRENT_CONTEXT.md).
-    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     assert readiness["G1"]["status"] == "not_met"
     assert "cc_usage table absent" in readiness["G1"]["detail"]
 
@@ -312,7 +335,7 @@ def test_g1_met_counts_requests_and_cc_usage_union(conn):
     # depend on the exact 'now'-vs-SQLite-date('now') boundary).
     for i in range(10, 14):
         seed_cc_usage(conn, "proj", f"sess-{i}", 0, ts=(now - datetime.timedelta(days=i)).isoformat())
-    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     assert readiness["G1"]["status"] == "met"
     assert "requests real=10" in readiness["G1"]["detail"]
     assert "cc_usage real=4" in readiness["G1"]["detail"]
@@ -327,7 +350,7 @@ def test_g1_not_met_when_distinct_days_enough_but_run_broken_by_gap(conn):
         seed(conn, "lead", f"prompt {i}", ts=(now - datetime.timedelta(days=i)).isoformat())
     conn.execute("UPDATE requests SET traffic_kind = 'real'")
     conn.commit()
-    readiness = phase2_readiness(conn, days=30, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=30, shadow_log_path="/does/not/exist.md")
     assert readiness["G1"]["max_consecutive_days"] == 7
     assert readiness["G1"]["status"] == "not_met"
     assert "14 distinct real-traffic day(s)" in readiness["G1"]["detail"]
@@ -340,7 +363,7 @@ def test_g1_met_when_run_of_14_consecutive_days(conn):
         seed(conn, "lead", f"prompt {i}", ts=(now - datetime.timedelta(days=i)).isoformat())
     conn.execute("UPDATE requests SET traffic_kind = 'real'")
     conn.commit()
-    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     assert readiness["G1"]["max_consecutive_days"] == 14
     assert readiness["G1"]["status"] == "met"
 
@@ -354,7 +377,7 @@ def test_g1_max_consecutive_days_ignores_shorter_run_across_a_gap(conn):
         seed(conn, "lead", f"prompt {i}", ts=(now - datetime.timedelta(days=i)).isoformat())
     conn.execute("UPDATE requests SET traffic_kind = 'real'")
     conn.commit()
-    readiness = phase2_readiness(conn, days=30, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=30, shadow_log_path="/does/not/exist.md")
     assert readiness["G1"]["max_consecutive_days"] == 20
     assert readiness["G1"]["status"] == "met"
 
@@ -364,14 +387,14 @@ def test_g1_single_day_of_traffic(conn):
     seed(conn, "lead", "prompt", ts=now.isoformat())
     conn.execute("UPDATE requests SET traffic_kind = 'real'")
     conn.commit()
-    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     assert readiness["G1"]["max_consecutive_days"] == 1
     assert readiness["G1"]["status"] == "not_met"
     assert "1 distinct real-traffic day(s)" in readiness["G1"]["detail"]
 
 
 def test_c2_not_computable_when_cc_usage_absent(conn):
-    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     assert readiness["C2"]["status"] == "not_computable_yet"
     assert "needs" in readiness["C2"]
 
@@ -380,7 +403,7 @@ def test_c2_met_when_enough_real_sessions(conn):
     for s in range(20):
         for turn in range(5):
             seed_cc_usage(conn, "proj", f"sess-{s}", turn)
-    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     assert readiness["C2"]["status"] == "met"
     assert "20 real session" in readiness["C2"]["detail"]
 
@@ -389,7 +412,7 @@ def test_c2_not_met_when_too_few_sessions(conn):
     for s in range(5):
         for turn in range(5):
             seed_cc_usage(conn, "proj", f"sess-{s}", turn)
-    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     assert readiness["C2"]["status"] == "not_met"
 
 
@@ -397,7 +420,7 @@ def test_c2_excludes_sidechain_turns(conn):
     # A session with only sidechain (subagent) turns should not count.
     for turn in range(5):
         seed_cc_usage(conn, "proj", "sess-sidechain", turn, is_sidechain=1)
-    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     assert readiness["C2"]["status"] == "not_met"
 
 
@@ -412,7 +435,7 @@ def test_c1_not_computable_when_no_real_traffic(conn):
     seed(conn, "lead", "ABCD", cost=0.01)
     conn.execute("UPDATE requests SET traffic_kind = 'synthetic'")
     conn.commit()
-    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     assert readiness["C1"]["status"] == "not_computable_yet"
     assert "needs" in readiness["C1"]
 
@@ -422,7 +445,7 @@ def test_c1_met_on_real_traffic_above_threshold(conn):
     seed(conn, "lead", "AAAAAAAAAAAAAAAAAAAA", cost=0.01)  # 20 chars, 10 repeated
     conn.execute("UPDATE requests SET traffic_kind = 'real'")
     conn.commit()
-    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     assert readiness["C1"]["status"] == "met"  # 10/20 = 50% >= 40%
 
 
@@ -431,7 +454,7 @@ def test_c1_not_met_below_threshold(conn):
     seed(conn, "lead", "AAAXXXXXXXXXXXXXXXXX", cost=0.01)  # 3/20 = 15% repeated
     conn.execute("UPDATE requests SET traffic_kind = 'real'")
     conn.commit()
-    readiness = phase2_readiness(conn, days=14, delegation_table_path="/does/not/exist.md")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     assert readiness["C1"]["status"] == "not_met"
 
 
@@ -447,9 +470,9 @@ def test_format_phase2_line_vocabulary():
 
 
 def test_daily_digest_carries_phase2_readiness(conn, tmp_path):
-    dtable = tmp_path / "DELEGATION_TABLE.md"
-    dtable.write_text(SHADOW_EVAL_LOG_FIXTURE, encoding="utf-8")
+    shadow_log = tmp_path / "SHADOW_EVALUATION_LOG.md"
+    shadow_log.write_text(SHADOW_EVAL_LOG_FIXTURE, encoding="utf-8")
     seed(conn, "lead", "AB", cost=0.01)
-    digest = daily_digest(conn, days=14, delegation_table_path=dtable)
+    digest = daily_digest(conn, days=14, shadow_log_path=shadow_log)
     assert "phase2_readiness" in digest
     assert digest["phase2_readiness"]["G2"]["status"] == "manual_check"

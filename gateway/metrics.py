@@ -85,9 +85,9 @@ def repetition_by_model(rows) -> dict:
 # ROADMAP.md "Phase 2 -- Routing and Context Management Evaluation" gate
 # criteria: G1-G2 (common), R1-R5 (Router), C1-C3 (Context management).
 # Deterministic Python/SQL over requests.db (incl. its cc_usage table,
-# Delegated Task 5) and DELEGATION_TABLE.md only -- no LLM calls (spec
-# rule 1). Every entry is one of four vocabularies, never a guessed value
-# (spec rule 2/3, Rule #1 spirit):
+# Delegated Task 5) and docs/SHADOW_EVALUATION_LOG.md only -- no LLM calls
+# (spec rule 1). Every entry is one of four vocabularies, never a guessed
+# value (spec rule 2/3, Rule #1 spirit):
 #   status="met" | "not_met"          -> entry also carries "detail"
 #   status="not_computable_yet"       -> entry also carries "needs"
 #   status="manual_check"             -> entry also carries "pointer"
@@ -97,18 +97,37 @@ _SHADOW_EVAL_LINE_RE = re.compile(
     r"(\s*\[([^\]]+)\])?\s*$"
 )
 
+# Matches the section's own heading regardless of heading depth: the H1
+# "# Shadow Evaluation Log" atop docs/SHADOW_EVALUATION_LOG.md (D-0067,
+# relocated verbatim out of DELEGATION_TABLE.md, where the same title used
+# to sit at "##" as a subsection). No match -> no section -> empty counts;
+# see parse_shadow_eval_log's docstring for why this is no longer a
+# whole-text fallback.
+_SHADOW_EVAL_HEADER_RE = re.compile(
+    r"^#{1,6}\s*Shadow Evaluation Log\s*$", re.MULTILINE
+)
+
 
 def parse_shadow_eval_log(text: str) -> dict:
-    """Parses the Shadow Evaluation Log section of DELEGATION_TABLE.md into
+    """Parses the Shadow Evaluation Log (docs/SHADOW_EVALUATION_LOG.md,
+    relocated verbatim out of DELEGATION_TABLE.md by D-0067) into
     per-category {"pairs": n_sum, "runs": line_count}, counting only JUDGED
     pairs (R1's own wording): a line without "judge=" (the early difflib-
     only evidence, 2026-07-03) is not judged evidence. [RETRACTED] lines are
-    excluded (contaminated sample, per DELEGATION_TABLE.md's own retraction
-    note); [OVERRULED, ...] lines are NOT excluded -- that pair WAS judged,
-    only the verdict was overridden by chief-judge review, which is still
-    judged-evidence volume for R1's purpose."""
-    idx = text.find("## Shadow Evaluation Log")
-    section = text[idx:] if idx != -1 else text
+    excluded (contaminated sample, per the log's own retraction note);
+    [OVERRULED, ...] lines are NOT excluded -- that pair WAS judged, only
+    the verdict was overridden by chief-judge review, which is still
+    judged-evidence volume for R1's purpose.
+
+    The heading must actually be found (_SHADOW_EVAL_HEADER_RE) before any
+    line is parsed -- no match means no section, and parsing stops with an
+    empty result. This is deliberate: a former version searched the whole
+    text when the heading wasn't found, which happened to still work only
+    because DELEGATION_TABLE.md always carried the section somewhere in it
+    -- hidden fragility that a real "heading missing/renamed" case would
+    have silently masked."""
+    match = _SHADOW_EVAL_HEADER_RE.search(text)
+    section = text[match.start():] if match else ""
     counts = defaultdict(lambda: {"pairs": 0, "runs": 0})
     for line in section.splitlines():
         m = _SHADOW_EVAL_LINE_RE.match(line)
@@ -249,19 +268,19 @@ def _c2_readiness(conn: sqlite3.Connection, days: int) -> dict:
     }
 
 
-def _r1_readiness(delegation_table_path) -> dict:
+def _r1_readiness(shadow_log_path) -> dict:
     try:
-        text = Path(delegation_table_path).read_text(encoding="utf-8")
+        text = Path(shadow_log_path).read_text(encoding="utf-8")
     except OSError:
         return {
             "status": "not_computable_yet",
-            "needs": f"DELEGATION_TABLE.md (not found at {delegation_table_path})",
+            "needs": f"docs/SHADOW_EVALUATION_LOG.md (not found at {shadow_log_path})",
         }
     counts = parse_shadow_eval_log(text)
     if not counts:
         return {
             "status": "not_computable_yet",
-            "needs": "judged Shadow Evaluation Log lines in DELEGATION_TABLE.md (none found)",
+            "needs": "judged Shadow Evaluation Log lines in docs/SHADOW_EVALUATION_LOG.md (none found)",
         }
     best_category, best = max(
         counts.items(), key=lambda kv: (kv[1]["pairs"], kv[1]["runs"])
@@ -281,14 +300,15 @@ def _r1_readiness(delegation_table_path) -> dict:
     }
 
 
-def phase2_readiness(conn: sqlite3.Connection, days: int, delegation_table_path=None) -> dict:
+def phase2_readiness(conn: sqlite3.Connection, days: int, shadow_log_path=None) -> dict:
     """Builds the Phase 2 readiness section: one entry per ROADMAP.md gate
     criterion (G1, G2, R1-R5, C1-C3). See the module comment above for the
-    four-status vocabulary. delegation_table_path defaults to
-    DELEGATION_TABLE.md next to this repo's metrics.py (one level up from
-    gateway/), so callers (including tests) can override it."""
-    if delegation_table_path is None:
-        delegation_table_path = Path(__file__).parent.parent / "DELEGATION_TABLE.md"
+    four-status vocabulary. shadow_log_path defaults to
+    docs/SHADOW_EVALUATION_LOG.md next to this repo's metrics.py (one level
+    up from gateway/, then into docs/), so callers (including tests) can
+    override it."""
+    if shadow_log_path is None:
+        shadow_log_path = Path(__file__).parent.parent / "docs" / "SHADOW_EVALUATION_LOG.md"
 
     return {
         "G1": _g1_readiness(conn, days),
@@ -299,7 +319,7 @@ def phase2_readiness(conn: sqlite3.Connection, days: int, delegation_table_path=
                 " judge-groq 13/13 (see CURRENT_CONTEXT.md)"
             ),
         },
-        "R1": _r1_readiness(delegation_table_path),
+        "R1": _r1_readiness(shadow_log_path),
         "R2": {
             "status": "not_computable_yet",
             "needs": (
@@ -327,8 +347,7 @@ def phase2_readiness(conn: sqlite3.Connection, days: int, delegation_table_path=
             "status": "manual_check",
             "pointer": (
                 "ROADMAP.md Router gate R5 / CURRENT_CONTEXT.md Environment"
-                " Notes -- no ANTHROPIC_API_KEY / paid Lead in production as"
-                " of this digest"
+                " Notes"
             ),
         },
         "C1": _c1_readiness(conn, days),
@@ -358,7 +377,7 @@ def format_phase2_line(criterion: str, entry: dict) -> str:
     raise ValueError(f"unknown phase2_readiness status: {status!r}")
 
 
-def daily_digest(conn: sqlite3.Connection, days: int, delegation_table_path=None) -> dict:
+def daily_digest(conn: sqlite3.Connection, days: int, shadow_log_path=None) -> dict:
     since = f"-{days} days"
     per_day = conn.execute(
         """
@@ -433,7 +452,7 @@ def daily_digest(conn: sqlite3.Connection, days: int, delegation_table_path=None
              "spent_tokens": e[4], "limit_tokens": e[5]}
             for e in quota_events
         ],
-        "phase2_readiness": phase2_readiness(conn, days, delegation_table_path),
+        "phase2_readiness": phase2_readiness(conn, days, shadow_log_path),
     }
 
 
@@ -504,11 +523,12 @@ def main():
     parser.add_argument("--days", type=int, default=1)
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
-        "--delegation-table",
+        "--shadow-log",
         default=None,
         help=(
-            "Path to DELEGATION_TABLE.md for the R1 criterion (default:"
-            " next to the repo root, one level up from this file)"
+            "Path to docs/SHADOW_EVALUATION_LOG.md for the R1 criterion"
+            " (default: docs/SHADOW_EVALUATION_LOG.md at the repo root, one"
+            " level up from this file)"
         ),
     )
     args = parser.parse_args()
@@ -517,7 +537,7 @@ def main():
         raise SystemExit(f"request log not found: {args.db}")
 
     conn = sqlite3.connect(args.db)
-    digest = daily_digest(conn, args.days, args.delegation_table)
+    digest = daily_digest(conn, args.days, args.shadow_log)
     print(json.dumps(digest, indent=2) if args.json else format_digest(digest))
 
 
