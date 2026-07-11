@@ -93,8 +93,10 @@ Every step above is done with evidence attached; the single honest
 residual (real API-contour traffic volume) is not phase work — it is
 counted by the Phase 2 gates (G1/R1) and arrives with real
 deployments (Phase 3). The telemetry loops (weekly calibration,
-savings trend) continue as standing operations. Phases 1 and 1.5 are
-proposed CLOSED — awaiting the Architect's confirmation line here.
+savings trend) continue as standing operations.
+
+**CLOSED 2026-07-11 — Architect confirmation given by the operator
+in session («да закрывай»), recorded by the Lead the same turn.**
 
 This workstream is NOT the deferred Router (D-0029): routing policy
 is executed by the Lead session itself following documented rules,
