@@ -188,3 +188,31 @@ automatically: the gate report (numbers vs. thresholds) is written
 into CURRENT_CONTEXT.md and the Architect signs the transition. The
 first task of the opened workstream is always an evaluation of an
 existing tool, never a build (D-0030).
+
+## Phase 3 — Toolkit (D-0070, operator direction 2026-07-11)
+
+The system becomes an installable tool for OTHER projects: core
+packaged apart from this dogfooding repo (users never see our tasks
+and plans), one-step model-to-role binding, models EXAMINED at
+onboarding, delegation then runs itself with minimal-attention
+notifications. Intake with the full gap map and open operator
+questions: docs/TOOLKIT_INTAKE_2026-07-11.md.
+
+Stage order (fixed; artifacts before code):
+
+1. [~] Inventory evaluation: core vs dogfooding vs entangled, plus
+   the exam assets' repo-specificity (recon t-044) — an evaluation,
+   never a build (D-0030/D-0033).
+2. [ ] Operator packaging decisions (В1–В6 of the intake: form/name/
+   visibility/contours/license/language/exam mandatoriness).
+3. [ ] Core spec v0: template file set, install path, binding+exam
+   onboarding, notification contract.
+4. [ ] Template skeleton to the spec.
+5. [ ] Validation by TWO installs: a fresh empty project (third
+   deployment, ZCRT-analog) and an existing project (fourth).
+6. [ ] Public wrap (user README, license, release) — only after both
+   validations pass.
+
+Phase 3 runs alongside Phase 1.5/2 telemetry loops (weekly
+calibration continues; its evidence feeds the toolkit's default
+policy shipped to users).
