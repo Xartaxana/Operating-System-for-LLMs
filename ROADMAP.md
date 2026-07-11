@@ -210,6 +210,30 @@ and the gates are independent. Decomposition authority stays with
 the Lead (D-0037) — the artifacts externalize the stages' OUTPUT,
 not the right to perform them.
 
+### Deferred within Phase 2: multi-agent parallelism and isolation
+
+Recorded 2026-07-11 (operator question surfaced the gap: these
+decisions lived only in RELATED_WORK/queue, invisible at phase level).
+Already IN policy, not deferred: parallel dispatches declare owned
+paths (CLAUDE.md rule 4), parallel-session discipline (D-0060).
+Deferred with named triggers, no work opened:
+
+- Lane-contract manifest fields (Owns / Non-goals / Handoff,
+  maxConcurrent caps; OpenClaw survey) — ride the A3 dispatch
+  context manifest when it lands (CURRENT_CONTEXT queue; trigger:
+  next D-0054/rule-11 touch). Evidence home: docs/RELATED_WORK.md
+  "OpenClaw survey" item 3.
+- Per-unit git worktree isolation (GSD) — REJECTED by Rule #1
+  (harness worktree isolation exists; no parallel volume). Reopen
+  trigger: real parallel-dispatch volume plus a path-collision
+  incident (D-0060 evidence class). Evidence home:
+  docs/RELATED_WORK.md "GSD" item 3.
+
+The task-pipeline gate above (P1: tasks spanning >=5 events or >=2
+sessions) is also the scale detector for this class: big-project
+parallelism becomes a workstream only when that gate's numbers say
+the coordination artifacts themselves are overflowing.
+
 ### Phase transition procedure
 
 When a gate's criteria are all green, the phase does not open
