@@ -37,7 +37,7 @@ critic проверяет классовую полноту фикса ПО КА
 | gateway/sqlite_logger.py -> requests | tools/usage_report.py -> cc_usage |
 | учётные цены алиасов в gateway/config.yaml | PRICES_PER_TOKEN_USD в usage_report.py |
 | traffic_kind (real/synthetic/replay/judge) | is_sidechain + agent_id/agent_type |
-| evidence: Shadow Evaluation Log (DELEGATION_TABLE.md) | evidence: routing-журнал + вердикты приёмки |
+| evidence: Shadow Evaluation Log (docs/SHADOW_EVALUATION_LOG.md, D-0067) | evidence: routing-журнал + вердикты приёмки |
 | gateway/metrics.py (дайджест) | tools/usage_report.py (отчёт) |
 | детектор фабрикации F-14: tools/pi_run_guard.py (код, Pi/gateway-воркеры) | приёмка по следу + точечная сверка D-0046 (дисциплина, Claude Code-воркеры) |
 

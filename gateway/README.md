@@ -122,7 +122,7 @@ The request is logged like any other, so a `success` row for model
 ## Ledger digest
 
 ```
-python metrics.py [--db PATH] [--days N] [--json] [--delegation-table PATH]
+python metrics.py [--db PATH] [--days N] [--json] [--shadow-log PATH]
 ```
 
 Run from gateway/ (same cwd-relative import convention as the proxy).
@@ -139,8 +139,10 @@ The digest ends with a "Phase 2 readiness" section (Delegated Task 3):
 one line per ROADMAP Phase 2 gate criterion (G1, G2, R1-R5, C1-C3) —
 met / not met / not computable yet (needs <what>) / manual check
 (pointer); computed deterministically over requests.db + cc_usage +
-the DELEGATION_TABLE.md Shadow Evaluation Log, never guessed. In JSON
-the same content is the `phase2_readiness` object.
+docs/SHADOW_EVALUATION_LOG.md (`--shadow-log`; relocated verbatim out
+of DELEGATION_TABLE.md by D-0067 — the table keeps only current
+Status cells now), never guessed. In JSON the same content is the
+`phase2_readiness` object.
 
 ## Analyst
 
@@ -190,8 +192,13 @@ an 11-pair set and also has a self-preference bias when judging its
 own source answers; `analyst` (4B) was not evaluated.
 
 `--update-table` writes `validated`/`rejected` verdicts into
-`DELEGATION_TABLE.md` row Status cells and appends one line per run to
-its "Shadow Evaluation Log" section (evidence for Update Rule 1).
+`DELEGATION_TABLE.md` row Status cells (`--table`, default
+`../DELEGATION_TABLE.md`) and appends one evidence line per run to
+`docs/SHADOW_EVALUATION_LOG.md` (`--shadow-log`, default
+`../docs/SHADOW_EVALUATION_LOG.md`) — relocated out of the table by
+D-0067 so closed run history doesn't bloat the boot path; the table
+keeps only current Status cells and points to the log as evidence for
+Update Rule 1.
 
 Caveat (Update Rule 4): this replays each prompt once. It measures
 one-shot answer quality and cost, not retry-loop cost — a category

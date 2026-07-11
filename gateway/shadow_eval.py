@@ -332,10 +332,27 @@ def update_table_status(text: str, task_type: str, new_status: str) -> str:
     return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
 
 
+_SHADOW_EVAL_HEADER_RE = re.compile(
+    r"^#{1,6}\s*Shadow Evaluation Log\s*$", re.MULTILINE
+)
+
+
 def append_evidence_log(text: str, entries: list) -> str:
-    heading = "## Shadow Evaluation Log"
-    if heading not in text:
-        text = text.rstrip("\n") + f"\n\n{heading}\n\nEvidence for Update Rule 1. One line per Shadow Evaluation run.\n\n"
+    """Appends one line per entry to the chronological tail of the Shadow
+    Evaluation Log (docs/SHADOW_EVALUATION_LOG.md, relocated verbatim out of
+    DELEGATION_TABLE.md by D-0067 -- the table keeps only current Status
+    cells, the run history lives here). The heading is matched at any depth
+    (metrics.py's parse_shadow_eval_log uses the same regex: the file's own
+    top-level heading is "# Shadow Evaluation Log", H1, not the "##"
+    subsection heading it used to be inside the table). If the heading is
+    missing entirely (e.g. a fresh/empty file), one is created at H1."""
+    match = _SHADOW_EVAL_HEADER_RE.search(text)
+    if not match:
+        text = text.rstrip("\n") + (
+            "\n\n# Shadow Evaluation Log\n\n"
+            "Evidence for DELEGATION_TABLE.md Update Rule 1. One line per"
+            " Shadow Evaluation run.\n\n"
+        )
     lines = text.splitlines()
     insert_at = len(lines)
     for entry in entries:
@@ -344,8 +361,17 @@ def append_evidence_log(text: str, entries: list) -> str:
     return "\n".join(lines) + "\n"
 
 
-def update_delegation_table(path: Path, date: str, source_model: str, target_model: str, aggregated: dict, statuses: dict, judge_model: str = None):
-    text = path.read_text(encoding="utf-8")
+def update_delegation_table(table_path: Path, shadow_log_path: Path, date: str,
+                            source_model: str, target_model: str, aggregated: dict,
+                            statuses: dict, judge_model: str = None):
+    """Writes to TWO files, split by D-0067 (boot-diet round 2): status
+    cells stay in table_path (DELEGATION_TABLE.md, the boot-path table),
+    evidence lines go to shadow_log_path (docs/SHADOW_EVALUATION_LOG.md,
+    relocated out of the table so closed run history doesn't bloat the
+    boot path). Before D-0067 both lived in the same file/path; a status
+    change in table_path still cites its evidence line in shadow_log_path
+    by date, same as before."""
+    table_text = table_path.read_text(encoding="utf-8")
     entries = []
     for category, task_type in CATEGORY_TO_TASK_TYPE.items():
         if category not in aggregated:
@@ -371,10 +397,13 @@ def update_delegation_table(path: Path, date: str, source_model: str, target_mod
             f" cost_target=${agg['mean_target_cost_usd']:.4f}  -> {status}"
         )
         if status in ("validated", "rejected"):
-            text = update_table_status(text, task_type, status)
+            table_text = update_table_status(table_text, task_type, status)
+    table_path.write_text(table_text, encoding="utf-8")
     if entries:
-        text = append_evidence_log(text, entries)
-    path.write_text(text, encoding="utf-8")
+        shadow_log_path = Path(shadow_log_path)
+        log_text = shadow_log_path.read_text(encoding="utf-8") if shadow_log_path.exists() else ""
+        log_text = append_evidence_log(log_text, entries)
+        shadow_log_path.write_text(log_text, encoding="utf-8")
 
 
 def calibrate(pairs: list, judge_model: str, gateway: str,
@@ -454,6 +483,15 @@ def main():
     parser.add_argument(
         "--table",
         default=Path(__file__).parent.parent / "DELEGATION_TABLE.md",
+        help="DELEGATION_TABLE.md path; only Status cells are written here"
+             " (evidence lines go to --shadow-log, D-0067)",
+    )
+    parser.add_argument(
+        "--shadow-log",
+        default=Path(__file__).parent.parent / "docs" / "SHADOW_EVALUATION_LOG.md",
+        help="Path to docs/SHADOW_EVALUATION_LOG.md; one evidence line per"
+             " run is appended here (relocated out of DELEGATION_TABLE.md"
+             " by D-0067 -- the table keeps only current Status cells)",
     )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -499,6 +537,7 @@ def main():
     if args.update_table and aggregated:
         update_delegation_table(
             Path(args.table),
+            Path(args.shadow_log),
             datetime.date.today().isoformat(),
             args.source_model,
             args.target_model,

@@ -350,11 +350,19 @@ def test_calibrate_reports_agreement_and_mismatches():
 
 
 def test_update_delegation_table_evidence_line_includes_judge_cost(tmp_path):
+    # D-0067 split: Status cells stay in DELEGATION_TABLE.md, evidence
+    # lines go to a SEPARATE docs/SHADOW_EVALUATION_LOG.md file.
     table_path = tmp_path / "DELEGATION_TABLE.md"
     table_path.write_text(
         "| Task type | Cost (Lead) | Value of Lead | Delegate to | Status |\n"
         "|---|---|---|---|---|\n"
         "| Summarization | Medium | Medium | Junior | estimated |\n",
+        encoding="utf-8",
+    )
+    shadow_log_path = tmp_path / "SHADOW_EVALUATION_LOG.md"
+    shadow_log_path.write_text(
+        "# Shadow Evaluation Log\n\n"
+        "Evidence for DELEGATION_TABLE.md Update Rule 1.\n\n",
         encoding="utf-8",
     )
     aggregated = {
@@ -366,11 +374,14 @@ def test_update_delegation_table_evidence_line_includes_judge_cost(tmp_path):
     }
     statuses = {"summarization": "validated"}
     update_delegation_table(
-        table_path, "2026-07-04", "lead-gemini", "middle-groq",
+        table_path, shadow_log_path, "2026-07-04", "lead-gemini", "middle-groq",
         aggregated, statuses, judge_model="judge-groq",
     )
-    text = table_path.read_text(encoding="utf-8")
-    assert "judge=judge-groq pass_rate=1.00 judge_cost=$0.0004" in text
+    table_text = table_path.read_text(encoding="utf-8")
+    log_text = shadow_log_path.read_text(encoding="utf-8")
+    assert "| Summarization | Medium | Medium | Junior | validated |" in table_text
+    assert "judge=judge-groq pass_rate=1.00 judge_cost=$0.0004" not in table_text
+    assert "judge=judge-groq pass_rate=1.00 judge_cost=$0.0004" in log_text
 
 
 def test_update_delegation_table_evidence_line_judge_cost_unknown(tmp_path):
@@ -385,6 +396,8 @@ def test_update_delegation_table_evidence_line_judge_cost_unknown(tmp_path):
         "| Summarization | Medium | Medium | Junior | estimated |\n",
         encoding="utf-8",
     )
+    shadow_log_path = tmp_path / "SHADOW_EVALUATION_LOG.md"
+    shadow_log_path.write_text("# Shadow Evaluation Log\n\n", encoding="utf-8")
     aggregated = {
         "summarization": {
             "n": 2, "mean_similarity": 0.9, "mean_source_cost_usd": 0.002,
@@ -394,11 +407,42 @@ def test_update_delegation_table_evidence_line_judge_cost_unknown(tmp_path):
     }
     statuses = {"summarization": "validated"}
     update_delegation_table(
-        table_path, "2026-07-04", "lead-gemini", "middle-groq",
+        table_path, shadow_log_path, "2026-07-04", "lead-gemini", "middle-groq",
         aggregated, statuses, judge_model="judge-groq",
     )
-    text = table_path.read_text(encoding="utf-8")
-    assert "judge=judge-groq pass_rate=1.00 judge_cost=unknown" in text
+    log_text = shadow_log_path.read_text(encoding="utf-8")
+    assert "judge=judge-groq pass_rate=1.00 judge_cost=unknown" in log_text
+
+
+def test_update_delegation_table_creates_shadow_log_when_missing(tmp_path):
+    # If docs/SHADOW_EVALUATION_LOG.md doesn't exist yet (fresh checkout,
+    # or a path typo), append_evidence_log's own no-heading branch creates
+    # it -- this must not raise even though shadow_log_path.exists() is False.
+    table_path = tmp_path / "DELEGATION_TABLE.md"
+    table_path.write_text(
+        "| Task type | Cost (Lead) | Value of Lead | Delegate to | Status |\n"
+        "|---|---|---|---|---|\n"
+        "| Summarization | Medium | Medium | Junior | estimated |\n",
+        encoding="utf-8",
+    )
+    shadow_log_path = tmp_path / "SHADOW_EVALUATION_LOG.md"
+    assert not shadow_log_path.exists()
+    aggregated = {
+        "summarization": {
+            "n": 2, "mean_similarity": 0.9, "mean_source_cost_usd": 0.002,
+            "mean_target_cost_usd": 0.0001, "pass_rate": None,
+            "mean_judge_cost_usd": None, "errors": 0,
+        }
+    }
+    statuses = {"summarization": "validated"}
+    update_delegation_table(
+        table_path, shadow_log_path, "2026-07-04", "lead-gemini", "middle-groq",
+        aggregated, statuses,
+    )
+    assert shadow_log_path.exists()
+    log_text = shadow_log_path.read_text(encoding="utf-8")
+    assert "# Shadow Evaluation Log" in log_text
+    assert "category=summarization" in log_text
 
 
 def test_update_table_status_replaces_only_matching_row():
@@ -414,12 +458,50 @@ def test_update_table_status_replaces_only_matching_row():
 
 
 def test_append_evidence_log_creates_section_once():
-    text = "# Delegation Table\n\nsome content\n"
+    # docs/SHADOW_EVALUATION_LOG.md's own heading is H1 (relocated
+    # verbatim out of DELEGATION_TABLE.md by D-0067, where it used to sit
+    # at "##" as a subsection) -- append_evidence_log must create an H1
+    # when no heading is found at all, matching metrics.py's
+    # _SHADOW_EVAL_HEADER_RE which accepts any depth "#{1,6}".
+    text = "some unrelated content\n"
     once = append_evidence_log(text, ["entry one"])
-    assert "## Shadow Evaluation Log" in once
+    assert "# Shadow Evaluation Log" in once
     assert "- entry one" in once
 
     twice = append_evidence_log(once, ["entry two"])
-    assert twice.count("## Shadow Evaluation Log") == 1
+    assert twice.count("Shadow Evaluation Log") == 1
     assert "- entry one" in twice
     assert "- entry two" in twice
+
+
+def test_append_evidence_log_appends_to_tail_of_real_file_structure():
+    # Reproduces the actual docs/SHADOW_EVALUATION_LOG.md shape: H1
+    # heading, prose caveats, and several historical "- YYYY-MM-DD ..."
+    # evidence lines already present. New entries must land at the
+    # chronological TAIL of the file (end of document), not spliced in
+    # right after the heading ahead of older prose/entries.
+    text = (
+        "# Shadow Evaluation Log\n\n"
+        "Evidence for DELEGATION_TABLE.md Update Rule 1 -- one line per"
+        " Shadow Evaluation run.\n\n"
+        "Some caveat prose about an earlier accounting bug.\n\n"
+        "- 2026-07-03  category=coding  source=lead-gemini target=intern"
+        "  n=2  sim=0.10  cost_source=$0.0044 cost_target=$0.0000  -> rejected\n"
+    )
+    updated = append_evidence_log(text, ["2026-07-11  category=coding  n=2  -> validated"])
+    lines = updated.splitlines()
+    assert lines[0] == "# Shadow Evaluation Log"
+    # the new entry is the LAST line, after the pre-existing 2026-07-03 one
+    assert lines[-1] == "- 2026-07-11  category=coding  n=2  -> validated"
+    assert "2026-07-03" in updated  # old entry preserved, not overwritten
+
+
+def test_append_evidence_log_heading_matched_at_any_depth():
+    # Symmetric with metrics.py's parse_shadow_eval_log: a "##"-depth
+    # heading (the pre-D-0067 shape, still possible if this ever runs
+    # against a stale copy) is recognized too -- no duplicate heading
+    # is created.
+    text = "## Shadow Evaluation Log\n\nsome content\n"
+    updated = append_evidence_log(text, ["entry one"])
+    assert updated.count("Shadow Evaluation Log") == 1
+    assert "- entry one" in updated
