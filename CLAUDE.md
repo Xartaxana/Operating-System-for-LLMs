@@ -180,7 +180,10 @@ requests.db / cc_usage / git log (чек 13е).
 ts из будущего (F-29), новизна task_id (повторный delegated по
 открытой задаче легален другим ярусом — critic-вход, либо ретраем с
 `attempt`>=2 после rejected; delegated на закрытую задачу запрещён —
-D-0060); новые accepted/rejected несут `by` (модель принимающего);
+D-0060); новые accepted/rejected несут `by` — строго ЯРУСНОЕ СЛОВО
+(haiku/sonnet/opus/fable, TIER_ORDER валидатора: ярусы сравниваются
+численно, полный model id молча провалит сравнение; поле `model` —
+свободная форма, полный id рекомендован — находка t-064);
 accepted по scout/builder/critic легален при tier(by) выше яруса
 agent, ЛИБО с полем `basis`: "critic" / "queued-to-lead" — матрица
 D-0058 кодом; для не-Claude `by` поле `basis` обязательно. Детектор
