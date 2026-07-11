@@ -25,7 +25,7 @@ critic проверяет классовую полноту фикса ПО КА
 |---|---|
 | CLAUDE.md (политика, правила 1–11, вокабуляр событий) | CLAUDE.md (то же + дисциплина команд конвейера) |
 | .claude/agents/{scout,builder,critic}.md | те же три + 10 QA-агентов конвейера |
-| logs/routing-log.jsonl + tools/journal_validator.py + .githooks/pre-commit (enforce формата и матрицы D-0058, D-0069) | logs/routing-log.jsonl + scripts/log_append.py (enforce формата, by/basis и continuation/retry — порт 2026-07-10, AO3 коммит 7e6fa36; enforcement на записи, признанное отличие: reopen-семантика) |
+| logs/routing-log.jsonl + tools/journal_validator.py + .githooks/pre-commit (enforce формата и матрицы D-0058, D-0069) + tools/calibration_counts.py (t-040 — читающий близнец той же схемы: гейт на записи ↔ счётчик чеков 3/13 на чтении; расхождение констант ловит test_schema_constants_match_journal_validator) | logs/routing-log.jsonl + scripts/log_append.py (enforce формата, by/basis и continuation/retry — порт 2026-07-10, AO3 коммит 7e6fa36; enforcement на записи, признанное отличие: reopen-семантика; счётного близнеца нет — журнал AO3 читает та же калибровка OS-скриптом) |
 | .githooks/commit-msg + tools/mechanism_gate.py (enforce правила 10б, D-0055) | .githooks/commit-msg + scripts/mechanism_gate.py (карта читается из OS-репо) |
 | — | .claude/skills/qa-loop/SKILL.md (журналирование диспатчей) |
 | .claude/skills/session-handoff (D-0050) | .claude/skills/session-handoff (порт t-021, коммит 0911cf6) |
