@@ -169,6 +169,22 @@ rule-10 свип, F-17 стадии, eval-1, AO3 handoff/trim, Gemini-экзам
 
 ## Remaining Lead-tier Queue (live only; закрытые блоки — evening-closures)
 
+- B4 (НОВОЕ, Sonnet-координатор 2026-07-11 21:23, t-062) правило-4
+  инцидент: ШТАТНЫЙ (не inline) подтверждающий прогон golden set
+  после t-057 att.3 дал FAIL по обязательному Q3 — тот же класс
+  «ложно-пустой grep» (postgres|redis по gateway/+tools/, 0 хитов
+  заявлено, реально guard.py:6,33+README.md:32,35), несмотря на то,
+  что усиленное правило 4 УЖЕ в тексте .claude/agents/scout.md.
+  Предыдущий PASS бандла (att.3) шёл inline-доставкой роли через
+  general-purpose обёртку, не через реальный scout-субагент — это
+  первое штатное измерение, и оно РАСХОДИТСЯ с inline-результатом.
+  ВОПРОС ДЛЯ ПОЛНОГО LEAD: правило 4 недостаточно (текстовая
+  дисциплина не держит позитивный контроль под нагрузкой) или это
+  единичный шум яруса (1 rejected, эскалация правилом 6 не
+  наступает автоматически при n=1)? Решение: повторный штатный
+  прогон (attempt 2) vs код-гейт для этого класса vs наблюдение до
+  калибровки. Полная запись — logs/routing-log.jsonl t-062 +
+  PROCESS/SCOUT_GOLDEN_SET.md Runs log.
 - A3 dispatch context manifest (Lead-class, mechanism — full
   rule-10 treatment; WHEN: next D-0054/rule-11 touch, not a
   dedicated pass): the dispatch text enumerates the exact
