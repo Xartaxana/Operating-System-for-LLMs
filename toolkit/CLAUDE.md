@@ -361,5 +361,9 @@ operator. For all sessions and subagents in this repo:
    empty result is reportable only after a positive control of the
    invocation — the same tool and syntax must find a sample known to
    exist; an empty output without that control is a miscall, not
-   absence (shell-grep alternation needs -E; -P needs a UTF-8
-   locale).
+   absence. The control must share the SHAPE of the checked call
+   (case profile, type/glob filters): a control with a different
+   pattern proves the pipe, not the absence (shell-grep alternation
+   needs -E; -P needs a UTF-8 locale; the Grep tool is
+   case-sensitive by default — a content-negative claim requires a
+   case-insensitive search).
