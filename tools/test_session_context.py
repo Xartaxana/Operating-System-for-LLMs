@@ -27,6 +27,17 @@ from session_context import (
     read_journal_events,
 )
 
+# t-043 (B3 remainder): the new MODEL / BOOT BUDGET functions live in the
+# draft tools/session_context_b3.py (D-0069 -- a SessionStart hook is a
+# self-activating enforcement file, so a builder session lands it under a
+# neighboring name and Lead moves it onto the live path at acceptance).
+# This indirection means the test suite keeps working unchanged once that
+# move happens: only this import line needs to flip.
+try:
+    import session_context_b3 as sc
+except ImportError:
+    import session_context as sc
+
 REQUESTS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -312,3 +323,330 @@ def test_module_survives_broken_preflight_quota_import_and_fails_open(tmp_path, 
     out = capsys.readouterr().out.strip().splitlines()
     assert len(out) == 1
     assert out[0].startswith("session-context warning:")
+
+
+# ==== t-043 (B3 remainder): MODEL line (D-0056a) ====================
+
+
+class _FakeStdin:
+    """Minimal stand-in for sys.stdin used to test the isatty() guard
+    and the JSON read without touching the real process stdin."""
+
+    def __init__(self, text, tty=False):
+        self._text = text
+        self._tty = tty
+
+    def isatty(self):
+        return self._tty
+
+    def read(self):
+        return self._text
+
+
+def test_extract_model_id_top_level_string():
+    assert sc.extract_model_id({"model": "claude-sonnet-5"}) == "claude-sonnet-5"
+
+
+def test_extract_model_id_dict_with_id_key():
+    assert sc.extract_model_id({"model": {"id": "claude-opus-4"}}) == "claude-opus-4"
+
+
+def test_extract_model_id_dict_with_model_key():
+    assert sc.extract_model_id({"model": {"model": "claude-haiku-3"}}) == "claude-haiku-3"
+
+
+def test_extract_model_id_top_level_model_id_fallback():
+    assert sc.extract_model_id({"model_id": "claude-fable-5"}) == "claude-fable-5"
+
+
+def test_extract_model_id_missing_returns_none():
+    assert sc.extract_model_id({}) is None
+    assert sc.extract_model_id(None) is None
+    assert sc.extract_model_id("not a dict") is None
+
+
+def test_model_tier_mapping_all_known_tiers():
+    assert sc.model_tier("claude-fable-5") == "Lead(top)"
+    assert sc.model_tier("claude-opus-4") == "critic-tier"
+    assert sc.model_tier("claude-sonnet-5") == "builder-tier"
+    assert sc.model_tier("claude-haiku-3") == "scout-tier"
+
+
+def test_model_tier_mapping_unknown_string():
+    assert sc.model_tier("some-other-model") == "unknown"
+
+
+def test_model_line_found_string_form():
+    line = sc.model_line({"model": "claude-fable-5"})
+    assert line == "MODEL: claude-fable-5 -> tier Lead(top) (Lead tier = fable)"
+
+
+def test_model_line_found_dict_form():
+    line = sc.model_line({"model": {"id": "claude-sonnet-5"}})
+    assert line == "MODEL: claude-sonnet-5 -> tier builder-tier (Lead tier = fable)"
+
+
+def test_model_line_missing_payload():
+    assert sc.model_line(None) == (
+        "MODEL: not provided by hook input -- verify tier yourself (D-0056a)"
+    )
+
+
+def test_model_line_empty_payload():
+    assert sc.model_line({}) == (
+        "MODEL: not provided by hook input -- verify tier yourself (D-0056a)"
+    )
+
+
+# ---- t-043 attempt 2 (critic-confirmed): model_line() ASCII/single-line
+# sanitization of the externally-sourced model id ----------------------
+
+
+def test_model_line_cyrillic_model_id_is_sanitized():
+    line = sc.model_line({"model": "клод\nX"})
+    assert line.isascii()
+    assert "\n" not in line
+    assert len(line.splitlines()) == 1
+
+
+def test_model_line_emoji_model_id_is_sanitized():
+    line = sc.model_line({"model": "sonnet\U0001F600rocket"})
+    assert line.isascii()
+    assert "\n" not in line
+    assert len(line.splitlines()) == 1
+
+
+def test_model_line_injection_attempt_stays_single_line():
+    line = sc.model_line({"model": "x\nINJECTED FAKE LINE"})
+    assert line.isascii()
+    assert "\n" not in line
+    assert len(line.splitlines()) == 1
+    assert "INJECTED FAKE LINE" in line  # content kept, just de-lineified
+
+
+def test_model_line_whitespace_only_falls_back_to_not_provided():
+    assert sc.model_line({"model": "   "}) == (
+        "MODEL: not provided by hook input -- verify tier yourself (D-0056a)"
+    )
+
+
+def test_model_line_long_model_id_is_truncated():
+    long_id = "sonnet-" + ("a" * 100)
+    line = sc.model_line({"model": long_id})
+    assert line.isascii()
+    assert "\n" not in line
+    # "MODEL: " prefix + sanitized (<=80 chars) + " -> tier ... " suffix
+    sanitized = sc._ascii_sanitize(long_id)
+    assert len(sanitized) == 80
+    assert line == f"MODEL: {sanitized} -> tier builder-tier (Lead tier = fable)"
+
+
+def test_ascii_sanitize_direct_cases():
+    assert sc._ascii_sanitize("   ") == ""
+    assert sc._ascii_sanitize("x\nINJECTED FAKE LINE") == "xINJECTED FAKE LINE"
+    assert sc._ascii_sanitize("клодX").isascii()
+    assert sc._ascii_sanitize("a" * 200, max_len=80) == "a" * 80
+
+
+def test_read_stdin_payload_skips_when_tty(monkeypatch):
+    # The isatty() guard must prevent any read() call at all when stdin
+    # is a TTY (a manual run from an interactive shell must not block).
+    def _boom():
+        raise AssertionError("read() must not be called when stdin is a TTY")
+
+    fake = _FakeStdin("", tty=True)
+    fake.read = _boom
+    monkeypatch.setattr(sys, "stdin", fake)
+    assert sc.read_stdin_payload() is None
+
+
+def test_read_stdin_payload_parses_json_when_piped(monkeypatch):
+    fake = _FakeStdin(json.dumps({"model": "claude-opus-4"}), tty=False)
+    monkeypatch.setattr(sys, "stdin", fake)
+    assert sc.read_stdin_payload() == {"model": "claude-opus-4"}
+
+
+def test_read_stdin_payload_returns_none_on_malformed_json(monkeypatch):
+    fake = _FakeStdin("{not valid json", tty=False)
+    monkeypatch.setattr(sys, "stdin", fake)
+    assert sc.read_stdin_payload() is None
+
+
+def test_read_stdin_payload_returns_none_on_empty_input(monkeypatch):
+    fake = _FakeStdin("", tty=False)
+    monkeypatch.setattr(sys, "stdin", fake)
+    assert sc.read_stdin_payload() is None
+
+
+def test_build_context_lines_model_line_placed_right_after_now(tmp_path):
+    root = _seed_repo(tmp_path, events=[])
+    now = datetime.datetime(2026, 7, 11, 9, 0, 0)
+    lines = sc.build_context_lines(root, now, stdin_payload={"model": "claude-fable-5"})
+    assert lines[0].startswith("NOW:")
+    assert lines[1] == "MODEL: claude-fable-5 -> tier Lead(top) (Lead tier = fable)"
+
+
+# ==== t-043 (B3 remainder): BOOT BUDGET (D-0068/D-0038) ==============
+
+
+def _seed_boot_files(root: Path, file_sizes: dict, boot_md_names=None):
+    """Writes BOOT.md whose body references boot_md_names via "Read
+    X.md" lines (defaults to the keys of file_sizes minus CLAUDE.md,
+    since CLAUDE.md is always added by the code under test, not by
+    BOOT.md's own list), plus each file in file_sizes at the given byte
+    size (content is padding bytes, exact bytes matter for the budget
+    arithmetic, not readability)."""
+    if boot_md_names is None:
+        boot_md_names = [n for n in file_sizes if n != "CLAUDE.md"]
+    body = "\n".join(f"1. Read {name}." for name in boot_md_names)
+    (root / "BOOT.md").write_text(body + "\n", encoding="utf-8")
+    for name, size in file_sizes.items():
+        (root / name).write_bytes(b"x" * size)
+
+
+def test_boot_path_files_parses_boot_md_and_always_adds_claude_md(tmp_path):
+    root = tmp_path
+    (root / "BOOT.md").write_text(
+        "1. Read README.md.\n2. Read PROJECT_CHARTER.md.\n", encoding="utf-8"
+    )
+    names = sc.boot_path_files(root)
+    assert names == ["README.md", "PROJECT_CHARTER.md", "CLAUDE.md"]
+
+
+def test_boot_path_files_missing_boot_md_still_yields_claude_md(tmp_path):
+    assert sc.boot_path_files(tmp_path) == ["CLAUDE.md"]
+
+
+def test_boot_budget_normal_under_warn_threshold(tmp_path):
+    root = tmp_path
+    _seed_boot_files(root, {"README.md": 100, "CLAUDE.md": 200})
+    lines = sc.boot_budget_lines(root)
+    assert lines == ["BOOT BUDGET: 300 bytes / 100000 (2 files)"]
+
+
+def test_boot_budget_warn_includes_top3(tmp_path):
+    root = tmp_path
+    _seed_boot_files(
+        root,
+        {
+            "README.md": 40000,
+            "PROJECT_CHARTER.md": 30000,
+            "ANTI_GOALS.md": 25000,
+            "CLAUDE.md": 100,
+        },
+    )
+    lines = sc.boot_budget_lines(root)
+    total = 40000 + 30000 + 25000 + 100
+    assert total > sc.BOOT_WARN_THRESHOLD
+    assert total <= sc.BOOT_BREACH_THRESHOLD
+    assert lines[0] == f"BOOT BUDGET: {total} bytes / 100000 (4 files) WARN"
+    assert lines[1] == "  40000  README.md"
+    assert lines[2] == "  30000  PROJECT_CHARTER.md"
+    assert lines[3] == "  25000  ANTI_GOALS.md"
+    assert len(lines) == 4
+
+
+def test_boot_budget_breach_includes_hint_and_top3(tmp_path):
+    root = tmp_path
+    _seed_boot_files(
+        root,
+        {
+            "README.md": 60000,
+            "PROJECT_CHARTER.md": 30000,
+            "ANTI_GOALS.md": 20000,
+            "CLAUDE.md": 100,
+        },
+    )
+    lines = sc.boot_budget_lines(root)
+    total = 60000 + 30000 + 20000 + 100
+    assert total > sc.BOOT_BREACH_THRESHOLD
+    assert lines[0] == (
+        f"BOOT BUDGET: {total} bytes / 100000 (4 files) BREACH -> run boot-diet skill (D-0068)"
+    )
+    assert lines[1] == "  60000  README.md"
+    assert lines[2] == "  30000  PROJECT_CHARTER.md"
+    assert lines[3] == "  20000  ANTI_GOALS.md"
+
+
+def test_boot_budget_missing_file_counts_zero_and_is_flagged(tmp_path):
+    root = tmp_path
+    # BOOT.md references a file that is never actually written.
+    (root / "BOOT.md").write_text("1. Read GHOST_FILE.md.\n", encoding="utf-8")
+    (root / "CLAUDE.md").write_bytes(b"x" * 50)
+    lines = sc.boot_budget_lines(root)
+    assert lines[0] == "BOOT BUDGET: 50 bytes / 100000 (2 files) [missing: GHOST_FILE.md]"
+
+
+def test_boot_budget_lines_within_output_budget(tmp_path):
+    root = tmp_path
+    _seed_boot_files(
+        root,
+        {
+            "README.md": 60000,
+            "PROJECT_CHARTER.md": 30000,
+            "ANTI_GOALS.md": 20000,
+            "CLAUDE.md": 100,
+        },
+    )
+    lines = sc.boot_budget_lines(root)
+    assert len(lines) <= 4  # 1 summary + top-3, never more
+
+
+# ==== t-043: full assembly still ASCII and within MAX_LINES =========
+
+
+def test_build_context_lines_b3_ascii_and_within_max_lines(tmp_path):
+    root = _seed_repo(
+        tmp_path,
+        events=[_event("delegated", task_id="t-001"), _event("calibrated", ts="2026-07-08T00:00:00")],
+    )
+    _seed_boot_files(
+        root,
+        {
+            "README.md": 60000,
+            "PROJECT_CHARTER.md": 30000,
+            "ANTI_GOALS.md": 20000,
+            "CLAUDE.md": 100,
+        },
+    )
+    now = datetime.datetime(2026, 7, 10, 12, 0, 0)
+    lines = sc.build_context_lines(root, now, stdin_payload={"model": "claude-fable-5"})
+    assert len(lines) <= sc.MAX_LINES
+    for line in lines:
+        line.encode("ascii")  # must not raise
+        assert line.isascii()
+    assert any(l.startswith("MODEL:") for l in lines)
+    assert any(l.startswith("BOOT BUDGET:") for l in lines)
+
+
+def test_build_context_lines_malicious_stdin_payload_stays_ascii_single_line(tmp_path):
+    # t-043 attempt 2 (critic-confirmed): a malicious/garbled model id in
+    # the hook's stdin payload must not break the ASCII/single-line
+    # invariant of ANY line in the assembled context, nor inject extra
+    # lines past MAX_LINES via embedded '\n'.
+    root = _seed_repo(
+        tmp_path,
+        events=[_event("delegated", task_id="t-001")],
+    )
+    now = datetime.datetime(2026, 7, 11, 9, 0, 0)
+    lines = sc.build_context_lines(
+        root, now, stdin_payload={"model": "клод\nX\U0001F600" + ("y" * 200)}
+    )
+    for line in lines:
+        assert line.isascii()
+        assert "\n" not in line
+        assert len(line.splitlines()) == 1
+    assert len(lines) <= sc.MAX_LINES
+
+
+def test_main_b3_success_path_includes_model_and_boot_budget(tmp_path, capsys, monkeypatch):
+    root = _seed_repo(tmp_path, events=[_event("delegated", task_id="t-001")])
+    _seed_boot_files(root, {"README.md": 100, "CLAUDE.md": 50})
+    fake = _FakeStdin(json.dumps({"model": "claude-sonnet-5"}), tty=False)
+    monkeypatch.setattr(sys, "stdin", fake)
+    code = sc.main(root)
+    assert code == 0
+    out = capsys.readouterr().out.strip().splitlines()
+    assert any(l.startswith("MODEL: claude-sonnet-5 -> tier builder-tier") for l in out)
+    assert any(l.startswith("BOOT BUDGET:") for l in out)
+    assert len(out) <= sc.MAX_LINES

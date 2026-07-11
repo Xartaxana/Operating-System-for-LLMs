@@ -20,10 +20,11 @@ docs/UNIFIED_PLAN_2026-07-07.md (D-0034..D-0036).
 
 ## Current Task (Authoritative, D-0025)
 
-Очередь пуста от назначенных задач — следующую выбирает оператор
-или /next-task по Remaining Queue (первый исполнимый пункт: B3
-SessionStart-хук расширенный, разблокирован калибровкой; крупные
-нити ждут оператора — статья, White Paper v0.2.0).
+Назначенной задачи нет. B3 закрыт 2026-07-11 (t-043, см. очередь).
+Остаток очереди — on-touch (A3 при касании D-0054/правила 11),
+evidence-gated (A5, stage-3 хук, admission-математика стены) либо
+ждёт оператора (статья по draft-C, ревью White Paper v0.2.0,
+подпись G1-гейта). Вторая калибровка ~2026-07-18.
 
 PAID-LEAD BASELINE RUN — DONE 2026-07-11 (та же сессия): рабочий
 набор 10 промптов на lead-sonnet (rows 408-417, $0.0170) + replay
@@ -296,7 +297,7 @@ above).
     next builder batch: N3 (go_at ignores probe truth), N4 (import-time
     fail-open hole), N5 (locked-DB guard); provider column in
     sqlite_logger (N1/N2 root, axis 2) — queued, evidence-gated.
-    B3 remainder: actual-model-tier line when hook input provides it.
+    B3 remainder — DONE 2026-07-11 (t-043, см. ниже).
   - B1 journal validator — DONE 2026-07-10 (t-031, builder+critic
     conveyor, D-0069): tools/journal_validator.py + .githooks/
     pre-commit; new by/basis fields documented in CLAUDE.md; check-9
@@ -306,20 +307,16 @@ above).
     usage_report.py loud-fail on locked cc_usage DB (critic
     observation, axis-2 symmetry candidate — Rule #1, on evidence).
   - B2 — FOLDED into A2, closed with it (archived same file as A2).
-  - B3 SessionStart hook (Lead spec -> builder; WHEN: after the
-    first weekly calibration validates what the Boot Report line
-    should show — same gating logic as the checks 3/13 counting
-    script): print actual model tier + open degradation window
-    (journal tail) + calibration staleness at session start, making
-    the D-0056 entry check unmissable (F-21/F-22 evidence).
-    EXTENDED per F-30 design (operator direction 2026-07-10,
-    "reality made ambient" layer): also print the CURRENT CLOCK
-    (F-29 root cause: time was nowhere in context, so the model
-    narrated it) and the Groq/Gemini rolling-window state computed
-    from requests.db + side DBs (F-27 math) — the model cannot be
-    tempted to guess what is already printed. Plus per-file
-    boot-budget breakdown (OpenClaw item 1, already queued here).
-    Mechanism commit at build time -> full rule-10 then.
+  - B3 SessionStart hook — DONE ЦЕЛИКОМ 2026-07-11 (t-043,
+    builder+critic конвейер: attempt 1 rejected по блокеру критика —
+    stdin без санитизации ломал ASCII-инвариант и инжектил строки
+    мимо MAX_LINES; attempt 2 принят, 307 passed). Хук печатает:
+    NOW/LAST EVENT/открытое окно деградации/калибровку/квоты (t-027)
+    + MODEL с ярусом из stdin-входа (D-0056a неминуем; санитизация —
+    фикс класса «внешне-источниковая строка вывода») + BOOT BUDGET
+    (список из BOOT.md, WARN>90K/BREACH>100K + boot-diet hint).
+    Размещение на путь — Lead (D-0069). WARN горит с первого прогона
+    (94,281 байт) — материал для handoff чека 4 и следующей диеты.
   - NOT adopted (recorded to stop re-litigating): GSD as
     coordinator (duplicates Lead), auto-mode SQLite state machine +
     crash recovery (inseparable from their runtime; our analog is
