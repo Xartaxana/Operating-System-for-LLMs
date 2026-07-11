@@ -186,11 +186,13 @@ rule-10 свип, F-17 стадии, eval-1, AO3 handoff/trim, Gemini-экзам
   бесплатный тир Groq). AO3-порт (очередь ниже) расширен
   дополнением правила 4.
 - A3 dispatch context manifest (Lead-class, mechanism — full
-  rule-10 treatment; WHEN: next D-0054/rule-11 touch, not a
-  dedicated pass): the dispatch text enumerates the exact
-  files/data injected into the worker (GSD UnitContextManifest as
-  prior art); lane-contract fields (Owns/Non-goals/Handoff — из
-  OpenClaw-обзора) входят в шаблон манифеста когда A3 приземлится.
+  rule-10 treatment; WHEN: ВЫДЕЛЕННЫМ ПРОХОДОМ сразу ПОСЛЕ закрытия
+  стадии 5б — приказ оператора 2026-07-11, заменил прежний пассивный
+  триггер «next D-0054/rule-11 touch»): the dispatch text enumerates
+  the exact files/data injected into the worker (GSD
+  UnitContextManifest as prior art); lane-contract fields
+  (Owns/Non-goals/Handoff, maxConcurrent — из OpenClaw-обзора)
+  входят в шаблон манифеста тем же проходом.
 - A5 witness auto-collection (builder-class; WHEN: first REAL
   builder-Pi work cycle — Rule #1: no wrapper before there are
   sessions to wrap; binding decided at calibration): wrapper runs

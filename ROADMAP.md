@@ -220,9 +220,10 @@ Deferred with named triggers, no work opened:
 
 - Lane-contract manifest fields (Owns / Non-goals / Handoff,
   maxConcurrent caps; OpenClaw survey) — ride the A3 dispatch
-  context manifest when it lands (CURRENT_CONTEXT queue; trigger:
-  next D-0054/rule-11 touch). Evidence home: docs/RELATED_WORK.md
-  "OpenClaw survey" item 3.
+  context manifest (CURRENT_CONTEXT queue; scheduled by operator
+  order 2026-07-11 as a dedicated pass right after toolkit stage 5б
+  closes). Evidence home: docs/RELATED_WORK.md "OpenClaw survey"
+  item 3.
 - Per-unit git worktree isolation (GSD) — REJECTED by Rule #1
   (harness worktree isolation exists; no parallel volume). Reopen
   trigger: real parallel-dispatch volume plus a path-collision
