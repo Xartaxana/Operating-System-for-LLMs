@@ -352,4 +352,10 @@ operator. For all sessions and subagents in this repo:
    clock / a database / a provider); unverified claims need an
    explicit "estimate, not verified" label. Worker claims are already
    covered by witness/trail (the witness and trail-based acceptance
-   rules); this rule closes the gap for Lead itself.
+   rules); this rule closes the gap for Lead itself. The same class
+   covers ANY content search (grep/glob/script) over the repo: an
+   empty result is reportable only after a positive control of the
+   invocation — the same tool and syntax must find a sample known to
+   exist; an empty output without that control is a miscall, not
+   absence (shell-grep alternation needs -E; -P needs a UTF-8
+   locale).
