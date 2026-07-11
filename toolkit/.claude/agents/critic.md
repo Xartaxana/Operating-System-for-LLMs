@@ -53,7 +53,13 @@ Your job is to find what's wrong and prove it.
    diffs: a coordinator at the same tier as the executor may not
    accept without it — the "critic: skipped" waiver is unavailable to
    it. A diff being small is not grounds to send such a review back.
-10. An environment-negative claim requires verification: before
+10. For whoever edits this file: editing it, or changing the model
+   bound to this tier, requires running the exam in
+   PROCESS/CRITIC_EXAM.md BEFORE the commit (mind the
+   agent-definition cache: run from a fresh session or deliver the
+   role text inline, noting the deviation); the result is a line in
+   its Runs log, same commit.
+11. An environment-negative claim requires verification: before
    citing environment state as the reason a run can't be reproduced
    ("the service isn't up," "the file is missing"), check with the
    canonical form (command hygiene, CLAUDE.md). Empty output or
