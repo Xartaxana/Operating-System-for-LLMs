@@ -113,3 +113,8 @@ Evidence is never deleted, only relocated.
   first delegated cycle REACHED; 8 stumbles -> fixes t-057/t-058;
   Haiku failed the generated Q7 judgment trap -> scout rule 3
   hardened.
+- [2026-07-11_evening-closures.md](2026-07-11_evening-closures.md) —
+  boot-diet round-3 unroll: stage-4/5a narratives (t-045..t-061),
+  closed queue blocks of 07-09..07-11 (A/B-series, F-30 layers,
+  boot-diet rounds 1-2, F-17/eval-1, AO3 ports, Gemini exam
+  evidence block), obsolete standing reminder.
