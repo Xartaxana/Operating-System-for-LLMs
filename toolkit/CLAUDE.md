@@ -124,7 +124,11 @@ separately in this deployment).
    covered / queued / n/a <why>" for EVERY axis of the current map,
    the line count follows the map; prose saying "axes are covered" is
    not an answer (a finding: recall fails silently, enumeration fails
-   loudly); (c) where the detector for this mechanism's failure is
+   loudly); the block answers for EVERY mechanism the commit carries
+   — several mechanisms in one commit mean a block per mechanism, or
+   one block whose lines close each mechanism by name (a finding:
+   enumeration done per commit instead of per mechanism degrades to
+   recall for the rest); (c) where the detector for this mechanism's failure is
    REGISTERED — a check in PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md, or
    an externally named detector in the mechanism's own text. Question
    (c) applies to ALL mechanisms, old and new alike: a mechanism with

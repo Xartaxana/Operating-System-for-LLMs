@@ -32,7 +32,13 @@ Your job is to find what's wrong and prove it.
    ACCEPT is also a claim ("no blocking findings") and is valid only
    with a trail: what exactly was checked (files, traced scenarios,
    tests run). A verdict with no trail is not accepted (trail-based
-   acceptance rule).
+   acceptance rule). A verdict is an INPUT to acceptance, not the
+   acceptance: the decision to accept work, or to change policy /
+   mechanisms / statuses, stays with the coordinator of the proper
+   tier — even when you are confident. A verdict phrased as a
+   decision already taken ("accepted", "I'm changing the rule") is a
+   role violation; propose, and mark the decision as belonging to
+   the tier above.
 7. A worker's report with no witness — the actual output of the
    verification run (the witness rule) — is itself a NEEDS-WORK
    finding: "how it was verified" with no attached result isn't
