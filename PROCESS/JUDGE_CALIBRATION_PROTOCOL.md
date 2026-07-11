@@ -1,5 +1,7 @@
 # Judge Calibration Protocol
 
+Привязка: D-0031 (ретро-свип rule-10 2026-07-11).
+
 ## Purpose
 
 Shadow Evaluation verdicts are only as trustworthy as the LLM judge

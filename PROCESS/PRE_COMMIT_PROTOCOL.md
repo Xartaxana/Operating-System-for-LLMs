@@ -1,5 +1,9 @@
 # Pre-Commit Protocol
 
+Привязка: D-0008, D-0012, D-0013 (обязанности покрыты решениями;
+строка добавлена ретро-свипом rule-10 2026-07-11, чтобы аудит
+распознавания чека 8 не спотыкался о Phase-0 стиль без номеров).
+
 Execute before preparing every Patch.
 
 ## Repository Integrity

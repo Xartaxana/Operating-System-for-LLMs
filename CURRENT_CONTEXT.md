@@ -20,20 +20,31 @@ docs/UNIFIED_PLAN_2026-07-07.md (D-0034..D-0036).
 
 ## Current Task (Authoritative, D-0025)
 
-Post-calibration builder batch: СЧЁТНЫЙ СКРИПТ ЧЕКОВ 3/13 + A4
-(rule-6 deterministic check, складывается в тот же скрипт по плану
-очереди) — спека Lead -> builder. Уроки первого ручного прогона в
-спеку: (1) парсить журналы json.loads, НЕ grep (AO3 пишет JSON с
-пробелами после двоеточий — grep-шаблон без пробела дал ложный
-пустой результат, поймано гигиеной п.6); (2) ветка A4 для
-rule-6-пар: «тред явно закрыт/superseded» (кейс t-012: 2 rejected
-без escalated, но продолжение явное — t-013/t-015) — скрипт
-репортит кандидатов, вердикт за Lead (D-0063); (3) отсечка
-`by`-обязательности = момент активации валидатора (b7e7ef2 07-10
-13:14), не календарная дата; (4) окно-фильтр по ts + пары
-lead_degraded/restored; (5) false-accept по ярусам =
-defect_found/accepted. Прототип-источник: scratchpad
-calib_counts.py первой калибровки (одноразовый, в репо не входил).
+PAID-LEAD BASELINE RUN (авторизован первой калибровкой 2026-07-11,
+ключ живой, кредиты предоплачены): прогон Shadow Evaluation с
+lead-sonnet эталоном (~10-20 запросов, категории
+provisionally_validated строк API-контура) — следующая
+gateway-сессия; preflight-квоты не нужен (paid), учёт в requests.db
+обязателен (ось 2, никогда молчаливый $0).
+
+Закрыто 2026-07-11 (той же сессией, что калибровка):
+- t-040 СЧЁТНЫЙ СКРИПТ ЧЕКОВ 3/13 + A4 — ПРИНЯТ (builder+critic
+  конвейер, critic ПРИНЯТЬ, 5 неблокирующих находок разрешены на
+  приёмке; 275 passed; live-прогоны воспроизвели эталон calibrated
+  08:55 точно). tools/calibration_counts.py зарегистрирован
+  механизмом в чеке 13 (детектор собственного отказа там же); ось 1
+  карты дополнена парой «гейт на записи ↔ счётчик на чтении».
+  A4-пункт очереди закрыт (влит). Кандидат журнальной дисциплины
+  (не взят, по evidence рецидива): continuation-делегация после
+  escalated без поля attempt (OS line 98).
+- РЕТРО-СВИП rule-10(б/г) D-0028..D-0063 + охота на нераспознанные
+  механизмы (приказ оператора после F-32) — ВЫПОЛНЕН, отчёт:
+  docs/task_reports/2026-07-11_rule10-retro-sweep.md. Итог:
+  (б)-пробелов нет; единственный (г)/D-0049-разрыв — D-0040 без
+  детектора — ЗАКРЫТ (строка в чеке 11); нераспознанных механизмов
+  уровня решений НЕ найдено (кандидаты t-041/t-042 разобраны
+  вердиктами в отчёте, ретро-четвёрка PI_HARNESS rule 0 там же);
+  шапки-привязки добавлены 4 Phase-0 протоколам.
 
 FIRST WEEKLY CALIBRATION — DONE 2026-07-11 (событие `calibrated`
 08:55, окно 2026-07-08..11 ~3.4 дня, честно помечено; все 17 чеков
@@ -311,24 +322,12 @@ above).
   deliberately untouched (worst win/risk ratio — policy dies out of
   context, F-1/F-9). Standing duty: re-measure at every handoff
   (D-0050 check 4, breach-response ordering fixed 2026-07-10).
-- One-time rule-10(b) sweep of pre-SIBLING_MAP decisions
-  (D-0028..D-0043 never had an axis sweep; F-12/F-13/F-14 were their
-  unswept siblings). Point-lookup matrix per the map, NOT a rescan.
-  EXTENDED by D-0064 (operator direction 2026-07-09): the SAME pass
-  asks question (г) of EVERY decision D-0028..D-0063 — one line per
-  mechanism (чем триггерится / какой код на пути, либо «на
-  дисциплине» + названный детектор); gaps land as queue items
-  (B-series class, D-0063 promotion by evidence), not immediate
-  builds. Further extended by D-0065 (F-25): the same pass HUNTS
-  already-born UNRECOGNIZED mechanisms through the net's homes
-  (ARCHITECTURE.md, BOOT.md, gateway/PI_HARNESS.md, PROCESS/,
-  roles/skills; first named candidate: PI_HARNESS hardened scout
-  profile rule 0, born at t-012 without the four questions) — each
-  find gets the four questions backfilled or an explicit
-  «не-механизм» verdict. Schedule: with/after the first weekly
-  calibration. Rule-10(a)
-  retro-audit deliberately NOT queued: its data stream is cc_usage,
-  covered by calibration check 11.
+- One-time rule-10(б/г) sweep D-0028..D-0063 + охота на
+  нераспознанные механизмы — DONE 2026-07-11 (приказ оператора;
+  отчёт docs/task_reports/2026-07-11_rule10-retro-sweep.md; итоги —
+  см. Current Task выше). Rule-10(a) retro-audit deliberately NOT
+  queued: its data stream is cc_usage, covered by calibration
+  check 11.
 - Evidence-acceptance adoption plan (F-17): stages 1 / 1.5 / 1.6 /
   1.7 / 2 DONE 2026-07-08..09 (D-0052..D-0055, D-0060; stage details
   archived —

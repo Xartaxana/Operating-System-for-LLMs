@@ -1,5 +1,7 @@
 # Zero Context Recovery Protocol
 
+Привязка: D-0022, D-0024 (ретро-свип rule-10 2026-07-11).
+
 ## Goal
 
 Verify that a completely new LLM session can continue the project using only the repository.
