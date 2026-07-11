@@ -54,13 +54,23 @@ CLAUDE.md wins and that's a bug report against this file.
 
 3. **Exams.** `delegation.config.yaml`'s `exam` block marks this
    mandatory, with failure overridable by explicit operator word.
-   Run the exam that matches each bound role:
+   Run the exam defined for each role below; roles listed without one
+   state the reason:
    - **scout**: first run the `scout-exam-gen` skill (it writes a
      golden set tailored to this repo at `PROCESS/SCOUT_GOLDEN_SET.md`
      — see that skill for the method), then dispatch the resulting
      question set as an ordinary, unmarked task — don't tell the
      worker it's an exam, since that changes the behavior being
      measured — and score the answers against the key it produced.
+   - **builder**: no entrance exam, by design. Every builder diff is
+     checked per-task by execution-based acceptance instead (the
+     witness rule, CLAUDE.md rule 2) — a real verification run against
+     that task's own spec, which is a stronger check than any one-time
+     golden set.
+   - **critic**: no shippable golden set yet. The candidate design
+     (diff review with planted defects) is queued upstream; until it
+     ships, critic's first verdicts are safeguarded by the accepting
+     tier's own spot checks, not by an exam.
    - **lead candidate** (when binding or swapping the model bound to
      `lead`): the vignettes in `PROCESS/LEAD_RANKING_EXAM.md`, scored
      against that protocol's own threshold.

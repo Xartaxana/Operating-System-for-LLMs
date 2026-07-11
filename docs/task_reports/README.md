@@ -107,3 +107,9 @@ Evidence is never deleted, only relocated.
   verbatim closed blocks of 2026-07-11 (first weekly calibration,
   paid-Lead baseline run, t-040 counting script, retro sweep),
   unfolded from CURRENT_CONTEXT by the evening handoff boot-diet.
+- [2026-07-11_toolkit-stage5a-stranger-report.md](2026-07-11_toolkit-stage5a-stranger-report.md) —
+  verbatim STRANGER_REPORT.md of the stage-5a validation install
+  (t-055, polygon D:\Improving_AI\From_Zero, Sonnet coordinator):
+  first delegated cycle REACHED; 8 stumbles -> fixes t-057/t-058;
+  Haiku failed the generated Q7 judgment trap -> scout rule 3
+  hardened.

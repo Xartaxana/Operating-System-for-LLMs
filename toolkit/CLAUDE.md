@@ -176,6 +176,14 @@ One JSON line per event, written with an Edit/Write tool:
 {"ts":"2026-07-08T12:00:00","event":"delegated","agent":"builder","model":"sonnet","task_id":"t-042","category":"implementation","notes":"brief: what was delegated"}
 ```
 
+Every event line — including `journal_created` and `lead_degraded` —
+carries five base fields checked by `tools/journal_validator.py`:
+`ts`, `event`, `agent`, `category`, and a non-empty `notes`. `ts` must
+be ISO local time with NO timezone suffix (a trailing `Z` fails the
+gate). `lead_degraded`'s `reason`/`scope` fields are legal as extras
+on top of these five — they don't replace `notes`, which stays
+mandatory on every event.
+
 Typed fields (typed-fields rule; load-bearing facts go in fields,
 notes are a human-readable extra, not a fact carrier for gates):
 `task_id` is mandatory for delegated/accepted/rejected/escalated/
