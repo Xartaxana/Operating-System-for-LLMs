@@ -94,3 +94,16 @@ Evidence is never deleted, only relocated.
   executor, not independent reproduction); independence micro-rank
   Opus 2/2 > Gemini 1/2 > Sonnet 0/2. Verbatim answers + conditions
   (old-corpus digest, clean-of-F-30 condition per run-2 lesson (б)).
+- [2026-07-11_rule10-retro-sweep.md](2026-07-11_rule10-retro-sweep.md) —
+  retro rule-10(б/г) sweep D-0028..D-0063: (б) no gaps, single (г)
+  gap D-0040 closed in check 11; unrecognized-mechanism hunt over
+  both repos' homes (t-041/t-042) found none at decision level;
+  PI_HARNESS rule-0 retro four-questions backfilled here.
+- [2026-07-11_savings-analysis.md](2026-07-11_savings-analysis.md) —
+  baseline-vs-routed economics at full API prices: delegation gross
+  savings 69% ($287/4 days), coordination premium not yet separable;
+  trend baseline for calibration check 18 (tools/savings_report.py).
+- [2026-07-11_day-closures.md](2026-07-11_day-closures.md) —
+  verbatim closed blocks of 2026-07-11 (first weekly calibration,
+  paid-Lead baseline run, t-040 counting script, retro sweep),
+  unfolded from CURRENT_CONTEXT by the evening handoff boot-diet.
