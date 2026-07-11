@@ -1,0 +1,4 @@
+#!/bin/sh
+# D-0052/D-0053: журнальный валидатор -- staged logs/routing-log.jsonl
+# не ломает append-only / типизированные поля / матрицу D-0058.
+python tools/journal_validator.py
