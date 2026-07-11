@@ -96,3 +96,42 @@ returns a). Prompt tuning did not flip it. Default judge replaced:
 judge-groq (groq/openai/gpt-oss-120b, reasoning model, same free
 key), calibration 11/11 including the fibonacci pair. Future runs
 use judge=judge-groq; middle-groq remains a replay TARGET only.
+
+PAID-LEAD BASELINE (2026-07-11, авторизован первой еженедельной
+калибровкой; первый прогон с ПЛАТНЫМ источником): рабочий набор
+ids 15-24 (10 промптов, 5 категорий) прогнан на lead-sonnet
+(rows 408-417, traffic_kind=synthetic, $0.0170), затем replay на
+tier-matching цели. Полная стоимость прогона $0.0232 учётно
+(24 запроса: 10 synthetic + 7 replay + 7 judge). Категории
+classification (строка rejected) и summarization (Junior не
+привязан в этом деплое — записанное различие D-0062) не гонялись.
+
+- 2026-07-11  category=coding  source=lead-sonnet target=middle-groq  n=2  sim=0.38  judge=judge-groq pass_rate=0.50  cost_source=$0.0040 cost_target=$0.0002 judge_cost=$0.0004  -> rejected [n=2; статус строки НЕ двинут — Update Rule 1, решает вторая калибровка]
+- 2026-07-11  category=extraction  source=lead-sonnet target=intern  n=2  sim=0.83  judge=judge-groq pass_rate=1.00  cost_source=$0.0009 cost_target=$0.0012 judge_cost=$0.0002  -> rejected [КАЧЕСТВО эквивалентно; rejected по Rule #1-ветке кода: учётная цена intern ВЫШЕ платного соннета]
+- 2026-07-11  category=formatting  source=lead-sonnet target=intern  n=2  sim=0.91  judge=judge-groq pass_rate=1.00  cost_source=$0.0007 cost_target=$0.0009 judge_cost=$0.0001  -> rejected [та же Rule #1-ветка]
+
+Chief-judge review (Lead Fable, 2026-07-11, D-0031 — вердикты
+статусной силы + 2 случайных аудита):
+
+- coding/409 WORSE — ПОДТВЕРЖДЁН, и это НЕ исторический
+  strictness-кейс: middle-groq выдал самосогласованный, но
+  нестандартный индекс (F(1)=0; его же пример печатает «10-th = 34»,
+  обе канонические конвенции дают 55) — реальный off-by-one против
+  общепринятого определения, fibonacci(0) падает. Прослежено
+  построчно (n=3/4/5 корректны В ЕГО конвенции — дефект именно в
+  выборе конвенции, не в цикле).
+- Аудит 412 (extraction) EQUIVALENT — защитим: intern сохранил
+  «3.7 million» строкой, соннет нормализовал в 3700000; без заданной
+  схемы обе экстракции легальны. Аудит 428 (formatting) EQUIVALENT —
+  подтверждён (таблицы идентичны с точностью до регистра).
+
+ГЛАВНЫЙ УРОК прогона (материал второй калибровки и White Paper):
+на микрозадачах ПЛАТНЫЙ frontier-источник оказался ДЕШЕВЛЕ
+делегирования — короткие ответы соннета стоят меньше, чем
+многословный локальный intern по синтетическим Haiku-ценам
+(D-0032: бесплатное ≠ $0). Прежние validated-вердикты этих
+категорий получены при БЕСПЛАТНОМ источнике (lead-gemini), где
+экономика выглядела иначе; строки таблицы получили первый
+контр-datapoint с платным источником. Статусы НЕ двигались этим
+прогоном (Update Rule 1: движения — на калибровке, с объёмом
+n>2 и полной стоимостью с ретраями по Update Rule 4).
