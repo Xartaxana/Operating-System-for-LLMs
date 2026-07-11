@@ -14,9 +14,13 @@ is a paid resource — the project's own subject.
 
 ## Current Milestone
 
-Phase 1.5 — Real Telemetry and Claude Code Routing (D-0034), on top
-of a complete Phase 1 MVP. Plan of record:
-docs/UNIFIED_PLAN_2026-07-07.md (D-0034..D-0036).
+Phase 3 — Toolkit (D-0070): система как инструмент для чужих
+проектов. Phases 1/1.5 — все шаги закрыты с evidence, закрытие
+ПРЕДЛОЖЕНО 2026-07-11 и ждёт подписи Архитектора (блок закрытия в
+ROADMAP.md); телеметрические циклы (еженедельная калибровка, тренд
+экономии) продолжаются как штатные операции, не фазовая работа.
+Plan of record: docs/UNIFIED_PLAN_2026-07-07.md + Phase 3
+docs/TOOLKIT_INTAKE_2026-07-11.md.
 
 ## Current Task (Authoritative, D-0025)
 

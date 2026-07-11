@@ -16,7 +16,15 @@
 Each step is useful on its own even if the next one is never built.
 
 1. [x] Gateway built: LiteLLM proxy + SQLite request log (gateway/), logging path verified end-to-end.
-   - [ ] Operational: all real traffic actually routed through the gateway (needs API keys configured by the Architect).
+   - [x] Operational — RESOLVED by D-0034 + live keys (bookkeeping
+     2026-07-11): the sub-item predates D-0034, which redefined the
+     real-traffic source — the operator's real Lead is the Claude
+     Code subscription, measured from transcripts (cc_usage), NOT
+     traffic to force through the proxy. The gateway's role is the
+     API contour: lab runs + paid runs (ANTHROPIC_API_KEY live
+     2026-07-10, lead/lead-sonnet verified end-to-end; first paid
+     run 2026-07-11). "All real traffic through the gateway" stopped
+     being an architecture goal on 2026-07-07.
 2. [x] Guard: deterministic budget counters, 80% warning, 100% cutoff.
    Custom pre-call hook over the SQLite log (native LiteLLM budgets
    evaluated per D-0030 and rejected: they need Postgres+Redis).
@@ -24,13 +32,17 @@ Each step is useful on its own even if the next one is never built.
    heuristics), context-repetition ratio, budget events; text + JSON output.
 4. [x] Analyst: local small model (Ollama, Qwen3-4B) answering questions
    over Ledger output through the gateway under its own alias.
-5. [~] Shadow Evaluation: shadow_eval.py built and tested; first real
+5. [x] Shadow Evaluation: shadow_eval.py built and tested; first real
    run 2026-07-03 (lead-gemini -> intern, 10 requests) produced the
    first evidence-backed DELEGATION_TABLE.md verdicts. LLM judge
-   built and calibrated 11/11 (judge-groq = gpt-oss-120b via Groq
-   free tier; replaced middle-groq, which mis-traced correct code).
-   Remaining: traffic volume, middle tier as replay target, paid
-   Lead baseline (see CURRENT_CONTEXT.md).
+   built and calibrated (judge-groq 13/13; second judge judge-gemini
+   13/13, t-023). Middle tier as replay target — DONE (runs
+   2026-07-03 and 2026-07-11). Paid Lead baseline — DONE 2026-07-11
+   (lead-sonnet working set + tier-matched replays, chief-judge
+   reviewed; docs/SHADOW_EVALUATION_LOG.md). Residual "real
+   API-contour traffic volume" is NOT phase work: it is already
+   counted by Phase 2 gate criteria (G1/R1) and arrives with real
+   deployments (Phase 3), not with more lab runs.
 
 ## Phase 1.5 — Real Telemetry and Claude Code Routing (D-0034)
 
@@ -40,14 +52,15 @@ plan 2026-07-07 (docs/UNIFIED_PLAN_2026-07-07.md, which holds the
 detailed specs and acceptance criteria). Like Phase 1, every step is
 useful on its own:
 
-1. [ ] Baseline telemetry: tools/usage_report.py parses Claude Code
-   transcripts into per-day / per-model / per-session / per-project
-   token and accounted-cost reports, cache-aware from day one
-   (input vs cache_read vs cache_creation tokens — the fields exist
-   in transcripts, verified 2026-07-07). First deliverable: a
-   baseline report over the existing transcript history, BEFORE any
-   routing changes behavior.
-2. [~] Routing in Claude Code: tiered subagents (scout=Haiku,
+1. [x] Baseline telemetry — DONE 2026-07-07 (Delegated Task 5):
+   tools/usage_report.py parses Claude Code transcripts into per-day
+   / per-model / per-session / per-project token and accounted-cost
+   reports, cache-aware from day one; the baseline report over the
+   full pre-routing history was delivered BEFORE routing changed
+   behavior ($1,177 all-time, cache-read share 97.6% — the
+   CURRENT_CONTEXT "Claude Code Baseline" section) and is now the
+   PRE-window of tools/savings_report.py (calibration check 18).
+2. [x] Routing in Claude Code: tiered subagents (scout=Haiku,
    builder=Sonnet, critic=Opus), routing policy + escalation rule in
    the project CLAUDE.md, delegation journal. Every routed category
    enters DELEGATION_TABLE.md as `estimated` (D-0028, D-0035); the
@@ -58,16 +71,30 @@ useful on its own:
    universal skip events, class-fix discipline with the sibling map
    (D-0043) and /qa-loop journaling; builder/critic tiers have first
    accepted evidence (Tasks 6-7), agent-attributed telemetry live
-   (cc_usage agent_id/agent_type). Remaining: >=1 week of routed
-   traffic incl. scout dispatches, then step 3's first loop.
-3. [ ] Weekly calibration loop: escalation journal + usage report
-   reviewed, table statuses upgraded/downgraded on evidence, routing
-   rules adjusted. This is Shadow Evaluation's philosophy applied to
-   the subscription contour (replay is impossible there; acceptance
-   verdicts and escalations are the measurements). Executable
-   checklist: PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md; each run ends
-   with a `calibrated` journal event, staleness is surfaced by the
-   Boot Report's Last Calibration line (D-0047).
+   (cc_usage agent_id/agent_type). Policy text Architect-accepted
+   2026-07-09 (171078c). Routed-traffic requirement satisfied
+   2026-07-08..11 (147+ journal events, 39+ tasks, all four tiers,
+   full degradation cycle) — the volume basis on which the operator
+   authorized the first calibration early. DONE; marked [x]
+   2026-07-11 (bookkeeping).
+3. [x] Weekly calibration loop — FIRST RUN DONE 2026-07-11 (all 18
+   checks incl. the economics trend added same day; `calibrated`
+   event 08:55 with full counters; 4 Claude-contour table rows moved
+   estimated -> provisionally_validated on journal evidence; F-32
+   found and closed on the run itself). The loop is now a STANDING
+   OPERATION, not phase work: recurring ~weekly (next ~2026-07-18),
+   staleness watched by the Boot Report line and the SessionStart
+   hook (D-0047). Executable checklist:
+   PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md.
+
+### Phase 1 + 1.5 closure (bookkeeping 2026-07-11; signature — Architect)
+
+Every step above is done with evidence attached; the single honest
+residual (real API-contour traffic volume) is not phase work — it is
+counted by the Phase 2 gates (G1/R1) and arrives with real
+deployments (Phase 3). The telemetry loops (weekly calibration,
+savings trend) continue as standing operations. Phases 1 and 1.5 are
+proposed CLOSED — awaiting the Architect's confirmation line here.
 
 This workstream is NOT the deferred Router (D-0029): routing policy
 is executed by the Lead session itself following documented rules,
