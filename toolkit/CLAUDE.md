@@ -44,8 +44,8 @@ separately in this deployment).
    map; a mechanism only enters the plan/queue after Lead's own
    targeted second pass over the promising spots — the trail of that
    second pass goes into the RELATED_WORK section (Lead-tier work, no
-   `dispatch_skipped` needed; its failure detector is a dedicated
-   calibration check). Accepting a digest goes by its trail
+   `dispatch_skipped` needed; its failure detector is check 16 of
+   PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md). Accepting a digest goes by its trail
    (trail-based acceptance rule): scout attaches where it searched and
    what it read; Lead checks coverage of the question and spot-checks
    at least one load-bearing claim (a negative claim — "X is nowhere
@@ -195,7 +195,7 @@ from the session's narrative (finding: timestamp taken from the
 session's narrative instead of the clock); a wrong `ts` noticed later
 is not rewritten — a note on the next event's notes field; the
 reference for reconciliation is your usage database / usage reports /
-git log (a dedicated calibration check).
+git log (check 13(e) of PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md).
 
 The `model` field is mandatory for delegated/escalated/accepted/
 rejected — a self-declaration by Lead; calibration reconciles it
@@ -307,7 +307,8 @@ unavailability) OR an explicit operator switch to a lower tier:
    fact): in the same turn, a retroactive `lead_degraded` (note +
    actual boundaries), acceptance of the window per point 3,
    `lead_restored`.
-   c) EXTERNAL CROSS-CHECK — a dedicated calibration check: the
+   c) EXTERNAL CROSS-CHECK — check 5 of
+   PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md: the
    actual model of Lead sessions per transcripts vs. window coverage
    by matched event pairs (extending the self-declaration-discrepancy
    check from workers to Lead); this catches failures of both
