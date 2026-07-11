@@ -20,26 +20,42 @@ docs/UNIFIED_PLAN_2026-07-07.md (D-0034..D-0036).
 
 ## Current Task (Authoritative, D-0025)
 
-FIRST WEEKLY CALIBRATION (Phase 1.5 step 3,
-PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md) — AUTHORIZED EARLY by the
-operator 2026-07-10 (decision at session close; next session starts
-with it). The ROADMAP «>=1 week of routed traffic» was a proxy for
-evidence volume, and the volume is already there — measured over
-the journal 2026-07-08..10: 145 events, 37 tasks, 57 dispatches
-across all four tiers (scout 22 / builder 17 / critic 9 / lead 9),
-42 accepted, 15 rejected with failure_class, 2 escalated,
-2 defect_found, one full degradation cycle; remaining days until
-07-15 would add near-zero traffic (queue almost empty). Honesty
-marks for the run: window is ~3 days, not 7 — state it in the
-`calibrated` notes; week-over-week trend checks are baseline-only
-on a first run regardless. Standing reminder stays: tier-check the
-D-0059 commit's session per D-0058 (checks 5/6). The calibration
-also legally moves table statuses (lead-gemini, builder-groq
-candidacies) and can schedule the paid-Lead baseline run on the
-fresh ANTHROPIC_API_KEY. Everything else in the queue is gated on
-this run (A4, retro rule-10(б/г) sweep, checks-3/13 script spec,
-B3) or on the operator (article final text, White Paper v0.2.0
-review).
+Post-calibration builder batch: СЧЁТНЫЙ СКРИПТ ЧЕКОВ 3/13 + A4
+(rule-6 deterministic check, складывается в тот же скрипт по плану
+очереди) — спека Lead -> builder. Уроки первого ручного прогона в
+спеку: (1) парсить журналы json.loads, НЕ grep (AO3 пишет JSON с
+пробелами после двоеточий — grep-шаблон без пробела дал ложный
+пустой результат, поймано гигиеной п.6); (2) ветка A4 для
+rule-6-пар: «тред явно закрыт/superseded» (кейс t-012: 2 rejected
+без escalated, но продолжение явное — t-013/t-015) — скрипт
+репортит кандидатов, вердикт за Lead (D-0063); (3) отсечка
+`by`-обязательности = момент активации валидатора (b7e7ef2 07-10
+13:14), не календарная дата; (4) окно-фильтр по ts + пары
+lead_degraded/restored; (5) false-accept по ярусам =
+defect_found/accepted. Прототип-источник: scratchpad
+calib_counts.py первой калибровки (одноразовый, в репо не входил).
+
+FIRST WEEKLY CALIBRATION — DONE 2026-07-11 (событие `calibrated`
+08:55, окно 2026-07-08..11 ~3.4 дня, честно помечено; все 17 чеков
+пройдены, вердикты и счётчики в notes события). Ключевое:
+(а) 4 строки Claude-контура в таблице -> provisionally_validated
+(evidence-блок в DELEGATION_TABLE.md); (б) нарушений класса
+«молчаливо» НЕ найдено: единственная буква-нарушение — t-012 без
+escalated при явном продолжении треда (в A4-спеку веткой);
+(в) false-accept сконцентрирован на координаторе (lead 2/8,
+воркеры 0/34) — подтверждает тред F-29/F-30; (г) стоячее
+напоминание закрыто: сессия D-0059-коммита шла на FABLE (cc_usage
+f5356744, 87 main-ходов, коммит 12:44 внутри окна сессии) —
+нарушения нет; (д) AO3 defect_found-семантика отличается от
+D-0052 (новые баги, не false-accept принятой работы) — словарная
+правка при следующем касании их CLAUDE.md, не нарушение формата.
+
+PAID-LEAD BASELINE — АВТОРИЗОВАН этой калибровкой (ключ живой,
+кредиты предоплачены): прогон Shadow Evaluation с lead-sonnet
+эталоном (~10-20 запросов, категории с provisionally_validated
+строками API-контура) — следующая gateway-сессия, ПЕРЕД ним
+preflight-квоты не нужен (paid), но requests.db учёт обязателен
+(ось 2, никогда молчаливый $0).
 
 - A2 remainder, LIVE part — DONE 2026-07-10 (t-037, accepted on
   attempt 3 after 2 tooling rejections + rule-6 escalation):
@@ -77,16 +93,17 @@ above).
 - Policy text ARCHITECT-ACCEPTED 2026-07-09 (commit 171078c; closed
   the last open item of Phase 1.5 step 2). Later policy changes
   follow the normal mechanism discipline.
-- Evidence stream: logs/routing-log.jsonl (t-001..t-022 so far); ALL
-  table statuses estimated — counts and status moves belong to the
-  first weekly calibration (Update Rule 1, D-0047).
+- Evidence stream: logs/routing-log.jsonl (t-001..t-039); Claude-
+  контурные строки таблицы provisionally_validated с первой
+  калибровки 2026-07-11 (Update Rule 1, D-0047; evidence-блок в
+  DELEGATION_TABLE.md).
 - Retro baseline AO3 (cc_usage, pre-routing): $276.70 accounted +
   $57.82 sidechain self-correction (Task 6). Weekly loop compares
   cost per accepted unit + escalation rate, NOT frontier share alone
   (Architect correction — see baseline section below).
-- Next: accumulate >=1 week of routed traffic, then the FIRST weekly
-  calibration (PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md, 12 checks;
-  run ends with a `calibrated` journal event; staleness watched by
+- First weekly calibration DONE 2026-07-11 (см. Current Task);
+  вторая — к ~2026-07-18 (полновесное недельное окно, трендовые
+  чеки 10/11 против baseline первого прогона; staleness watched by
   the Boot Report's Last Calibration line, D-0047).
 - 2026-07-08 day narrative (interim 18h read, Task 7 closure,
   dead-tier revival, F-1/D-0041/D-0042, first degradation cycle,
@@ -230,12 +247,10 @@ above).
     files/data injected into the worker (GSD UnitContextManifest as
     prior art) — makes inject-vs-recon choices auditable and cuts
     worker context cost.
-  - A4 Rule-6 deterministic check (Lead-class; WHEN: first weekly
-    calibration): journal scan «two rejected, same task_id + tier,
-    no escalated» — mechanical enforcement of rule 6, GSD's
-    consecutive-dispatch caps as prior art. NOT a new tool: fold
-    into the deterministic counting script for checks 3/13 already
-    queued under the D-0053 follow-up.
+  - A4 Rule-6 deterministic check — ВЗЯТ В РАБОТУ 2026-07-11: часть
+    Current Task (счётный скрипт чеков 3/13, см. выше; уроки
+    первого ручного прогона уже в задаче, вкл. ветку
+    «тред явно закрыт/superseded» с кейса t-012).
   - A5 witness auto-collection (builder-class; WHEN: unblock
     condition MET 2026-07-10 by t-037, but build only with the
     first REAL builder-Pi work cycle — Rule #1: no wrapper before
