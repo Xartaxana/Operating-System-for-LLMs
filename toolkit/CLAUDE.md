@@ -195,7 +195,7 @@ from the session's narrative (finding: timestamp taken from the
 session's narrative instead of the clock); a wrong `ts` noticed later
 is not rewritten — a note on the next event's notes field; the
 reference for reconciliation is your usage database / usage reports /
-git log (check 13(e) of PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md).
+git log (check 13(f) of PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md).
 
 The `model` field is mandatory for delegated/escalated/accepted/
 rejected — a self-declaration by Lead; calibration reconciles it

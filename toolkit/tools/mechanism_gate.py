@@ -1,13 +1,15 @@
-"""Гейт правила 10(б) — D-0055: коммит механизмных файлов несёт осевой блок.
+"""Gate for rule 10(b): a commit touching mechanism files must carry an
+axis block.
 
-Вызывается commit-msg-хуком (.githooks/commit-msg) с путём к файлу
-сообщения коммита. Логика (полностью в чистой decide(), тестируемой
-без git):
+Called by the commit-msg hook (.githooks/commit-msg) with the path to
+the commit message file. Logic (entirely in a pure decide(), testable
+without git):
 
-1. Staged-пути не задевают механизмные префиксы → гейт молчит.
-2. Merge-коммит (MERGE_HEAD существует) → гейт молчит: слитые коммиты
-   уже проходили его поодиночке; блокировать автосообщение мержа —
-   ложное срабатывание, приучающее к --no-verify (ревью critic, F-C).
+1. Staged paths don't touch any mechanism prefix -> the gate is silent.
+2. A merge commit (MERGE_HEAD exists) -> the gate is silent: merged
+   commits already passed this gate individually; blocking the merge's
+   auto-message would be a false positive that trains toward
+   --no-verify.
 3. Skip line "axes: not a mechanism (<reason>)" (this template's
    English phrasing, CLAUDE.md rule 10) works ONLY from the commit
    message -- a written statement by the committer, the same pattern
@@ -23,8 +25,8 @@
    literal "axis N:" would close axes fictitiously. Axis count and
    numbers are read from the map on every run -- the map grows and
    changes, the gate follows it.
-5. Карта не читается / ноль осей → fail-closed (F-7: молчаливый
-   пропуск проверки неотличим от её прохождения).
+5. The map can't be read / has zero axes -> fail-closed (a silent skip
+   of the check is indistinguishable from passing it).
 6. Net: known homes of mechanisms in this template (CLAUDE.md,
    DECISIONS.md, docs/SIBLING_MAP.md, PROCESS/, .claude/agents/,
    .claude/skills/, BOOT.md) plus self-protection of the enforcement
@@ -67,22 +69,24 @@ MECHANISM_PREFIXES = (
 # toolkit/docs/SIBLING_MAP.md and toolkit/CLAUDE.md rule 10): this
 # template's map headings and its axis-answer/skip-line vocabulary are
 # English ("## Axis N", "axis N: covered", "axes: not a mechanism
-# (<reason>)") -- the source deployment's Russian regexes ("Ось N")
-# silently matched zero axes against this template's own map (fail-
-# closed on every mechanism commit); ported as English to match the
-# artifact these regexes actually run against.
+# (<reason>)") -- the source deployment's original regexes matched on
+# its own non-English heading text and silently matched zero axes
+# against this template's own map (fail-closed on every mechanism
+# commit); ported as English to match the artifact these regexes
+# actually run against.
 AXIS_HEADING_RE = re.compile(r"^##\s+Axis\s+(\d+)", re.MULTILINE)
 SKIP_RE = re.compile(r"axes\s*:\s*not\s+a\s+mechanism\s*\(", re.IGNORECASE)
 
 
 def parse_axes(map_text: str) -> list[int]:
-    """Номера осей из заголовков карты; порядок и разрывы нумерации не важны."""
+    """Axis numbers from the map's headings; order and gaps in the
+    numbering don't matter."""
     return [int(n) for n in AXIS_HEADING_RE.findall(map_text)]
 
 
 def _matches(path: str, pref: str) -> bool:
-    # Граница префикса (F-D): каталоги — по startswith, файлы — точно
-    # (CLAUDE.md.bak не механизмный путь).
+    # Prefix boundary: directories match by startswith, files match
+    # exactly (CLAUDE.md.bak is not a mechanism path).
     if pref.endswith("/"):
         return path.startswith(pref)
     return path == pref
@@ -100,13 +104,13 @@ def find_missing(text: str, axes: list[int]) -> list[int]:
 
 def decide(msg: str, block_extra: str, staged: list[str],
            map_text: str | None, merging: bool = False) -> tuple[int, str]:
-    """Чистое решение гейта. block_extra — дифф DECISIONS.md."""
+    """Pure gate decision. block_extra -- the diff of DECISIONS.md."""
     hits = mechanism_paths(staged)
     if not hits:
         return 0, ""
     if merging:
         return 0, ""
-    if SKIP_RE.search(msg):  # только сообщение — F-A
+    if SKIP_RE.search(msg):  # message only -- not looked up in the diff
         return 0, ""
     if map_text is None:
         return 1, (f"axis map not found ({MAP_PATH}) -- fail-closed, "
@@ -137,7 +141,7 @@ def _git(*args: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv:
-        print("mechanism_gate: нужен путь к файлу сообщения коммита", file=sys.stderr)
+        print("mechanism_gate: need a path to the commit message file", file=sys.stderr)
         return 1
     staged = _git("diff", "--cached", "--name-only").splitlines()
     merge_head = _git("rev-parse", "--git-path", "MERGE_HEAD").strip()

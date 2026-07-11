@@ -83,7 +83,7 @@ def test_invalid_json_line_fails():
     staged = HEAD_TEXT + "{not valid json\n"
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1
-    assert any("невалидный JSON" in v for v in violations)
+    assert any("invalid JSON" in v for v in violations)
 
 
 # ---- 3. event enum ----
@@ -121,7 +121,7 @@ def test_task_id_bad_format_fails():
                             task_id="t-2", notes="bad format"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1
-    assert any("формату t-NNN" in v for v in violations)
+    assert any("t-NNN format" in v for v in violations)
 
 
 # ---- 6. rejected: attempt / failure_class ----
@@ -164,7 +164,7 @@ def test_delegated_novelty_violation_wrong_number():
                             task_id="t-005", notes="skipped ahead"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1
-    assert any("новизна task_id" in v for v in violations)
+    assert any("task_id novelty" in v for v in violations)
 
 
 def test_delegated_novelty_correct_max_plus_one_passes():
@@ -180,7 +180,7 @@ def test_accepted_references_nonexistent_task_id_fails():
                             notes="dangling ref"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1
-    assert any("не ссылается" in v for v in violations)
+    assert any("does not reference" in v for v in violations)
 
 
 def test_accepted_can_reference_task_id_delegated_earlier_in_same_commit():
@@ -241,7 +241,7 @@ def test_9g_duplicate_pattern_t029_same_agent_no_attempt_no_rejected_fails():
                             model="sonnet", task_id="t-001", notes="t-029-class duplicate"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1
-    assert any("запрещённый дубль" in v for v in violations)
+    assert any("forbidden duplicate" in v for v in violations)
 
 
 def test_9g_delegated_after_accepted_fails_reopen_forbidden():
@@ -256,7 +256,7 @@ def test_9g_delegated_after_accepted_fails_reopen_forbidden():
                                        model="opus", task_id="t-001", notes="reopen attempt") + "\n"
     code, violations = jv.decide(staged, head_with_accept, NOW)
     assert code == 1
-    assert any("reopen запрещён" in v for v in violations)
+    assert any("reopen forbidden" in v for v in violations)
 
 
 # ---- 10. ts monotonicity / no narrative future ----
@@ -270,7 +270,7 @@ def test_ts_not_monotonic_relative_to_previous_new_line_fails():
     )
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1
-    assert any("не монотонен" in v for v in violations)
+    assert any("not monotonic" in v for v in violations)
 
 
 def test_ts_earlier_than_last_head_line_fails():
@@ -278,15 +278,15 @@ def test_ts_earlier_than_last_head_line_fails():
                             task_id="t-002", notes="before HEAD's last ts"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1
-    assert any("не монотонен" in v for v in violations)
+    assert any("not monotonic" in v for v in violations)
 
 
 def test_ts_narrative_future_beyond_now_plus_10min_fails():
     staged = _staged(_line(event="delegated", ts="2026-07-11T00:00:00", model="sonnet",
-                            task_id="t-002", notes="far future (F-29)"))
+                            task_id="t-002", notes="far future (narrative-future timestamp)"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1
-    assert any("F-29" in v for v in violations)
+    assert any("narrative-future" in v for v in violations)
 
 
 def test_ts_within_10min_future_grace_passes():
@@ -296,7 +296,7 @@ def test_ts_within_10min_future_grace_passes():
     assert code == 0
 
 
-# ---- 11. D-0058 acceptance matrix ----
+# ---- 11. role-vs-tier acceptance matrix ----
 
 def test_matrix_missing_by_fails():
     staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="scout",
@@ -313,7 +313,7 @@ def test_matrix_scout_accepted_by_same_tier_without_basis_fails():
                             notes="peer accepting peer, no basis"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1
-    assert any("D-0058" in v for v in violations)
+    assert any("role-vs-tier" in v for v in violations)
 
 
 def test_matrix_scout_accepted_by_higher_tier_passes():
@@ -338,7 +338,7 @@ def test_matrix_non_claude_by_requires_basis():
                             notes="non-Claude by, no basis"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1
-    assert any("D-0058" in v for v in violations)
+    assert any("role-vs-tier" in v for v in violations)
 
 
 def test_matrix_non_claude_by_with_basis_critic_passes():
@@ -440,4 +440,4 @@ def test_main_exits_one_on_real_staged_violation(tmp_path, capsys, monkeypatch):
     assert code == 1
     err = capsys.readouterr().err
     assert "FAILED validation" in err
-    assert "новизна task_id" in err
+    assert "task_id novelty" in err

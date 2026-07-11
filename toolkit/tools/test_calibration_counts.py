@@ -1,12 +1,13 @@
-"""Тесты tools/calibration_counts.py (t-040). Синтетические журналы-фикстуры
-на tmp_path, по одному кейсу на класс из спеки, плюс smoke-тест CLI."""
+"""Tests for tools/calibration_counts.py. Synthetic journal fixtures on
+tmp_path, one case per class from the spec, plus a CLI smoke test."""
 import json
 
 from calibration_counts import analyze_journal, main, parse_ts
 
 
 def write_journal(path, lines):
-    """lines: список dict ИЛИ сырых строк (для непарсящихся/AO3-с-пробелами)."""
+    """lines: a list of dicts OR raw strings (for unparsable lines /
+    the spaced-JSON format)."""
     with open(path, "w", encoding="utf-8") as fh:
         for line in lines:
             if isinstance(line, str):
@@ -22,7 +23,7 @@ def ev(ts, event, **kw):
 
 
 # ---------------------------------------------------------------------
-# 1. rule-6 пара без escalated -> кандидат
+# 1. rule-6 pair without escalated -> candidate
 # ---------------------------------------------------------------------
 def test_rule6_pair_without_escalated_is_candidate(tmp_path):
     p = tmp_path / "j.jsonl"
@@ -43,7 +44,7 @@ def test_rule6_pair_without_escalated_is_candidate(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# 2. rule-6 пара С escalated -> НЕ кандидат
+# 2. rule-6 pair WITH escalated -> NOT a candidate
 # ---------------------------------------------------------------------
 def test_rule6_pair_with_escalated_not_candidate(tmp_path):
     p = tmp_path / "j.jsonl"
@@ -65,7 +66,7 @@ def test_rule6_pair_with_escalated_not_candidate(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# 3. rejected без failure_class -> нарушение
+# 3. rejected without failure_class -> violation
 # ---------------------------------------------------------------------
 def test_rejected_missing_failure_class_is_violation(tmp_path):
     p = tmp_path / "j.jsonl"
@@ -82,7 +83,7 @@ def test_rejected_missing_failure_class_is_violation(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# 4. accepted(builder) без witness -> нарушение
+# 4. accepted(builder) without witness -> violation
 # ---------------------------------------------------------------------
 def test_accepted_builder_missing_witness_is_violation(tmp_path):
     p = tmp_path / "j.jsonl"
@@ -99,18 +100,18 @@ def test_accepted_builder_missing_witness_is_violation(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# 5. by-пропуск после отсечки vs легальность до
+# 5. missing 'by' after the cutoff vs. legal before it
 # ---------------------------------------------------------------------
 def test_by_missing_after_cutoff_legal_before(tmp_path):
     p = tmp_path / "j.jsonl"
     by_since = "2026-07-10T13:14:00"
     write_journal(p, [
         ev("2026-07-09T00:00:00", "accepted", agent="scout", model="haiku",
-           task_id="t-001", category="recon", notes="n"),  # до отсечки, без by -> легально
+           task_id="t-001", category="recon", notes="n"),  # before cutoff, no by -> legal
         ev("2026-07-10T14:00:00", "accepted", agent="scout", model="haiku",
-           task_id="t-002", category="recon", notes="n"),  # после отсечки, без by -> кандидат
+           task_id="t-002", category="recon", notes="n"),  # after cutoff, no by -> candidate
         ev("2026-07-10T15:00:00", "accepted", agent="scout", model="haiku",
-           task_id="t-003", category="recon", notes="n", by="fable"),  # после, с by -> ок
+           task_id="t-003", category="recon", notes="n", by="fable"),  # after, with by -> ok
     ])
     report = analyze_journal(str(p), None, None, parse_ts(by_since))
     assert len(report["by_violations"]) == 1
@@ -118,7 +119,7 @@ def test_by_missing_after_cutoff_legal_before(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# 6. дубль task_id: после accepted / critic-вход / continuation / retry
+# 6. duplicate task_id: after accepted / critic-entry / continuation / retry
 # ---------------------------------------------------------------------
 def test_duplicate_delegate_after_accepted_is_candidate(tmp_path):
     p = tmp_path / "j.jsonl"
@@ -128,12 +129,12 @@ def test_duplicate_delegate_after_accepted_is_candidate(tmp_path):
         ev("2026-07-08T00:10:00", "accepted", agent="scout", model="haiku",
            task_id="t-001", category="recon", notes="n"),
         ev("2026-07-08T00:20:00", "delegated", agent="scout", model="haiku",
-           task_id="t-001", category="recon", notes="n"),  # дубль/reopen без attempt>=2, не critic
+           task_id="t-001", category="recon", notes="n"),  # duplicate/reopen, no attempt>=2, not critic
     ])
     report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
     dups = report["duplicate_delegates"]
     assert len(dups) == 1
-    assert dups[0]["branch"] == "кандидат-дубль"
+    assert dups[0]["branch"] == "candidate-duplicate"
 
 
 def test_duplicate_delegate_critic_entry_is_legal_branch(tmp_path):
@@ -144,12 +145,12 @@ def test_duplicate_delegate_critic_entry_is_legal_branch(tmp_path):
         ev("2026-07-08T00:10:00", "accepted", agent="builder", model="sonnet",
            task_id="t-001", category="implementation", notes="n", witness="ok"),
         ev("2026-07-08T00:20:00", "delegated", agent="critic", model="opus",
-           task_id="t-001", category="review", notes="n"),  # critic-вход по открытой/закрытой задаче
+           task_id="t-001", category="review", notes="n"),  # critic-entry on an open/closed task
     ])
     report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
     dups = report["duplicate_delegates"]
     assert len(dups) == 1
-    assert dups[0]["branch"] == "critic-вход"
+    assert dups[0]["branch"] == "critic-entry"
 
 
 def test_duplicate_delegate_continuation_after_rejected(tmp_path):
@@ -160,7 +161,7 @@ def test_duplicate_delegate_continuation_after_rejected(tmp_path):
         ev("2026-07-08T00:10:00", "rejected", agent="builder", model="sonnet",
            task_id="t-001", attempt=1, failure_class="spec", category="implementation", notes="n"),
         ev("2026-07-08T00:20:00", "delegated", agent="builder", model="sonnet",
-           task_id="t-001", category="implementation", notes="n"),  # continuation, тот же ярус
+           task_id="t-001", category="implementation", notes="n"),  # continuation, same tier
     ])
     report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
     dups = report["duplicate_delegates"]
@@ -187,7 +188,7 @@ def test_duplicate_delegate_retry_attempt_2(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# 7. ts-немонотонность
+# 7. ts non-monotonicity
 # ---------------------------------------------------------------------
 def test_ts_non_monotonic_detected(tmp_path):
     p = tmp_path / "j.jsonl"
@@ -195,7 +196,7 @@ def test_ts_non_monotonic_detected(tmp_path):
         ev("2026-07-08T10:00:00", "delegated", agent="scout", model="haiku",
            task_id="t-001", category="recon", notes="n"),
         ev("2026-07-08T09:00:00", "accepted", agent="scout", model="haiku",
-           task_id="t-001", category="recon", notes="n"),  # раньше предыдущей строки
+           task_id="t-001", category="recon", notes="n"),  # earlier than the previous line
     ])
     report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
     assert len(report["ts_anomalies"]) == 1
@@ -203,7 +204,7 @@ def test_ts_non_monotonic_detected(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# 8. непарсящаяся строка
+# 8. unparsable line
 # ---------------------------------------------------------------------
 def test_unparsable_line_reported(tmp_path):
     p = tmp_path / "j.jsonl"
@@ -217,7 +218,7 @@ def test_unparsable_line_reported(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# 9. AO3-формат с пробелами после двоеточий
+# 9. the spaced-JSON format (spaces after colons)
 # ---------------------------------------------------------------------
 def test_ao3_format_with_spaces_parses(tmp_path):
     p = tmp_path / "j.jsonl"
@@ -231,7 +232,7 @@ def test_ao3_format_with_spaces_parses(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# 10. окно-фильтр
+# 10. window filter
 # ---------------------------------------------------------------------
 def test_window_filter_excludes_outside_events(tmp_path):
     p = tmp_path / "j.jsonl"
@@ -251,17 +252,18 @@ def test_window_filter_excludes_outside_events(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# 11. legacy-секция до-D-0053
+# 11. legacy section, pre-typed-fields-schema
 # ---------------------------------------------------------------------
 def test_legacy_events_before_d0053_not_counted_as_violation(tmp_path):
     p = tmp_path / "j.jsonl"
     write_journal(p, [
-        # до LEGACY_CUTOFF (2026-07-08T20:00:00), rejected без failure_class -- legacy
+        # before LEGACY_CUTOFF (2026-07-08T20:00:00), rejected with no
+        # failure_class -- legacy
         ev("2026-07-08T10:00:00", "delegated", agent="builder", model="sonnet",
            task_id="t-001", category="implementation", notes="n"),
         ev("2026-07-08T10:10:00", "rejected", agent="builder", model="sonnet",
            task_id="t-001", attempt=1, category="implementation", notes="n"),
-        # после LEGACY_CUTOFF, тот же дефект -- настоящее нарушение
+        # after LEGACY_CUTOFF, the same defect -- a real violation
         ev("2026-07-09T10:00:00", "delegated", agent="builder", model="sonnet",
            task_id="t-002", category="implementation", notes="n"),
         ev("2026-07-09T10:10:00", "rejected", agent="builder", model="sonnet",
@@ -276,7 +278,7 @@ def test_legacy_events_before_d0053_not_counted_as_violation(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# smoke-тест CLI
+# CLI smoke test
 # ---------------------------------------------------------------------
 def test_cli_json_smoke(tmp_path):
     p = tmp_path / "j.jsonl"
@@ -287,7 +289,8 @@ def test_cli_json_smoke(tmp_path):
         ev("2026-07-08T01:10:00", "accepted", agent="scout", model="haiku",
            task_id="t-001", category="recon", notes="n"),
     ])
-    # прямой вызов модульного main() надёжнее subprocess (не завязан на cwd/PYTHONPATH)
+    # a direct call to the module's main() is more reliable than subprocess
+    # (not tied to cwd/PYTHONPATH)
     import io
     import contextlib
 
@@ -329,9 +332,10 @@ def test_cli_missing_file_exit_2(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# Синхронизация схемных констант с journal_validator (critic t-040,
-# находка 1): обе копии кодируют ОДНУ схему D-0053 (гейт на записи,
-# счётчик на чтении); молчаливое расхождение тихо уводит счёт калибровки.
+# Schema constants stay in sync with journal_validator (a prior review
+# finding): both copies encode the SAME typed-fields schema (a gate on
+# write, a counter on read); a silent divergence would quietly skew the
+# calibration count.
 # ---------------------------------------------------------------------
 def test_schema_constants_match_journal_validator():
     import journal_validator as jv
@@ -342,9 +346,10 @@ def test_schema_constants_match_journal_validator():
 
 
 # ---------------------------------------------------------------------
-# Ветка other (critic t-040, находка 2): повторный delegated ПОСЛЕ
-# escalated без attempt (живой прецедент OS line 98, t-015) -> честный
-# catch-all, surfaced в отчёт с prior_status для вердикта Lead.
+# The "other" branch (a prior review finding): a repeated delegated
+# AFTER escalated with no attempt (a live precedent) -> an honest
+# catch-all, surfaced in the report with prior_status for a human
+# verdict.
 # ---------------------------------------------------------------------
 def test_duplicate_delegate_after_escalated_without_attempt_is_other(tmp_path):
     p = tmp_path / "j.jsonl"
@@ -358,7 +363,7 @@ def test_duplicate_delegate_after_escalated_without_attempt_is_other(tmp_path):
         ev("2026-07-09T01:20:00", "escalated", agent="scout", model="m",
            task_id="t-001", category="recon", notes="n"),
         ev("2026-07-09T01:30:00", "delegated", agent="scout", model="m",
-           task_id="t-001", category="recon", notes="attempt 3 без поля attempt"),
+           task_id="t-001", category="recon", notes="attempt 3 with no attempt field"),
     ])
     report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
     other = [d for d in report["duplicate_delegates"] if d["branch"] == "other"]
@@ -368,7 +373,7 @@ def test_duplicate_delegate_after_escalated_without_attempt_is_other(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# Чек 13б: false-accept rate по ярусам (critic t-040, находка 3).
+# False-accept rate by tier (a prior review finding).
 # ---------------------------------------------------------------------
 def test_false_accept_rate_per_agent(tmp_path):
     p = tmp_path / "j.jsonl"
@@ -390,7 +395,7 @@ def test_false_accept_rate_per_agent(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# Чек 5 (журнальная сторона): пары деградации — closed и незакрытый хвост.
+# Degradation pairs (journal side): a closed pair and an unclosed tail.
 # ---------------------------------------------------------------------
 def test_degradation_pairs_closed_and_open_tail(tmp_path):
     p = tmp_path / "j.jsonl"
@@ -398,7 +403,7 @@ def test_degradation_pairs_closed_and_open_tail(tmp_path):
         ev("2026-07-09T01:00:00", "lead_degraded", agent="lead", model="opus",
            category="degradation", notes="switch down"),
         ev("2026-07-09T02:00:00", "lead_restored", agent="lead", model="fable",
-           category="degradation", notes="разбор окна: пусто"),
+           category="degradation", notes="window review: empty"),
         ev("2026-07-09T03:00:00", "lead_degraded", agent="lead", model="sonnet",
            category="degradation", notes="switch down again"),
     ])
@@ -408,11 +413,11 @@ def test_degradation_pairs_closed_and_open_tail(tmp_path):
     assert pairs[0]["note"] == "closed"
     assert pairs[0]["restored_line"] == 2
     assert pairs[1]["restored_line"] is None
-    assert "НЕЗАКРЫТА" in pairs[1]["note"]
+    assert "NOT CLOSED" in pairs[1]["note"]
 
 
 # ---------------------------------------------------------------------
-# Чек 13г: распределение rejected по failure_class x agent x model.
+# rejected distribution by failure_class x agent x model.
 # ---------------------------------------------------------------------
 def test_rejected_distribution_grouping(tmp_path):
     p = tmp_path / "j.jsonl"
@@ -433,7 +438,7 @@ def test_rejected_distribution_grouping(tmp_path):
 
 
 # ---------------------------------------------------------------------
-# Незакрытые задачи: последний lifecycle-эвент delegated -> в списке.
+# Unclosed tasks: last lifecycle event is delegated -> listed.
 # ---------------------------------------------------------------------
 def test_unclosed_tasks_listed(tmp_path):
     p = tmp_path / "j.jsonl"

@@ -1,34 +1,32 @@
-"""SessionStart hook: "reality in the background" (t-027, F-30 layer 2)
-plus the t-043 (B3 remainder) extension -- two more measured facts a
-fresh session should not have to ask about before trusting its own boot
-picture:
+"""SessionStart hook: surfaces "reality in the background" -- a few
+measured facts a fresh session shouldn't have to ask about before
+trusting its own boot picture:
 
-- MODEL: which tier is this session actually running on (D-0056a: the
-  in-session self-check of D-0056/D-0058's tier matrix needs a measured
-  input, not the session narrating its own model name).
-- BOOT BUDGET: how big is the boot path right now, against the D-0068
-  WARN/BREACH thresholds, without waiting for a weekly calibration run
-  or a manual `wc -c` to notice a slow creep.
+- MODEL: which tier is this session actually running on (a measured
+  input for the in-session tier-check, not the session narrating its
+  own model name).
+- BOOT BUDGET: how big is the boot path right now, against WARN/BREACH
+  thresholds, without waiting for a weekly calibration run or a manual
+  byte count to notice a slow creep.
 
-Built as a draft (session_context_b3.py) per D-0069 -- a SessionStart
-hook registered in .claude/settings.json is a self-activating
-enforcement file, so the builder delivered it under a sibling name and
-Lead placed it on this path at acceptance (t-043; critic input: REWORK
-on stdin sanitization, fixed attempt 2).
+A SessionStart hook registered in .claude/settings.json is a
+self-activating enforcement file: it was delivered under a sibling
+filename and placed on this live path only at review/acceptance time,
+not by whoever wrote it.
 
-Hard constraints inherited from t-027 (all still load-bearing, all
-still true here):
+Hard constraints (all load-bearing):
 - NEVER breaks session start: any exception anywhere below collapses to
   ONE line, 'session-context warning: ...', and exit 0 (fail-open).
   main() is the single try/except boundary -- see its docstring for why
   a per-section try/except was deliberately NOT used.
-- Fast (<2s) and NO network at all (the NOW line's whole point is
-  anti-F-29: read the system clock, not a narrated/inferred time).
-- ASCII-safe output: this environment's console is cp1251. Every line
+- Fast (<2s) and NO network at all (the NOW line's whole point is to
+  guard against a narrative-future timestamp: read the system clock,
+  not a narrated/inferred time).
+- ASCII-safe output: some consoles run a non-UTF8 codepage. Every line
   built here is plain ASCII -- including the one line built from a
   NON-hardcoded source (MODEL from stdin), which goes through
-  _ascii_sanitize (critic t-043 blocker: unsanitized stdin could break
-  this invariant, inject lines past MAX_LINES, or crash print mid-flush).
+  _ascii_sanitize (unsanitized stdin could break this invariant, inject
+  lines past MAX_LINES, or crash print mid-flush).
 - <=25 lines total (MAX_LINES).
 - Reading stdin must never block: only attempted when stdin is not a
   TTY (a manual `python tools/session_context.py` run from an
@@ -171,7 +169,8 @@ def last_calibration_line(events: list, now: datetime.datetime = None) -> str:
 def gemini_aliases(config: dict) -> list:
     """Gateway aliases whose RAW litellm_params.model starts with
     'gemini/' -- Gemini free tier limits per-model requests/day, not
-    tokens (spec: "лимиты не хардкодить, просто 'requests last 24h: N'")."""
+    tokens (spec: don't hardcode the limit, just report
+    'requests last 24h: N')."""
     aliases = []
     for entry in config.get("model_list", []) or []:
         raw_model = (entry.get("litellm_params") or {}).get("model", "")
@@ -361,7 +360,7 @@ def boot_budget_lines(root: Path) -> list:
     missing_suffix = "".join(f" [missing: {name}]" for name in missing)
 
     if total > BOOT_BREACH_THRESHOLD:
-        status_suffix = " BREACH -> run boot-diet skill (D-0068)"
+        status_suffix = " BREACH -> run boot-diet skill"
     elif total > BOOT_WARN_THRESHOLD:
         status_suffix = " WARN"
     else:
@@ -402,8 +401,8 @@ def build_context_lines(
 
 
 def main(root: Path = None) -> int:
-    """The ONE try/except boundary for the whole script (spec: 'НИКОГДА
-    не падает -> одна строка -> exit 0'). Deliberately not per-section:
+    """The ONE try/except boundary for the whole script (spec: NEVER
+    crashes -> one line -> exit 0). Deliberately not per-section:
     a partially-built context (e.g. journal read fine, quota lookup
     half-crashed) is a worse failure mode than no context at all --
     a session trusting a half-populated 'reality' block is exactly the

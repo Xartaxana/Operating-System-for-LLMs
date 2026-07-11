@@ -61,9 +61,7 @@ duplicated here.
 Failure detector (CLAUDE.md rule 10, clause (c)): this command only
 orders existing mechanisms — its output (journal events, commits,
 CURRENT_CONTEXT) is what your weekly calibration's journal-completeness
-and commit-discipline checks audit (WEEKLY_CALIBRATION_PROTOCOL.md,
-checks 1/3/6/13 in this template's numbering — reconcile once that
-protocol is translated for your deployment); picking a task against
-priority shows up in the next session's Boot Report as a mismatch
-between the recorded Current Task and the actual commits
-(single-current-task rule).
+and commit-discipline checks audit (see PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md
+checks 1/3/6/13); picking a task against priority shows up in the next
+session's Boot Report as a mismatch between the recorded Current Task
+and the actual commits (single-current-task rule).

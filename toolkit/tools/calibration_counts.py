@@ -1,22 +1,25 @@
-"""Счётный скрипт чеков 3/13 еженедельной калибровки + A4 (правило 6) --
-t-040. Снимает ручной подсчёт журнальных счётчиков с внимания ИИ
-(D-0063): детерминированно решаемое (счёт, группировка, позиция в
-файле) -- в код; ВЕРДИКТЫ (нарушение это или нет, например "тред
-явно продолжен другим task_id" у t-012) остаются за Lead. Скрипт
-печатает КАНДИДАТОВ, не приговоры.
+"""Counting script for the weekly calibration's field-completeness and
+duplicate-task checks, plus the rejected/escalated pairing check. Takes
+manual counting of journal counters off the reviewer's plate:
+deterministically decidable work (counting, grouping, position in the
+file) goes into code; VERDICTS (is this actually a violation, e.g. "the
+thread was explicitly continued under a different task_id") stay with
+the human reviewer. The script prints CANDIDATES, not verdicts.
 
-Работает с ОБОИМИ форматами журнала маршрутизации:
-  - OS  (D:\\...\\logs/routing-log.jsonl): JSON без пробелов, task_id t-NNN.
-  - AO3 (D:\\AO3_tests\\logs/routing-log.jsonl): JSON С ПРОБЕЛАМИ после
-    двоеточий, описательные task_id (at-bug-004 и т.п.).
+Works with EITHER routing-journal formatting style:
+  - compact JSON, no spaces after colons, task_id format t-NNN;
+  - JSON WITH SPACES after colons, descriptive task_id strings (e.g.
+    a slug like "at-bug-004").
 
-Парсинг -- ТОЛЬКО json.loads построчно (урок первой калибровки: grep по
-AO3-формату дал ложный пустой результат из-за пробелов после ':'; при
-парсинге json.loads пробелы не имеют значения). Непарсящаяся строка --
-кандидат-нарушение в отчёте, не молчаливый skip.
+Parsing is json.loads, line by line, ONLY (a lesson from an earlier
+calibration run: grepping the spaced-JSON format gave a false empty
+result because of the spaces after ':'; json.loads doesn't care about
+whitespace). A line that fails to parse is a candidate violation in the
+report, never a silent skip.
 
-Exit code 0 всегда, кроме ошибок IO/аргументов -- скрипт измеритель, не
-гейт (в отличие от tools/journal_validator.py, который блокирует коммит).
+Exit code is always 0, except for IO/argument errors -- this script is
+a measurement tool, not a gate (unlike tools/journal_validator.py,
+which blocks the commit).
 
 CLI:
     python tools/calibration_counts.py --journal PATH [--journal PATH ...]
@@ -30,16 +33,17 @@ import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-try:  # безопасность вывода на Windows-консолях с не-UTF8 codepage
+try:  # keep output safe on Windows consoles with a non-UTF8 codepage
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except AttributeError:
     pass
 
 DEFAULT_BY_SINCE = "2026-07-10T13:14:00"
-# До-D-0053 эпоха OS-журнала (см. CLAUDE.md "Журнал маршрутизации" и
-# WEEKLY_CALIBRATION_PROTOCOL чек 13): события со ts раньше этой границы
-# читаются вручную, append-only, не в счёте кандидатов чека 3.
+# Pre-typed-fields-schema era of the journal (see CLAUDE.md's "Routing
+# log" section and the weekly calibration protocol's field-completeness
+# check): events with a ts earlier than this cutoff are read manually,
+# append-only, and excluded from the field-completeness candidate count.
 LEGACY_CUTOFF = "2026-07-08T20:00:00"
 
 MODEL_REQUIRED_EVENTS = {"delegated", "escalated", "accepted", "rejected"}
@@ -50,9 +54,9 @@ ALWAYS_REQUIRED_FIELDS = ("agent", "category", "notes")
 
 
 def parse_ts(ts: Optional[str]) -> Optional[datetime]:
-    """Разбор ts. Возвращает None, если поле отсутствует/не строка/не
-    парсится как ISO -- вызывающий код решает, что делать (кандидат
-    "нет ts", не крэш)."""
+    """Parses ts. Returns None if the field is missing/not a
+    string/doesn't parse as ISO -- the caller decides what to do (a
+    "no ts" candidate, not a crash)."""
     if not isinstance(ts, str) or not ts:
         return None
     try:
@@ -83,20 +87,21 @@ def load_journal(path: str) -> List[ParsedLine]:
             try:
                 data = json.loads(stripped)
                 if not isinstance(data, dict):
-                    lines.append(ParsedLine(i, stripped, None, "не JSON-объект (не dict)"))
+                    lines.append(ParsedLine(i, stripped, None, "not a JSON object (not a dict)"))
                     continue
             except json.JSONDecodeError as exc:
-                lines.append(ParsedLine(i, stripped, None, f"невалидный JSON: {exc}"))
+                lines.append(ParsedLine(i, stripped, None, f"invalid JSON: {exc}"))
                 continue
             lines.append(ParsedLine(i, stripped, data))
     return lines
 
 
 def _in_window(pl: ParsedLine, start: Optional[datetime], end: Optional[datetime]) -> bool:
-    """Событие без парсящегося ts не исключается окном (нет данных для
-    решения) -- считается "в окне"; отсутствие ts само по себе не
-    проверяется этим скриптом отдельным чеком (ts обязателен структурно
-    в журнале с первой строки, задача не просила это отдельно считать)."""
+    """An event with no parseable ts is not excluded by the window
+    (there's no data to decide on) -- it counts as "in window";
+    a missing ts is not itself checked separately by this script (ts
+    is structurally required in the journal from the first line, and
+    counting that separately was not part of this script's brief)."""
     if pl.ts is None:
         return True
     if start is not None and pl.ts < start:
@@ -118,22 +123,23 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
 
     legacy_cutoff_dt = parse_ts(LEGACY_CUTOFF)
 
-    # --- 1. Счёт по типам событий и по ярусам (agent x event) ---
+    # --- 1. Counts by event type and by tier (agent x event) ---
     by_event: Dict[str, int] = {}
     by_agent_event: Dict[str, Dict[str, int]] = {}
     for pl in in_window:
-        ev = pl.data.get("event", "<нет>")
+        ev = pl.data.get("event", "<none>")
         by_event[ev] = by_event.get(ev, 0) + 1
         agent = pl.data.get("agent")
         if isinstance(agent, str) and agent:
             by_agent_event.setdefault(agent, {})
             by_agent_event[agent][ev] = by_agent_event[agent].get(ev, 0) + 1
 
-    # --- 2. Чек 3 / A4 (правило 6): rule-6 кандидаты ---
-    # Группировка rejected по (task_id, agent) среди событий В ОКНЕ;
-    # >=2 rejected -> ищем escalated с тем же task_id ПОЗЖЕ 2-й rejected
-    # ПО ПОЗИЦИИ В ФАЙЛЕ (среди ВСЕХ распарсенных строк, не только окна --
-    # эскалация могла лечь за границей окна).
+    # --- 2. Escalation-pairing check: rule-6 candidates ---
+    # Group rejected by (task_id, agent) among events IN WINDOW;
+    # >=2 rejected -> look for an escalated with the same task_id LATER
+    # than the 2nd rejected BY POSITION IN THE FILE (among ALL parsed
+    # lines, not just the window -- the escalation could sit outside
+    # the window's boundary).
     rejected_groups: Dict[Tuple[str, str], List[int]] = {}
     for pl in in_window:
         if pl.data.get("event") != "rejected":
@@ -142,7 +148,7 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
         agent = pl.data.get("agent")
         if not tid:
             continue
-        key = (tid, agent if isinstance(agent, str) else "<нет>")
+        key = (tid, agent if isinstance(agent, str) else "<none>")
         rejected_groups.setdefault(key, []).append(pl.line_no)
 
     escalated_by_task: Dict[str, List[int]] = {}
@@ -164,13 +170,14 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
                 "agent": agent,
                 "rejected_lines": sorted(line_nos),
                 "note": (
-                    "кандидат; escalated с этим task_id после 2-й rejected не найден "
-                    "(по позиции в файле). Ветка closed/superseded (тред продолжен другим "
-                    "task_id) -- вердикт Lead, скрипту это не решить."
+                    "candidate; no escalated with this task_id found after the 2nd "
+                    "rejected (by file position). Could be closed/superseded (the "
+                    "thread continued under a different task_id) -- a human verdict, "
+                    "not something this script can decide."
                 ),
             })
 
-    # --- 3. Пропуски типизированных полей (D-0053) ---
+    # --- 3. Missing typed fields (typed-fields schema) ---
     field_violations = []
     legacy_events = []
     for pl in in_window:
@@ -220,14 +227,14 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
         else:
             field_violations.append(entry)
 
-    # --- 4. by-пропуски относительно --by-since ---
+    # --- 4. Missing 'by' relative to --by-since ---
     by_violations = []
     for pl in in_window:
         ev = pl.data.get("event")
         if ev not in ("accepted", "rejected"):
             continue
         if pl.ts is None or pl.ts < by_since:
-            continue  # до активации валидатора -- легально
+            continue  # before the validator was activated -- legal
         by_val = pl.data.get("by")
         if not isinstance(by_val, str) or not by_val.strip():
             by_violations.append({
@@ -235,13 +242,13 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
                 "ts": pl.data.get("ts"),
             })
 
-    # --- 5. Целостность task_id: повторные delegated ---
-    # Проходим В ПОРЯДКЕ ФАЙЛА (все distinct-parsed события, не только
-    # окно, чтобы "последний lifecycle-статус" не терял историю до
-    # окна) -- но регистрируем в отчёт только повторы, чьё delegated
-    # само попадает в окно.
-    last_status: Dict[str, str] = {}          # task_id -> event яруса lifecycle
-    seen_delegated: Dict[str, bool] = {}      # task_id -> уже видели хоть один delegated
+    # --- 5. task_id integrity: repeated delegated ---
+    # Walk IN FILE ORDER (all distinct-parsed events, not just the
+    # window, so the "last lifecycle status" doesn't lose history from
+    # before the window) -- but only register a repeat in the report
+    # when its own delegated line falls inside the window.
+    last_status: Dict[str, str] = {}          # task_id -> last lifecycle event
+    seen_delegated: Dict[str, bool] = {}      # task_id -> at least one delegated seen
     duplicate_delegates = []
     for pl in parsed_lines:
         d = pl.data
@@ -256,11 +263,11 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
                                 and attempt >= 2)
             prior = last_status.get(tid)
             if seen_delegated.get(tid):
-                # повторный delegated по уже виденному task_id
+                # a repeated delegated on an already-seen task_id
                 if agent == "critic":
-                    branch = "critic-вход"
+                    branch = "critic-entry"
                 elif prior == "accepted" and not has_attempt_ge2:
-                    branch = "кандидат-дубль"
+                    branch = "candidate-duplicate"
                 elif prior == "rejected":
                     branch = "continuation"
                 elif has_attempt_ge2:
@@ -276,10 +283,11 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
             last_status[tid] = "delegated"
         elif ev in ("accepted", "rejected", "escalated"):
             last_status[tid] = ev
-        # defect_found не двигает lifecycle-статус исходной задачи (у него
-        # свой task_id новой находки; ref указывает на исходную).
+        # defect_found does not move the original task's lifecycle status
+        # (it has its own task_id for the new finding; ref points back
+        # to the original).
 
-    # --- 6. ts-монотонность ---
+    # --- 6. ts monotonicity ---
     ts_anomalies = []
     prev_ts = None
     prev_line = None
@@ -294,7 +302,7 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
         prev_ts = pl.ts
         prev_line = pl.line_no
 
-    # --- 7. Чек 13б: false-accept rate по ярусам ---
+    # --- 7. False-accept rate by tier ---
     defect_by_agent: Dict[str, int] = {}
     accepted_by_agent: Dict[str, int] = {}
     for pl in in_window:
@@ -313,18 +321,18 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
         rate = (d_count / a_count) if a_count else None
         false_accept[agent] = {"defect_found": d_count, "accepted": a_count, "rate": rate}
 
-    # --- 8. Чек 13г: rejected по failure_class x agent x model ---
+    # --- 8. rejected distribution by failure_class x agent x model ---
     rejected_distribution: Dict[Tuple[str, str, str], int] = {}
     for pl in in_window:
         if pl.data.get("event") != "rejected":
             continue
-        fc = pl.data.get("failure_class", "<нет>")
-        agent = pl.data.get("agent", "<нет>")
-        model = pl.data.get("model", "<нет>")
+        fc = pl.data.get("failure_class", "<none>")
+        agent = pl.data.get("agent", "<none>")
+        model = pl.data.get("model", "<none>")
         key = (fc, agent, model)
         rejected_distribution[key] = rejected_distribution.get(key, 0) + 1
 
-    # --- 9. Деградация (чек 5): пары lead_degraded/lead_restored ---
+    # --- 9. Degradation: lead_degraded/lead_restored pairs ---
     degradation_pairs = []
     open_degraded = None
     for pl in in_window:
@@ -334,7 +342,7 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
                 degradation_pairs.append({
                     "degraded_line": open_degraded["line"], "degraded_ts": open_degraded["ts"],
                     "restored_line": None, "restored_ts": None,
-                    "note": "не закрыта следующей lead_degraded (ещё одна degraded раньше restored)",
+                    "note": "not closed by a following lead_degraded (another degraded before a restored)",
                 })
             open_degraded = {"line": pl.line_no, "ts": pl.data.get("ts")}
         elif ev == "lead_restored":
@@ -349,17 +357,17 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
                 degradation_pairs.append({
                     "degraded_line": None, "degraded_ts": None,
                     "restored_line": pl.line_no, "restored_ts": pl.data.get("ts"),
-                    "note": "lead_restored без предшествующей lead_degraded в окне",
+                    "note": "lead_restored with no preceding lead_degraded in window",
                 })
     if open_degraded is not None:
         degradation_pairs.append({
             "degraded_line": open_degraded["line"], "degraded_ts": open_degraded["ts"],
             "restored_line": None, "restored_ts": None,
-            "note": "НЕЗАКРЫТА до конца окна/файла -- легально, если сессия ещё жива / "
-                    "зафиксировано последним событием",
+            "note": "NOT CLOSED by the end of the window/file -- legal if the session "
+                    "is still alive / recorded as the last event",
         })
 
-    # --- 10. Незакрытые задачи ---
+    # --- 10. Unclosed tasks ---
     unclosed_tasks = []
     for tid, status in last_status.items():
         if status == "delegated":
@@ -395,96 +403,96 @@ def _fmt_section(title: str) -> str:
 
 def render_text(report: Dict[str, Any]) -> str:
     out = []
-    out.append(f"# Журнал: {report['journal']}")
-    out.append(f"Строк всего: {report['total_lines']}; распарсено: {report['parsed_lines']}; "
-               f"в окне: {report['in_window_count']}")
+    out.append(f"# Journal: {report['journal']}")
+    out.append(f"Total lines: {report['total_lines']}; parsed: {report['parsed_lines']}; "
+               f"in window: {report['in_window_count']}")
 
-    out.append(_fmt_section("Непарсящиеся строки (кандидат-нарушение)"))
+    out.append(_fmt_section("Unparsable lines (candidate violation)"))
     if report["unparsable"]:
         for u in report["unparsable"]:
             out.append(f"  line {u['line']}: {u['error']}")
     else:
-        out.append("  (нет)")
+        out.append("  (none)")
 
-    out.append(_fmt_section("Счёт по типам событий"))
+    out.append(_fmt_section("Counts by event type"))
     for ev, c in sorted(report["counts"]["by_event"].items()):
         out.append(f"  {ev}: {c}")
 
-    out.append(_fmt_section("Счёт по ярусам x событиям (agent x event)"))
+    out.append(_fmt_section("Counts by tier x event (agent x event)"))
     for agent, evs in sorted(report["counts"]["by_agent_event"].items()):
         out.append(f"  {agent}: " + ", ".join(f"{ev}={c}" for ev, c in sorted(evs.items())))
 
-    out.append(_fmt_section("Rule-6 / A4 кандидаты (пара rejected без escalated)"))
+    out.append(_fmt_section("Escalation-pairing candidates (a rejected pair with no escalated)"))
     if report["rule6_candidates"]:
         for c in report["rule6_candidates"]:
             out.append(f"  task_id={c['task_id']} agent={c['agent']} "
                        f"rejected_lines={c['rejected_lines']} -- {c['note']}")
     else:
-        out.append("  (нет кандидатов)")
+        out.append("  (no candidates)")
 
-    out.append(_fmt_section("Пропуски типизированных полей (кандидат-нарушение, пост-legacy)"))
+    out.append(_fmt_section("Missing typed fields (candidate violation, post-legacy)"))
     if report["field_violations"]:
         for v in report["field_violations"]:
             out.append(f"  line {v['line']} event={v['event']} task_id={v['task_id']}: "
-                       f"отсутствуют {v['missing_fields']}")
+                       f"missing {v['missing_fields']}")
     else:
-        out.append("  (нет)")
+        out.append("  (none)")
 
-    out.append(_fmt_section(f"Legacy (ts < {LEGACY_CUTOFF}, не нарушения)"))
-    out.append(f"  {len(report['legacy_events'])} событие(й) с пропусками полей до D-0053-эпохи")
+    out.append(_fmt_section(f"Legacy (ts < {LEGACY_CUTOFF}, not violations)"))
+    out.append(f"  {len(report['legacy_events'])} event(s) with missing fields, pre-dating the typed-fields schema")
 
-    out.append(_fmt_section("by-пропуски (post by-since)"))
+    out.append(_fmt_section("Missing 'by' (post by-since)"))
     if report["by_violations"]:
         for v in report["by_violations"]:
             out.append(f"  line {v['line']} event={v['event']} task_id={v['task_id']} ts={v['ts']}")
     else:
-        out.append("  (нет)")
+        out.append("  (none)")
 
-    out.append(_fmt_section("Повторные delegated по task_id (классификация ветки)"))
+    out.append(_fmt_section("Repeated delegated by task_id (branch classification)"))
     if report["duplicate_delegates"]:
         for v in report["duplicate_delegates"]:
-            note = (" (аномальный повтор вне канонических веток -- вердикт Lead)"
+            note = (" (anomalous repeat outside the canonical branches -- needs a human verdict)"
                     if v["branch"] == "other" else "")
             out.append(f"  line {v['line']} task_id={v['task_id']} agent={v['agent']} "
                        f"attempt={v['attempt']} prior_status={v['prior_status']} "
                        f"-> {v['branch']}{note}")
     else:
-        out.append("  (нет повторов)")
+        out.append("  (no repeats)")
 
-    out.append(_fmt_section("ts-аномалии (информационно, известные классы F-23/F-29)"))
+    out.append(_fmt_section("ts anomalies (informational, known non-monotonic-clock classes)"))
     if report["ts_anomalies"]:
         for a in report["ts_anomalies"]:
             out.append(f"  line {a['line']} ts={a['ts']} < line {a['prev_line']} "
                        f"prev_ts={a['prev_ts']}")
     else:
-        out.append("  (нет)")
+        out.append("  (none)")
 
-    out.append(_fmt_section("False-accept rate по ярусам (чек 13б)"))
+    out.append(_fmt_section("False-accept rate by tier"))
     for agent, fa in sorted(report["false_accept"].items()):
-        rate_s = f"{fa['rate']:.4f}" if fa["rate"] is not None else "н/д (accepted=0)"
+        rate_s = f"{fa['rate']:.4f}" if fa["rate"] is not None else "n/a (accepted=0)"
         out.append(f"  {agent}: defect_found={fa['defect_found']} / accepted={fa['accepted']} "
                    f"= {rate_s}")
 
-    out.append(_fmt_section("Rejected по failure_class x agent x model (чек 13г)"))
+    out.append(_fmt_section("Rejected by failure_class x agent x model"))
     if report["rejected_distribution"]:
         for r in report["rejected_distribution"]:
             out.append(f"  {r['failure_class']} / {r['agent']} / {r['model']}: {r['count']}")
     else:
-        out.append("  (нет rejected в окне)")
+        out.append("  (no rejected in window)")
 
-    out.append(_fmt_section("Пары деградации lead_degraded/lead_restored (чек 5)"))
+    out.append(_fmt_section("lead_degraded/lead_restored pairs"))
     if report["degradation_pairs"]:
         for p in report["degradation_pairs"]:
             out.append(f"  degraded(line={p['degraded_line']}, ts={p['degraded_ts']}) -> "
                        f"restored(line={p['restored_line']}, ts={p['restored_ts']}): {p['note']}")
     else:
-        out.append("  (нет событий деградации в окне)")
+        out.append("  (no degradation events in window)")
 
-    out.append(_fmt_section("Незакрытые задачи (последний lifecycle-эвент = delegated)"))
+    out.append(_fmt_section("Unclosed tasks (last lifecycle event = delegated)"))
     if report["unclosed_tasks"]:
         out.append("  " + ", ".join(report["unclosed_tasks"]))
     else:
-        out.append("  (нет)")
+        out.append("  (none)")
 
     return "\n".join(out)
 
@@ -492,13 +500,13 @@ def render_text(report: Dict[str, Any]) -> str:
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else "")
     p.add_argument("--journal", action="append", required=True,
-                    help="путь к routing-log.jsonl (можно повторять)")
-    p.add_argument("--window-start", default=None, help="ISO ts, включительно (>=)")
-    p.add_argument("--window-end", default=None, help="ISO ts, исключительно (<)")
+                    help="path to routing-log.jsonl (repeatable)")
+    p.add_argument("--window-start", default=None, help="ISO ts, inclusive (>=)")
+    p.add_argument("--window-end", default=None, help="ISO ts, exclusive (<)")
     p.add_argument("--by-since", default=DEFAULT_BY_SINCE,
-                    help="момент активации валидатора D-0069 (по умолчанию "
+                    help="when the 'by'-field validator was activated (default "
                          f"{DEFAULT_BY_SINCE})")
-    p.add_argument("--json", action="store_true", help="машиночитаемый вывод")
+    p.add_argument("--json", action="store_true", help="machine-readable output")
     return p.parse_args(argv)
 
 
@@ -507,17 +515,17 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     window_start = parse_ts(args.window_start) if args.window_start else None
     if args.window_start and window_start is None:
-        print(f"calibration_counts: невалидный --window-start {args.window_start!r}",
+        print(f"calibration_counts: invalid --window-start {args.window_start!r}",
               file=sys.stderr)
         return 2
     window_end = parse_ts(args.window_end) if args.window_end else None
     if args.window_end and window_end is None:
-        print(f"calibration_counts: невалидный --window-end {args.window_end!r}",
+        print(f"calibration_counts: invalid --window-end {args.window_end!r}",
               file=sys.stderr)
         return 2
     by_since = parse_ts(args.by_since)
     if by_since is None:
-        print(f"calibration_counts: невалидный --by-since {args.by_since!r}", file=sys.stderr)
+        print(f"calibration_counts: invalid --by-since {args.by_since!r}", file=sys.stderr)
         return 2
 
     reports = []
@@ -525,7 +533,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             reports.append(analyze_journal(path, window_start, window_end, by_since))
         except OSError as exc:
-            print(f"calibration_counts: не удалось прочитать {path!r}: {exc}", file=sys.stderr)
+            print(f"calibration_counts: failed to read {path!r}: {exc}", file=sys.stderr)
             return 2
 
     if args.json:
@@ -536,7 +544,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(render_text(report))
 
     if len(reports) > 1:
-        print(_fmt_section("СВОДКА по всем журналам"))
+        print(_fmt_section("SUMMARY across all journals"))
         for report in reports:
             n_rule6 = len(report["rule6_candidates"])
             n_field = len(report["field_violations"])

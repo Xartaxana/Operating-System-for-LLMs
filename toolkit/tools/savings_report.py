@@ -1,25 +1,30 @@
 # -*- coding: utf-8 -*-
-"""Экономический разрез обоих контуров для чека 18 еженедельной
-калибровки (заказ оператора 2026-07-11): экономит ли система деньги,
-и каков тренд.
+"""Savings/trend report across both contours for the weekly
+calibration's savings check: is delegation actually saving money, and
+what's the trend.
 
-Считает по cc_usage (субскрипционный контур) и requests (API-контур)
-в gateway/requests.db, полные API-цены (list, без батча; кэш-скидки
-read x0.1 / write x1.25 — реальный API-механизм):
+Computes from cc_usage (the subscription contour) and requests (the
+API contour) in gateway/requests.db, using full API list prices (no
+batch discount; cache discounts read x0.1 / write x1.25 -- a real API
+mechanism):
 
-1. Окна PRE (< --routed-start) и ROUTED (>= --routed-start [.. --until]):
-   ходы, учётная стоимость, $/день, разбивка main/side по моделям.
-2. Контрфакт делегирования: токен-профили routed-сайдчейнов,
-   переоценённые по ценам Fable, против факта — брутто-экономия $ и %.
-3. API-контур: запросы и учётная стоимость по traffic_kind.
+1. PRE (< --routed-start) and ROUTED (>= --routed-start [.. --until])
+   windows: turns, accounted cost, $/day, a main/side breakdown by
+   model.
+2. Delegation counterfactual: token profiles of routed sidechains,
+   re-priced at the top-tier model's rates, against the actual cost --
+   gross savings in $ and %.
+3. API contour: requests and accounted cost by traffic_kind.
 
-Baseline первого замера (2026-07-11, сверка тренда):
-docs/task_reports/2026-07-11_savings-analysis.md. Оговорки метода
-(цензурированный baseline, нераздельность премии координации от
-неделегируемой Lead-работы) записаны там же и остаются в силе.
+The first run's recorded baseline is your first savings/trend report
+-- keep it for comparison against later runs. Method caveats (a
+censored baseline, and that the coordination premium isn't separable
+from non-delegable top-tier work) belong in that same baseline record
+and remain in force.
 
-Цены дублируют tools/usage_report.py PRICES_PER_TOKEN_USD осознанно
-НЕ: импортируются оттуда — единственный владелец цен (ось 2).
+Prices deliberately do NOT duplicate tools/usage_report.py's
+PRICES_PER_TOKEN_USD -- they're imported from there, the single owner
+of pricing.
 """
 import argparse
 import io
@@ -42,7 +47,8 @@ def _cost(model: str, i: int, o: int, cw: int, cr: int):
 
 
 def fable_counterfactual(i: int, o: int, cw: int, cr: int) -> float:
-    """Тот же токен-профиль по ценам Fable — «а если бы это делал Lead»."""
+    """The same token profile priced at the top-tier model's rates --
+    "what if the top tier had done this instead"."""
     return _cost(FABLE_MODEL, i or 0, o or 0, cw or 0, cr or 0)
 
 
@@ -103,28 +109,27 @@ def print_report(db_path: str, routed_start: str, until: str = None) -> None:
             kind = "side" if sc else "main"
             print(f"  {model:28} {kind:4} turns={n:5} sess={sess:3}"
                   f" cost=${cost or 0:9.2f}  $/turn={((cost or 0) / n):.4f}")
-        print(f"  ИТОГО: {w['total_turns']} ходов, ${w['total_cost']:.2f},"
-              f" {w['days']} дней, ${w['per_day']:.2f}/день")
+        print(f"  TOTAL: {w['total_turns']} turns, ${w['total_cost']:.2f},"
+              f" {w['days']} days, ${w['per_day']:.2f}/day")
 
     c = counterfactual_summary(db, "ts >= ?" + until_cond,
                                (routed_start,) + until_params)
-    print("\n===== КОНТРФАКТ: routed-сайдчейны по ценам Fable =====")
+    print("\n===== COUNTERFACTUAL: routed sidechains at the top-tier model's rates =====")
     for d in c["detail"]:
         print(f"  {str(d['agent_type']):16} {d['model']:28} turns={d['turns']:4}"
-              f" факт=${d['actual']:8.2f} по-Fable=${d['as_fable']:8.2f}")
-    print(f"  ИТОГО: факт=${c['actual']:.2f}  по-Fable=${c['as_fable']:.2f}"
-          f"  брутто-экономия=${c['gross_savings']:.2f} ({c['savings_pct']:.0f}%)")
+              f" actual=${d['actual']:8.2f} as-top-tier=${d['as_fable']:8.2f}")
+    print(f"  TOTAL: actual=${c['actual']:.2f}  as-top-tier=${c['as_fable']:.2f}"
+          f"  gross savings=${c['gross_savings']:.2f} ({c['savings_pct']:.0f}%)")
 
     a = api_contour_summary(db)
-    print("\n===== API-КОНТУР (requests.db, вся история) =====")
+    print("\n===== API CONTOUR (requests.db, full history) =====")
     for kind, n, cost in a["kinds"]:
         print(f"  {kind:10} n={n:4} cost=${cost or 0:.4f}")
-    print(f"  ИТОГО: {a['total_n']} запросов, ${a['total_cost']:.4f} учётно")
+    print(f"  TOTAL: {a['total_n']} requests, ${a['total_cost']:.4f} accounted")
 
-    print("\nВ notes события calibrated (чек 18): $/день ROUTED,"
-          " брутто-экономия $ и %, факт сайдчейнов, API-итог;"
-          " сравнить с прошлой точкой (baseline 2026-07-11:"
-          " docs/task_reports/2026-07-11_savings-analysis.md).")
+    print("\nFor the calibrated event's notes: $/day ROUTED, gross"
+          " savings in $ and %, actual sidechain cost, API total;"
+          " compare against your first run's recorded baseline.")
 
 
 def main(argv=None) -> int:
@@ -132,9 +137,9 @@ def main(argv=None) -> int:
     ap.add_argument("--db", default=str(Path(__file__).resolve().parent.parent
                                         / "gateway" / "requests.db"))
     ap.add_argument("--routed-start", default="2026-07-08",
-                    help="граница PRE/ROUTED (деплой роутинга на этом репо)")
+                    help="the PRE/ROUTED boundary (when routing was deployed on this repo)")
     ap.add_argument("--until", default=None,
-                    help="верхняя граница ROUTED-окна (для воспроизводимых срезов)")
+                    help="upper bound of the ROUTED window (for reproducible slices)")
     args = ap.parse_args(argv)
     print_report(args.db, args.routed_start, args.until)
     return 0

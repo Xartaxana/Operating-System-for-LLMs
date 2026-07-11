@@ -24,7 +24,8 @@ verdict, never a self-certified "looks fine."
    `delegation.config.yaml`, runs an entrance exam on each bound
    model, and produces your first Boot Report. A failed exam doesn't
    block you — you get a plain warning and a choice: swap the model,
-   or keep it anyway (recorded, not silent).
+   or keep it anyway (exam failures land in your decision log, not
+   silent).
 4. After that, delegation runs itself. `delegation.config.yaml` holds
    the model bindings; `CLAUDE.md` holds the routing rules themselves.
 

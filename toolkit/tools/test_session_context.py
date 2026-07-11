@@ -402,8 +402,8 @@ def test_model_line_empty_payload():
 # sanitization of the externally-sourced model id ----------------------
 
 
-def test_model_line_cyrillic_model_id_is_sanitized():
-    line = sc.model_line({"model": "клод\nX"})
+def test_model_line_non_ascii_model_id_is_sanitized():
+    line = sc.model_line({"model": "café\nX"})
     assert line.isascii()
     assert "\n" not in line
     assert len(line.splitlines()) == 1
@@ -444,7 +444,7 @@ def test_model_line_long_model_id_is_truncated():
 def test_ascii_sanitize_direct_cases():
     assert sc._ascii_sanitize("   ") == ""
     assert sc._ascii_sanitize("x\nINJECTED FAKE LINE") == "xINJECTED FAKE LINE"
-    assert sc._ascii_sanitize("клодX").isascii()
+    assert sc._ascii_sanitize("caféX").isascii()
     assert sc._ascii_sanitize("a" * 200, max_len=80) == "a" * 80
 
 
@@ -561,7 +561,7 @@ def test_boot_budget_breach_includes_hint_and_top3(tmp_path):
     total = 60000 + 30000 + 20000 + 100
     assert total > sc.BOOT_BREACH_THRESHOLD
     assert lines[0] == (
-        f"BOOT BUDGET: {total} bytes / 100000 (4 files) BREACH -> run boot-diet skill (D-0068)"
+        f"BOOT BUDGET: {total} bytes / 100000 (4 files) BREACH -> run boot-diet skill"
     )
     assert lines[1] == "  60000  README.md"
     assert lines[2] == "  30000  PROJECT_CHARTER.md"
@@ -630,7 +630,7 @@ def test_build_context_lines_malicious_stdin_payload_stays_ascii_single_line(tmp
     )
     now = datetime.datetime(2026, 7, 11, 9, 0, 0)
     lines = sc.build_context_lines(
-        root, now, stdin_payload={"model": "клод\nX\U0001F600" + ("y" * 200)}
+        root, now, stdin_payload={"model": "café\nX\U0001F600" + ("y" * 200)}
     )
     for line in lines:
         assert line.isascii()

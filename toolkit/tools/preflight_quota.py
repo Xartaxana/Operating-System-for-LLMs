@@ -23,7 +23,7 @@ logged as provider_model "openai/gpt-oss-120b"; "groq/llama-3.3-70b-
 versatile" as "llama-3.3-70b-versatile"; "gemini/gemini-3.5-flash" as
 "gemini-3.5-flash"; "anthropic/claude-fable-5" (the "mock" alias) as
 "claude-fable-5". This is a real spec/reality discrepancy from the
-spec text's "provider_model совпадает с provider_model заданного
+spec text's "provider_model matches the provider_model of the given
 --alias" reading of litellm_params.model verbatim -- normalize_provider_model()
 below is the fix (strip the first path segment before comparing).
 
@@ -100,7 +100,7 @@ class QuotaDatabaseLockedError(RuntimeError):
     db) rather than have the caller's uncaught traceback stand in for
     an error message, and rather than silently dropping that db's
     usage out of the sum -- a quiet drop would understate real quota
-    burn exactly like a silent $0 would (same class as Ось 2's
+    burn exactly like a silent $0 would (same class as the sibling
     'no silent $0' rule)."""
 
     def __init__(self, db_name: str):

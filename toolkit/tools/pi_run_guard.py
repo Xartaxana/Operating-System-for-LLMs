@@ -1,46 +1,30 @@
-"""Deterministic zero-tool-call fabrication guard for Pi workers (t-017,
-CURRENT_CONTEXT.md item A0/A1 queue, F-14 class).
+"""Deterministic zero-tool-call fabrication guard for non-Claude
+("Pi") workers -- the zero-tool-call fabrication class.
 
-F-14: a candidate model answers a scout-style prompt with zero REAL tool
-calls while producing a confident, detailed, entirely fabricated answer
-(t-011, then t-016 on a hardened profile: qwen3:4b answered all 7 golden
-questions AND fabricated a "Trail" section citing nonexistent files --
-Makefile, monitoring/cron_checks.py, model_configs/D-0035.yaml,
-routing_log_schema.py -- see gateway/t013.db row 96 and
-gateway/requests.db row 257, both reproduced below). This script is the
-"post-run check of a Pi worker transcript/requests.db" item from
-CURRENT_CONTEXT.md's D-0025 queue: stamp PASS/REJECTED/INCONCLUSIVE
-BEFORE a coordinator reads the worker's prose report, so a fabricated
-"I found X at file:line" cannot be graded on its own say-so.
+A candidate model can answer a scout-style prompt with zero REAL tool
+calls while producing a confident, detailed, entirely fabricated
+answer (observed empirically: a small local model answered every
+golden question AND fabricated a "Trail" section citing files that do
+not exist in the repo at all). This script stamps PASS/REJECTED/
+INCONCLUSIVE on a worker's run BEFORE a coordinator reads its prose
+report, so a fabricated "I found X at file:line" cannot be graded on
+its own say-so.
 
-stdlib only (argparse, json, re, sqlite3) -- no litellm/pi imports, so
-this runs standalone against saved artifacts without a live proxy.
+stdlib only (argparse, json, re, sqlite3) -- no provider-specific
+imports, so this runs standalone against saved artifacts without a
+live proxy.
 
 SOURCES (need at least one, both are accepted and combined):
 
-  --json <file>   a Pi `--mode json` event-stream file (one JSON object
-                   per line). Event/message shapes below are taken
-                   DIRECTLY from the installed package's own docs,
-                   `@earendil-works/pi-coding-agent` 0.80.3
-                   (docs/json.md, read from
-                   C:\\Users\\user\\AppData\\Roaming\\npm\\node_modules\\
-                   @earendil-works\\pi-coding-agent\\docs\\json.md on
-                   this machine 2026-07-09), cross-checked against the
-                   package's compiled dist/*.js for the exact content-
-                   block `type` literals (grep hits below):
+  --json <file>   a Pi-style `--mode json` event-stream file (one JSON
+                   object per line):
                      - tool_execution_start / tool_execution_end events
                        carry `toolCallId` + `toolName` directly (the
-                       structural tool-call signal -- same event class
-                       GSD Pi v1.3.0's guard reads per the spec's prior
-                       art pointer).
+                       structural tool-call signal).
                      - assistant message `content` is an array of
-                       blocks; the three block types actually emitted
-                       are "text" (field `text`), "thinking" (field
-                       `thinking`), and "toolCall" -- verified via
-                       dist/modes/interactive/components/assistant-
-                       message.js:67,74,79,107 and
-                       dist/core/agent-session.js:2388 (both filter on
-                       `c.type === "toolCall"`, camelCase, NOT
+                       blocks; the three block types that matter are
+                       "text" (field `text`), "thinking" (field
+                       `thinking`), and "toolCall" (camelCase, not
                        "tool_use" or "tool-call").
                      - the run's final answer is the last `agent_end`
                        event's tail assistant message; `message_end` is
@@ -48,26 +32,21 @@ SOURCES (need at least one, both are accepted and combined):
                        agent_end (cut off mid-run).
 
   --db <requests.db> --model <alias> --since <ts> [--until <ts>]
-                   a window of gateway/requests.db-schema rows
-                   (gateway/sqlite_logger.py SCHEMA: ts, model,
-                   provider_model, status, prompt, response, error).
-                   Opened READ-ONLY (sqlite3 URI mode=ro) -- this guard
-                   reads telemetry, it never writes to any DB (spec
-                   requirement).
+                   a window of gateway-style requests.db rows (schema:
+                   ts, model, provider_model, status, prompt, response,
+                   error). Opened READ-ONLY (sqlite3 URI mode=ro) --
+                   this guard reads telemetry, it never writes to any
+                   DB (spec requirement).
 
-                   Structural tool-call signal here: sqlite_logger.py's
-                   `_success_row` only ever stores `message.content`
-                   text in `response` -- it does NOT store a structured
-                   tool_calls array. The only place a completed tool
-                   round-trip survives is the NEXT turn's `prompt`
-                   column, which the caller (Pi) re-serializes with a
-                   `{"role": "tool", ..., "tool_call_id": "<id>"}`
-                   message appended. Verified empirically against
-                   gateway/t013.db row 28 (ends in exactly such a
-                   message, tool_call_id "ebvvaww9c") and confirmed the
-                   id count grows monotonically across a single
-                   session's consecutive turns (t013.db ids 6..75,
-                   count 1,2,3...22) as history is re-sent each turn --
+                   Structural tool-call signal here: a successful row
+                   only ever stores the assistant's text in `response`
+                   -- it does NOT store a structured tool_calls array.
+                   The only place a completed tool round-trip survives
+                   is the NEXT turn's `prompt` column, which the caller
+                   re-serializes with a `{"role": "tool", ...,
+                   "tool_call_id": "<id>"}` message appended. The id
+                   count grows monotonically across a single session's
+                   consecutive turns as history is re-sent each turn --
                    so counting is by DISTINCT id VALUE across the whole
                    window, not by occurrence, or later turns would
                    recount every earlier call once per turn.
@@ -75,37 +54,32 @@ SOURCES (need at least one, both are accepted and combined):
                    Final-answer signal: the chronologically LAST row in
                    the window (ORDER BY ts, id -- id is the tie-breaker
                    since concurrent requests can log with an identical
-                   ts, see t013.db ids 27/28), counted content-ful only
-                   if status == 'success' AND response is non-empty
-                   after stripping. A 'success' row with an EMPTY
-                   response is a tool-call-issuing turn with no visible
-                   text (observed on t013.db ids 21/24/26/30) -- it must
-                   NOT be read as a substantive answer even though its
-                   own status says success.
+                   ts), counted content-ful only if status == 'success'
+                   AND response is non-empty after stripping. A
+                   'success' row with an EMPTY response is a
+                   tool-call-issuing turn with no visible text -- it
+                   must NOT be read as a substantive answer even though
+                   its own status says success.
 
-KNOWN GOTCHA (found empirically while building the t-016 retro-witness,
-worth repeating to any coordinator choosing a --since/--until window):
-a --db window is a plain time-box, not a run boundary. gateway/
-requests.db's t-016 window (model=intern, ~15:37:57..15:45:51 on
-2026-07-09) contains SEVEN empty-content retry attempts, ONE unrelated
-connectivity probe that happens to include one real (broken) bash tool
-call ("echo 21+21 |", id 256), and THEN the actual fabricated golden-
-set answer (id 257, zero tool calls in its own turn). A window drawn
-loosely across the whole session (--since 15:37 --until 15:46) sees
-that one incidental real call and PASSes -- wrongly, because it did not
-inform the graded answer at all. The verdict below is exactly the
-literal spec algorithm (aggregate distinct tool-call ids across every
-row the window matches, vs. the window's own last content-ful row) --
-it does NOT try to associate a given tool call with a given answer.
-Precise window scoping (tight --since/--until around the specific
-answer being graded, excluding unrelated probe turns) is the CALLER's
-responsibility, not something this script infers.
+KNOWN GOTCHA (worth repeating to any coordinator choosing a
+--since/--until window): a --db window is a plain time-box, not a run
+boundary. A window drawn loosely across a whole session can pick up
+one unrelated, incidental real tool call from a connectivity probe
+earlier in the window, and then PASS wrongly on an otherwise
+fabricated answer later in the same window -- because that incidental
+call did not inform the graded answer at all. The verdict below is
+exactly the literal spec algorithm (aggregate distinct tool-call ids
+across every row the window matches, vs. the window's own last
+content-ful row) -- it does NOT try to associate a given tool call with
+a given answer. Precise window scoping (tight --since/--until around
+the specific answer being graded, excluding unrelated probe turns) is
+the CALLER's responsibility, not something this script infers.
 
-The END side of the window is equally load-bearing (critic finding F1,
-t-017 review): the final-answer signal is read off the window's LAST
-row, so a trailing empty retry/probe row AFTER the graded answer turns
-a real fabrication into INCONCLUSIVE, masking it as an ops abort. The
-window must END at the specific answer being graded.
+The END side of the window is equally load-bearing: the final-answer
+signal is read off the window's LAST row, so a trailing empty
+retry/probe row AFTER the graded answer turns a real fabrication into
+INCONCLUSIVE, masking it as an ops abort. The window must END at the
+specific answer being graded.
 """
 
 from __future__ import annotations
@@ -282,7 +256,7 @@ def verdict(tool_calls: int, content_ok: bool) -> tuple[str, int]:
       REGARDLESS of tool_calls (a run that issued tool calls but never
       produced a final answer is not evidence either way).
     - content-ful answer + zero structural tool calls -> REJECTED
-      (F-14 fabrication shape), exit 1.
+      (the zero-tool-call fabrication class), exit 1.
     - content-ful answer + >=1 structural tool call -> PASS, exit 0."""
     if not content_ok:
         return "INCONCLUSIVE", 2
@@ -297,7 +271,7 @@ def verdict(tool_calls: int, content_ok: bool) -> tuple[str, int]:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="Deterministic zero-tool-call fabrication guard (F-14) for Pi workers."
+        description="Deterministic zero-tool-call fabrication guard for Pi-style workers."
     )
     parser.add_argument("--json", help="Path to a Pi `--mode json` event-stream file")
     parser.add_argument("--db", help="Gateway requests.db-schema SQLite file (read-only)")
@@ -334,7 +308,7 @@ def main(argv=None) -> int:
     tool_calls, content_ok, final_text = combine_sources(json_result, db_result)
     label, code = verdict(tool_calls, content_ok)
 
-    print("=== PI RUN GUARD (F-14 zero-tool-call fabrication check) ===")
+    print("=== PI RUN GUARD (zero-tool-call fabrication check) ===")
     for d in sources_desc:
         print(f"source: {d}")
     print(f"structural_tool_calls: {tool_calls}")
@@ -344,7 +318,7 @@ def main(argv=None) -> int:
         print(f"final_answer_preview: {preview!r}")
     print(f"verdict: {label}")
     if label == "REJECTED":
-        print("reason: zero structural tool calls with a substantive final answer -- F-14 fabrication shape (t-011/t-016)")
+        print("reason: zero structural tool calls with a substantive final answer -- the zero-tool-call fabrication class")
     elif label == "INCONCLUSIVE":
         print("reason: no content-ful final answer in scope (ops abort -- 429/cut session/empty window), not a verdict on the model")
     print("=============================================================")

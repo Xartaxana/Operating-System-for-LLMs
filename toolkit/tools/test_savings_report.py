@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Тесты tools/savings_report.py (чек 18 калибровки): математика
-контрфакта, деление окон, API-срез — на tmp-базе с обеими схемами."""
+"""Tests for tools/savings_report.py (the savings/trend calibration
+check): counterfactual math, window splitting, the API-contour slice --
+against a tmp database covering both schemas."""
 import sqlite3
 
 import pytest
@@ -55,7 +56,7 @@ def test_window_split_pre_vs_routed(db):
 
 
 def test_counterfactual_only_sidechains_in_window(db):
-    # сайдчейн в окне — считается; main и до-оконный сайдчейн — нет
+    # a sidechain inside the window counts; main and a pre-window sidechain don't
     _cc(db, "2026-07-09T10:00:00", "claude-haiku-4-5-20251001", 1,
         i=1000, o=100, cost=0.002, agent="scout")
     _cc(db, "2026-07-09T11:00:00", "claude-fable-5", 0, cost=9.0)

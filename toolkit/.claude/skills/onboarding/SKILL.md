@@ -77,21 +77,14 @@ CLAUDE.md wins and that's a bug report against this file.
    anyway. "Keep" requires the operator's own explicit word — never a
    silent default.
 
-   If the operator says keep, write a journal event recording the
-   override. This deployment's event vocabulary (CLAUDE.md's routing
-   log section) has no dedicated "exam overridden" event type; reuse
-   `rejected` — its typed fields (`task_id`, `attempt`, `failure_class`,
-   `model`) already fit an exam failure exactly, and reusing it plugs
-   the override into the existing two-strikes escalation rule (a
-   second overridden failure on the same role trips escalation on its
-   own, which is the right behavior here):
+   If the operator says keep, exam failures land in your decision log,
+   not the routing journal: append a line to `DECISIONS.md` (next free
+   `D-NNNN`; `D-0001` on a virgin log), in that log's own one-line
+   format:
 
-   ```json
-   {"ts":"<clock>","event":"rejected","agent":"<role>","model":"<model>","task_id":"onboarding-<role>-exam","attempt":<n>,"failure_class":"capability","notes":"exam failed (<score>); operator override: kept anyway by explicit operator decision"}
-   ```
-
-   (This reuse is this skill's own judgment call, not settled policy —
-   see the build report for the open question it raises.)
+   `- D-NNNN — Model <model> kept for role <role> despite a failed
+   entrance exam (score <score>); explicit operator decision at
+   onboarding.`
 
 4. **Init.**
    - `git config core.hooksPath .githooks`.

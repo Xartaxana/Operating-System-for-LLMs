@@ -190,8 +190,8 @@ def _estimated_wait_seconds(now: datetime.datetime, earliest_ts, window_seconds:
     """Approximate seconds until the oldest counted request ages out of
     the window, i.e. the earliest moment spend can drop. Approximation,
     not exact time-to-under-limit (that depends on how many of the
-    oldest requests must age out): good enough for the DoD's "примерное
-    время ожидания"."""
+    oldest requests must age out): good enough for the DoD's
+    "approximate wait time" requirement."""
     if earliest_ts is None:
         return window_seconds
     earliest = datetime.datetime.fromisoformat(earliest_ts)

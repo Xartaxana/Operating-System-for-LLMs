@@ -3,8 +3,8 @@ tool_calls for a given model, in streaming and non-streaming mode?
 
 Persistent (unlike the session-scratchpad tools_pipe_test.py from t-012)
 so future sessions can re-run it without recreating it. Isolates the
-groq-streaming tool-call break recorded in PI_HARNESS.md "Известные
-разрывы" #1 (t-013 verdict: NOT reproduced on litellm 1.90.2).
+groq-streaming tool-call break recorded in PI_HARNESS.md "Known
+breaks" #1 (t-013 verdict: NOT reproduced on litellm 1.90.2).
 Named *_check.py, not *_test.py, to stay out of the pytest glob
 (critic t-013, F3).
 

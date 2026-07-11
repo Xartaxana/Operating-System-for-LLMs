@@ -40,7 +40,11 @@ contour question and takes it from there.
 4. Initialize the routing journal: `logs/routing-log.jsonl` ships with
    a single seed line (`journal_created`) carrying a placeholder
    timestamp, `{SET_AT_INSTALL}`. Replace that placeholder with the
-   real install time when you copy the file in.
+   real install time when you copy the file in. **Do this before your
+   first commit of the journal**: once `core.hooksPath` points at
+   `.githooks` (step 3, above), the pre-commit gate treats committed
+   journal lines as append-only, so a placeholder that slips into a
+   commit stops being an easy hand-edit.
 5. Continue to Onboarding, below.
 
 ## Onboarding
@@ -49,7 +53,9 @@ Both paths converge here: run the onboarding skill. It asks one
 question — "Working on a Claude Code subscription, or on a set of API
 keys from different providers?" — writes the answer into
 `delegation.config.yaml`, runs the entrance exam for each bound model,
-and produces your first Boot Report.
+and produces your first Boot Report. A failed exam doesn't block you —
+swap the model, or keep it anyway; exam failures land in your decision
+log (`DECISIONS.md`), not the routing journal.
 
 The onboarding skill is not part of this skeleton yet: it ships in the
 next build step of this template, under `.claude/skills/onboarding/`.

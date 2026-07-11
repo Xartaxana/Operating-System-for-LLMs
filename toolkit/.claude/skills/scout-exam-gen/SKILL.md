@@ -86,16 +86,15 @@ points at this exact path; don't write it anywhere else.
    commit as the edit.
 2. A change to the model bound to the scout tier in
    `delegation.config.yaml`.
-3. A calibration-flagged spike in recon-class rejections, once this
-   deployment's weekly calibration protocol is up and running
-   (`PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md`).
+3. A calibration-flagged spike in recon-class rejections, per
+   `PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md`.
 
 ## Failure detector
 
 An edit to `.claude/agents/scout.md`, or a change to the model bound
 to `scout` in `delegation.config.yaml`, with no matching new line in
 `PROCESS/SCOUT_GOLDEN_SET.md`'s Runs log in the same commit — visible
-to anyone reviewing that commit's diff. Once a weekly calibration
-protocol exists in this deployment, a rise in recon-class `rejected`
-events with no corresponding golden-set run in the same window is that
-protocol's own detector for this gap.
+to anyone reviewing that commit's diff. A rise in recon-class
+`rejected` events with no corresponding golden-set run in the same
+window is `PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md`'s own detector for
+this gap.
