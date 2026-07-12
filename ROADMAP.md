@@ -274,10 +274,32 @@ Stage order (fixed; artifacts before code):
    docs/task_reports/2026-07-12_toolkit-stage5b-operator-install-report.md).
    Findings fix batch (F-35/F-36 + exam-retry + journal-leak) queued
    in CURRENT_CONTEXT — recommended before stage 6.
-6. [ ] Public wrap (user README, license, release) — only after both
-   validations pass. Unblocked 2026-07-12; recommended order: 5b
-   findings fix batch + third release snapshot first.
+6. [x] Public wrap (user README, license, release) — DONE 2026-07-12:
+   PRE-RELEASE banner off (В2: both validation installs passed), MIT
+   license shipped since the first push, fourth release snapshot
+   e0754a6 + annotated tag v0.1.0 (staging and published in sync,
+   axis 7). Preceded, per the Lead recommendation, by the 5b findings
+   fix batch (М1–М6, closed 2026-07-12 night, snapshot b92cbd2) and
+   the D-0072 tier doc-string in all three CLAUDE.md copies (11f710b
+   + AO3 0a1f01e). Narrative:
+   docs/task_reports/2026-07-12_phase3-closure.md.
 
-Phase 3 runs alongside Phase 1.5/2 telemetry loops (weekly
-calibration continues; its evidence feeds the toolkit's default
-policy shipped to users).
+### Phase 3 closure (2026-07-12; подпись — оператор)
+
+All six stages closed with evidence attached: intake t-044, operator
+packaging decisions В1–В6, core spec v0, skeleton a0b3cd9, both
+validation installs (5a stranger 2026-07-11, 5b operator self-install
+2026-07-12), public wrap v0.1.0. The toolkit is public and released:
+github.com/Xartaxana/Supervised-Delegation, tag v0.1.0. Residuals
+(tier-gate hardening on first incident, A5 witness wrapper, etc.)
+live in CURRENT_CONTEXT's queue on their own evidence triggers; user
+deployments are outside axis 7 by design — their feedback arrives as
+issues, not phase work.
+
+**CLOSED 2026-07-12 — operator direction in session («давай закроем
+фазу 3»); the release word (push + tag v0.1.0) given the same
+session, recorded by the Lead the same turn.**
+
+Phase 3 ran alongside Phase 1.5/2 telemetry loops (weekly calibration
+continues; its evidence feeds the toolkit's default policy shipped to
+users).

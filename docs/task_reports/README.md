@@ -126,3 +126,9 @@ Evidence is never deleted, only relocated.
   cycle proven by transcript; findings F-35/F-36 + exam-retry and
   journal-leak candidates -> fix batch queued. ACCEPTED; closes
   D-0070 stage 5 (both installs).
+- [2026-07-12_phase3-closure.md](2026-07-12_phase3-closure.md) —
+  Phase 3 closure: stage-6 public wrap narrative (t-073 recon, D-0072
+  tier doc-string in all three CLAUDE.md, PRE-RELEASE banner off,
+  fourth snapshot e0754a6 + tag v0.1.0, polygon deleted) plus the
+  verbatim CURRENT_CONTEXT unrolls of the 5b fix batch, stages 1–5a
+  prehistory and the 07-11 evening block.
