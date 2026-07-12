@@ -27,6 +27,22 @@
    обходить гейт, родство F-15). Широкие каталоги (tools/, gateway/)
    сознательно вне невода — записанный выбор D-0055: ложные
    срабатывания приучают к --no-verify.
+7. D-0072 (механизм 5, t-068): на ветке «механизм» (осевой блок
+   пройден) сообщение коммита обязано нести ОТДЕЛЬНУЮ строку
+   «tier: <значение>» — самодекларация фактического яруса
+   коммиттера, аналог dispatch_skipped. Ожидаемое значение —
+   привязка roles.lead из delegation.config.yaml в корне репозитория;
+   файла или ключа roles.lead нет → дефолт семейства "fable"
+   (субскрипционный дефолт Lead). Декларация принимается точным
+   совпадением с моделью привязки ИЛИ вхождением её ярусного семейства
+   (fable/opus/sonnet/haiku, по подстроке) — для не-Claude привязки
+   семейства нет, годится только точное совпадение model id.
+   Skip-ветка («не-механизм») и merge-коммиты строку tier не требуют
+   (тот же невод исключений, что и у осевого блока). Гейт НЕ проверяет
+   истинность декларации — двухслойный enforcement (D-0063): код
+   гарантирует форму и присутствие строки, правдивость декларации
+   судит калибровка по транскриптам ярусом выше (тот же детектор,
+   что и D-0042/D-0056).
 """
 from __future__ import annotations
 
@@ -35,9 +51,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 REPO = Path(__file__).resolve().parents[1]
 MAP_PATH = REPO / "docs" / "SIBLING_MAP.md"
 DECISIONS_FULL = "docs/DECISIONS_FULL.md"
+CONFIG_PATH = REPO / "delegation.config.yaml"
+
+LEAD_FAMILIES = ("fable", "opus", "sonnet", "haiku")
+TIER_LINE_RE = re.compile(r"^\s*tier\s*:\s*(\S.*?)\s*$", re.IGNORECASE | re.MULTILINE)
 
 MECHANISM_PREFIXES = (
     "CLAUDE.md",
@@ -85,6 +107,61 @@ def find_missing(text: str, axes: list[int]) -> list[int]:
             if not re.search(rf"ось\s+{n}\s*:", text, re.IGNORECASE)]
 
 
+def resolve_lead_binding(config_text: str | None) -> str:
+    """Модель, привязанная к roles.lead в delegation.config.yaml (см.
+    структуру в toolkit/delegation.config.yaml). Файл отсутствует, ключ
+    roles.lead отсутствует, либо YAML не парсится → дефолт семейства
+    "fable" (субскрипционный дефолт Lead, D-0072) — консервативный
+    (fail-closed) выбор: требует явной декларации от кого угодно ниже
+    top-tier. Самодекларация НЕ проверяется на истинность здесь (см.
+    tier_declared_ok) — двухслойный enforcement D-0063: код гарантирует
+    форму, правду судит калибровка по транскриптам ярусом выше."""
+    if not config_text:
+        return "fable"
+    try:
+        data = yaml.safe_load(config_text) or {}
+    except yaml.YAMLError:
+        return "fable"
+    lead = (data.get("roles") or {}).get("lead") or {}
+    model = ((lead.get("subscription") or {}).get("model")
+             or (lead.get("api") or {}).get("model"))
+    return model or "fable"
+
+
+def lead_family(binding: str) -> str | None:
+    """Ярусное семейство привязанной модели по подстроке (fable/opus/
+    sonnet/haiku); None — семейство не распознано (не-Claude привязка),
+    тогда годится только точное совпадение model id."""
+    low = binding.lower()
+    for fam in LEAD_FAMILIES:
+        if fam in low:
+            return fam
+    return None
+
+
+def find_tier_declaration(msg: str) -> str | None:
+    """Значение строки «tier: <значение>» — только из СООБЩЕНИЯ коммита
+    (не из диффа), та же самодекларативная форма, что и skip-строка."""
+    m = TIER_LINE_RE.search(msg)
+    return m.group(1).strip() if m else None
+
+
+def tier_declared_ok(declared: str, binding: str) -> bool:
+    if declared == binding:
+        return True
+    fam = lead_family(binding)
+    if fam is None:
+        return False
+    return fam in declared.lower()
+
+
+def _tier_queue_note() -> str:
+    return ("механизменный коммит — Lead-tier работа: сессия на ярусе "
+            "ниже привязки lead НЕ коммитит механизм сама, а кладёт его "
+            "в Lead-очередь CURRENT_CONTEXT.md; сессия lead-яруса "
+            "добавляет строку «tier: <своя модель>» (D-0072).")
+
+
 def decide(msg: str, block_extra: str, staged: list[str],
            map_text: str | None, merging: bool = False) -> tuple[int, str]:
     """Чистое решение гейта. block_extra — дифф docs/DECISIONS_FULL.md."""
@@ -114,6 +191,33 @@ def decide(msg: str, block_extra: str, staged: list[str],
     return 0, ""
 
 
+def decide_full(msg: str, block_extra: str, staged: list[str],
+                 map_text: str | None, config_text: str | None,
+                 merging: bool = False) -> tuple[int, str]:
+    """decide() плюс требование правила 7 (D-0072): строка tier на
+    ветке «механизм» (осевой блок уже пройден, не skip, не merge).
+    config_text — текст delegation.config.yaml (или None, если файла
+    нет), тем же паттерном, что и map_text."""
+    code, reason = decide(msg, block_extra, staged, map_text, merging)
+    if code:
+        return code, reason
+    hits = mechanism_paths(staged)
+    if not hits or merging or SKIP_RE.search(msg):
+        return 0, ""
+    binding = resolve_lead_binding(config_text)
+    declared = find_tier_declaration(msg)
+    if declared is None:
+        return 1, ("коммит трогает механизмные файлы:\n  " + "\n  ".join(hits)
+                    + "\nНет строки «tier: <значение>» (привязка lead: "
+                    + binding + ") — " + _tier_queue_note())
+    if not tier_declared_ok(declared, binding):
+        return 1, ("коммит трогает механизмные файлы:\n  " + "\n  ".join(hits)
+                    + "\nЯрус не lead: «tier: " + declared
+                    + "» не совпадает с привязкой (" + binding + ") — "
+                    + _tier_queue_note())
+    return 0, ""
+
+
 def _git(*args: str) -> str:
     proc = subprocess.run(["git", *args], capture_output=True, text=True,
                           encoding="utf-8", errors="replace")
@@ -132,7 +236,10 @@ def main(argv: list[str] | None = None) -> int:
     block_extra = _git("diff", "--cached", "--", DECISIONS_FULL)
     map_text = (MAP_PATH.read_text(encoding="utf-8", errors="replace")
                 if MAP_PATH.exists() else None)
-    code, reason = decide(msg, block_extra, staged, map_text, merging)
+    config_text = (CONFIG_PATH.read_text(encoding="utf-8", errors="replace")
+                   if CONFIG_PATH.exists() else None)
+    code, reason = decide_full(msg, block_extra, staged, map_text,
+                               config_text, merging)
     if code:
         print("mechanism_gate: " + reason, file=sys.stderr)
     return code
