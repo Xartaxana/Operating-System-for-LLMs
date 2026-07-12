@@ -118,3 +118,11 @@ Evidence is never deleted, only relocated.
   closed queue blocks of 07-09..07-11 (A/B-series, F-30 layers,
   boot-diet rounds 1-2, F-17/eval-1, AO3 ports, Gemini exam
   evidence block), obsolete standing reminder.
+- [2026-07-12_toolkit-stage5b-operator-install-report.md](2026-07-12_toolkit-stage5b-operator-install-report.md) —
+  stage-5b validation install into the operator's EXISTING project
+  (D:\Dog, operator self-install, Sonnet session): Path B +
+  onboarding complete, critic exam caught a real trap miss
+  (hinted-retry recorded honestly as their D-0001), first delegated
+  cycle proven by transcript; findings F-35/F-36 + exam-retry and
+  journal-leak candidates -> fix batch queued. ACCEPTED; closes
+  D-0070 stage 5 (both installs).

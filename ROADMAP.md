@@ -254,18 +254,29 @@ questions: docs/TOOLKIT_INTAKE_2026-07-11.md.
 
 Stage order (fixed; artifacts before code):
 
-1. [~] Inventory evaluation: core vs dogfooding vs entangled, plus
+1. [x] Inventory evaluation: core vs dogfooding vs entangled, plus
    the exam assets' repo-specificity (recon t-044) — an evaluation,
-   never a build (D-0030/D-0033).
-2. [ ] Operator packaging decisions (В1–В6 of the intake: form/name/
-   visibility/contours/license/language/exam mandatoriness).
-3. [ ] Core spec v0: template file set, install path, binding+exam
-   onboarding, notification contract.
-4. [ ] Template skeleton to the spec.
-5. [ ] Validation by TWO installs: a fresh empty project (third
-   deployment, ZCRT-analog) and an existing project (fourth).
+   never a build (D-0030/D-0033). Closed 2026-07-11.
+2. [x] Operator packaging decisions (В1–В6 of the intake: form/name/
+   visibility/contours/license/language/exam mandatoriness). Closed
+   2026-07-11 (MIT confirmed by the operator).
+3. [x] Core spec v0: template file set, install path, binding+exam
+   onboarding, notification contract. Closed 2026-07-11.
+4. [x] Template skeleton to the spec — first push a0b3cd9
+   "v0.1.0-pre" (github.com/Xartaxana/Supervised-Delegation), second
+   release snapshot f91fb31. Closed 2026-07-11 (pipeline
+   t-045..t-053; day/evening closure reports).
+5. [x] Validation by TWO installs: a fresh empty project (third
+   deployment, ZCRT-analog) — DONE 2026-07-11 (stage 5a, t-055 +
+   repeat t-064, stranger reached the first delegated cycle) — and
+   an existing project (fourth) — DONE 2026-07-12 (stage 5b, D:\Dog,
+   operator self-install, ACCEPTED; report:
+   docs/task_reports/2026-07-12_toolkit-stage5b-operator-install-report.md).
+   Findings fix batch (F-35/F-36 + exam-retry + journal-leak) queued
+   in CURRENT_CONTEXT — recommended before stage 6.
 6. [ ] Public wrap (user README, license, release) — only after both
-   validations pass.
+   validations pass. Unblocked 2026-07-12; recommended order: 5b
+   findings fix batch + third release snapshot first.
 
 Phase 3 runs alongside Phase 1.5/2 telemetry loops (weekly
 calibration continues; its evidence feeds the toolkit's default
