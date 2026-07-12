@@ -30,6 +30,36 @@ model_list:
       model: gemini/gemini-2.5-flash
       api_key: os.environ/GEMINI_API_KEY
 
+  # Passthrough aliases (t-075): API-window prep so a Claude Code
+  # session pointed at this proxy via ANTHROPIC_API_KEY can send the
+  # model names it uses natively and have them pass straight through,
+  # without needing a gateway-specific alias like "lead"/"lead-sonnet"
+  # above. Each name maps to the identical anthropic/<name> model.
+  - model_name: claude-fable-5
+    litellm_params:
+      model: anthropic/claude-fable-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-sonnet-5
+    litellm_params:
+      model: anthropic/claude-sonnet-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-opus-4-8
+    litellm_params:
+      model: anthropic/claude-opus-4-8
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-haiku-4-5-20251001
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
   # Second judge, cross-family to judge-groq (t-023, 2026-07-10):
   # gemini-3.5-flash passed judge calibration 13/13 — use it for
   # pairs where builder-groq (same underlying model as judge-groq)

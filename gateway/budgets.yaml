@@ -9,6 +9,14 @@ warn_ratio: 0.8
 daily_usd:
   default: 5.00
   lead: 10.00
+  # Passthrough aliases (t-075, API-window prep): caps proposed by Lead
+  # for the 2-3 day Claude Code / ANTHROPIC_API_KEY window; operator to
+  # adjust. warn_ratio above fires at 80% of each as usual.
+  claude-fable-5: 150.00
+  claude-sonnet-5: 50.00
+  claude-opus-4-8: 50.00
+  claude-haiku-4-5-20251001: 10.00
+  claude-sonnet-4-6: 20.00
 
 # quota_windows: sliding-window TOKEN quotas (t-018), one or more
 # {window_seconds, limit_tokens} walls per gateway alias. Each window
