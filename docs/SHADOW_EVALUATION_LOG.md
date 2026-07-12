@@ -110,6 +110,29 @@ classification (строка rejected) и summarization (Junior не
 - 2026-07-11  category=extraction  source=lead-sonnet target=intern  n=2  sim=0.83  judge=judge-groq pass_rate=1.00  cost_source=$0.0009 cost_target=$0.0012 judge_cost=$0.0002  -> rejected [КАЧЕСТВО эквивалентно; rejected по Rule #1-ветке кода: учётная цена intern ВЫШЕ платного соннета]
 - 2026-07-11  category=formatting  source=lead-sonnet target=intern  n=2  sim=0.91  judge=judge-groq pass_rate=1.00  cost_source=$0.0007 cost_target=$0.0009 judge_cost=$0.0001  -> rejected [та же Rule #1-ветка]
 
+STAGE-2 ЦИКЛ №1 (2026-07-13 ночь, приказ оператора «R1 сначала»;
+конвейер t-082..t-085, коммит d90cd03): регрессионный набор из 15
+принятых builder-задач (gateway/regression_set_coding.jsonl, все
+category=coding по построению) прогнан на lead-sonnet (15 строк
+921-939, synthetic, ~$0.68 — ответы 4-17k токенов), реплеи ниже.
+Оба прогона ДО category-фикса t-085: эвристика categorize()
+раскидала 15 coding-промптов как coding=6/formatting=5/extraction=1/
+other=3, отсюда малые n при полном наборе. 15 РАЗЛИЧНЫХ промптов;
+прогоны сэмплируют случайные подмножества — пары между прогонами
+могут повторять промпт (решение Lead в журнале t-085: инстанс
+пары на прогон легален, различимость промптов — этой строкой).
+
+- 2026-07-13  category=coding  source=lead-sonnet target=middle-groq  n=2  sim=0.30  judge=judge-groq pass_rate=0.50  cost_source=$0.0444 cost_target=$0.0007 judge_cost=$0.0007  -> rejected [прогон 1, sample 8 до category-фикса; статус НЕ двинут — Update Rule 1]
+- 2026-07-13  category=coding  source=lead-sonnet target=middle-groq  n=4  sim=0.09  judge=judge-groq pass_rate=0.00  cost_source=$0.0577 cost_target=$0.0008 judge_cost=$0.0012  -> rejected [прогон 2, sample 15; middle-groq провалил все 4 — третий подряд reject-сигнал по строке coding->Middle; статус двигает калибровка ~07-18]
+
+Цикл НЕ завершён: контрольный прогон №3 (полный выход с ground-truth
+category) ждёт рестарта прокси — живой процесс держит старый
+sqlite_logger без колонки category (урок деплоя: правка gateway-кода
+при живом API-окне требует рестарта прокси; 6 строк-дублей без тега,
+~$0.3, id с 01:24). Продолжение: рестарт прокси -> PRAGMA-сверка
+колонки -> source-перепрогон (лягут с category=coding) -> прогон №3
+-> его строка сюда.
+
 Chief-judge review (Lead Fable, 2026-07-11, D-0031 — вердикты
 статусной силы + 2 случайных аудита):
 

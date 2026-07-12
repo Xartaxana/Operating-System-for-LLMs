@@ -40,16 +40,33 @@ opus 50 / haiku 10 / sonnet-4-6 20 (Guard warn 80%). ЗАКРЫТИЕ ОКНА
 = удалить env-блок из settings.json (или вернуть бэкап) + закрыть
 окно прокси. Подготовка/смоки/поправка — дословно:
 docs/task_reports/2026-07-12_api-window-prep.md.
-Остатки в очереди: регресс-тест стриминга ЗАКРЫТ (t-077,
-gateway/test_stream_cache_logging.py, 5 тестов) + metrics.py-нарратив
-кэш-колонок ЗАКРЫТ (t-078, cache_read/creation + cache_read_share,
-знаменатель согласован с usage_report.py по оси 2) — оба 2026-07-12
-opus-координатором в API-окне, приняты по witness (105 passed;
-t-078 через critic-вход, attempt 1 rejected = ошибка Lead-спеки).
-Остаток тегирования synthetic (смок 22:19 -> real) поднят в очередь
-Lead как механизм (ось 2, вместе с F-37) — см. Remaining Lead-tier
-Queue. Параллельно одобрен первый цикл stage-2 реплеев — открыть
-следующей сессией.
+Остатки окна ЗАКРЫТЫ: t-077 стриминг-тест, t-078 metrics-кэш,
+t-079/D-0075 synthetic-тег, F-37, F-38 — нарратив ДОСЛОВНО:
+docs/task_reports/2026-07-13_api-window-night.md.
+BOOT-БЮДЖЕТ: BREACH 105334/100000 на закрытии 07-13 (на входе был
+101221). Архивная развёртка сделана (−2.3К, boot-diet round 5
+partial, handoff-триггер); остаток требует: (а) подписи гейт-отчёта
+(его архивация даст ~4.5К) и/или (б) глубоких срезов CLAUDE.md
+30857 — ТОЛЬКО Lead+Architect (D-0068). Полный boot-diet — первым
+пунктом след. сессии после подписи.
+STAGE-2 ЦИКЛ №1 ОТКРЫТ 2026-07-13 ночью (приказ «R1 сначала») и
+ОСТАНОВЛЕН НА ПОЛУШАГЕ — продолжение после boot-diet:
+1) оператор рестартует прокси (окно «API-WINDOW PROXY», Ctrl+C ->
+   pwsh -File gateway\run_proxy.ps1) — живой процесс держит
+   sqlite_logger ДО t-085, колонки category в живой БД НЕТ;
+2) сверка: PRAGMA table_info(requests) содержит category;
+3) python gateway/regression_runner.py --model lead-sonnet --pace 3
+   --timeout 180 (15 строк лягут с category=coding);
+4) прогон №3: python gateway/shadow_eval.py --source-model
+   lead-sonnet --target-model middle-groq --judge-model judge-groq
+   --categories coding --sample 30 --days 1 --pace 40 (ожидание:
+   n ~ 21 — полный выход после category-фикса);
+5) строка прогона в docs/SHADOW_EVALUATION_LOG.md (там же контекст
+   цикла и незавершённость записаны).
+Сделано ночью (дословно — 2026-07-13_api-window-night.md): конвейер
+t-082..t-085 (d90cd03), прогоны 1-2 — третий подряд reject-сигнал
+coding->Middle. Счёт R1 coding: 12 пар / 5 прогонов из 30/2; после
+№3 ~ 27-33. Гейт-отчёт Phase 2 обновлён 07-13, ЖДЁТ ПОДПИСИ.
 Гейт-отчёт Phase 2 (ниже) ждёт подписи. Действующие рамки:
 ТУЛКИТ-МОРАТОРИЙ D-0074 (правка toolkit/ — только проверенным
 батчем по слову оператора; порт-очередь в очереди ниже).
@@ -177,50 +194,32 @@ Context — закрыт ПРЯМЫМ измерением (C3 = 0.11% при п
 
 ## System State (condensed, 2026-07-08; updates dated)
 
-- Phase 0 closed 2026-07-03 (Zero Context Recovery Test passed).
-- Phase 1 steps 1-4 built and verified: Gateway (LiteLLM + SQLite
-  request log), Guard (daily per-model budgets, warn 80% / refuse
-  100%), Ledger (metrics.py digest), Analyst (Qwen3-4B via Ollama
-  through the gateway under its own alias).
-- Shadow Evaluation (step 5) operational: shadow_eval.py with
-  --judge-model, --calibrate, --categories, honest Rule #1 cost
-  extraction; sampler excludes judge/replay traffic. 2026-07-11:
-  reader (metrics.py R1) и writer (shadow_eval.py) переведены на
-  docs/SHADOW_EVALUATION_LOG.md (t-054/t-056, пара оси 4 закрыта).
-- Judge: judge-groq (groq/openai/gpt-oss-120b, free tier), calibrated
-  13/13 at temperature=0, reproduced twice. Protocol:
-  PROCESS/JUDGE_CALIBRATION_PROTOCOL.md (D-0031) — status-changing
-  verdicts need chief-judge review; 1-2 random audits per run. No
-  local judge on this hardware (Qwen3-4B 11/13, below the 90% bar);
-  fallback order: judge-groq > paid API judge > local 4B restricted.
-  Second judge judge-gemini (gemini-3.5-flash, 13/13, t-023) —
-  cross-family point work only (20 req/day): builder-groq
-  self-judging pairs.
-- Gemini key role exam DONE 2026-07-10: lead-gemini (2.5-flash) —
-  API-contour Lead-baseline CANDIDATE (12/13 + ranking 11/12, между
-  Sonnet-контролем и Opus); полный evidence-блок дословно —
-  docs/task_reports/2026-07-11_evening-closures.md + отчёты
-  2026-07-10_gemini-key-role-exam.md /
-  2026-07-10_ranking-exam-run3-gemini-answers.md + Runs log
-  LEAD_RANKING_EXAM.md. Статусы двигает production-журнал +
-  калибровка (D-0028/D-0035).
-- traffic_kind tagging live: real/synthetic/replay/judge; gate G1
-  counts only 'real'. The tag travels via extra_body metadata —
-  litellm's metadata= kwarg does NOT reach the wire (verified; see
-  comments in sqlite_logger.py / shadow_eval.py).
-- Tests: suite 316 passed (2026-07-11 witness, t-056 acceptance;
-  canonical form python -m pytest tools/ gateway/ -q); toolkit
-  suite 311 passed отдельно. gateway/conftest.py isolates every
-  test (tmp DB + full litellm callback-list snapshot/restore).
-- requests.db: 199 rows на 2026-07-08 (+ прогоны 07-11: paid
-  baseline, судейские); cc_usage table alongside (idempotent
-  import, both transcript layouts, agent attribution, 0 NULL-cost
-  rows).
-- DELEGATION_TABLE.md: 4-state model (D-0035).
-  provisionally_validated: coding -> Middle, summarization /
-  extraction / formatting -> intern, ВСЕ 4 строки Claude-контура
-  (калибровка 2026-07-11); rejected: classification -> intern.
-- Delegated Tasks 1-7: ACCEPTED and archived (docs/task_reports/).
+- Фазы/гейты — владелец ROADMAP.md (Phase 0/1/1.5/3 закрыты там).
+  Компоненты API-контура (Gateway/Guard/Ledger/Analyst/Shadow
+  Evaluation) построены и живы; лог прогонов —
+  docs/SHADOW_EVALUATION_LOG.md (t-054/t-056, пара оси 4).
+- Judge: judge-groq (gpt-oss-120b, free) 13/13 x2; протокол
+  PROCESS/JUDGE_CALIBRATION_PROTOCOL.md (D-0031) — статусные
+  вердикты через chief-judge, 1-2 случайных аудита на прогон.
+  Fallback: judge-groq > paid API judge > local 4B restricted
+  (Qwen3-4B 11/13 — ниже бара). Второй судья judge-gemini (13/13,
+  t-023) — кросс-семейная точечная работа (20 req/day):
+  self-judging пары builder-groq.
+- lead-gemini (2.5-flash) — API-contour Lead-baseline CANDIDATE
+  (экзамен 07-10; evidence — evening-closures.md + Runs log
+  LEAD_RANKING_EXAM.md); статусы двигает журнал+калибровка.
+- traffic_kind live: real/synthetic/replay/judge; G1 считает только
+  real; тег едет extra_body metadata (litellm metadata= kwarg до
+  провода НЕ доезжает — verified, комментарии в sqlite_logger.py).
+  С t-085 рядом едет ground-truth category (та же труба).
+- Tests: каноническая форма python -m pytest tools/ gateway/ -q
+  (352 passed на 2026-07-13); toolkit suite отдельно;
+  gateway/conftest.py изолирует каждый тест.
+- DELEGATION_TABLE.md: 4-state (D-0035). provisionally_validated:
+  coding->Middle, summarization/extraction/formatting->intern, все
+  4 строки Claude-контура (калибровка 07-11); rejected:
+  classification->intern. Reject-тренд по coding->Middle копится
+  (3 прогона подряд) — решает калибровка ~07-18.
 
 ## Claude Code Baseline (Task 5, 2026-07-07 — live guidance)
 
@@ -249,15 +248,9 @@ Context — закрыт ПРЯМЫМ измерением (C3 = 0.11% при п
   экзамен gpt-oss-120b операционный FAIL) — дословно в
   docs/task_reports/2026-07-12_boot-diet-round4-unroll.md; живой
   остаток (точка t-066 для чека 14в) — в Current Task выше.
-- ОСЬ 2 / traffic_kind + F-37 — ЗАКРЫТО 2026-07-12 Fable-батчем
-  (D-0075): дефолт 'real' остаётся (записанный выбор — органика
-  passthrough не тегается), не-органические генераторы самотегаются
-  (tools_stream_check.py закрыт t-079), смок-пачка id 512–526
-  ретегирована synthetic громко, MODEL-строка хука несёт маркер
-  «declared by harness, not measured -- F-37» (in-hook сверка с
-  измерением отвергнута как нереализуемая на SessionStart —
-  аддендум F-37). Детекторы: чеки 13(з) НОВЫЙ / 13(ж) / 5.
-  Порт конвенции в toolkit — в порт-очередь ниже (D-0074).
+- ОСЬ 2 / traffic_kind + F-37 — ЗАКРЫТО 2026-07-12 (D-0075, чеки
+  13(з)/13(ж)/5; дословно — 2026-07-13_api-window-night.md); порт
+  конвенции — в порт-очередь ниже.
 - Упрочнение tier-гейта (builder-class; WHEN: на evidence первого
   инцидента — Rule #1, критик t-068 находка 2 пометил не-блокером):
   find_tier_declaration матчит ПЕРВУЮ строку `tier:` — сообщение с
@@ -313,20 +306,14 @@ Context — закрыт ПРЯМЫМ измерением (C3 = 0.11% при п
   checks 10/11 show the discipline leaks); per-file boot-budget
   breakdown в session-handoff чек 4 / SessionStart hook (on next
   touch, OpenClaw prior art).
-- Eval plan, stage 2 (needs >=1 week routed traffic): journal's
-  accepted tasks as a regression set replayed on the API contour on
-  model/price changes; minimum-n / pass^k in DELEGATION_TABLE Update
-  Rules (thresholds from first-calibration data); numeric judge-human
-  agreement in JUDGE_CALIBRATION_PROTOCOL. NOT taken: per-PR CI, full
-  execution-based bench harness (Rule #1).
-  - Batch API candidate (2026-07-10, operator-approved): judge/
-    replay/golden-set traffic = independent request sets with no
-    latency need — Message Batches profile (-50% input AND output;
-    Groq/Gemini have analogs). TRIGGER (Rule #1): stage-2 regression
-    replays run regularly — free-tier judge traffic gains $0 today.
-    At adoption: batch endpoints bypass the proxy's request logging —
-    the accounting path into requests.db must land in the same move
-    (axis 2, never a silent $0).
+- Eval plan stage 2 — В РАБОТЕ (цикл №1 открыт 07-13, см. Current
+  Task; конвейер d90cd03). Остаток плана: minimum-n / pass^k в
+  Update Rules таблицы + numeric judge-human agreement в
+  JUDGE_CALIBRATION_PROTOCOL (пороги — с данных калибровки). NOT
+  taken: per-PR CI, полный bench-harness (Rule #1). Batch API
+  candidate (одобрен 07-10): TRIGGER = реплеи регулярны; при
+  адопции batch-эндпоинты минуют лог прокси — учётный путь в
+  requests.db тем же ходом (ось 2, никогда молчаливый $0).
 - NOT adopted (recorded to stop re-litigating): GSD as coordinator
   (duplicates Lead), auto-mode SQLite state machine + crash recovery
   (our analog is session handoff), supply-chain audit tags, WXP;
@@ -370,6 +357,13 @@ Context — закрыт ПРЯМЫМ измерением (C3 = 0.11% при п
 - Free-telemetry mode: intern/analyst (Ollama) carry synthetic
   Haiku-class accounting prices, so Guard/Ledger money paths work at
   $0 cash.
+- УРОК ДЕПЛОЯ (2026-07-13, стоил ~$0.3 дублей): правка gateway-кода
+  (sqlite_logger/колбэки) при ЖИВОМ прокси не действует до рестарта
+  прокси — процесс держит старый модуль; тесты это не ловят по
+  построению (грузят свежий код). После правки gateway/*.py при
+  активном API-окне: рестарт прокси оператором МЕЖДУ ходами сессии
+  (сессия не убивает прокси сама — режет собственный стрим), затем
+  PRAGMA/смок-сверка.
 - BSOD 2026-07-09 15:02 (bugcheck 0x3B in aehd.sys — Android
   Emulator Hypervisor Driver) while the AO3 pipeline exercised the
   emulator. Rule of thumb: do NOT run the Android emulator (AO3 QA

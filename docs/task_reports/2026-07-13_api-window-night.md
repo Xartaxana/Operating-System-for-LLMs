@@ -1,0 +1,83 @@
+# 2026-07-13 (ночь) — API-окно: остатки, F-37/F-38, D-0075, stage-2 цикл №1
+
+Нарратив ночной сессии 2026-07-12 22:13 — 2026-07-13 ~01:45
+(opus-координатор до 23:20, далее Fable по /model). Перенесено из
+CURRENT_CONTEXT.md при закрытии (D-0038/D-0068, boot-diet round 5,
+handoff-триггер). Живые указатели остались в CURRENT_CONTEXT.
+
+## Закрытые остатки API-окна (t-076..t-079)
+
+- Разведка t-076 (scout): стриминг-путь, metrics-кэш, traffic_kind
+  дефолт — точные file:line; приёмка со сверкой негативов.
+- t-077 ЗАКРЫТ: gateway/test_stream_cache_logging.py — постоянный
+  регресс-тест кэш-логирования (5 тестов: прямые атрибуты Usage,
+  fallback через prompt_tokens_details, non-anthropic, usage=None,
+  уровень _success_row). Witness: независимые 5 passed / 105 passed.
+- t-078 ЗАКРЫТ (attempt 2): metrics.py daily_digest показывает
+  cache_read/creation + cache_read_share, текст+JSON. attempt 1
+  rejected: failure_class=spec — ОШИБКА LEAD-СПЕКИ (неверный
+  знаменатель), поймана critic-входом. Позже F-38 (см. ниже).
+- t-079 ЗАКРЫТ: tools_stream_check.py самотегается synthetic.
+
+## F-37 и D-0075 (Fable-батч 23:20–23:30, коммит 8fa8d65)
+
+F-37: MODEL-строка SessionStart-хука доверяла harness-payload'у
+(заявлен sonnet-4-6, факт opus-4-8 — подтверждено окружением + логом
+прокси; passthrough 1:1, прокси не ремапит). Фикс: маркер «declared
+by harness, not measured -- F-37»; in-hook сверка отвергнута
+(строки сессии ещё не в базе на SessionStart) — записанное
+ограничение. Детекторы: чеки 13(ж)/5.
+
+D-0075: дефолт traffic_kind='real' остаётся (органика passthrough
+не тегается), не-органика самотегается; смок-пачка id 512–526
+(22:19:05, 15 строк) ретегирована synthetic громко, соседи-органика
+511/527 целы. Новый чек 13(з): сигнатура немаркированного генератора
+(мульти-алиасный один тик / крошечные токены с real).
+
+## Пересмотр гейт-отчёта Phase 2 (запрос оператора) и F-38
+
+Пересмотр вскрыл F-38: формула cache_read_share t-078 (принятая С
+critic-входом) — двойной счёт: litellm prompt_tokens для anthropic
+ВКЛЮЧАЕТ кэш-части (эмпирика: prompt−(read+creation)=~2 ток/запрос),
+у собрата usage_report.py поле дизъюнктно. Дайджест занижал вдвое
+(48% при истинных 96.1%). Фикс t-080: знаменатель prompt_tokens +
+live-shape тест; critic t-080 ACCEPT с обязательной СВОЕЙ эмпирикой
+(все 266 кэш-строк, 0 контрпримеров, avg-остаток 0.0023). Подкласс
+вписан в ось 2 SIBLING_MAP. Урок ярусам — в очереди (critic.md /
+CRITIC_EXAM on touch). Коммит 9a5386e.
+
+Обновлённые числа отчёта: G1 16/14 дней; R2/R3 впервые вычислимы
+(345 real-строк с промптами); R5 met фактом ($29.89 вечер окна);
+C1 92%; C3 прямым измерением 0.11% uncached (порог 25%) — Context
+закрыт замером; P1 10 задач. Вердикты без изменений.
+
+## Stage-2 цикл №1 (приказ «R1 сначала», t-081..t-085, коммит d90cd03)
+
+Конвейер: t-081 scout-разведка механики shadow_eval; t-082 --pace в
+evaluate(); t-083 регрессионный набор 15 coding-промптов из принятых
+builder-задач; t-084 regression_runner.py (самотег D-0075); t-085
+ground-truth category (metadata → колонка requests.category,
+миграция образца t-075, приоритет хранимой в shadow_eval+metrics;
+critic ACCEPT — обязательный вход, схема учётной БД).
+
+Прогоны: source 15 строк lead-sonnet (~$0.68, ответы 4–17k ток);
+реплей №1 coding n=2 pass 50%; №2 n=4 pass 0% — третий подряд
+reject-сигнал coding→Middle. Причина малых n: эвристика categorize()
+раскидала 15 coding-промптов (coding 6 / formatting 5 / extraction 1
+/ other 3) — потому и фикс t-085. Полные строки прогонов + контекст:
+docs/SHADOW_EVALUATION_LOG.md «STAGE-2 ЦИКЛ №1».
+
+Цикл прерван на полушаге: живой прокси держит sqlite_logger ДО
+t-085 (колонки category в живой БД нет; 6 строк-дублей без тега,
+~$0.3). Урок деплоя записан в Environment Notes CURRENT_CONTEXT.
+Шаги продолжения — в Current Task CURRENT_CONTEXT (рестарт прокси →
+PRAGMA → source-перепрогон → прогон №3 → строка в лог).
+
+## Ярусная бухгалтерия сессии
+
+Окно деградации opus 22:13–23:20 (lead_degraded 22:45 с поздней
+фиксацией — отмечено в приёмке), закрыто lead_restored 23:20 с
+приёмкой окна по D-0044 Fable'ом; ярус Fable сверен ИЗМЕРЕНИЕМ
+(строки 749–751 requests.db = claude-fable-5). Валидатор журнала
+дважды ловил ошибки ДО коммита (category у rejected; task_id
+новизна defect_found) — гейт работает.
