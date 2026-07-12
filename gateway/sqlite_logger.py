@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS requests (
     error TEXT,
     traffic_kind TEXT NOT NULL DEFAULT 'real',
     cache_creation_input_tokens INTEGER,
-    cache_read_input_tokens INTEGER
+    cache_read_input_tokens INTEGER,
+    category TEXT
 );
 """
 
@@ -81,6 +82,12 @@ def _connect() -> sqlite3.Connection:
         conn.execute("ALTER TABLE requests ADD COLUMN cache_creation_input_tokens INTEGER")
     if "cache_read_input_tokens" not in columns:
         conn.execute("ALTER TABLE requests ADD COLUMN cache_read_input_tokens INTEGER")
+    # category column (t-085): ground-truth category from regression set or
+    # any caller that tags metadata.category; NULL for untagged traffic.
+    # Added independently of prior migrations so a DB that already has
+    # all earlier columns but predates this change still gets it.
+    if "category" not in columns:
+        conn.execute("ALTER TABLE requests ADD COLUMN category TEXT")
     return conn
 
 
@@ -109,6 +116,7 @@ def _base_row(kwargs, start_time, end_time) -> dict:
         else None,
         "prompt": json.dumps(messages, ensure_ascii=False) if messages else None,
         "traffic_kind": metadata.get("traffic_kind") or "real",
+        "category": metadata.get("category"),
     }
 
 

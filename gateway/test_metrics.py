@@ -559,6 +559,37 @@ def test_daily_digest_cache_share_live_traffic_shape(conn):
     assert row["cache_read_share"] > 0.9  # the double-count bug can't pass this
 
 
+def test_categories_heuristic_stored_category_preferred(conn):
+    """categories_heuristic must use the stored category column when non-NULL,
+    falling back to categorize() only for rows where category IS NULL (t-085)."""
+    # Row 1: prompt would fire 'formatting' heuristic, but stored category = 'coding'
+    conn.execute(
+        "INSERT INTO requests (ts, model, status, prompt_tokens, completion_tokens,"
+        " cost_usd, latency_ms, prompt, response, category)"
+        " VALUES (datetime('now'), 'lead', 'success', 10, 5, 0.01, 100,"
+        " 'format this markdown table', 'ok', 'coding')"
+    )
+    # Row 2: no stored category (NULL) -> heuristic applies, prompt = 'summarize this'
+    conn.execute(
+        "INSERT INTO requests (ts, model, status, prompt_tokens, completion_tokens,"
+        " cost_usd, latency_ms, prompt, response, category)"
+        " VALUES (datetime('now'), 'lead', 'success', 10, 5, 0.01, 100,"
+        " 'summarize this article', 'ok', NULL)"
+    )
+    conn.commit()
+
+    digest = daily_digest(conn, days=1)
+    cats = digest["categories_heuristic"]
+    # stored 'coding' beats the 'formatting' needle in row 1
+    assert "coding" in cats
+    assert cats["coding"]["requests"] == 1
+    # 'formatting' must NOT appear (no row ended up there)
+    assert "formatting" not in cats
+    # row 2 has no stored category, heuristic fires 'summarization'
+    assert "summarization" in cats
+    assert cats["summarization"]["requests"] == 1
+
+
 def test_daily_digest_cache_null_rows_treated_as_zero(conn):
     # seed() does not set cache columns -> they are NULL in the DB.
     seed(conn, "lead", "prompt", tokens=(200, 30))

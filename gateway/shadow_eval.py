@@ -96,7 +96,7 @@ def sample_requests(conn: sqlite3.Connection, source_model: str, days: int, limi
     replaying them contaminates the sample (observed 2026-07-03: a
     failed lead-gemini calibration polluted 6 of 11 sampled pairs)."""
     rows = conn.execute(
-        "SELECT id, prompt, response, COALESCE(cost_usd, 0) FROM requests"
+        "SELECT id, prompt, response, COALESCE(cost_usd, 0), category FROM requests"
         " WHERE model = ? AND status = 'success' AND prompt IS NOT NULL"
         " AND response IS NOT NULL AND substr(ts, 1, 10) >= date('now', ?)"
         " AND traffic_kind NOT IN ('replay', 'judge')"
@@ -105,7 +105,8 @@ def sample_requests(conn: sqlite3.Connection, source_model: str, days: int, limi
         (source_model, f"-{days} days", limit),
     ).fetchall()
     return [
-        {"id": r[0], "prompt": r[1], "response": r[2], "cost_usd": r[3]} for r in rows
+        {"id": r[0], "prompt": r[1], "response": r[2], "cost_usd": r[3], "category": r[4]}
+        for r in rows
     ]
 
 
@@ -229,18 +230,27 @@ def last_user_content(messages: list) -> str:
     return ""
 
 
-def evaluate(conn, source_model: str, target_model: str, gateway: str, days: int, sample_n: int, judge_model: str = None, categories: set = None, db_path=None, **replay_kwargs):
+def evaluate(conn, source_model: str, target_model: str, gateway: str, days: int, sample_n: int, judge_model: str = None, categories: set = None, db_path=None, pace: float = 0.0, **replay_kwargs):
     """categories: optional whitelist. A replay only supports the table
     row whose 'Delegate to' tier the target actually is, so a run
     aimed at one row (e.g. coding -> Middle) must not touch rows whose
-    named tier differs from the target."""
+    named tier differs from the target.
+    pace: seconds to sleep between pairs (free-tier RPM/TPM ceilings, e.g.
+    Groq free tier is 8000 TPM for judge-groq/gpt-oss).
+
+    Category priority (t-085): a stored category (requests.category, set
+    by the regression runner from the ground-truth JSONL field) is used
+    directly; categorize() is only the fallback for rows with no stored
+    category (NULL), i.e. untagged real traffic."""
     results = []
-    for row in sample_requests(conn, source_model, days, sample_n):
+    for i, row in enumerate(sample_requests(conn, source_model, days, sample_n)):
+        if i and pace:
+            time.sleep(pace)
         try:
             messages = json.loads(row["prompt"])
         except (TypeError, json.JSONDecodeError):
             continue
-        category = categorize(row["prompt"])
+        category = row["category"] or categorize(row["prompt"])
         if categories and category not in categories:
             continue
         try:
@@ -522,7 +532,7 @@ def main():
     categories = set(args.categories.split(",")) if args.categories else None
     results = evaluate(conn, args.source_model, args.target_model, args.gateway,
                        args.days, args.sample, judge_model=args.judge_model,
-                       categories=categories, db_path=args.db)
+                       categories=categories, db_path=args.db, pace=args.pace)
     aggregated = aggregate_by_category(results)
     statuses = {
         category: decide_status(agg, args.threshold, args.min_samples, args.pass_threshold)

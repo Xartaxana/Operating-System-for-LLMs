@@ -505,3 +505,75 @@ def test_append_evidence_log_heading_matched_at_any_depth():
     updated = append_evidence_log(text, ["entry one"])
     assert updated.count("Shadow Evaluation Log") == 1
     assert "- entry one" in updated
+
+
+def test_evaluate_stored_category_overrides_heuristic(conn):
+    """A row whose text would be categorized as 'formatting' by the heuristic
+    but whose stored category column says 'coding' must end up in 'coding'
+    -- the ground-truth beats the keyword scan (t-085)."""
+    # Insert a row whose prompt text would fire the formatting heuristic
+    # but carry a stored category of 'coding'.
+    conn.execute(
+        "INSERT INTO requests (ts, model, status, cost_usd, prompt, response, category)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            datetime.datetime.now().isoformat(),
+            "lead",
+            "success",
+            0.01,
+            json.dumps([{"role": "user", "content": "format this markdown table please"}]),
+            "some answer",
+            "coding",
+        ),
+    )
+    conn.commit()
+
+    results = evaluate(
+        conn, "lead", "intern", "http://localhost:4000", days=7, sample_n=10,
+        mock_response="some answer",
+    )
+    assert len(results) == 1
+    assert results[0]["category"] == "coding"
+
+
+def test_sample_requests_returns_category_column(conn):
+    """sample_requests() must return the category field from the DB row."""
+    conn.execute(
+        "INSERT INTO requests (ts, model, status, cost_usd, prompt, response, category)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            datetime.datetime.now().isoformat(),
+            "lead",
+            "success",
+            0.01,
+            json.dumps([{"role": "user", "content": "write a sort function"}]),
+            "def sort(): pass",
+            "coding",
+        ),
+    )
+    conn.commit()
+    rows = sample_requests(conn, "lead", days=7, limit=10)
+    assert len(rows) == 1
+    assert rows[0]["category"] == "coding"
+
+
+def test_evaluate_pace_sleeps_between_pairs(conn, monkeypatch):
+    import time as time_module
+
+    import shadow_eval
+
+    sleep_calls = []
+    monkeypatch.setattr(time_module, "sleep", lambda secs: sleep_calls.append(secs))
+    monkeypatch.setattr(shadow_eval.time, "sleep", lambda secs: sleep_calls.append(secs))
+
+    seed(conn, "lead", [{"role": "user", "content": "summarize this article"}], "summary one")
+    seed(conn, "lead", [{"role": "user", "content": "write a python function"}], "def f(): pass")
+    seed(conn, "lead", [{"role": "user", "content": "classify this text"}], "positive")
+
+    results = evaluate(
+        conn, "lead", "intern", "http://localhost:4000", days=7, sample_n=10,
+        pace=2.5, mock_response="ok",
+    )
+    # 3 pairs -> sleep called exactly (3 - 1) = 2 times, each with pace value
+    assert len(results) == 3
+    assert sleep_calls == [2.5, 2.5]

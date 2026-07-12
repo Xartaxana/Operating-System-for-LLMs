@@ -398,18 +398,22 @@ def daily_digest(conn: sqlite3.Connection, days: int, shadow_log_path=None) -> d
         (since,),
     ).fetchall()
 
+    # categories_heuristic: source is mixed (t-085) -- stored category column
+    # takes priority when non-NULL (ground-truth from regression set or any
+    # tagged caller); categorize() is the fallback for untagged real traffic.
+    # The key "categories_heuristic" is kept for downstream compatibility.
     categories = defaultdict(lambda: {"requests": 0, "cost_usd": 0.0})
     prompts = conn.execute(
-        "SELECT model, prompt, COALESCE(cost_usd, 0) FROM requests"
+        "SELECT model, prompt, COALESCE(cost_usd, 0), category FROM requests"
         " WHERE substr(ts, 1, 10) >= date('now', ?) ORDER BY ts",
         (since,),
     ).fetchall()
-    for _, prompt, cost in prompts:
-        bucket = categories[categorize(prompt)]
+    for _, prompt, cost, stored_category in prompts:
+        bucket = categories[stored_category or categorize(prompt)]
         bucket["requests"] += 1
         bucket["cost_usd"] = round(bucket["cost_usd"] + cost, 6)
 
-    repetition = repetition_by_model((model, prompt) for model, prompt, _ in prompts)
+    repetition = repetition_by_model((model, prompt) for model, prompt, _, _cat in prompts)
 
     try:
         events = conn.execute(
