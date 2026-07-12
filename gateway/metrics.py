@@ -388,7 +388,9 @@ def daily_digest(conn: sqlite3.Connection, days: int, shadow_log_path=None) -> d
                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                COALESCE(SUM(cost_usd), 0) AS cost_usd,
                ROUND(AVG(latency_ms), 1) AS avg_latency_ms,
-               ROUND(AVG(LENGTH(COALESCE(response, ''))), 1) AS avg_response_chars
+               ROUND(AVG(LENGTH(COALESCE(response, ''))), 1) AS avg_response_chars,
+               COALESCE(SUM(cache_read_input_tokens), 0) AS cache_read_tokens,
+               COALESCE(SUM(cache_creation_input_tokens), 0) AS cache_creation_tokens
         FROM requests
         WHERE day >= date('now', ?)
         GROUP BY day, model ORDER BY day, model
@@ -437,6 +439,16 @@ def daily_digest(conn: sqlite3.Connection, days: int, shadow_log_path=None) -> d
                 "prompt_tokens": r[4], "completion_tokens": r[5],
                 "cost_usd": round(r[6], 6), "avg_latency_ms": r[7],
                 "avg_response_chars": r[8],
+                # Cache columns (NULL rows treated as 0; only Anthropic traffic populates these)
+                "cache_read_tokens": r[9],
+                "cache_creation_tokens": r[10],
+                # Fraction of input-side tokens served from cache (cache_read / full input side:
+                # cache_read + cache_creation + prompt_tokens) - consistent with
+                # tools/usage_report.py cache_read_share_of_input (project baseline).
+                "cache_read_share": (
+                    round(r[9] / (r[9] + r[10] + r[4]), 4)
+                    if (r[9] + r[10] + r[4]) > 0 else 0.0
+                ),
             }
             for r in per_day
         ],
@@ -468,6 +480,10 @@ def format_digest(digest: dict) -> str:
             f" ({r['failures']} failed), {r['prompt_tokens']}+{r['completion_tokens']} tok,"
             f" ${r['cost_usd']:.4f}, {r['avg_latency_ms']} ms avg,"
             f" {r['avg_response_chars']} chars avg answer"
+        )
+        lines.append(
+            f"    cache: read={r['cache_read_tokens']} creation={r['cache_creation_tokens']}"
+            f" cache_read_share={r['cache_read_share']:.1%}"
         )
 
     lines.append("")

@@ -476,3 +476,80 @@ def test_daily_digest_carries_phase2_readiness(conn, tmp_path):
     digest = daily_digest(conn, days=14, shadow_log_path=shadow_log)
     assert "phase2_readiness" in digest
     assert digest["phase2_readiness"]["G2"]["status"] == "manual_check"
+
+
+# --- cache token columns in daily_digest (t-078) ---------------------------
+
+
+def seed_with_cache(conn, model, prompt, prompt_tokens=100,
+                    cache_read=0, cache_creation=0, ts=None):
+    """Insert a request row with explicit cache token counts."""
+    conn.execute(
+        "INSERT INTO requests (ts, model, status, prompt_tokens, completion_tokens,"
+        " cost_usd, latency_ms, prompt, response,"
+        " cache_read_input_tokens, cache_creation_input_tokens)"
+        " VALUES (?, ?, 'success', ?, 10, 0.01, 50, ?, 'ok', ?, ?)",
+        (
+            ts or datetime.datetime.now().isoformat(),
+            model, prompt_tokens, prompt, cache_read, cache_creation,
+        ),
+    )
+    conn.commit()
+
+
+def test_daily_digest_cache_aggregation(conn):
+    # Two requests with cache activity, one without (NULL -> treated as 0).
+    seed_with_cache(conn, "sonnet", "prompt A", prompt_tokens=200,
+                    cache_read=80, cache_creation=40)
+    seed_with_cache(conn, "sonnet", "prompt B", prompt_tokens=100,
+                    cache_read=60, cache_creation=0)
+    seed(conn, "sonnet", "prompt C", tokens=(50, 5))  # no cache columns -> NULL
+
+    digest = daily_digest(conn, days=1)
+    (row,) = digest["per_day"]
+
+    assert row["cache_read_tokens"] == 140        # 80 + 60 + 0
+    assert row["cache_creation_tokens"] == 40     # 40 + 0 + 0
+    # cache_read_share = 140 / (140 + 40 + 350) = 140/530 ≈ 0.2642 -> rounded to 4dp
+    # denominator = cache_read + cache_creation + prompt_tokens (full input side,
+    # consistent with tools/usage_report.py cache_read_share_of_input).
+    total_prompt = row["prompt_tokens"]           # 200 + 100 + 50 = 350
+    expected_share = round(140 / (140 + 40 + total_prompt), 4)
+    assert row["cache_read_share"] == pytest.approx(expected_share)
+
+
+def test_daily_digest_cache_share_zero_when_no_prompt_tokens(conn):
+    # Edge: all prompt_tokens are 0 AND no cache reads -> denominator is 0,
+    # share must be 0.0, not a ZeroDivisionError.
+    conn.execute(
+        "INSERT INTO requests (ts, model, status, prompt_tokens, completion_tokens,"
+        " cost_usd, latency_ms, prompt, response,"
+        " cache_read_input_tokens, cache_creation_input_tokens)"
+        " VALUES (datetime('now'), 'sonnet', 'success', 0, 0, 0.0, 10, 'x', 'y', 0, 0)"
+    )
+    conn.commit()
+    digest = daily_digest(conn, days=1)
+    (row,) = digest["per_day"]
+    assert row["cache_read_share"] == 0.0
+
+
+def test_daily_digest_cache_text_format(conn):
+    seed_with_cache(conn, "sonnet", "prompt X", prompt_tokens=400,
+                    cache_read=100, cache_creation=50)
+    digest = daily_digest(conn, days=1)
+    text = format_digest(digest)
+    # Cache sub-line must appear after the main per-day line.
+    assert "cache: read=100 creation=50" in text
+    # cache_read_share = 100/(100+50+400) = 100/550 ≈ 18.2% (:.1% format)
+    # denominator = cache_read + cache_creation + prompt_tokens (full input side).
+    assert "cache_read_share=18.2%" in text
+
+
+def test_daily_digest_cache_null_rows_treated_as_zero(conn):
+    # seed() does not set cache columns -> they are NULL in the DB.
+    seed(conn, "lead", "prompt", tokens=(200, 30))
+    digest = daily_digest(conn, days=1)
+    (row,) = digest["per_day"]
+    assert row["cache_read_tokens"] == 0
+    assert row["cache_creation_tokens"] == 0
+    assert row["cache_read_share"] == 0.0

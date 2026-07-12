@@ -40,10 +40,16 @@ opus 50 / haiku 10 / sonnet-4-6 20 (Guard warn 80%). ЗАКРЫТИЕ ОКНА
 = удалить env-блок из settings.json (или вернуть бэкап) + закрыть
 окно прокси. Подготовка/смоки/поправка — дословно:
 docs/task_reports/2026-07-12_api-window-prep.md.
-Остатки в очереди: регресс-тест стриминга; metrics.py-нарратив
-кэш-колонок; пробы SessionStart-хука тегать synthetic (примесь
-real замечена 22:19; ось 2, on touch preflight_quota). Параллельно
-одобрен первый цикл stage-2 реплеев — открыть следующей сессией.
+Остатки в очереди: регресс-тест стриминга ЗАКРЫТ (t-077,
+gateway/test_stream_cache_logging.py, 5 тестов) + metrics.py-нарратив
+кэш-колонок ЗАКРЫТ (t-078, cache_read/creation + cache_read_share,
+знаменатель согласован с usage_report.py по оси 2) — оба 2026-07-12
+opus-координатором в API-окне, приняты по witness (105 passed;
+t-078 через critic-вход, attempt 1 rejected = ошибка Lead-спеки).
+Остаток тегирования synthetic (смок 22:19 -> real) поднят в очередь
+Lead как механизм (ось 2, вместе с F-37) — см. Remaining Lead-tier
+Queue. Параллельно одобрен первый цикл stage-2 реплеев — открыть
+следующей сессией.
 Гейт-отчёт Phase 2 (ниже) ждёт подписи. Действующие рамки:
 ТУЛКИТ-МОРАТОРИЙ D-0074 (правка toolkit/ — только проверенным
 батчем по слову оператора; порт-очередь в очереди ниже).
@@ -225,6 +231,23 @@ Context — закрыт по evidence, реанимация только реш
   экзамен gpt-oss-120b операционный FAIL) — дословно в
   docs/task_reports/2026-07-12_boot-diet-round4-unroll.md; живой
   остаток (точка t-066 для чека 14в) — в Current Task выше.
+- ОСЬ 2 / traffic_kind + F-37 (МЕХАНИЗМ, Fable-класс; поднято
+  2026-07-12 opus-координатором в API-окне, разбор очереди остатков):
+  (а) смок/проб-трафик пишется traffic_kind='real' — дефолт в
+  gateway/sqlite_logger.py:111 (`metadata.get('traffic_kind') or
+  'real'`); генераторы (gateway/tools_stream_check.py payload без
+  metadata; смок кэш-цикла 22:19 — models в один тик, real) тег не
+  ставят -> засоряет G1. preflight_quota.probe() тегает synthetic
+  верно (образец). Класс-фикс (D-0043): генераторы самотегаются
+  synthetic + решение по дефолту 'real' + ретро-чистка строк 22:19
+  (evidence requests.db — Lead-решение, не переписывать молча).
+  (б) F-37: SessionStart-хук tools/session_context.py доверяет
+  model из harness-payload без сверки с измерением -> present-but-
+  stale ярус утверждается уверенно (этой сессией: заявлен sonnet-4-6,
+  факт opus-4-8). Фикс: сверка payload с requests.db/cc_usage + флаг
+  MISMATCH. Детали: docs/FINDINGS.md F-37, defect_found ref=t-043.
+  Обе части — ось 2 SIBLING_MAP (контуры измерения), свести одним
+  заходом Fable. Разведка приложена: routing-log t-076.
 - Упрочнение tier-гейта (builder-class; WHEN: на evidence первого
   инцидента — Rule #1, критик t-068 находка 2 пометил не-блокером):
   find_tier_declaration матчит ПЕРВУЮ строку `tier:` — сообщение с
