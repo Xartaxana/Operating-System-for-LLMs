@@ -34,12 +34,16 @@ real-трафик С промпт-контентом → R2/R3 гейта ста
 requests + cache-aware cost_usd (litellm 1.90.2 сам считает скидку —
 воспроизведено критиком), капы daily_usd (fable 150 / sonnet-5 50 /
 opus 50 / haiku 10 / sonnet-4-6 20 — оператор может поправить).
-ОБЯЗАТЕЛЬНЫЙ шаг запуска окна: после ПЕРВОГО реального запроса
-сверить non-NULL cache_read_input_tokens в requests (рекомендация
-критика №1; NULL = стриминговый путь не донёс usage, чинить до
-продолжения). Остатки в очереди: регресс-тест стриминга
-(упрочнение); metrics.py-нарратив кэш-колонок. Параллельно одобрен
-первый цикл stage-2 регрессионных реплеев (кормит R1).
+СМОК НА ЖИВОМ ПРОКСИ 2026-07-12 21:30+ (synthetic, ~$0.05): полный
+кэш-цикл подтверждён — call1 write 16804 ток./$0.0421, call2 READ
+16804/$0.0034 (12x дешевле, cost_usd cache-aware); обе строки в
+requests с кэш-колонками; /v1/messages (формат Claude Code)
+отвечает; пробы перепомечены synthetic. Прокси запущен независимым
+окном (gateway/run_proxy.ps1). ОБЯЗАТЕЛЬНЫЙ шаг: после ПЕРВОГО
+реального СТРИМИНГОВОГО запроса окна сверить non-NULL
+cache_read_input_tokens (критик №1; смок был нестриминговый).
+Остатки в очереди: регресс-тест стриминга; metrics.py-нарратив
+кэш-колонок. Параллельно одобрен первый цикл stage-2 реплеев.
 Гейт-отчёт Phase 2 (ниже) ждёт подписи. Действующие рамки:
 ТУЛКИТ-МОРАТОРИЙ D-0074 (правка toolkit/ — только проверенным
 батчем по слову оператора; порт-очередь в очереди ниже).
@@ -293,6 +297,10 @@ Context — закрыт по evidence, реанимация только реш
 - Proxy must be started from gateway/ (callback imports are
   cwd-relative). litellm does NOT auto-load gateway/.env — export
   GEMINI_API_KEY / GROQ_API_KEY before starting the proxy.
+  КАНОНИЧЕСКИЙ ЗАПУСК: pwsh -File gateway\run_proxy.ps1 (делает всё
+  сам, вкл. PYTHONUTF8=1 — без него litellm-баннер падает на
+  cp1251-консоли UnicodeEncodeError'ом, урок 2026-07-12). Ключи
+  лежат в gateway\.env (GEMINI/GROQ/ANTHROPIC_API_KEY).
 - lead-gemini = gemini/gemini-2.5-flash (10 req/min, 250 req/day);
   judge-gemini = gemini/gemini-3.5-flash (5 req/min, 20 req/day
   rolling — pace >=13s, point work only). ZERO free quota on this
