@@ -138,3 +138,9 @@ Evidence is never deleted, only relocated.
   A3/moratorium narrative, stage-6 duplicate, AO3-port paragraph,
   07-11 closure summaries, and the B4/F-34 queue block (live t-066
   residue kept in place).
+- [2026-07-12_api-window-prep.md](2026-07-12_api-window-prep.md) —
+  API-window preparation narrative (t-074 recon, t-075 gateway prep
+  with critic entry, live-proxy cache smoke, PYTHONUTF8 lesson, the
+  22:05 desktop-bypass correction, headless streaming check) and the
+  final verification on the operator's real interactive traffic
+  (~97% cache reads, cache-aware cost).
