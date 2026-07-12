@@ -442,12 +442,23 @@ def daily_digest(conn: sqlite3.Connection, days: int, shadow_log_path=None) -> d
                 # Cache columns (NULL rows treated as 0; only Anthropic traffic populates these)
                 "cache_read_tokens": r[9],
                 "cache_creation_tokens": r[10],
-                # Fraction of input-side tokens served from cache (cache_read / full input side:
-                # cache_read + cache_creation + prompt_tokens) - consistent with
-                # tools/usage_report.py cache_read_share_of_input (project baseline).
+                # Fraction of input-side tokens served from cache. FIELD
+                # SEMANTICS (verified empirically on live rows 2026-07-13,
+                # defect_found ref=t-078): litellm Usage.prompt_tokens for
+                # anthropic is the FULL input side -- it already INCLUDES
+                # cache_read and cache_creation (live rows 527-531/749-751:
+                # prompt - (read + creation) = ~2 uncached tokens each). So
+                # the denominator is prompt_tokens ALONE; adding the cache
+                # columns on top double-counts and understates the share
+                # (~48% displayed where the measured truth is ~96%). This is
+                # the same METRIC as tools/usage_report.py
+                # cache_read_share_of_input, but THERE cc_usage input_tokens
+                # is DISJOINT from the cache counters, so that sibling SUMS
+                # the three. Porting a formula across the axis-2 pair must
+                # translate field semantics, not just copy arithmetic
+                # (SIBLING_MAP axis 2; F-38).
                 "cache_read_share": (
-                    round(r[9] / (r[9] + r[10] + r[4]), 4)
-                    if (r[9] + r[10] + r[4]) > 0 else 0.0
+                    round(r[9] / r[4], 4) if r[4] > 0 else 0.0
                 ),
             }
             for r in per_day

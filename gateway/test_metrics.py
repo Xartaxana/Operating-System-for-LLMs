@@ -510,11 +510,12 @@ def test_daily_digest_cache_aggregation(conn):
 
     assert row["cache_read_tokens"] == 140        # 80 + 60 + 0
     assert row["cache_creation_tokens"] == 40     # 40 + 0 + 0
-    # cache_read_share = 140 / (140 + 40 + 350) = 140/530 ≈ 0.2642 -> rounded to 4dp
-    # denominator = cache_read + cache_creation + prompt_tokens (full input side,
-    # consistent with tools/usage_report.py cache_read_share_of_input).
+    # cache_read_share = 140 / 350 = 0.4. Denominator is prompt_tokens
+    # ALONE: in requests.db litellm's prompt_tokens is the FULL input
+    # side, already including the cache counters (verified on live rows,
+    # defect_found ref=t-078 / F-38) -- summing them on top double-counts.
     total_prompt = row["prompt_tokens"]           # 200 + 100 + 50 = 350
-    expected_share = round(140 / (140 + 40 + total_prompt), 4)
+    expected_share = round(140 / total_prompt, 4)
     assert row["cache_read_share"] == pytest.approx(expected_share)
 
 
@@ -540,9 +541,22 @@ def test_daily_digest_cache_text_format(conn):
     text = format_digest(digest)
     # Cache sub-line must appear after the main per-day line.
     assert "cache: read=100 creation=50" in text
-    # cache_read_share = 100/(100+50+400) = 100/550 ≈ 18.2% (:.1% format)
-    # denominator = cache_read + cache_creation + prompt_tokens (full input side).
-    assert "cache_read_share=18.2%" in text
+    # cache_read_share = 100/400 = 25.0% (:.1% format); prompt_tokens is
+    # the full input side (F-38), so it is the denominator by itself.
+    assert "cache_read_share=25.0%" in text
+
+
+def test_daily_digest_cache_share_live_traffic_shape(conn):
+    # Regression pin for F-38 (defect_found ref=t-078): a row shaped like
+    # LIVE API-window traffic (requests.db id 531: prompt_tokens is the
+    # full input side, cache_read is almost all of it). The old
+    # double-counting denominator gave ~0.49 here; the true share is ~0.97.
+    seed_with_cache(conn, "opus", "live-shape", prompt_tokens=63423,
+                    cache_read=61541, cache_creation=1880)
+    digest = daily_digest(conn, days=1)
+    (row,) = digest["per_day"]
+    assert row["cache_read_share"] == pytest.approx(round(61541 / 63423, 4))
+    assert row["cache_read_share"] > 0.9  # the double-count bug can't pass this
 
 
 def test_daily_digest_cache_null_rows_treated_as_zero(conn):
