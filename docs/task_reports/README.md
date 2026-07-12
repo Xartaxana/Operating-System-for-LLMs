@@ -132,3 +132,9 @@ Evidence is never deleted, only relocated.
   fourth snapshot e0754a6 + tag v0.1.0, polygon deleted) plus the
   verbatim CURRENT_CONTEXT unrolls of the 5b fix batch, stages 1–5a
   prehistory and the 07-11 evening block.
+- [2026-07-12_boot-diet-round4-unroll.md](2026-07-12_boot-diet-round4-unroll.md) —
+  boot-diet round-4 unroll (breach 101,952 after the Phase 2 gate
+  report and D-0073/D-0074): verbatim CURRENT_CONTEXT blocks — closed
+  A3/moratorium narrative, stage-6 duplicate, AO3-port paragraph,
+  07-11 closure summaries, and the B4/F-34 queue block (live t-066
+  residue kept in place).
