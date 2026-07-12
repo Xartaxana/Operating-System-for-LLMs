@@ -294,6 +294,19 @@ def _ascii_sanitize(s: str, max_len: int = 80) -> str:
 
 
 def model_line(stdin_payload=None) -> str:
+    """F-37 (2026-07-12): the payload model is the harness's SessionStart
+    DECLARATION, not a measurement -- it can be stale (observed live:
+    payload said sonnet-4-6 while the session actually ran opus-4-8;
+    the proxy log was the ground truth). A present-but-stale id stated
+    confidently is worse than an absent one, so the line now carries
+    the "declared by harness, not measured" marker in both branches.
+    An in-hook measured cross-check is NOT implementable at SessionStart
+    time: the session's own first request has not landed in requests.db
+    yet, so the freshest rows there belong to a previous session --
+    recorded limitation, not an oversight. The measured verification
+    duty stays where it already lives: D-0056 (first-Lead-action check
+    in-session) and calibration check 5 (transcripts vs windows);
+    liveness of this line -- check 13(zh)."""
     model_id = extract_model_id(stdin_payload)
     if not model_id:
         return "MODEL: not provided by hook input -- verify tier yourself (D-0056a)"
@@ -303,7 +316,10 @@ def model_line(stdin_payload=None) -> str:
         # as "no model id at all" -- there is nothing left to report.
         return "MODEL: not provided by hook input -- verify tier yourself (D-0056a)"
     tier = model_tier(sanitized)
-    return f"MODEL: {sanitized} -> tier {tier} (Lead tier = fable)"
+    return (
+        f"MODEL: {sanitized} -> tier {tier}"
+        " (declared by harness, not measured -- F-37; Lead tier = fable)"
+    )
 
 
 # ---------------------------------------------------------------------------

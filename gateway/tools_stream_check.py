@@ -8,6 +8,10 @@ groq-streaming tool-call break recorded in PI_HARNESS.md "Известные
 Named *_check.py, not *_test.py, to stay out of the pytest glob
 (critic t-013, F3).
 
+Self-tags every request with metadata.traffic_kind="synthetic" so proxy
+runs do not pollute real-traffic accounting in sqlite_logger.py (default
+is 'real'; gate G1).
+
 Usage:
     python tools_stream_check.py --model middle-groq --stream
     python tools_stream_check.py --model middle-groq --no-stream
@@ -72,6 +76,7 @@ def run_nonstream(base_url: str, model: str, timeout: float) -> bool:
         "tools": ONE_TOOL,
         "tool_choice": "auto",
         "stream": False,
+        "metadata": {"traffic_kind": "synthetic"},
     }
     try:
         resp = post(base_url, payload, timeout)
@@ -100,6 +105,7 @@ def run_stream(base_url: str, model: str, timeout: float) -> bool:
         "tools": ONE_TOOL,
         "tool_choice": "auto",
         "stream": True,
+        "metadata": {"traffic_kind": "synthetic"},
     }
     try:
         resp = post(base_url, payload, timeout)

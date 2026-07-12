@@ -231,23 +231,15 @@ Context — закрыт по evidence, реанимация только реш
   экзамен gpt-oss-120b операционный FAIL) — дословно в
   docs/task_reports/2026-07-12_boot-diet-round4-unroll.md; живой
   остаток (точка t-066 для чека 14в) — в Current Task выше.
-- ОСЬ 2 / traffic_kind + F-37 (МЕХАНИЗМ, Fable-класс; поднято
-  2026-07-12 opus-координатором в API-окне, разбор очереди остатков):
-  (а) смок/проб-трафик пишется traffic_kind='real' — дефолт в
-  gateway/sqlite_logger.py:111 (`metadata.get('traffic_kind') or
-  'real'`); генераторы (gateway/tools_stream_check.py payload без
-  metadata; смок кэш-цикла 22:19 — models в один тик, real) тег не
-  ставят -> засоряет G1. preflight_quota.probe() тегает synthetic
-  верно (образец). Класс-фикс (D-0043): генераторы самотегаются
-  synthetic + решение по дефолту 'real' + ретро-чистка строк 22:19
-  (evidence requests.db — Lead-решение, не переписывать молча).
-  (б) F-37: SessionStart-хук tools/session_context.py доверяет
-  model из harness-payload без сверки с измерением -> present-but-
-  stale ярус утверждается уверенно (этой сессией: заявлен sonnet-4-6,
-  факт opus-4-8). Фикс: сверка payload с requests.db/cc_usage + флаг
-  MISMATCH. Детали: docs/FINDINGS.md F-37, defect_found ref=t-043.
-  Обе части — ось 2 SIBLING_MAP (контуры измерения), свести одним
-  заходом Fable. Разведка приложена: routing-log t-076.
+- ОСЬ 2 / traffic_kind + F-37 — ЗАКРЫТО 2026-07-12 Fable-батчем
+  (D-0075): дефолт 'real' остаётся (записанный выбор — органика
+  passthrough не тегается), не-органические генераторы самотегаются
+  (tools_stream_check.py закрыт t-079), смок-пачка id 512–526
+  ретегирована synthetic громко, MODEL-строка хука несёт маркер
+  «declared by harness, not measured -- F-37» (in-hook сверка с
+  измерением отвергнута как нереализуемая на SessionStart —
+  аддендум F-37). Детекторы: чеки 13(з) НОВЫЙ / 13(ж) / 5.
+  Порт конвенции в toolkit — в порт-очередь ниже (D-0074).
 - Упрочнение tier-гейта (builder-class; WHEN: на evidence первого
   инцидента — Rule #1, критик t-068 находка 2 пометил не-блокером):
   find_tier_declaration матчит ПЕРВУЮ строку `tier:` — сообщение с
@@ -259,7 +251,10 @@ Context — закрыт по evidence, реанимация только реш
   моратории), в опубликованное НЕ уходит до верификации живыми
   диспатчами; (2) док-строка D-0072 — уже ушла снимком v0.1.0,
   закрыто; (3) кэш-колонки sqlite_logger (t-075) — в toolkit/gateway
-  после верификации живым трафиком окна. Новых правок toolkit/ не
+  после верификации живым трафиком окна; (4) D-0075 — самотег-
+  конвенция traffic_kind (генераторы) + F-37-маркер MODEL-строки
+  session_context + чеки 13(ж-доп)/13(з) — батчем после проживания
+  у нас. Новых правок toolkit/ не
   делать — ось 7 в осевых блоках отвечается «в очередь порта» сюда.
 - A5 witness auto-collection (builder-class; WHEN: first REAL
   builder-Pi work cycle — Rule #1: no wrapper before there are

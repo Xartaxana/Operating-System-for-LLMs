@@ -378,12 +378,21 @@ def test_model_tier_mapping_unknown_string():
 
 def test_model_line_found_string_form():
     line = sc.model_line({"model": "claude-fable-5"})
-    assert line == "MODEL: claude-fable-5 -> tier Lead(top) (Lead tier = fable)"
+    # F-37: the payload id is a harness declaration, not a measurement --
+    # the line must say so (present-but-stale stated confidently is the
+    # failure mode this marker exists to prevent).
+    assert line == (
+        "MODEL: claude-fable-5 -> tier Lead(top)"
+        " (declared by harness, not measured -- F-37; Lead tier = fable)"
+    )
 
 
 def test_model_line_found_dict_form():
     line = sc.model_line({"model": {"id": "claude-sonnet-5"}})
-    assert line == "MODEL: claude-sonnet-5 -> tier builder-tier (Lead tier = fable)"
+    assert line == (
+        "MODEL: claude-sonnet-5 -> tier builder-tier"
+        " (declared by harness, not measured -- F-37; Lead tier = fable)"
+    )
 
 
 def test_model_line_missing_payload():
@@ -438,7 +447,10 @@ def test_model_line_long_model_id_is_truncated():
     # "MODEL: " prefix + sanitized (<=80 chars) + " -> tier ... " suffix
     sanitized = sc._ascii_sanitize(long_id)
     assert len(sanitized) == 80
-    assert line == f"MODEL: {sanitized} -> tier builder-tier (Lead tier = fable)"
+    assert line == (
+        f"MODEL: {sanitized} -> tier builder-tier"
+        " (declared by harness, not measured -- F-37; Lead tier = fable)"
+    )
 
 
 def test_ascii_sanitize_direct_cases():
@@ -483,7 +495,10 @@ def test_build_context_lines_model_line_placed_right_after_now(tmp_path):
     now = datetime.datetime(2026, 7, 11, 9, 0, 0)
     lines = sc.build_context_lines(root, now, stdin_payload={"model": "claude-fable-5"})
     assert lines[0].startswith("NOW:")
-    assert lines[1] == "MODEL: claude-fable-5 -> tier Lead(top) (Lead tier = fable)"
+    assert lines[1] == (
+        "MODEL: claude-fable-5 -> tier Lead(top)"
+        " (declared by harness, not measured -- F-37; Lead tier = fable)"
+    )
 
 
 # ==== t-043 (B3 remainder): BOOT BUDGET (D-0068/D-0038) ==============
