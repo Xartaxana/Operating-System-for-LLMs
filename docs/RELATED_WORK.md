@@ -414,6 +414,11 @@ agent-loop/context/agent-workspace, сверка negative-хитов в src/.
    posture; параллелизм как дефицитный ресурс, caps maxConcurrent).
    КАК: поля Owns/Non-goals/Handoff влить в шаблон A3 dispatch
    context manifest при его постройке (A3 уже в очереди). Не раньше.
+   СДЕЛАНО 2026-07-12: влиты в D-0073 (правило 11 обоих деплоев +
+   шаблон; owns/non-goals/handoff обязательны для пишущего диспатча,
+   maxConcurrent — опциональный кап веера); Chat budget / Tool
+   posture НЕ взяты (Rule #1: бюджетирует харнес, tool-профили —
+   роль-файлы).
 
 Prior art / валидация — записано, работ не открывается:
 

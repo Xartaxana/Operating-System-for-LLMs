@@ -159,7 +159,13 @@ for the period, and diffs to DECISIONS.md.
     counting script's constants in sync with the journal validator.
     (d) A systematic `failure_class=spec` for a tier signals
     dispatches with no DoD; check the Lead's recent specs for
-    acceptance criteria plus a verification run.
+    acceptance criteria plus a verification run AND for the context
+    manifest (a writing dispatch with no "given"/"owns" is a leak of
+    the dispatch-context-manifest rule); a systematic
+    `failure_class=recon` on builder signals an insufficient "given"
+    basket; "needed beyond the manifest" report lines are direct
+    telemetry of the same (piling up → the Lead's baskets are
+    systematically thin).
     (e) Task_id integrity: no duplicate task_ids between unrelated
     tasks, across every journal you run. A known-duplicate id
     recorded in the journal counts as TWO tasks in every check-3/13

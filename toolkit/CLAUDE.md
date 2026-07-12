@@ -173,7 +173,21 @@ separately in this deployment).
    — the dispatch attaches the spec/DoD of the work under review,
    otherwise only general quality is checkable, not fit to the task. A
    dispatch with no DoD is returned by the worker as questions, before
-   work starts. Lead-tier tasks and the judge role are covered by
+   work starts. Alongside the DoD, a dispatch carries a CONTEXT
+   MANIFEST (dispatch-context-manifest rule): "given" — an enumeration
+   of the files/data injected into the worker (the starting basket;
+   its sufficiency is the Lead's responsibility); a WRITING dispatch
+   must also carry "owns" (the paths it may write), "non-goals" and
+   "handoff" (what comes back for acceptance); a parallel fan-out
+   declares ownership per rule 4 plus an optional maxConcurrent cap.
+   The manifest is DECLARATIVE on reads and NORMATIVE on writes: the
+   worker reads the repo freely, and going past the basket is not a
+   violation but a report line — "needed beyond the manifest"
+   (telemetry on spec quality); for a targeted read-only dispatch the
+   manifest is simply the explicit enumeration of what's attached in
+   the dispatch text, no fields. A writing/parallel dispatch with no
+   manifest is returned by the worker as questions, same as one with
+   no DoD. Lead-tier tasks and the judge role are covered by
    their own dedicated mechanisms (the Lead exam, weekly calibration,
    and judge calibration — not repeated here).
 

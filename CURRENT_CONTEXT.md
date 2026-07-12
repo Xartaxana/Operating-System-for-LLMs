@@ -25,9 +25,17 @@ record: docs/UNIFIED_PLAN_2026-07-07.md; гейты Phase 2 — ROADMAP.md.
 
 ## Current Task (Authoritative, D-0025)
 
-A3 — dispatch context manifest, ВЫДЕЛЕННЫМ ПРОХОДОМ (приказ
-оператора 2026-07-11; полное описание — в очереди ниже). Условие
-«после закрытия 5б» выполнено; Phase 3 закрыта целиком.
+A3 ЗАКРЫТ 2026-07-12 тем же днём, что Phase 3: D-0073 — манифест
+контекста диспатча (граница «декларативен по чтению, нормативен по
+записи» зафиксирована из вопроса оператора ДО стройки). Правило 11
++ builder-роль во всех трёх копиях (наш/toolkit/AO3), чек 13(г)
+обоих протоколов расширен, D-0073 в обе стороны пары решений,
+prior-art отметки (RELATED_WORK OpenClaw п.3, ROADMAP deferred).
+В шаблон уходит ОЧЕРЕДНЫМ релизным снимком (staging опережает
+опубликованное v0.1.0 — легально по оси 7, изменение родилось
+здесь). СЛЕДУЮЩЕЕ — по команде оператора: гейт-отчёт Phase 2
+(приоритет 2026-07-11 «по команде») или вторая калибровка ~07-18;
+до команды одна авторитетная задача не назначена.
 
 Закрытие Phase 3, стадия 6 (2026-07-12): док-строка tier-декларации
 D-0072 в правило 10 всех трёх CLAUDE.md (11f710b; AO3 0a1f01e —
@@ -185,14 +193,9 @@ rule-10 свип, F-17 стадии, eval-1, AO3 handoff/trim, Gemini-экзам
   find_tier_declaration матчит ПЕРВУЮ строку `tier:` — сообщение с
   посторонней строкой, начинающейся с tier:, даёт ложный reject;
   фикс — матчить любую удовлетворяющую строку.
-- A3 dispatch context manifest (Lead-class, mechanism — full
-  rule-10 treatment; WHEN: ВЫДЕЛЕННЫМ ПРОХОДОМ сразу ПОСЛЕ закрытия
-  стадии 5б — приказ оператора 2026-07-11, заменил прежний пассивный
-  триггер «next D-0054/rule-11 touch»): the dispatch text enumerates
-  the exact files/data injected into the worker (GSD
-  UnitContextManifest as prior art); lane-contract fields
-  (Owns/Non-goals/Handoff, maxConcurrent — из OpenClaw-обзора)
-  входят в шаблон манифеста тем же проходом.
+- A3 ЗАКРЫТ 2026-07-12 (D-0073) — см. Current Task. Остаток прохода:
+  порт в опубликованный шаблон — очередным релизным снимком
+  Supervised-Delegation (toolkit-staging уже несёт правку).
 - A5 witness auto-collection (builder-class; WHEN: first REAL
   builder-Pi work cycle — Rule #1: no wrapper before there are
   sessions to wrap; binding decided at calibration): wrapper runs
