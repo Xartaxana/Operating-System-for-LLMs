@@ -212,7 +212,10 @@ on-touch/evidence-gated.
   ту же протухшую заглушку «currently 0» (доклад builder; их версия
   дивергентна — своя сигнатура phase2_readiness); (7) F-39 фикс
   shadow_eval (max_tokens в replay + truncated-счётчик, t-091) —
-  копия toolkit/gateway/shadow_eval.py несёт тот же класс дефекта.
+  копия toolkit/gateway/shadow_eval.py несёт тот же класс дефекта;
+  (8) конвенция лейбла диспатча «модель: …» в правиле 7 политики
+  (слово оператора 2026-07-13) — та же строка в toolkit/CLAUDE.md
+  (EN).
   Новых правок toolkit/ не
   делать — ось 7 в осевых блоках отвечается «в очередь порта» сюда.
 - A5 witness auto-collection (builder-class; WHEN: first REAL
