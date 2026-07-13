@@ -15,4 +15,11 @@ Get-Content .env | ForEach-Object {
     }
 }
 $Host.UI.RawUI.WindowTitle = 'API-WINDOW PROXY (litellm :4000)'
+Write-Host ''
+Write-Host '=== ПРОКСИ ЗАПУСКАЕТСЯ: старт занимает ~10-15 секунд ===' -ForegroundColor Cyan
+Write-Host 'Жди строку "Uvicorn running on http://0.0.0.0:4000" - ТОЛЬКО тогда порт открыт.' -ForegroundColor Cyan
+Write-Host 'До неё идут баннер LITELLM и жёлтые WARNING про cost map - это НОРМА, не ошибка.' -ForegroundColor Cyan
+Write-Host 'НЕ закрывай это окно, пока нужно API-окно. Проверка готовности - в другом окне:' -ForegroundColor Cyan
+Write-Host '    Invoke-RestMethod http://localhost:4000/health/liveliness' -ForegroundColor DarkGray
+Write-Host ''
 litellm --config config.yaml
