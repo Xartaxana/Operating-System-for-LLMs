@@ -96,7 +96,8 @@ def sample_requests(conn: sqlite3.Connection, source_model: str, days: int, limi
     replaying them contaminates the sample (observed 2026-07-03: a
     failed lead-gemini calibration polluted 6 of 11 sampled pairs)."""
     rows = conn.execute(
-        "SELECT id, prompt, response, COALESCE(cost_usd, 0), category FROM requests"
+        "SELECT id, prompt, response, COALESCE(cost_usd, 0), category, completion_tokens"
+        " FROM requests"
         " WHERE model = ? AND status = 'success' AND prompt IS NOT NULL"
         " AND response IS NOT NULL AND substr(ts, 1, 10) >= date('now', ?)"
         " AND traffic_kind NOT IN ('replay', 'judge')"
@@ -105,7 +106,8 @@ def sample_requests(conn: sqlite3.Connection, source_model: str, days: int, limi
         (source_model, f"-{days} days", limit),
     ).fetchall()
     return [
-        {"id": r[0], "prompt": r[1], "response": r[2], "cost_usd": r[3], "category": r[4]}
+        {"id": r[0], "prompt": r[1], "response": r[2], "cost_usd": r[3], "category": r[4],
+         "completion_tokens": r[5]}
         for r in rows
     ]
 
@@ -148,11 +150,22 @@ def _extract_cost(response, model: str, db_path, call_start):
         return None
 
 
-def replay(messages: list, target_model: str, gateway: str, db_path=None, **kwargs):
+def replay(messages: list, target_model: str, gateway: str, db_path=None,
+           max_tokens: int = None, **kwargs):
     """Runs the same messages on target_model through the gateway.
-    Returns (response_text, cost_usd); cost_usd is None if it could
-    not be determined (see _extract_cost). kwargs pass through to
-    litellm (tests use mock_response to avoid a live model/proxy).
+    Returns (response_text, cost_usd, finish_reason); cost_usd is None
+    if it could not be determined (see _extract_cost). kwargs pass
+    through to litellm (tests use mock_response to avoid a live
+    model/proxy).
+
+    max_tokens: passed to litellm.completion when not None. Without
+    it the replay target inherits the provider's own default cap,
+    which can be far below what the source answer needed (F-39:
+    gpt-oss-120b on Groq truncated 7 of 11 replies at its 3072-token
+    default while the lead-sonnet source answers ran 4138-19537
+    tokens -- the stand was measuring itself, not the candidate).
+    None preserves the old not-passed behavior (callers that don't
+    care, e.g. judge_pair's short verdict).
 
     traffic_kind is sent via extra_body, not litellm.completion's own
     metadata= kwarg: that kwarg only feeds litellm's local logging
@@ -161,6 +174,8 @@ def replay(messages: list, target_model: str, gateway: str, db_path=None, **kwar
     (verified empirically 2026-07-04: metadata= produced 'real' rows
     on the proxy; extra_body={"metadata": ...} reaches the callback)."""
     call_start = datetime.datetime.now()
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
     response = litellm.completion(
         model=f"openai/{target_model}",
         api_base=gateway.rstrip("/") + "/v1",
@@ -169,9 +184,21 @@ def replay(messages: list, target_model: str, gateway: str, db_path=None, **kwar
         extra_body={"metadata": {"traffic_kind": "replay"}},
         **kwargs,
     )
-    text = response.choices[0].message.content
+    choice = response.choices[0]
+    text = choice.message.content
+    finish_reason = getattr(choice, "finish_reason", None)
     cost = _extract_cost(response, target_model, db_path, call_start)
-    return text, cost
+    return text, cost, finish_reason
+
+
+def _auto_max_tokens(source_completion_tokens) -> int:
+    """Auto per-pair replay max_tokens (F-39): 1.3x the source's own
+    completion_tokens, floored at 8192 so the replay target isn't
+    starved by its own provider default. NULL/0 source (pre-migration
+    rows, or a source call whose usage wasn't logged) floors straight
+    to 8192 rather than raising on None * 1.3."""
+    tokens = source_completion_tokens or 0
+    return max(int(tokens * 1.3), 8192)
 
 
 def parse_verdict(text: str):
@@ -230,13 +257,16 @@ def last_user_content(messages: list) -> str:
     return ""
 
 
-def evaluate(conn, source_model: str, target_model: str, gateway: str, days: int, sample_n: int, judge_model: str = None, categories: set = None, db_path=None, pace: float = 0.0, **replay_kwargs):
+def evaluate(conn, source_model: str, target_model: str, gateway: str, days: int, sample_n: int, judge_model: str = None, categories: set = None, db_path=None, pace: float = 0.0, max_tokens_override: int = None, **replay_kwargs):
     """categories: optional whitelist. A replay only supports the table
     row whose 'Delegate to' tier the target actually is, so a run
     aimed at one row (e.g. coding -> Middle) must not touch rows whose
     named tier differs from the target.
     pace: seconds to sleep between pairs (free-tier RPM/TPM ceilings, e.g.
     Groq free tier is 8000 TPM for judge-groq/gpt-oss).
+    max_tokens_override: falsy (None or 0) -> auto per-pair max_tokens
+    from the source row's completion_tokens (_auto_max_tokens, F-39);
+    truthy -> that fixed value is used for every pair instead.
 
     Category priority (t-085): a stored category (requests.category, set
     by the regression runner from the ground-truth JSONL field) is used
@@ -253,13 +283,18 @@ def evaluate(conn, source_model: str, target_model: str, gateway: str, days: int
         category = row["category"] or categorize(row["prompt"])
         if categories and category not in categories:
             continue
+        target_max_tokens = (
+            max_tokens_override if max_tokens_override
+            else _auto_max_tokens(row["completion_tokens"])
+        )
         try:
-            replayed_text, replayed_cost = replay(
-                messages, target_model, gateway, db_path=db_path, **replay_kwargs
+            replayed_text, replayed_cost, finish_reason = replay(
+                messages, target_model, gateway, db_path=db_path,
+                max_tokens=target_max_tokens, **replay_kwargs
             )
             error = None
         except Exception as exc:
-            replayed_text, replayed_cost, error = None, None, str(exc)
+            replayed_text, replayed_cost, finish_reason, error = None, None, None, str(exc)
         verdict, judge_cost = None, None
         if judge_model and error is None:
             try:
@@ -279,6 +314,7 @@ def evaluate(conn, source_model: str, target_model: str, gateway: str, days: int
                 "verdict": verdict,
                 "judge_cost_usd": judge_cost,
                 "error": error,
+                "truncated": finish_reason == "length",
             }
         )
     return results
@@ -302,6 +338,7 @@ def aggregate_by_category(results: list) -> dict:
                 sum(i["target_cost_usd"] or 0 for i in items) / n, 6
             ),
             "errors": sum(1 for i in items if i["error"]),
+            "truncated": sum(1 for i in items if i.get("truncated")),
             "pass_rate": round(
                 sum(1 for i in judged if i["verdict"] == "equivalent") / len(judged), 4
             )
@@ -400,11 +437,18 @@ def update_delegation_table(table_path: Path, shadow_log_path: Path, date: str,
                 judged += f" judge_cost=${agg['mean_judge_cost_usd']:.4f}"
             else:
                 judged += " judge_cost=unknown"
+        # errors= (unjudged pairs, F-40) and truncated= (stand-clipped
+        # replies, F-39) must survive in the durable evidence line, not
+        # only the console report: both findings were uncovered by
+        # retrospective audit, so the detectors live where audits read
+        # (critic t-091 non-blocker N1, placed by Lead at acceptance).
         entries.append(
             f"{date}  category={category}  source={source_model} target={target_model}"
             f"  n={agg['n']}  sim={agg['mean_similarity']:.2f}{judged}"
             f"  cost_source=${agg['mean_source_cost_usd']:.4f}"
-            f" cost_target=${agg['mean_target_cost_usd']:.4f}  -> {status}"
+            f" cost_target=${agg['mean_target_cost_usd']:.4f}"
+            f"  errors={agg.get('errors', 0)} truncated={agg.get('truncated', 0)}"
+            f"  -> {status}"
         )
         if status in ("validated", "rejected"):
             table_text = update_table_status(table_text, task_type, status)
@@ -461,7 +505,8 @@ def format_report(source_model, target_model, aggregated, statuses) -> str:
             f"  {category} [{mapped}]: n={agg['n']} sim={agg['mean_similarity']:.0%}{judged}{judge_cost}"
             f" cost {source_model}=${agg['mean_source_cost_usd']:.4f}"
             f" vs {target_model}=${agg['mean_target_cost_usd']:.4f}"
-            f" errors={agg['errors']} -> {statuses[category]}"
+            f" errors={agg['errors']} truncated={agg.get('truncated', 0)}"
+            f" -> {statuses[category]}"
         )
     return "\n".join(lines)
 
@@ -486,6 +531,12 @@ def main():
                         help="run --judge-model on labeled pairs and report agreement; no replay")
     parser.add_argument("--pace", type=float, default=0.0,
                         help="seconds between calibration pairs (free-tier RPM ceilings)")
+    parser.add_argument("--max-tokens", type=int, default=0,
+                        help="replay completion token cap. Positive = fixed override for"
+                        " every pair; 0 (default) = auto per-pair, 1.3x the source's own"
+                        " completion_tokens floored at 8192 (F-39: without this the replay"
+                        " target inherits its provider's default cap and can truncate"
+                        " answers longer than that default)")
     parser.add_argument("--categories",
                         help="comma-separated category whitelist (e.g. 'coding');"
                         " restricts the run to rows whose Delegate-to tier matches the target")
@@ -532,7 +583,8 @@ def main():
     categories = set(args.categories.split(",")) if args.categories else None
     results = evaluate(conn, args.source_model, args.target_model, args.gateway,
                        args.days, args.sample, judge_model=args.judge_model,
-                       categories=categories, db_path=args.db, pace=args.pace)
+                       categories=categories, db_path=args.db, pace=args.pace,
+                       max_tokens_override=args.max_tokens or None)
     aggregated = aggregate_by_category(results)
     statuses = {
         category: decide_status(agg, args.threshold, args.min_samples, args.pass_threshold)

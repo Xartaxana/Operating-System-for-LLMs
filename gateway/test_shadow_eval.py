@@ -16,6 +16,7 @@ from shadow_eval import (
     calibrate,
     decide_status,
     evaluate,
+    format_report,
     judge_pair,
     parse_verdict,
     replay,
@@ -132,6 +133,50 @@ def test_replay_tags_traffic_kind_as_replay(monkeypatch):
     assert captured["extra_body"] == {"metadata": {"traffic_kind": "replay"}}
 
 
+def test_replay_passes_max_tokens_to_completion_when_set(monkeypatch):
+    # F-39: replay() must forward max_tokens to litellm.completion so the
+    # replay target doesn't fall back to its provider's own default cap.
+    import shadow_eval
+
+    real_completion = shadow_eval.litellm.completion
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        kwargs.setdefault("mock_response", "ok")
+        return real_completion(**kwargs)
+
+    monkeypatch.setattr(shadow_eval.litellm, "completion", fake_completion)
+    replay([{"role": "user", "content": "hi"}], "intern", "http://localhost:4000", max_tokens=500)
+    assert captured["max_tokens"] == 500
+
+
+def test_replay_omits_max_tokens_when_none(monkeypatch):
+    # None preserves the pre-F-39 behavior: no max_tokens kwarg at all
+    # (e.g. judge_pair's short verdict calls don't need one).
+    import shadow_eval
+
+    real_completion = shadow_eval.litellm.completion
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        kwargs.setdefault("mock_response", "ok")
+        return real_completion(**kwargs)
+
+    monkeypatch.setattr(shadow_eval.litellm, "completion", fake_completion)
+    replay([{"role": "user", "content": "hi"}], "intern", "http://localhost:4000", max_tokens=None)
+    assert "max_tokens" not in captured
+
+
+def test_replay_returns_finish_reason(monkeypatch):
+    text, cost, finish_reason = replay(
+        [{"role": "user", "content": "hi"}], "intern", "http://localhost:4000",
+        mock_response="ok",
+    )
+    assert finish_reason == "stop"
+
+
 def test_judge_pair_tags_traffic_kind_as_judge(monkeypatch):
     import shadow_eval
 
@@ -183,6 +228,110 @@ def test_evaluate_records_replay_errors(conn):
     assert results[0]["similarity"] == 0.0
 
 
+def test_auto_max_tokens_scales_and_floors():
+    from shadow_eval import _auto_max_tokens
+
+    assert _auto_max_tokens(10000) == int(10000 * 1.3)
+    assert _auto_max_tokens(1000) == 8192  # 1.3x would be below the floor
+    assert _auto_max_tokens(0) == 8192
+    assert _auto_max_tokens(None) == 8192
+
+
+def test_evaluate_computes_max_tokens_from_source_completion_tokens(conn, monkeypatch):
+    # F-39: the pair's max_tokens must be derived from the SOURCE row's own
+    # completion_tokens (max(source * 1.3, 8192)), not left unset.
+    import shadow_eval
+
+    conn.execute(
+        "INSERT INTO requests (ts, model, status, cost_usd, prompt, response, completion_tokens)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            datetime.datetime.now().isoformat(), "lead", "success", 0.01,
+            json.dumps([{"role": "user", "content": "hi"}]), "hello", 10000,
+        ),
+    )
+    conn.commit()
+
+    captured = {}
+
+    def fake_replay(messages, target_model, gateway, db_path=None, max_tokens=None, **kwargs):
+        captured["max_tokens"] = max_tokens
+        return "hello", 0.001, "stop"
+
+    monkeypatch.setattr(shadow_eval, "replay", fake_replay)
+    evaluate(conn, "lead", "intern", "http://localhost:4000", days=7, sample_n=10)
+    assert captured["max_tokens"] == max(int(10000 * 1.3), 8192)
+
+
+def test_evaluate_floors_max_tokens_when_source_completion_tokens_null(conn, monkeypatch):
+    import shadow_eval
+
+    seed(conn, "lead", [{"role": "user", "content": "hi"}], "hello")  # completion_tokens NULL
+
+    captured = {}
+
+    def fake_replay(messages, target_model, gateway, db_path=None, max_tokens=None, **kwargs):
+        captured["max_tokens"] = max_tokens
+        return "hello", 0.001, "stop"
+
+    monkeypatch.setattr(shadow_eval, "replay", fake_replay)
+    evaluate(conn, "lead", "intern", "http://localhost:4000", days=7, sample_n=10)
+    assert captured["max_tokens"] == 8192
+
+
+def test_evaluate_max_tokens_override_bypasses_auto_calc(conn, monkeypatch):
+    import shadow_eval
+
+    conn.execute(
+        "INSERT INTO requests (ts, model, status, cost_usd, prompt, response, completion_tokens)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            datetime.datetime.now().isoformat(), "lead", "success", 0.01,
+            json.dumps([{"role": "user", "content": "hi"}]), "hello", 10000,
+        ),
+    )
+    conn.commit()
+
+    captured = {}
+
+    def fake_replay(messages, target_model, gateway, db_path=None, max_tokens=None, **kwargs):
+        captured["max_tokens"] = max_tokens
+        return "hello", 0.001, "stop"
+
+    monkeypatch.setattr(shadow_eval, "replay", fake_replay)
+    evaluate(conn, "lead", "intern", "http://localhost:4000", days=7, sample_n=10,
+             max_tokens_override=2000)
+    assert captured["max_tokens"] == 2000
+
+
+def test_evaluate_counts_truncated_on_finish_reason_length(conn, monkeypatch):
+    import shadow_eval
+
+    seed(conn, "lead", [{"role": "user", "content": "hi"}], "hello")
+
+    def fake_replay(messages, target_model, gateway, db_path=None, max_tokens=None, **kwargs):
+        return "partial answer", 0.001, "length"
+
+    monkeypatch.setattr(shadow_eval, "replay", fake_replay)
+    results = evaluate(conn, "lead", "intern", "http://localhost:4000", days=7, sample_n=10)
+    assert results[0]["truncated"] is True
+
+
+def test_evaluate_truncated_false_when_finish_reason_unavailable(conn, monkeypatch):
+    # mock/provider not returning finish_reason must not be counted and
+    # must not raise.
+    import shadow_eval
+
+    seed(conn, "lead", [{"role": "user", "content": "hi"}], "hello")
+
+    def fake_replay(messages, target_model, gateway, db_path=None, max_tokens=None, **kwargs):
+        return "answer", 0.001, None
+
+    monkeypatch.setattr(shadow_eval, "replay", fake_replay)
+    results = evaluate(conn, "lead", "intern", "http://localhost:4000", days=7, sample_n=10)
+    assert results[0]["truncated"] is False
+
+
 def test_aggregate_by_category():
     results = [
         {"category": "coding", "source_cost_usd": 0.02, "target_cost_usd": 0.001, "similarity": 0.8, "error": None},
@@ -193,6 +342,27 @@ def test_aggregate_by_category():
     assert agg["coding"]["n"] == 2
     assert agg["coding"]["mean_similarity"] == pytest.approx(0.7)
     assert agg["other"]["errors"] == 1
+
+
+def test_aggregate_by_category_counts_truncated():
+    results = [
+        {"category": "coding", "source_cost_usd": 0.02, "target_cost_usd": 0.001,
+         "similarity": 0.8, "error": None, "truncated": True},
+        {"category": "coding", "source_cost_usd": 0.03, "target_cost_usd": 0.002,
+         "similarity": 0.6, "error": None, "truncated": False},
+    ]
+    agg = aggregate_by_category(results)
+    assert agg["coding"]["truncated"] == 1
+
+
+def test_aggregate_by_category_truncated_defaults_to_zero_without_key():
+    # Older-shaped result dicts (no "truncated" key) must not crash aggregation.
+    results = [
+        {"category": "coding", "source_cost_usd": 0.02, "target_cost_usd": 0.001,
+         "similarity": 0.8, "error": None},
+    ]
+    agg = aggregate_by_category(results)
+    assert agg["coding"]["truncated"] == 0
 
 
 class _FakeResponse:
@@ -263,6 +433,16 @@ def test_aggregate_by_category_mean_judge_cost_none_when_no_judge_run():
     ]
     agg = aggregate_by_category(results)
     assert agg["coding"]["mean_judge_cost_usd"] is None
+
+
+def test_format_report_includes_truncated_count():
+    aggregated = {
+        "coding": {"n": 2, "mean_similarity": 0.5, "mean_source_cost_usd": 0.02,
+                   "mean_target_cost_usd": 0.001, "errors": 0, "truncated": 3},
+    }
+    statuses = {"coding": "estimated"}
+    report = format_report("lead", "intern", aggregated, statuses)
+    assert "errors=0 truncated=3" in report
 
 
 def test_decide_status_validated():

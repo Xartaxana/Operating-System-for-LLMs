@@ -94,6 +94,11 @@ model_list:
     litellm_params:
       model: groq/openai/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
+      # reasoning_format=hidden: same fix class as the builder-groq block
+      # below (t-037) -- gpt-oss returns its reasoning in the response,
+      # which eats into the completion-token budget (F-39: replay hit
+      # the provider's default max_tokens with reasoning included).
+      reasoning_format: hidden
 
   # Middle-tier CANDIDATE #2 (same operator order): free Gemini tier,
   # 10 req/min 250 req/day (pace >=6s on replays). Cross-family to
