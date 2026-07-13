@@ -243,11 +243,12 @@ on-touch/evidence-gated.
   final article based on docs/draft-C.md and hands it to Lead for
   proofreading + comparison against the three AI drafts. Brief + all
   drafts: docs/ARTICLE_BRIEF_2026-07-10.md, docs/draft-{A,B,C}.md.
-- White Paper: v0.2.0 FULL REVISION done 2026-07-10 (охват — см.
-  git log v0.2.0). AWAITING Architect review (operator reviews
-  v0.2.0 directly; v0.1.x review thread superseded). NB: v0.2.0 не
-  покрывает события 2026-07-11 (калибровка, тулкит, D-0070/71) —
-  кандидат v0.2.1 после стадии 6.
+- White Paper: v0.2.1 написан 2026-07-13 по слову оператора («пиши
+  v0.2.1, ревью сделаю сразу по ней») — evidence-апдейт 07-11..13:
+  калибровка, тулкит v0.1.0 + обе установки, платный источник и
+  4х-reject coding->Middle, C3=0.11% прямым замером, гейт-решение
+  Phase 2, D-0069..75, F-37/38. AWAITING Architect review v0.2.1
+  (цель ревью смещена с v0.2.0 её же словом).
 
 ## Environment Notes (this machine)
 

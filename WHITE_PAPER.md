@@ -1,6 +1,6 @@
 # Supervised Delegation: an Operating System Approach to LLM Cost
 
-**White Paper — living draft v0.2.0 (2026-07-10)**
+**White Paper — living draft v0.2.1 (2026-07-13)**
 
 Status: draft. Every claim in section 7 is backed by repository
 evidence (commits, DELEGATION_TABLE.md + docs/SHADOW_EVALUATION_LOG.md,
@@ -8,7 +8,25 @@ requests.db, logs/routing-log.jsonl, docs/FINDINGS.md); numbers
 will be revised as telemetry volume grows. Deliverable #1 of
 PROJECT_CHARTER.md.
 
-Changelog: v0.2.0 (2026-07-10) — full-document revision against the
+Changelog: v0.2.1 (2026-07-13) — evidence update after the first
+full production-evidence cycle. First weekly calibration moved the
+four Claude-contour rows to provisionally_validated (§5, §5.1, §7);
+Phases 1/1.5 closed; Phase 3 (toolkit, D-0070..D-0074) executed and
+released as a public template validated by two independent installs
+— the §4.1 portability claim demonstrated, not argued. A paid Lead
+entered production through the gateway (API window), giving the API
+contour its first real traffic and the sharpest reversal so far:
+four consecutive paid-source reject runs against the
+coding→Middle row, plus the finding that on micro-tasks the paid
+frontier source was cheaper than the delegation (§5, §7). The
+Phase 2 gate report was signed 2026-07-13: context-management
+workstream CLOSED by direct cache-aware measurement (paid uncached
+input 0.11% vs the 25% threshold), task-pipeline workstream OPENED
+(carrier evaluation done, markdown DAG artifact piloted), Router
+still red (§10). Measurement honesty hardened into construction
+(D-0075, F-37/F-38 — §6.2); boot diet round 5 cut the policy text
+itself behind its code gates, verified by critic + golden set (§8).
+v0.2.0 (2026-07-10) — full-document revision against the
 decision index (now D-0068) and the live evidence streams, folding in
 everything since v0.1: the deployed routing MVP with its typed
 journal and acceptance matrix (§5.1; D-0052..D-0058, D-0060), the
@@ -65,7 +83,12 @@ session cost (~85%, input:output ≈ 25:1). Our own first baseline
 97.6% of input-side tokens were already served from provider cache —
 repetition is real, but most of it is already discounted ~90% at the
 provider, so the actionable metric is PAID UNCACHED re-sent input,
-not raw repetition (D-0036).
+not raw repetition (D-0036). The direct measurement followed on
+2026-07-13, on paid interactive traffic routed through our own
+gateway: truly uncached paid input was 0.11% of the input side
+against a 25% gate threshold — the external 50–62% prior describes
+raw repetition honestly, and provider caching has already taken that
+money off the table (§7, §10).
 
 Meanwhile, the naive cost fix — replace the frontier model with a
 cheaper one — can backfire end-to-end: production data shows an
@@ -226,6 +249,21 @@ what lets the same policy text run Claude subagents on one contour
 and a 4B-local/70B/Gemini ladder on the other without rewriting a
 single rule.
 
+Since 2026-07-12 the portability claim is demonstrated rather than
+argued: the policy was packaged as a public installable template
+(Supervised-Delegation v0.1.0, D-0070) and validated by two
+independent installs — a stranger's session on a fresh empty project
+and the operator's self-install into an existing, unrelated project.
+Both reached the first delegated cycle. Onboarding EXAMINES the
+user's models before binding them to functions — a generated scout
+exam and a seeded-defect critic exam dispatched as an ordinary
+unmarked review (D-0071) — which is the "evidence does not port"
+rule made executable: a new deployment's models earn their bindings,
+they do not inherit ours. The dogfooding deployments and the
+published template are kept as an explicit synchronized pair:
+experiments live in the dogfooding repos, and the template changes
+only in verified batches opened by the operator's word (D-0074).
+
 ## 5. Evidence-Based Delegation
 
 DELEGATION_TABLE.md is the system's decision surface: task type →
@@ -239,7 +277,12 @@ so the label cannot read stronger than the data), to
 cost — the only status that may justify routing real traffic), or to
 `rejected` (delegation attempted and found harmful). On the
 subscription contour status moves happen only at the weekly
-calibration (D-0047), never mid-stream.
+calibration (D-0047), never mid-stream. The first such calibration
+ran 2026-07-11 (18 checks, a journaled `calibrated` event) and moved
+the four Claude-contour rows — recon, implementation-to-spec,
+review, coordination — to provisionally_validated on 3.4 days of
+routed production traffic: the first status movements backed by a
+production journal rather than replay.
 
 Evidence comes from **Shadow Evaluation** (`gateway/shadow_eval.py`):
 a sample of real Lead requests is replayed offline on a cheaper
@@ -255,7 +298,20 @@ The methodology's first real results (n=2 per category, free-tier
 models; see §7) already overturned two intuitions: character
 similarity is unusable as a verdict (it rejects verbose-but-correct
 answers), and "classification is easy for small models" is false in
-the one case where reasoning quality mattered.
+the one case where reasoning quality mattered. A later paid-source
+replay cycle (2026-07-11..13; a paid Sonnet-tier source, ground-truth
+task categories travelling in request metadata to a stored column,
+so heuristics no longer decide what a replay was about) delivered
+the sharpest reversal yet: "routine code generation delegates to
+Middle" — provisionally validated on a free-tier source — collected
+four consecutive reject runs against the paid source (31 judged
+pairs, pass rates 0.00–0.05, chief-judge audits upheld), and the
+accounting showed that on micro-tasks the paid frontier source was
+CHEAPER end-to-end than the delegation it was supposed to justify:
+short frontier answers cost less than a verbose local intern at
+synthetic accounting prices. The earlier verdicts were facts about a
+FREE source's economics; the row's fate is the next calibration's
+call (§7).
 
 ## 5.1 Contour Asymmetry and the Regression Bridge
 
@@ -298,8 +354,16 @@ coordinator queues acceptance to the full Lead — otherwise a session
 would certify itself. Parallel dispatches and sessions declare owned
 paths and never touch another session's uncommitted work; task-id
 novelty is checked against the journal tail at write time (D-0060).
-The first weekly calibration — the moment table statuses first move
-on this contour — is pending its one-week routed-traffic minimum.
+Since D-0073 every dispatch also carries a context MANIFEST next to
+its definition of done: the injected "given" basket, plus
+owns/non-goals/handoff on writing dispatches — declarative on reads
+(reading past the basket is a report line, not a violation),
+normative on writes. The journal format and the acceptance matrix
+are enforced by a pre-commit validator on the commit path (D-0069),
+and every mechanism commit must declare its tier in the message,
+checked against the deployment's lead binding (D-0072). The first
+weekly calibration ran 2026-07-11; the loop is now a standing
+weekly operation and the only place table statuses move.
 
 The two streams are bridged, not merged. Accepted journal tasks that
 distill to a replayable form (recon questions, spec→diff,
@@ -436,22 +500,40 @@ the recognition of "this is a mechanism" is itself defended in
 depth (D-0065), with a stated admission that 100%-by-code is not
 promised.
 
-## 7. Empirical Status (2026-07-10)
+The same week extended the principle one layer down: the
+MEASUREMENT is a supervised component too. Two accounting defects
+were found and closed by construction rather than by vigilance
+(D-0075, F-37/F-38). Every non-organic traffic generator now
+self-tags its rows — organic clients cannot tag, so 'real' stays
+the default and everything synthetic must say so in its own
+payload. And a cache-share formula that double-counted was traced
+to field SEMANTICS assumed from a sibling instead of verified: the
+same metric's input field INCLUDES the cache components on one
+contour and excludes them on the other. The recorded rule: porting
+a formula across a measurement pair translates field semantics,
+never copies arithmetic — and semantics are verified empirically on
+live rows, not by reading the sibling's code.
+
+## 7. Empirical Status (2026-07-13)
 
 What the evidence currently supports — with honest caveats: Shadow
-Evaluation volume is small (n=2 per category), its traffic synthetic,
-its "Lead" baseline a free-tier model; the subscription-contour
-baseline is CENSORED data (the operator rationed frontier usage);
-routing-journal categories are all still `estimated`, awaiting the
-first weekly calibration.
+Evaluation volume is honest only for coding (31 judged pairs across
+6 runs, with a recorded caveat that pair-instances repeat prompts
+across runs); other categories are still n≈2 on a free-tier source.
+The subscription-contour baseline is CENSORED data (the operator
+rationed frontier usage). provisionally_validated rows rest on a
+3.4-day window; the production_validated bar (full week +
+cost-per-accepted-unit trend) is deliberately not claimed.
 
 API contour (Shadow Evaluation + judge, details in
 docs/SHADOW_EVALUATION_LOG.md):
 
 | Claim | Evidence |
 |---|---|
-| Extraction, formatting, summarization delegate to a 4B local model | Shadow Evaluation, judge-verified, pass_rate 1.00 |
-| Routine code generation delegates to Middle (70B) | tier-matching replay, judge pass_rate 1.00, chief-judge review of both pairs |
+| Extraction, formatting, summarization delegate to a 4B local model | Shadow Evaluation, judge-verified, pass_rate 1.00 — FREE-tier source; first paid-source counter-datapoint recorded (see micro-task row) |
+| Routine code generation does NOT delegate to Middle (70B) from a paid source | four consecutive reject runs 2026-07-11..13, 31 judged pairs, pass rates 0.00–0.05, chief-judge audits upheld; the earlier free-tier-source pass (n=2) stands as the overturned prior; status movement is the ~07-18 calibration's call |
+| On micro-tasks a paid frontier source can be CHEAPER than delegation | replay accounting: short paid-Sonnet answers cost less end-to-end than a verbose local intern at synthetic accounting prices — free ≠ $0 (D-0032), and delegation economics are a property of the SOURCE, not only the target |
+| Paid uncached input is 0.11% of the input side; the local compression lever is dead | direct cache-aware measurement of the API window (requests.db, F-38-correct formula); provider caching works through the proxy; context-management workstream closed by Architect signature |
 | Classification does NOT delegate to 4B | judge + manual review agree: flawed reasoning on a mixed-sentiment case |
 | difflib similarity is not a verdict | 2 of 5 first-run verdicts were false rejections |
 | 70B judge unusable for code pairs | hallucinated bug in correct code, reproduced across independent runs |
@@ -460,7 +542,7 @@ docs/SHADOW_EVALUATION_LOG.md):
 | Recon does NOT delegate to the available 4B local model | entrance + hardened re-exam 0/7 twice, fabricated citations; local-scout thread closed until a stronger model fits 6 GB VRAM |
 
 Subscription contour (transcript telemetry + routing journal +
-exams, 2026-07-07..10):
+exams, 2026-07-07..13):
 
 | Claim | Evidence |
 |---|---|
@@ -470,11 +552,18 @@ exams, 2026-07-07..10):
 | The vignette-measurable frontier delta is independent reproduction | ranking exam, 3 runs, pre-registered rubric: Opus 2/2 > Gemini 2.5-flash 1/2 > Sonnet 0/2 on the diagnostic pair; everything else saturates |
 | The coordinator is the reality-grounding weak point | F-27/F-29/F-30: narrated timestamps, one-ledger quota wall, calendar-reset assumption — all journaled within one week, defenses now on the execution path (§6.2) |
 | Delegation is opt-in: policy must auto-load | F-1: with agents defined but policy not auto-loaded, the Lead did delegable work itself on the most expensive tier |
+| All four contour rows provisionally validated in production | first weekly calibration 2026-07-11: scout 14 accepted / 1 tooling reject / 0 late defects (+ golden set 7/7×3); builder 11 witness-backed acceptances, 0 capability fails; critic 9 dispatches, 7 verdicts, findings confirmed by Lead spot-checks; the Lead row confirmed from the failure side — both window defects sit on the coordinator itself |
+| The policy ports: two independent installs reached the first delegated cycle | toolkit v0.1.0 (D-0070): a stranger on a fresh project and the operator's self-install into an existing one; models examined at onboarding (D-0071) — the critic exam caught a real trap miss on the user's model |
 
 Supervision cost so far: the judge's accounted spend for the entire
-calibration + evaluation history is ~$0.01 against a source traffic
-sample accounted at ~$0.03 — trivially satisfying Rule #1 at this
-scale, but the ratio only becomes meaningful with production volume.
+calibration + evaluation history remains in cents against its source
+samples — trivially satisfying Rule #1 at this scale, but the ratio
+only becomes meaningful with production volume. Since 2026-07-12 a
+paid Lead is in production by fact, not sign-off: an "API window"
+routes the operator's real interactive sessions through the gateway
+on prepaid credits ($29.89 accounted on the first evening), which is
+what made the cache-aware C3 measurement — and the R2/R3 gate
+criteria — computable on real traffic for the first time.
 Scout-tier recon economics are near zero on the subscription contour
 ($1.33 accounted all-time), so the standing case for cheap recon is
 resilience and the API-contour pilot, not savings — recorded to
@@ -515,13 +604,19 @@ that as a design constraint, not an inconvenience:
 - **Boot context is a paid resource — the project's own subject
   applied to itself** (D-0038). The boot path carries a 100 KB
   budget, re-measured at every session close; closed work moves to
-  an archive the moment it closes, leaving a one-line pointer. Two
+  an archive the moment it closes, leaving a one-line pointer. Five
   "boot diet" rounds (D-0051, D-0067/68) split decision full-texts
   from the always-loaded index, replaced the full architecture spec
-  on the boot path with a session-sized operative core, and made
-  the breach response itself an executable procedure (archive sweep
+  on the boot path with a session-sized operative core, made the
+  breach response itself an executable procedure (archive sweep
   first; deep cuts of operative documents only by explicit
-  Lead+Architect decision). Current boot path: ~84 KB.
+  Lead+Architect decision) — and finally cut the policy text itself:
+  rationale and gate-guarded procedural detail moved behind the code
+  that enforces them (two-layer enforcement applied to the policy's
+  own text), verified before commit by an independent critic review
+  of the diff ("no obligation lost") and a scout golden-set run
+  against the trimmed text. Current boot path: ~94 KB of the 100 KB
+  budget.
 - **Session close is checked symmetrically to boot** (D-0050): a
   handoff checklist verifies everything is committed and pushed,
   the journal is closed, live-state files reflect reality and the
@@ -561,70 +656,83 @@ docs/RELATED_WORK.md to stop re-litigating).
 
 ## 10. Roadmap
 
-- **Phase 1 (API contour — MVP complete):** Gateway, Guard, Ledger,
-  Analyst and Shadow Evaluation are built and verified (159+ tests
-  green on the canonical run). Operationally open: routing real API
-  traffic through the gateway and a paid frontier Lead baseline —
-  both wait on keys held by the Architect.
-- **Phase 1.5 (current — real telemetry and Claude Code routing,
-  D-0034):** transcript telemetry is live and cache-aware
-  (per-model/per-session/per-agent accounted cost, sidechain
-  attribution); the routing MVP is DEPLOYED on two projects with the
-  policy Architect-accepted; the routing journal is the evidence
-  stream. Next: accumulate ≥1 week of routed traffic, then the first
-  weekly calibration (PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md; run
-  ends with a journaled `calibrated` event whose staleness the Boot
-  Report watches) — the first moment any subscription-contour status
-  may legally move.
-- **Phase 2 (entered on evidence, D-0029, D-0033, D-0059):** three
-  independently gated workstreams, each gate computable from
-  existing telemetry (ROADMAP.md holds the thresholds; revising one
-  requires a decision-log entry). The ROUTER gate: ≥30 judged pairs
-  per category, validated-delegable share ≥25% of Lead spend, stable
-  category mix, projected savings ≥3x router cost, and a paid Lead
-  or explicit sign-off. The CONTEXT-MANAGEMENT gate (reframed as
-  evaluation, D-0036): all criteria measured CACHE-AWARE — the
-  driver is confirmed only if PAID UNCACHED re-sent input is ≥25% of
-  accounted input spend; provider caching is measured before any
-  compression tooling is evaluated. The TASK-PIPELINE gate (D-0059):
-  externalize intake → scope → DAG → allocate from the Lead's head
-  into artifacts, gated on tasks big enough to drop edges at session
-  boundaries; artifacts before code, decomposition authority stays
-  with the Lead. A green gate produces a written report and a human
-  signature, not an automatic transition; the first task of any
-  opened workstream is an evaluation of an existing tool, never a
-  build (D-0030).
+- **Phases 0/1/1.5 — CLOSED (2026-07-03 / 07-11):** the API-contour
+  MVP (Gateway, Guard, Ledger, Analyst, Shadow Evaluation; 360 tests
+  green on the canonical run), cache-aware transcript telemetry, the
+  deployed routing MVP with an Architect-accepted policy, and the
+  weekly calibration loop — now a standing operation, not phase
+  work. Paid keys arrived 2026-07-10; since 2026-07-12 an "API
+  window" routes the operator's real interactive sessions through
+  the gateway on prepaid credits.
+- **Phase 2 — gate decision SIGNED 2026-07-13** (gates defined by
+  D-0029/D-0033/D-0036/D-0059; thresholds in ROADMAP.md; a green
+  gate produces a written report and a human signature, never an
+  automatic transition):
+  the TASK-PIPELINE workstream is OPEN — common gate green (16
+  consecutive real days, judge 13/13), all P-criteria met on journal
+  evidence (10 tasks spanning ≥5 events; boundary-loss defects as
+  the confirmed driver). Its first task — an evaluation of existing
+  task-graph carriers, never a build (D-0030) — is done: the
+  harness's native task tools were REJECTED as a primary carrier
+  (their store lives outside the repository, hence outside the
+  project's only memory; reopen trigger recorded), and a minimal
+  markdown DAG artifact in the repository is being piloted on a real
+  multi-session task. The CONTEXT-MANAGEMENT workstream is CLOSED by
+  direct measurement (C3 = 0.11% vs ≥25%): provider caching already
+  took the money off the table; reopening requires an explicit
+  Architect decision. The ROUTER gate stays red: R1 volume arrived
+  (31 pairs) but points AGAINST the one candidate category, and
+  R2/R3 become computable for the first time at the next
+  calibration — the current evidence direction is "nothing worth
+  routing yet", which the architecture treats as a valid,
+  money-saving answer (the Router exists to be built only on
+  receipts).
+- **Phase 3 (toolkit, D-0070) — CLOSED 2026-07-12:** the system
+  packaged as a public installable template (Supervised-Delegation
+  v0.1.0), validated by two installs (§4.1); template changes ship
+  only as verified batches from the dogfooding deployments (D-0074).
 - **Continuous:** the delegation table and this paper's §7 are living
   documents; Shadow Evaluation runs append to
-  docs/SHADOW_EVALUATION_LOG.md; the routing journal accumulates
-  toward each weekly calibration.
+  docs/SHADOW_EVALUATION_LOG.md; the weekly calibration (next
+  ~2026-07-18) aggregates the journal and owns every status
+  movement — including the pending coding→Middle rejection call and
+  the task-pipeline pilot verdict.
 
 ## 11. Limitations
 
-Shadow Evaluation samples remain small (n=2 per category) and its
-traffic synthetic; the API contour has carried no real traffic yet
-and its Lead baseline is a free-tier model. The subscription-contour
-baseline is censored data (the operator rationed frontier usage), so
-it can bound rates, not refute hypotheses about unconstrained spend.
-All routing-journal categories are still `estimated`: the first
-weekly calibration has not yet run, so the production-evidence loop
-this paper describes has completed zero full cycles. Exam evidence
-is n=1 per candidate, and the ranking instrument is itself a weak
-ranker (the control's gap equals the pre-registered threshold);
-single machine (6 GB VRAM constrains local tiers to 4B); the judge
-calibration set is young (13 pairs) and grows only as fast as
-chief-judge reviews happen; retry-loop cost (the strongest external
-counter-datapoint to naive delegation) is designed into the method
-but not yet measured locally. The mechanism discipline of §6.2 is
-one week old: its own failure detectors are registered but have
-fired only on the incidents that motivated them.
+Shadow Evaluation volume is honest but lopsided: 31 judged pairs on
+coding (with a recorded caveat — pair-instances repeat prompts
+across runs; the largest run held 11 distinct prompts of 19 pairs),
+n≈2 everywhere else, and the paid-source reject trend is three days
+old — the status movement it implies is deliberately left to the
+calibration. provisionally_validated rows rest on a 3.4-day window;
+production_validated requires a full week plus a
+cost-per-accepted-unit trend that has one baseline point so far.
+The subscription baseline remains censored data (it bounds rates,
+it cannot refute hypotheses about unconstrained spend). The
+C3 = 0.11% measurement covers one API window on one provider's
+caching — it closes the workstream locally, not as a general claim.
+Exam evidence is n=1 per candidate, and the ranking instrument is
+itself a weak ranker (the control's gap equals the pre-registered
+threshold); single machine (6 GB VRAM constrains local tiers to 4B);
+the judge calibration set is young (13 pairs) and grows only as
+fast as chief-judge reviews happen; retry-loop cost is designed into
+the method (the `attempt` field exists) but the trend is not yet
+measured. The mechanism discipline of §6.2 is under two weeks old;
+its detectors have now fired in production beyond their motivating
+incidents (F-34, F-37, F-38) — evidence both that the net catches
+and that leaks keep arriving. The task-pipeline pilot has completed
+zero cycles; its first verdict is due at the ~07-18 calibration.
 
 ---
 
 *Canonical sources: ARCHITECTURE.md (specification; boot core
 ARCHITECTURE_BOOT.md), DECISIONS.md index + docs/DECISIONS_FULL.md
-(D-0001…D-0068), DELEGATION_TABLE.md + docs/SHADOW_EVALUATION_LOG.md
+(D-0001…D-0075), DELEGATION_TABLE.md + docs/SHADOW_EVALUATION_LOG.md
 (evidence), logs/routing-log.jsonl (routing journal),
-docs/FINDINGS.md (F-1…F-30), PROCESS/JUDGE_CALIBRATION_PROTOCOL.md,
+docs/FINDINGS.md (F-1…F-38), PROCESS/JUDGE_CALIBRATION_PROTOCOL.md,
 PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md, docs/RELATED_WORK.md,
-gateway/ + tools/ (reference implementation).*
+docs/TASK_CARRIER_EVAL_2026-07-13.md + docs/tasks/ (task-pipeline
+workstream), toolkit/ + github.com/Xartaxana/Supervised-Delegation
+(the published template), gateway/ + tools/ (reference
+implementation).*
