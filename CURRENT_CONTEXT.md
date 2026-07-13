@@ -215,7 +215,9 @@ on-touch/evidence-gated.
   копия toolkit/gateway/shadow_eval.py несёт тот же класс дефекта;
   (8) конвенция лейбла диспатча «модель: …» в правиле 7 политики
   (слово оператора 2026-07-13) — та же строка в toolkit/CLAUDE.md
-  (EN).
+  (EN); (9) ретро-контур калибровки (чеки 0/19–24 +
+  docs/RETRO_PATTERNS.md) и gotcha-принцип onboarding-доков — порт
+  в toolkit/PROCESS после >=1 прожитого прогона (~07-18).
   Новых правок toolkit/ не
   делать — ось 7 в осевых блоках отвечается «в очередь порта» сюда.
 - A5 witness auto-collection (builder-class; WHEN: first REAL
@@ -230,6 +232,11 @@ on-touch/evidence-gated.
   чтением кода собрата» (F-30 для critic'а); (б) кейс-кандидат
   CRITIC_EXAM: пара «одна формула, разные раскладки полей»
   (подсаженный дифф класса F-38).
+- РЕТРО-БЭКЛОГ КАЛИБРОВКИ: docs/RETRO_PATTERNS.md (12 паттернов с
+  именованными триггерами, порядок важности — слово оператора
+  2026-07-13; триггеры сверяет чек 0 протокола). Оттуда же:
+  UI-witness «до/после» (расширение D-0052) — триггер: первый
+  UI-диспатч возобновлённого AO3-конвейера.
 - Evidence-gated residuals (каждый — на своём триггере): provider
   column in sqlite_logger (N1/N2 root, axis 2); requests(model,ts)
   index (только на latency evidence); AO3 log_append.py port of
