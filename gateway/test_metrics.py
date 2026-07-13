@@ -458,6 +458,111 @@ def test_c1_not_met_below_threshold(conn):
     assert readiness["C1"]["status"] == "not_met"
 
 
+def seed_categorized(conn, category, cost, prompt="irrelevant prompt text", ts=None):
+    """Insert a real-traffic row with an explicit stored `category` (t-085)
+    and cost_usd, for R2 readiness tests. category=None leaves the column
+    NULL so categorize() must fall back on the prompt text."""
+    conn.execute(
+        "INSERT INTO requests (ts, model, status, prompt_tokens, completion_tokens,"
+        " cost_usd, latency_ms, prompt, response, category, traffic_kind)"
+        " VALUES (?, 'lead', 'success', 100, 20, ?, 50, ?, 'ok', ?, 'real')",
+        (ts or datetime.datetime.now().isoformat(), cost, prompt, category),
+    )
+    conn.commit()
+
+
+def test_r2_met_when_validated_categories_dominate_spend(conn):
+    seed_categorized(conn, "coding", 0.30)
+    seed_categorized(conn, "other", 0.10)
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
+    # 0.30 / 0.40 = 75% >= 25% threshold
+    assert readiness["R2"]["status"] == "met"
+    assert "coding" in readiness["R2"]["detail"]
+
+
+def test_r2_not_met_when_validated_categories_below_threshold(conn):
+    # 'classification' has a DELEGATION_TABLE.md row but it is REJECTED, so
+    # it must NOT count toward the validated-delegable share -- if it did,
+    # 0.30 + 0.05 = 0.35 / 0.35 = 100% would wrongly read "met".
+    seed_categorized(conn, "classification", 0.30)
+    seed_categorized(conn, "coding", 0.05)
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
+    # 0.05 / 0.35 ~= 14% < 25% threshold
+    assert readiness["R2"]["status"] == "not_met"
+    assert "14.3%" in readiness["R2"]["detail"]
+
+
+def test_r2_falls_back_to_categorize_when_stored_category_null(conn):
+    seed_categorized(conn, None, 0.30, prompt="please summarize this document")
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
+    assert readiness["R2"]["status"] == "met"
+    assert "summarization" in readiness["R2"]["detail"]
+
+
+def test_r2_honest_low_data_when_rows_exist_but_all_zero_cost(conn):
+    # Rows exist (unlike the stale "currently 0 rows" stub this replaces),
+    # but there is nothing to compute a spend SHARE from.
+    seed_categorized(conn, "coding", 0.0)
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
+    assert readiness["R2"]["status"] == "not_computable_yet"
+    assert "1 real row(s)" in readiness["R2"]["needs"]
+    assert "currently 0" not in readiness["R2"]["needs"]
+
+
+def seed_cache_real(conn, prompt_tokens, cache_read, cache_creation, ts=None):
+    """Insert a real-traffic row with explicit cache-token columns (t-075),
+    for C3 readiness tests."""
+    conn.execute(
+        "INSERT INTO requests (ts, model, status, prompt_tokens, completion_tokens,"
+        " cost_usd, latency_ms, prompt, response,"
+        " cache_read_input_tokens, cache_creation_input_tokens, traffic_kind)"
+        " VALUES (?, 'opus', 'success', ?, 10, 0.01, 50, 'x', 'ok', ?, ?, 'real')",
+        (ts or datetime.datetime.now().isoformat(), prompt_tokens, cache_read, cache_creation),
+    )
+    conn.commit()
+
+
+def test_c3_not_met_cache_aware_low_uncached_share(conn):
+    # Live-shape row (requests.db id 531 shape, F-38): prompt_tokens is
+    # INCLUSIVE of both cache columns, so uncached = prompt - read - creation
+    # is tiny relative to the input side.
+    seed_cache_real(conn, prompt_tokens=63423, cache_read=61541, cache_creation=1880)
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
+    uncached = 63423 - 61541 - 1880  # = 2
+    ratio = uncached / 63423
+    assert ratio < 0.25
+    assert readiness["C3"]["status"] == "not_met"
+    assert f"{uncached} of 63423" in readiness["C3"]["detail"]
+
+
+def test_c3_met_when_uncached_share_above_threshold(conn):
+    seed_cache_real(conn, prompt_tokens=100, cache_read=10, cache_creation=10)  # 80% uncached
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
+    assert readiness["C3"]["status"] == "met"
+
+
+def test_c3_honest_low_data_when_rows_exist_but_zero_prompt_tokens(conn):
+    seed_cache_real(conn, prompt_tokens=0, cache_read=0, cache_creation=0)
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
+    assert readiness["C3"]["status"] == "not_computable_yet"
+    assert "1 real row(s)" in readiness["C3"]["needs"]
+    assert "currently 0" not in readiness["C3"]["needs"]
+
+
+def test_c3_regression_pin_matches_gate_report_shape(conn):
+    """Regression pin: shape approximating the signed 2026-07-13 gate report
+    (docs/task_reports/2026-07-13_phase2-gate-report.md) -- truly-uncached
+    ~0.11% of the input side, at cache_read ~96.1% / cache_creation ~3.8%."""
+    seed_cache_real(
+        conn, prompt_tokens=27_589_350, cache_read=26_510_000, cache_creation=1_050_000,
+    )
+    readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
+    uncached = 27_589_350 - 26_510_000 - 1_050_000  # 29,350
+    ratio = uncached / 27_589_350
+    assert ratio == pytest.approx(0.0011, abs=0.0001)
+    assert readiness["C3"]["status"] == "not_met"
+
+
 def test_format_phase2_line_vocabulary():
     assert format_phase2_line("G1", {"status": "met", "detail": "x"}) == "  G1: x -> met"
     assert format_phase2_line("R1", {"status": "not_met", "detail": "x"}) == "  R1: x -> not met"

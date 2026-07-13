@@ -186,7 +186,10 @@ on-touch/evidence-gated.
   у нас; (5) stage-2 конвейер t-082..t-085: pace в evaluate,
   regression_runner + набор, колонка requests.category
   (ground-truth > эвристика, миграция образца t-075), верная
-  формула cache_read_share (F-38) — тем же батчем. Новых правок
+  формула cache_read_share (F-38) — тем же батчем; (6) readiness
+  R2/C3 metrics.py (t-090): копия toolkit/gateway/metrics.py несёт
+  ту же протухшую заглушку «currently 0» (доклад builder; их версия
+  дивергентна — своя сигнатура phase2_readiness). Новых правок
   toolkit/ не
   делать — ось 7 в осевых блоках отвечается «в очередь порта» сюда.
 - A5 witness auto-collection (builder-class; WHEN: first REAL

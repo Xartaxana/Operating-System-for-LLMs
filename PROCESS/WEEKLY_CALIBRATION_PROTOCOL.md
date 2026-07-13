@@ -127,7 +127,14 @@ D:\AO3_tests), cc_usage через tools/usage_report.py, git-история
     (дефект уже чинившегося класса вне указанных картой мест)
     оформлены как находки о карте, ось поправлена. Число записей
     D-XXXX в DECISIONS.md (индекс) равно числу в
-    docs/DECISIONS_FULL.md (D-0051).
+    docs/DECISIONS_FULL.md (D-0051). Код-зеркало таблицы статусов
+    (critic t-090): VALIDATED_DELEGABLE_CATEGORIES в
+    gateway/metrics.py равно множеству категорий строк
+    provisionally_validated/production_validated
+    DELEGATION_TABLE.md; статусы двигает ТОЛЬКО калибровка
+    (Update Rule 1), поэтому ЛЮБОЙ статусный ход текущего прогона
+    обновляет frozenset тем же коммитом — расхождение на момент
+    чека = нарушение.
 
 13. **D-0052/D-0053 — доказательная приёмка (обе стороны), типизи-
     рованные поля.** (а) Каждый accepted по builder-диспатчу несёт

@@ -99,6 +99,11 @@ scout / builder / critic (х2 деплоя) + Lead-правила в CLAUDE.md +
   docs/SHADOW_EVALUATION_LOG.md (лог прогонов, D-0067): новый прогон
   пишется в лог, смена статуса в таблице ссылается на строку лога
   (Update Rule 1).
+- DELEGATION_TABLE.md (строки provisionally/production_validated) <->
+  gateway/metrics.py VALIDATED_DELEGABLE_CATEGORIES (код-зеркало для
+  R2 readiness, t-090): статусы двигает только калибровка, поэтому
+  статусный ход обновляет frozenset ТЕМ ЖЕ коммитом; детектор —
+  чек 12 (сверка множества с таблицей на каждом прогоне).
 - PROCESS/LEAD_RANKING_EXAM.md (кейсы) <-> docs/FINDINGS.md
   F-28/F-30 (банк-источник): новая находка класса
   «непроверенный-вывод-как-факт» — кандидат в новый кейс экзамена;

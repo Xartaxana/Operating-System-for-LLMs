@@ -42,6 +42,28 @@ def categorize(prompt_text: str) -> str:
     return "other"
 
 
+# Categories from CATEGORY_RULES/categorize() (and the stored `category`
+# column, t-085) that DELEGATION_TABLE.md's four-state status vocabulary
+# (D-0035) currently marks provisionally_validated or production_validated --
+# i.e. have a delegate whose suitability has actually been checked, as
+# opposed to "estimated" (not yet checked) or "rejected" (checked and found
+# harmful). Mirrors DELEGATION_TABLE.md rows: "Routine code generation"
+# (coding), "Summarization" (summarization), "Data extraction, JSON
+# conversion" (extraction), "Formatting (Markdown, tables)" (formatting) --
+# all provisionally_validated. "classification" maps to "Classification,
+# tagging", which DELEGATION_TABLE.md marks REJECTED, so it is excluded here
+# even though the row exists; "other" has no corresponding table row at all.
+# Used by R2 readiness (ROADMAP.md "Money on the table"). No machine link to
+# DELEGATION_TABLE.md; the drift detector is REGISTERED (rule 10в): weekly
+# calibration check 12 (PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md) diffs this
+# frozenset against the table's provisionally/production_validated rows --
+# statuses move ONLY at calibration (Update Rule 1), so any status move must
+# update this set in the same commit (critic t-090 blocker resolution).
+VALIDATED_DELEGABLE_CATEGORIES = frozenset({
+    "coding", "summarization", "extraction", "formatting",
+})
+
+
 def common_prefix_len(a: str, b: str) -> int:
     limit = min(len(a), len(b))
     i = 0
@@ -268,6 +290,122 @@ def _c2_readiness(conn: sqlite3.Connection, days: int) -> dict:
     }
 
 
+def _r2_readiness(conn: sqlite3.Connection, days: int) -> dict:
+    """ROADMAP.md R2 ("Money on the table"): validated-delegable categories'
+    share of real-traffic spend, over the G1 window. Category attribution
+    prefers the stored `category` column (t-085, ground truth); NULL rows
+    fall back to categorize() the same way daily_digest's categories_heuristic
+    does.
+
+    RECORDED ASSUMPTION (critic t-090, non-blocker): the gate text says
+    "share of the LEAD's accounted spend"; this sums ALL real rows without a
+    model filter. Today the two are equivalent by construction -- real rows
+    in requests.db are coordinator-tier interactive traffic (subagents are
+    accounted in cc_usage, not here). If non-Lead 'real' traffic ever flows
+    through the gateway (e.g. a built Router), this denominator silently
+    widens: add a model filter then. The per-category spend printout keeps
+    the mix visible to the calibrating Lead."""
+    since = f"-{days} days"
+    rows = conn.execute(
+        "SELECT category, COALESCE(cost_usd, 0), prompt FROM requests"
+        " WHERE traffic_kind = 'real' AND substr(ts, 1, 10) >= date('now', ?)",
+        (since,),
+    ).fetchall()
+    if not rows:
+        return {
+            "status": "not_computable_yet",
+            "needs": (
+                f"categorized real traffic (0 traffic_kind='real' row(s)"
+                f" in the last {days} day(s))"
+            ),
+        }
+    cost_by_category = defaultdict(float)
+    total_cost = 0.0
+    for stored_category, cost, prompt in rows:
+        category = stored_category or categorize(prompt)
+        cost_by_category[category] += cost
+        total_cost += cost
+    if total_cost <= 0:
+        return {
+            "status": "not_computable_yet",
+            "needs": (
+                f"nonzero cost_usd on real rows to compute a spend share"
+                f" ({len(rows)} real row(s) in the last {days} day(s),"
+                " all zero-cost)"
+            ),
+        }
+    validated_cost = sum(
+        cost_by_category[c] for c in VALIDATED_DELEGABLE_CATEGORIES
+        if c in cost_by_category
+    )
+    ratio = validated_cost / total_cost
+    status = "met" if ratio >= 0.25 else "not_met"
+    breakdown = ", ".join(
+        f"{cat}=${cost_by_category[cat]:.4f}" for cat in sorted(cost_by_category)
+    )
+    return {
+        "status": status,
+        "detail": (
+            f"{ratio:.1%} of real-traffic spend (${total_cost:.4f} across"
+            f" {len(rows)} row(s)) falls in validated-delegable categories"
+            f" ({', '.join(sorted(VALIDATED_DELEGABLE_CATEGORIES))}, per"
+            " DELEGATION_TABLE.md provisionally_validated rows); per-category"
+            f" spend: {breakdown} vs threshold >=25%"
+        ),
+    }
+
+
+def _c3_readiness(conn: sqlite3.Connection, days: int) -> dict:
+    """ROADMAP.md C3: cache-aware truly-uncached share of real-traffic
+    input-side tokens. prompt_tokens is INCLUSIVE of the cache columns
+    (F-38, verified empirically, defect_found ref=t-078): the truly-
+    uncached paid portion of a row is prompt_tokens minus BOTH cache
+    columns, not prompt_tokens alone (the old bug) and not prompt_tokens
+    plus the cache columns (double-counts the other way -- see
+    daily_digest's cache_read_share comment, SIBLING_MAP axis 2, for the
+    disjoint-columns sibling formula in tools/usage_report.py)."""
+    since = f"-{days} days"
+    rows = conn.execute(
+        "SELECT COALESCE(prompt_tokens, 0), COALESCE(cache_read_input_tokens, 0),"
+        " COALESCE(cache_creation_input_tokens, 0) FROM requests"
+        " WHERE traffic_kind = 'real' AND substr(ts, 1, 10) >= date('now', ?)",
+        (since,),
+    ).fetchall()
+    if not rows:
+        return {
+            "status": "not_computable_yet",
+            "needs": (
+                f"cache-column data on real traffic (0 traffic_kind='real'"
+                f" row(s) in the last {days} day(s))"
+            ),
+        }
+    total_input = sum(r[0] for r in rows)
+    if total_input <= 0:
+        return {
+            "status": "not_computable_yet",
+            "needs": (
+                f"nonzero prompt_tokens on real rows to compute a cache"
+                f" share ({len(rows)} real row(s) in the last {days} day(s),"
+                " all zero prompt_tokens)"
+            ),
+        }
+    uncached = sum(max(p - read - creation, 0) for p, read, creation in rows)
+    cache_read_total = sum(r[1] for r in rows)
+    cache_creation_total = sum(r[2] for r in rows)
+    ratio = uncached / total_input
+    status = "met" if ratio >= 0.25 else "not_met"
+    return {
+        "status": status,
+        "detail": (
+            f"{ratio:.2%} truly-uncached paid input on real traffic"
+            f" ({uncached} of {total_input} input-side token(s) across"
+            f" {len(rows)} row(s) in the last {days} day(s); cache_read="
+            f"{cache_read_total}, cache_creation={cache_creation_total})"
+            " vs threshold >=25%"
+        ),
+    }
+
+
 def _r1_readiness(shadow_log_path) -> dict:
     try:
         text = Path(shadow_log_path).read_text(encoding="utf-8")
@@ -320,15 +458,7 @@ def phase2_readiness(conn: sqlite3.Connection, days: int, shadow_log_path=None) 
             ),
         },
         "R1": _r1_readiness(shadow_log_path),
-        "R2": {
-            "status": "not_computable_yet",
-            "needs": (
-                "categorized real traffic (metrics.categorize() over"
-                " requests.traffic_kind='real' rows, currently 0; cc_usage"
-                " carries no prompt content by privacy design, D-0034, so it"
-                " cannot be categorized either)"
-            ),
-        },
+        "R2": _r2_readiness(conn, days),
         "R3": {
             "status": "not_computable_yet",
             "needs": (
@@ -352,15 +482,7 @@ def phase2_readiness(conn: sqlite3.Connection, days: int, shadow_log_path=None) 
         },
         "C1": _c1_readiness(conn, days),
         "C2": _c2_readiness(conn, days),
-        "C3": {
-            "status": "not_computable_yet",
-            "needs": (
-                "a cache-aware repetition measure combining requests.db prompt"
-                " content with cc_usage cache_read/cache_creation token"
-                " accounting (not yet built); also blocked by 0"
-                " traffic_kind='real' rows in requests"
-            ),
-        },
+        "C3": _c3_readiness(conn, days),
     }
 
 
