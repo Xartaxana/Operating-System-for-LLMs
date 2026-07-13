@@ -190,6 +190,7 @@ staging↔published дрейф смотрит чек 12.
 | PROCESS/LEAD_RANKING_EXAM.md (F-28/F-30, виньетки) | Lead-кандидаты |
 | gateway/judge_calibration.json + PROCESS/JUDGE_CALIBRATION_PROTOCOL.md (D-0031) | judge |
 | witness-приёмка каждой задачи (D-0052) — НАБОРА НЕТ по решению | builder |
+| PROCESS/DEPLOYMENT_ECONOMY_EXAM.md (A/B/C, заказ оператора 2026-07-13; regression-триггер — релизный снимок тулкита, детектор — чек 14е) | деплой/политика целиком |
 
 Правило: изменение экзаменационной ДИСЦИПЛИНЫ (предрегистрация
 ключей до диспатча, немаркированность, contamination-чек, триггеры

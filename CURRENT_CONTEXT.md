@@ -217,7 +217,10 @@ on-touch/evidence-gated.
   (слово оператора 2026-07-13) — та же строка в toolkit/CLAUDE.md
   (EN); (9) ретро-контур калибровки (чеки 0/19–24 +
   docs/RETRO_PATTERNS.md) и gotcha-принцип onboarding-доков — порт
-  в toolkit/PROCESS после >=1 прожитого прогона (~07-18).
+  в toolkit/PROCESS после >=1 прожитого прогона (~07-18);
+  (10) экзамен экономии деплоя (PROCESS/DEPLOYMENT_ECONOMY_EXAM.md):
+  ПЕРВЫЙ ПРОГОН — при следующем релизном снимке (детектор пропуска —
+  чек 14е); решение о поставке экзамена в шаблон — тем же батчем.
   Новых правок toolkit/ не
   делать — ось 7 в осевых блоках отвечается «в очередь порта» сюда.
 - A5 witness auto-collection (builder-class; WHEN: first REAL

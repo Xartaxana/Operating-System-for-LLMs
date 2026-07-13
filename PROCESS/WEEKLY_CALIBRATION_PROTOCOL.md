@@ -244,6 +244,10 @@ D:\AO3_tests), cc_usage через tools/usage_report.py, git-история
     детектора: ретро-кейс t-016 (`python tools/pi_run_guard.py --db
     gateway/requests.db --model intern --since 2026-07-09T15:45:00
     --until 2026-07-09T15:46:00`) обязан давать REJECTED exit 1.
+    (е) Экзамен экономии деплоя (PROCESS/DEPLOYMENT_ECONOMY_EXAM.md,
+    2026-07-13): релизный снимок тулкита за окно (ось 7, батчи
+    D-0074) без строки прогона в Runs log экзамена = находка
+    (релизная регрессия деплоя не прогнана).
 
 15. **Ось 6 / R14-guard AO3 — «блокер → test_debt-баг у источника».**
     Класс AT-BUG-004/005/006 (знание прозой в теле артефакта —
