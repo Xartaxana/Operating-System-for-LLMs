@@ -108,6 +108,19 @@ model_list:
       model: gemini/gemini-2.5-flash
       api_key: os.environ/GEMINI_API_KEY
 
+  # Judge candidate for long pairs (operator order 2026-07-13, F-40)
+  # - FAILED calibration 2026-07-13: 11/13 (84.6%) vs bar 13/13 of
+  # both active judges and the 90% escalation floor (D-0031). Misses:
+  # equivalent on a flawed-reasoning classification pair (the exact
+  # skill the 2026-07-03 llama judge was replaced over) and
+  # target_worse on cosmetic formatting. NOT status-grade; alias kept
+  # for reproducibility of the run ($0.0369, requests.db judge-haiku
+  # rows). Same fate as Qwen3-4B (11/13, below bar).
+  - model_name: judge-haiku
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+
   # Shadow Evaluation judge (shadow_eval.py --judge-model). gpt-oss-120b
   # reasoning model via Groq free tier: 11/11 on judge_calibration.json
   # where middle-groq stuck at 10/11 (mis-traces correct code). Named by
