@@ -124,14 +124,26 @@ other=3, отсюда малые n при полном наборе. 15 РАЗЛ
 
 - 2026-07-13  category=coding  source=lead-sonnet target=middle-groq  n=2  sim=0.30  judge=judge-groq pass_rate=0.50  cost_source=$0.0444 cost_target=$0.0007 judge_cost=$0.0007  -> rejected [прогон 1, sample 8 до category-фикса; статус НЕ двинут — Update Rule 1]
 - 2026-07-13  category=coding  source=lead-sonnet target=middle-groq  n=4  sim=0.09  judge=judge-groq pass_rate=0.00  cost_source=$0.0577 cost_target=$0.0008 judge_cost=$0.0012  -> rejected [прогон 2, sample 15; middle-groq провалил все 4 — третий подряд reject-сигнал по строке coding->Middle; статус двигает калибровка ~07-18]
+- 2026-07-13  category=coding  source=lead-sonnet target=middle-groq  n=19 (distinct prompts=11)  sim=0.07  judge=judge-groq pass_rate=0.05  cost_source=$0.0917 cost_target=$0.0010 judge_cost=$0.0013  -> rejected [прогон 3, sample 30/days 1 — первый полный выход через ground-truth category (конвейер t-082..t-085 на живом прокси, source-перепрогон id 1121–1137); 18 WORSE / 1 EQUIVALENT / 2 пустых ретрая; ЧЕТВЁРТЫЙ подряд reject-сигнал]
 
-Цикл НЕ завершён: контрольный прогон №3 (полный выход с ground-truth
-category) ждёт рестарта прокси — живой процесс держит старый
-sqlite_logger без колонки category (урок деплоя: правка gateway-кода
-при живом API-окне требует рестарта прокси; 6 строк-дублей без тега,
-~$0.3, id с 01:24). Продолжение: рестарт прокси -> PRAGMA-сверка
-колонки -> source-перепрогон (лягут с category=coding) -> прогон №3
--> его строка сюда.
+Stage-2 цикл №1 ЗАВЕРШЁН 2026-07-13 днём: счёт R1 coding = 31
+пара-инстанс / 6 прогонов при пороге >=30/>=2 — объём НАБРАН.
+Оговорка для калибровки ~07-18: пары-инстансы включают реплеи
+одинаковых промптов между прогонами (в прогоне 3 различных
+промптов 11 из 19; решение Lead — журнал t-085), калибровка
+взвешивает. Направление evidence одностороннее: 4 reject-прогона
+подряд — кандидат-вердикт строки coding->Middle = rejected,
+статус двигает калибровка (Update Rule 1).
+
+Chief-judge review прогона 3 (Lead Fable, 2026-07-13, D-0031 — 2
+аудита): EQUIVALENT-выброс id 1210 — ЗАЩИТИМ (кандидат выполняет
+все явные требования задачи _extract_cost: порядок приоритетов,
+DB-fallback, явный None, тесты трёх путей; имя таблицы задачей не
+задано — расхождение legal); WORSE id 1179 — ПОДТВЕРЖДЁН (тесты
+кандидата сломаны как написаны: нет import sqlite3 в тест-файле;
+`"response_cost" in Mock()._hidden_params` бросает TypeError на
+входах его же тестов при требовании «never raise»; путь 1 не
+обёрнут try).
 
 Chief-judge review (Lead Fable, 2026-07-11, D-0031 — вердикты
 статусной силы + 2 случайных аудита):
