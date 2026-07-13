@@ -37,6 +37,20 @@ reject-сигнал coding->Middle, R1 coding = 31 пара / 6 прогонов
 строки прогонов — docs/SHADOW_EVALUATION_LOG.md; статус двигает
 только калибровка (кандидат-вердикт rejected).
 
+MIDDLE-КАНДИДАТЫ (приказ оператора 2026-07-13 после 4х reject
+llama): алиасы middle-oss (gpt-oss-120b) и middle-gemini
+(2.5-flash) добавлены (d91ec9b), прокси поднят СЕССИЕЙ (не
+API-окно: только replay/judge-трафик, real-строки не пишутся).
+Первые прогоны: middle-oss НЕВАЛИДЕН по F-39 (стенд обрезал 7/11
+ответов, на чистом подмножестве 50%); middle-gemini pass 50% при
+чистом стенде, но 4/10 пар не судимы (F-40, TPM судьи). Оба кратно
+сильнее llama (5%). t-091 (builder): фикс max_tokens в replay +
+truncated-счётчик. ПОСЛЕ приёмки t-091: рестарт прокси, честный
+повтор обоих прогонов (judge-gemini квота — повтор A завтра);
+решение по судейской ёмкости для длинных пар (платный судья,
+Rule #1) и статусные ходы — калибровка ~07-18. Строки прогонов +
+chief-judge — docs/SHADOW_EVALUATION_LOG.md «MIDDLE-КАНДИДАТЫ».
+
 API-ОКНО ЗАКРЫТО И СВЕРЕНО 2026-07-13 ~12:52 (862 real-строки +
 104 replay/judge, $170.44; все цели окна закрыты; env-блок снят с
 user settings.json, прокси опущен, сессии на подписке). Дословно:
@@ -174,8 +188,10 @@ on-touch/evidence-gated.
   формула cache_read_share (F-38) — тем же батчем; (6) readiness
   R2/C3 metrics.py (t-090): копия toolkit/gateway/metrics.py несёт
   ту же протухшую заглушку «currently 0» (доклад builder; их версия
-  дивергентна — своя сигнатура phase2_readiness). Новых правок
-  toolkit/ не
+  дивергентна — своя сигнатура phase2_readiness); (7) F-39 фикс
+  shadow_eval (max_tokens в replay + truncated-счётчик, t-091) —
+  копия toolkit/gateway/shadow_eval.py несёт тот же класс дефекта.
+  Новых правок toolkit/ не
   делать — ось 7 в осевых блоках отвечается «в очередь порта» сюда.
 - A5 witness auto-collection (builder-class; WHEN: first REAL
   builder-Pi work cycle — Rule #1: no wrapper before there are

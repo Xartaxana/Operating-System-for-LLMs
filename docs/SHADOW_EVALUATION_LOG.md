@@ -170,3 +170,29 @@ Chief-judge review (Lead Fable, 2026-07-11, D-0031 — вердикты
 контр-datapoint с платным источником. Статусы НЕ двигались этим
 прогоном (Update Rule 1: движения — на калибровке, с объёмом
 n>2 и полной стоимостью с ретраями по Update Rule 4).
+
+MIDDLE-КАНДИДАТЫ (2026-07-13 день, приказ оператора после 4х
+reject llama: два новых алиаса middle-oss=gpt-oss-120b и
+middle-gemini=gemini-2.5-flash, коммит d91ec9b; тот же
+регрессионный набор 15 coding-промптов, source-строки lead-sonnet
+id 1121–1137):
+
+- 2026-07-13  category=coding  source=lead-sonnet target=middle-oss  n=11 (distinct=10)  sim=7%  judge=judge-gemini pass_rate=0.27  cost_source=$0.1023 cost_target=$0.0018 judge_cost=$0.0203  -> НЕВАЛИДЕН, F-39 [прогон A: 7/11 ответов обрезаны стендом ровно на 3072 completion-ток. (replay без max_tokens, потолок провайдера; source 4.1–19.5k) — судья мерил стенд; на НЕОБРЕЗАННОМ подмножестве 2/4 EQUIVALENT = 50%. Повтор после фикса t-091; judge-gemini квота 15/20 выбрана — повтор завтра]
+- 2026-07-13  category=coding  source=lead-sonnet target=middle-gemini  n=10 (distinct=10)  sim=4%  judge=judge-groq pass_rate=0.50  cost_source=$0.0886 cost_target=$0.0319 judge_cost=$0.0016  errors=4  -> ниже порога, НО с оговоркой F-40 [прогон B: реплеи чистые (без обрезки, до 19.6k ток.); 4 из 10 пар НЕ СУДИМЫ — judge-groq TPM 8000 отверг судейские промпты 9–14k («Request too large»), unjudged-пары — ДЛИННЫЕ, отказ судьи коррелирует с полнотой кандидата; судимое подмножество 3 EQUIVALENT / 3 WORSE]
+
+Chief-judge review обоих прогонов (Lead Fable, 2026-07-13, D-0031
+— по 1-2 аудита): прогон A: EQUIVALENT id 1562 (_extract_cost) —
+ЗАЩИТИМ (все 3 пути + 4 pytest-теста, import sqlite3 в тестах
+присутствует — та самая ловушка llama из аудита прогона 3; имя
+таблицы задачей не задано, расхождение legal); WORSE id 1564
+(savings_report) — вердикт формально верен, но причина —
+ОБРЕЗКА СТЕНДОМ (ответ оборван на середине seed-кода тестов;
+требования (c)/(d) до обрыва покрыты) — отсюда F-39 и инвалидация
+прогона. Прогон B: EQUIVALENT id 1585 (conftest) — ЗАЩИТИМ
+(autouse-фикстура, LIFO через monkeypatch, все 4 колбэк-атрибута,
+ответ полный). ПРЕДВАРИТЕЛЬНЫЙ сигнал (не статус): оба кандидата
+кратно сильнее llama (5%) на том же наборе; middle-gemini — лучший
+из бесплатных (50% на судимом подмножестве при чистом стенде).
+Честный полный прогон обоих — после фикса t-091 (max_tokens) и
+решения по судейской ёмкости (F-40); статусы двигает калибровка
+~07-18 (Update Rule 1).
