@@ -243,6 +243,27 @@ into CURRENT_CONTEXT.md and the Architect signs the transition. The
 first task of the opened workstream is always an evaluation of an
 existing tool, never a build (D-0030).
 
+### Gate decision 2026-07-13 (report of 2026-07-12, revised 07-13; signature — Architect, in session)
+
+- **Task pipeline workstream (D-0059): OPENED.** Common gate green
+  (G1 16/14 real days, G2 13/13), P1–P3 met (10 tasks ≥5 events vs
+  threshold 3; boundary-loss drivers t-029 + F-36; upkeep ≤ rework).
+  First task — an EVALUATION, not a build (D-0030): existing
+  task-graph carriers (Claude Code native task tools vs a markdown
+  template in PROCESS/) against one real multi-session task; build
+  order thereafter fixed by D-0059.
+- **Router workstream: stays CLOSED** — R1 red (coding 12 judged
+  pairs / 5 runs vs ≥30/2 required; stage-2 replays are the feeder);
+  R2/R3 computable for the first time since the API window — first
+  honest slice at calibration ~07-18. Independent of this signature.
+- **Context management workstream: CLOSED by direct measurement** —
+  C3 truly-uncached paid input = 0.11% vs ≥25% threshold
+  (cache-aware, requests.db, F-38-correct formula); provider caching
+  works through the proxy. Reanimation only by explicit Architect
+  decision.
+- Report archived per D-0038: docs/task_reports/ (pointer in
+  CURRENT_CONTEXT).
+
 ## Phase 3 — Toolkit (D-0070, operator direction 2026-07-11)
 
 The system becomes an installable tool for OTHER projects: core
