@@ -46,11 +46,11 @@ docs/task_reports/2026-07-12_api-window-prep.md.
 Остатки окна ЗАКРЫТЫ: t-077 стриминг-тест, t-078 metrics-кэш,
 t-079/D-0075 synthetic-тег, F-37, F-38 — нарратив ДОСЛОВНО:
 docs/task_reports/2026-07-13_api-window-night.md.
-BOOT-БЮДЖЕТ: boot-diet round 5 ЗАВЕРШЁН 2026-07-13 днём (архив
-подписанного гейт-отчёта + дедуп очереди; 108.3К -> под 100К).
-Крупнейшие дома — CLAUDE.md 30.9К, ROADMAP 17.3К; глубокие срезы —
-ТОЛЬКО Lead+Architect (D-0068); предложение по CLAUDE.md ЖДЁТ
-РЕШЕНИЯ: docs/CLAUDE_MD_DIET_PROPOSAL_2026-07-13.md (-8.2К).
+BOOT-БЮДЖЕТ: boot-diet round 5 + глубокие срезы CLAUDE.md ИСПОЛНЕНЫ
+2026-07-13 (одобрение оператора; 30.9К -> 24.7К, бюджет ~93.7К/100К;
+спека среза: docs/CLAUDE_MD_DIET_PROPOSAL_2026-07-13.md; верификация
+critic ACCEPT t-086 + golden set 7/7 t-087). Следующий резерв при
+новом росте — ROADMAP 17.3К, отдельным предложением.
 STAGE-2 ЦИКЛ №1 ЗАВЕРШЁН 2026-07-13 днём: прогон №3 n=19 (distinct
 11) pass_rate=0.05 -> rejected, ЧЕТВЁРТЫЙ подряд reject-сигнал
 coding->Middle; счёт R1 coding = 31 пара / 6 прогонов — ОБЪЁМ
