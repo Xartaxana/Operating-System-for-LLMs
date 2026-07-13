@@ -144,3 +144,17 @@ Evidence is never deleted, only relocated.
   22:05 desktop-bypass correction, headless streaming check) and the
   final verification on the operator's real interactive traffic
   (~97% cache reads, cache-aware cost).
+- [2026-07-13_api-window-night.md](2026-07-13_api-window-night.md) —
+  API-window night narrative: t-077 streaming test, t-078 metrics
+  cache fix, t-079/D-0075 synthetic self-tag + F-37 MODEL-line
+  marker, F-38 cache_read_share fix, stage-2 pipeline t-082..t-085
+  and shadow-eval runs 1-2 (third consecutive coding->Middle reject
+  signal). Index line added 2026-07-13 day: the night session
+  archived the file but skipped this index — caught by boot-diet
+  round 5 step 3.
+- [2026-07-13_phase2-gate-report.md](2026-07-13_phase2-gate-report.md) —
+  Phase 2 gate report SIGNED 2026-07-13, verbatim from
+  CURRENT_CONTEXT (boot-diet round 5): common + task-pipeline gates
+  green, Router red (R1 12/30), Context closed by direct cache-aware
+  measurement (C3 = 0.11% vs 25% threshold); the transition decision
+  block lives in ROADMAP.md "Gate decision 2026-07-13".
