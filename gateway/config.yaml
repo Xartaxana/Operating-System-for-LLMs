@@ -83,6 +83,26 @@ model_list:
       model: groq/llama-3.3-70b-versatile
       api_key: os.environ/GROQ_API_KEY
 
+  # Middle-tier CANDIDATE #1 (operator order 2026-07-13, after 4
+  # consecutive reject runs on middle-groq/llama-3.3-70b for coding):
+  # same free Groq key, stronger model. Separate alias, NOT a rebinding
+  # of middle-groq - the reject evidence stays attached to the llama
+  # binding (D-0062: binding is a deployment property). Same underlying
+  # model as judge-groq -> its Shadow Evaluation pairs are judged by
+  # the cross-family judge-gemini (13/13, t-023), pace >=13s.
+  - model_name: middle-oss
+    litellm_params:
+      model: groq/openai/gpt-oss-120b
+      api_key: os.environ/GROQ_API_KEY
+
+  # Middle-tier CANDIDATE #2 (same operator order): free Gemini tier,
+  # 10 req/min 250 req/day (pace >=6s on replays). Cross-family to
+  # judge-groq, so the default judge applies without self-judging.
+  - model_name: middle-gemini
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+
   # Shadow Evaluation judge (shadow_eval.py --judge-model). gpt-oss-120b
   # reasoning model via Groq free tier: 11/11 on judge_calibration.json
   # where middle-groq stuck at 10/11 (mis-traces correct code). Named by
