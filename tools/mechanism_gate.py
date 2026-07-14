@@ -53,6 +53,15 @@ from pathlib import Path
 
 import yaml
 
+# Оба потока: тексты отказа гейта — кириллица и в stdout, и в stderr;
+# без reconfigure Windows-консоль искажает их (класс найден в AO3-твине,
+# их задача e4-impact-selection 2026-07-14; ось 1 SIBLING_MAP — фикс парный).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
 REPO = Path(__file__).resolve().parents[1]
 MAP_PATH = REPO / "docs" / "SIBLING_MAP.md"
 DECISIONS_FULL = "docs/DECISIONS_FULL.md"
