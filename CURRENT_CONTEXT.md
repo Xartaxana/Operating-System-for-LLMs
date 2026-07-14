@@ -38,47 +38,34 @@ reject-сигнал coding->Middle, R1 coding = 31 пара / 6 прогонов
 строки прогонов — docs/SHADOW_EVALUATION_LOG.md; статус двигает
 только калибровка (кандидат-вердикт rejected).
 
-MIDDLE-КАНДИДАТЫ: закрытая часть дня 2026-07-13 (алиасы d91ec9b,
-первые прогоны middle-oss/middle-gemini, t-091 фикс стенда,
-judge-haiku ПРОВАЛИЛ 11/13 — схема $0: groq + gemini точечно;
-кандидат платного судьи opus-4-8) — VERBATIM в
-docs/task_reports/2026-07-13_middle-candidates-judge-haiku.md.
-ЧЕСТНЫЙ ПОВТОР A ПОПЫТАН 2026-07-14 ~14:01-14:14 — НЕВАЛИДЕН, НОВЫЙ
-ДЕФЕКТ (defect_found ref=t-091, журнал 14:14:14): t-091's авто
-max_tokens floor (8192) сам превышает Groq TPM=8000 этой
-организации для middle-oss — 0/6 пар (errors=6/6), judge-gemini не
-задет (квота цела). Разбор и поправка —
-docs/SHADOW_EVALUATION_LOG.md «MIDDLE-КАНДИДАТЫ» (строка 2026-07-14
-+ поправка). ОСТАЛОСЬ: решение override-потолок (<8000, риск
-truncation на 7/15 длинных строк) vs. вердикт «middle-oss
-инфра-непригоден на этом Groq-тире для coding» — калибровка ~07-18
-вместе со статусным ходом coding->Middle; наблюдать C3 (рост
-unjudged, сцепка F-40); judge_pair без max_tokens + статусные ходы
-— туда же. Поправка 16:1x (класс F-30) — архивирована в отчёт дня.
+MIDDLE-КАНДИДАТЫ: закрытая часть дня 07-13 — VERBATIM в
+docs/task_reports/2026-07-13_middle-candidates-judge-haiku.md (там
+же схема $0 судей и кандидат opus-4-8). Повтор A 07-14 НЕВАЛИДЕН
+(defect_found ref=t-091, журнал 14:14): авто-floor max_tokens 8192
+сам превышает Groq TPM 8000 — 0/6 пар, судья не задет; разбор —
+SHADOW_EVALUATION_LOG «MIDDLE-КАНДИДАТЫ»; рекомендация Lead —
+вердикт «инфра-непригоден» по прецеденту t-063. На калибровку
+~07-18: override vs инфра-непригодность middle-oss (со статусным
+ходом coding->Middle), C3/F-40, judge_pair без max_tokens.
 
 API-ОКНО ЗАКРЫТО 2026-07-13 ($170.44, прокси опущен, сессии на
 подписке) — дословно: docs/task_reports/2026-07-13_api-window-night.md
 + 2026-07-12_api-window-prep.md.
 
-BOOT-БЮДЖЕТ: раунды 5/6 — 07-13/14; раунд 7 (уплотнение
-CURRENT_CONTEXT) 2026-07-14 после пробоя 100.9К. Резерв при новом
-росте — ROADMAP 17.3К, отдельным предложением Lead+Architect.
+BOOT-БЮДЖЕТ: раунды 5–7 — 07-13/14; раунд 8 (диета после текстов
+D-0076, пробой 102.6К) — 07-14. Резерв при новом росте — ROADMAP
+17.3К, отдельным предложением Lead+Architect.
 
 Действующие рамки: ТУЛКИТ-МОРАТОРИЙ D-0074 (правка toolkit/ —
 только проверенным батчем по слову оператора; порт-очередь ниже).
 
-Закрытое 2026-07-11/12 (Phase 3, A3/D-0073, D-0074, AO3-порт,
-первая калибровка, paid baseline) — описания в индексе
-docs/task_reports/README.md (единственный владелец). Живой остаток:
-позитивная точка t-066 (golden set 6/7, Q3 PASS первым штатным
-диспатчем) для чека 14в калибровки ~07-18; решение «haiku
-сохраняем» в силе.
+Закрытое 07-11/12 — индекс docs/task_reports/README.md
+(единственный владелец). Живой остаток: t-066 (golden set 6/7,
+Q3 PASS) для чека 14в; «haiku сохраняем» в силе.
 
-ПРИОРИТЕТ ОПЕРАТОРА 2026-07-11: текстовые задачи для API-builder
-(builder-groq) забираются по ходу (прокси сейчас опущен — по факту
-на паузе до следующего окна). Прочие нити: статья draft-C и White
-Paper v0.2.1 — у оператора; остаток старой очереди —
-on-touch/evidence-gated.
+ПРИОРИТЕТ ОПЕРАТОРА 07-11: текстовые задачи builder-groq по ходу
+(прокси опущен — на паузе). Прочее: draft-C и WP v0.2.1 — у
+оператора; старая очередь — on-touch/evidence-gated.
 
 ## Routing MVP — LIVE on both deployments
 
@@ -86,9 +73,8 @@ on-touch/evidence-gated.
   dogfooding: THIS repo (2026-07-08). Each = auto-loaded CLAUDE.md
   policy + agents scout/builder/critic + logs/routing-log.jsonl
   (D-0041: always the three together).
-- Policy text ARCHITECT-ACCEPTED 2026-07-09 (commit 171078c; closed
-  the last open item of Phase 1.5 step 2). Later policy changes
-  follow the normal mechanism discipline.
+- Policy text ARCHITECT-ACCEPTED 2026-07-09 (171078c); later policy
+  changes follow the mechanism discipline.
 - Evidence stream: logs/routing-log.jsonl (t-001..t-095); Claude-
   контурные строки таблицы provisionally_validated с первой
   калибровки 2026-07-11 (Update Rule 1, D-0047; evidence-блок в
@@ -97,10 +83,8 @@ on-touch/evidence-gated.
   $57.82 sidechain self-correction (Task 6). Weekly loop compares
   cost per accepted unit + escalation rate, NOT frontier share alone
   (Architect correction — see baseline section below).
-- First weekly calibration DONE 2026-07-11; вторая — к ~2026-07-18
-  (полновесное недельное окно, трендовые чеки 10/11 против baseline
-  первого прогона; staleness watched by the Boot Report's Last
-  Calibration line, D-0047).
+- Первая калибровка 07-11; вторая ~07-18 (трендовые чеки против
+  baseline первого прогона; staleness — Boot Report, D-0047).
 
 ## System State (condensed, 2026-07-08; updates dated)
 
@@ -209,7 +193,10 @@ on-touch/evidence-gated.
   (13) из внешнего ревью (триаж 07-14): privacy-режимы sqlite_logger
   (no-raw-text + fingerprints + TTL/purge; дефолт — решение
   оператора) и onboarding-пробы моделей; в DoD батча — hash-сверка
-  корень↔toolkit + манифест намеренных расхождений.
+  корень↔toolkit + манифест намеренных расхождений;
+  (14) D-0076/F-44: правило порядка в toolkit/CLAUDE.md (EN),
+  worker_ref в валидатор, OPEN DISPATCH в session_context, чек
+  13(и) в протокол — после проживания у нас >=1 недели.
   Новых правок toolkit/ не
   делать — ось 7 в осевых блоках отвечается «в очередь порта» сюда.
 - A5 witness auto-collection (builder-class; WHEN: first REAL
@@ -224,12 +211,10 @@ on-touch/evidence-gated.
   чтением кода собрата» (F-30 для critic'а); (б) кейс-кандидат
   CRITIC_EXAM: пара «одна формула, разные раскладки полей»
   (подсаженный дифф класса F-38).
-- ВНЕШНЕЕ РЕВЬЮ 2026-07-13 разобрано и закрыто по-горячему:
-  триаж docs/task_reports/2026-07-14_external-review-triage.md;
-  немедленный фикс t-095 ПРИНЯТ 2026-07-14 (словарь shadow_eval +
-  удаление кодового пути к таблице; закрыл находки 2/11); на
-  повестку калибровки — staleness цен + economic margin; порт-п.13;
-  находки 7/10 не берём (триггеры — в триаже).
+- ВНЕШНЕЕ РЕВЬЮ 07-13 закрыто (триаж
+  docs/task_reports/2026-07-14_external-review-triage.md; t-095
+  принят — находки 2/11). На калибровку: staleness цен + economic
+  margin; порт-п.13; 7/10 не берём (триггеры в триаже).
 - КАНДИДАТ ПОВЕСТКИ КАЛИБРОВКИ ~07-18 (предложение Lead 2026-07-14,
   слово оператора НЕ дано — решить на разборе): формализовать
   скип-порог числом на данных чеков 19/21/22 (сейчас порога нет:
@@ -250,10 +235,14 @@ on-touch/evidence-gated.
   экзамена 2026-07-14 (протокол, прецедент C-T1: визуальный дефект
   мимо кодовой приёмки, скрин оператора); для AO3-конвейера триггер
   прежний (первый UI-диспатч).
+- AO3-ПОРТ D-0076 (ось 1; инцидент F-44 — там; исполняет сессия
+  AO3 по слову оператора): правило порядка + worker_ref в
+  log_append.py (их кодовый гейт при append) + сверка открытых
+  диспатчей в хук/handoff; заодно давний остаток by/basis +
+  continuation/retry ветки.
 - Evidence-gated residuals (каждый — на своём триггере): provider
   column in sqlite_logger (N1/N2 root, axis 2); requests(model,ts)
-  index (только на latency evidence); AO3 log_append.py port of
-  by/basis + continuation/retry branches (axis 1, в AO3-порт выше);
+  index (только на latency evidence);
   usage_report.py loud-fail on locked cc_usage DB (axis-2 candidate,
   on evidence); t-018 wall admission-math (candidate on calibration
   evidence, journal row 404); structured worker-report frames
@@ -264,26 +253,20 @@ on-touch/evidence-gated.
   checks 10/11 show the discipline leaks); per-file boot-budget
   breakdown в session-handoff чек 4 / SessionStart hook (on next
   touch, OpenClaw prior art).
-- Eval plan stage 2 — В РАБОТЕ (цикл №1 открыт 07-13, см. Current
-  Task; конвейер d90cd03). Остаток плана: minimum-n / pass^k в
-  Update Rules таблицы + numeric judge-human agreement в
-  JUDGE_CALIBRATION_PROTOCOL (пороги — с данных калибровки). NOT
-  taken: per-PR CI, полный bench-harness (Rule #1). Batch API
-  candidate (одобрен 07-10): TRIGGER = реплеи регулярны; при
-  адопции batch-эндпоинты минуют лог прокси — учётный путь в
-  requests.db тем же ходом (ось 2, никогда молчаливый $0).
-- NOT adopted (recorded to stop re-litigating): GSD as coordinator
-  (duplicates Lead), auto-mode SQLite state machine + crash recovery
-  (our analog is session handoff), supply-chain audit tags, WXP;
-  OpenClaw: channels, delegate identity, compaction/memory
-  (harness-owned), utilityModel (duplicates D-0062). Прочее из
-  OpenClaw-обзора закрыто или едет на своих носителях (см.
-  evening-closures + RELATED_WORK «OpenClaw survey»).
-- Habr/LinkedIn thread (t-036): финальная статья написана ОПЕРАТОРОМ,
-  вычитана Lead'ом 07-14 (её docx сессии не правят); EN-перевод
-  создан (D:\Improving_AI\How I keep an eye on AI (EN).docx);
-  денежная фраза подтверждена (КАССА выше). NEXT: публикация — слово
-  оператора. История слепого теста A/B и материалы:
+- Eval plan stage 2 — В РАБОТЕ (цикл №1 07-13, конвейер d90cd03).
+  Остаток: minimum-n/pass^k в Update Rules + numeric agreement в
+  JUDGE_CALIBRATION_PROTOCOL (пороги с калибровки). NOT taken:
+  per-PR CI, bench-harness (Rule #1). Batch API (одобрен 07-10):
+  TRIGGER = реплеи регулярны; учётный путь requests.db тем же
+  ходом (ось 2, никогда молчаливый $0).
+- NOT adopted (чтобы не пересуживать): GSD-координатор, auto-mode
+  SQLite/crash recovery, supply-chain tags, WXP; OpenClaw: channels,
+  delegate identity, compaction/memory, utilityModel. Обоснования —
+  RELATED_WORK «OpenClaw survey» + evening-closures.
+- Habr/LinkedIn (t-036): статья оператора вычитана 07-14 (docx
+  сессии не правят); EN-перевод: D:\Improving_AI\How I keep an eye
+  on AI (EN).docx; денежная фраза подтверждена (КАССА выше). NEXT:
+  публикация — слово оператора. Материалы:
   docs/ARTICLE_BRIEF_2026-07-10.md + draft-{A,B,C} + журнал t-036.
 - White Paper: v0.2.1 написан 2026-07-13 по слову оператора («пиши
   v0.2.1, ревью сделаю сразу по ней») — evidence-апдейт 07-11..13:
