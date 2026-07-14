@@ -98,6 +98,29 @@ wiring in the two new columns:
   accounted_cost_usd (unpriced) in this machine's existing
   gateway/requests.db (7 rows, all NULL) before this task's pricing
   fix.
+
+t-093 (2026-07-14 follow-up, F-42): a THIRD subagent transcript depth
+found, still under .../subagents/ but deeper than the Task 6 flat
+layout -- the workflow tool writes to
+`<project>/<session>/subagents/workflows/wf_*/agent-*.jsonl`. The
+Task 6 glob (`subagents/*.jsonl`, one directory deep only) and the
+`p.parent.name == "subagents"` detection in iter_assistant_turns()
+both silently missed these files (a "silent $0" per Rule #1) -- e.g.
+seven such files existed under
+D--Improving-AI-exam-release1-C-t2/<session>/subagents/workflows/wf_*/
+on this machine, contributing real accounted cost that
+`usage_report.py --json` was omitting from that project's total.
+Fixed by widening the glob to `subagents/**/*.jsonl` (recursive=True)
+and by walking up the path's parents in iter_assistant_turns() to
+find the nearest ancestor literally named "subagents" instead of
+checking only the immediate parent -- both changes are depth-agnostic
+so any FUTURE nesting under subagents/ is also covered, not just this
+one extra level. The workflow tool's own `journal.jsonl` files (also
+under subagents/workflows/wf_*/, but never named `type: "assistant"`
+with a `usage` block) are matched by the wider glob but remain inert:
+iter_assistant_turns() already skips every line whose `type` isn't
+"assistant" before it ever looks at `usage`, so a file with no
+assistant/usage lines simply yields zero rows, not an error.
 """
 
 import argparse
@@ -197,17 +220,26 @@ def transcript_glob(base_dir: Path = None) -> list:
     single string) for Claude Code transcripts on this machine:
 
     1. top-level session transcripts: <project>/<session>.jsonl
-    2. subagent/sidechain transcripts, one directory layer deeper
-       (Delegated Task 6): <project>/<session>/subagents/agent-*.jsonl
+    2. subagent/sidechain transcripts, ANY depth under subagents/
+       (Delegated Task 6, extended by t-093/F-42):
+       <project>/<session>/subagents/agent-*.jsonl (flat, Task 6) AND
+       <project>/<session>/subagents/workflows/wf_*/agent-*.jsonl
+       (deeper -- observed from the workflow tool, which nests its
+       agent transcripts one or more extra directories below
+       subagents/). The `**` component matches zero or more
+       directories, so this single pattern covers both the flat and
+       the nested layouts; import_transcripts() passes recursive=True
+       to glob.glob() so `**` is honored.
 
-    The two layouts do not share a single glob pattern, hence the
-    list. import_transcripts() accepts either this list or a single
-    pattern string (the latter for CLI-override / backward-compat
-    with existing callers/tests that pass one path)."""
+    The two top-level layouts (session vs. subagent) do not share a
+    single glob pattern, hence the list. import_transcripts() accepts
+    either this list or a single pattern string (the latter for
+    CLI-override / backward-compat with existing callers/tests that
+    pass one path)."""
     base = base_dir or (Path.home() / ".claude" / "projects")
     return [
         str(base / "*" / "*.jsonl"),
-        str(base / "*" / "*" / "subagents" / "*.jsonl"),
+        str(base / "*" / "*" / "subagents" / "**" / "*.jsonl"),
     ]
 
 
@@ -221,23 +253,31 @@ def iter_assistant_turns(path: str):
     transcript's directory layout (see below).
 
     project / fallback session_id derivation handles BOTH transcript
-    layouts (Delegated Task 6):
+    layouts (Delegated Task 6, extended by t-093/F-42):
     - top-level: <project>/<session>.jsonl -- verified empirically
       2026-07-07 that every real transcript's per-line "sessionId"
       always equals its own filename stem (0 mismatches), so the
       filename stem is both the project's session and the fallback.
-    - subagent/sidechain: <project>/<session>/subagents/agent-*.jsonl
-      -- the file's OWN stem is the sub-agent id (e.g. "agent-a6d8..."),
-      not a session id, so it would be wrong as a session_id fallback;
-      the real parent session id is the directory name one level above
-      "subagents/". Detected by checking whether the immediate parent
-      directory is literally named "subagents" (re-verified across 61
-      real subagent files, 0 sessionId mismatches against this
-      directory name -- see module docstring)."""
+    - subagent/sidechain, ANY depth under subagents/ --
+      <project>/<session>/subagents/agent-*.jsonl (flat, Task 6) or
+      <project>/<session>/subagents/workflows/wf_*/agent-*.jsonl
+      (deeper, t-093) -- the file's OWN stem is the sub-agent id
+      (e.g. "agent-a6d8..."), not a session id, so it would be wrong
+      as a session_id fallback; the real parent session id is the
+      directory name one level ABOVE the nearest ancestor directory
+      literally named "subagents", regardless of how many extra
+      directories (workflows/wf_x/...) sit between "subagents" and
+      the file itself. Detected by walking up the path's parents to
+      find that "subagents" ancestor (re-verified across the original
+      61 flat subagent files, 0 sessionId mismatches against this
+      derivation, plus the deep workflow files found under
+      D--Improving-AI-exam-release1-C-t2 -- see module docstring)."""
     p = Path(path)
-    if p.parent.name == "subagents":
-        project = p.parent.parent.parent.name
-        filename_session_id = p.parent.parent.name
+    subagents_dir = next((a for a in p.parents if a.name == "subagents"), None)
+    if subagents_dir is not None:
+        session_dir = subagents_dir.parent
+        project = session_dir.parent.name
+        filename_session_id = session_dir.name
     else:
         project = p.parent.name
         filename_session_id = p.stem
@@ -399,7 +439,13 @@ def import_transcripts(glob_pattern, db_file: Path):
     conn = _connect(db_file)
     paths = set()
     for pattern in patterns:
-        paths.update(glob.glob(pattern))
+        # recursive=True so a `**` component (the subagents/**/*.jsonl
+        # default pattern, t-093/F-42) matches any depth, including
+        # zero extra directories (the flat Task-6 layout); it is a
+        # no-op for patterns without `**` (the top-level session
+        # pattern), so this is safe for both defaults and any custom
+        # --transcripts-glob override.
+        paths.update(glob.glob(pattern, recursive=True))
     try:
         for path in sorted(paths):
             for turn in iter_assistant_turns(path):
@@ -662,9 +708,10 @@ def main():
             "Override the transcript glob with a SINGLE custom pattern "
             "(default, with no override: TWO patterns are scanned -- "
             "~/.claude/projects/*/*.jsonl for session transcripts and "
-            "~/.claude/projects/*/*/subagents/*.jsonl for subagent/"
-            "sidechain transcripts, Delegated Task 6). Passing this flag "
-            "replaces both default patterns with just this one."
+            "~/.claude/projects/*/*/subagents/**/*.jsonl (recursive, "
+            "any depth) for subagent/sidechain transcripts, Delegated "
+            "Task 6 + t-093). Passing this flag replaces both default "
+            "patterns with just this one."
         ),
     )
     parser.add_argument(

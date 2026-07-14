@@ -544,6 +544,118 @@ def test_backfill_fills_agent_fields_and_null_costs_idempotently(tmp_path, db_fi
     assert updated_again == 0
 
 
+# ---- deep subagent transcripts under workflows/ (t-093/F-42) ----
+#
+# The workflow tool writes agent transcripts at a THIRD depth, still
+# under .../subagents/ but nested further:
+# <project>/<session>/subagents/workflows/wf_*/agent-*.jsonl. The
+# Task 6 glob/detection (one directory deep only) silently missed
+# these. Regression coverage below builds a tmp tree with all three
+# layouts together (top-level session, flat subagent, deep workflow
+# subagent) and confirms every one is counted.
+
+def test_project_attribution_deep_workflow_subagent_layout(tmp_path):
+    path = (
+        tmp_path / "myproj" / "session-1" / "subagents" / "workflows"
+        / "wf_abc123" / "agent-deep1.jsonl"
+    )
+    _write_jsonl(path, [_assistant_line(session_id="session-1", is_sidechain=True)])
+    turns = list(iter_assistant_turns(str(path)))
+    assert len(turns) == 1
+    # Must attribute to the real project/session two levels above the
+    # "subagents" ancestor, NOT "wf_abc123", "workflows", or
+    # "subagents" itself.
+    assert turns[0]["project"] == "myproj"
+    assert turns[0]["session_id"] == "session-1"
+    assert turns[0]["is_sidechain"] == 1
+
+
+def test_deep_workflow_subagent_session_id_fallback_uses_directory_not_agent_filename(tmp_path):
+    # No "sessionId" JSON field -- fallback must still resolve to the
+    # session directory one level above "subagents/", regardless of
+    # how many extra directories (workflows/wf_x/...) sit in between.
+    path = (
+        tmp_path / "myproj2" / "sess-xyz" / "subagents" / "workflows"
+        / "wf_def456" / "agent-deep2.jsonl"
+    )
+    _write_jsonl(path, [_assistant_line(session_id=None, is_sidechain=True)])
+    turns = list(iter_assistant_turns(str(path)))
+    assert len(turns) == 1
+    assert turns[0]["session_id"] == "sess-xyz"
+    assert turns[0]["project"] == "myproj2"
+
+
+def test_transcript_glob_recursive_pattern_covers_deep_workflow_files(tmp_path, db_file):
+    # PIN (D-0052): on the pre-t-093 code (glob pattern
+    # "subagents/*.jsonl", one directory deep only), this test fails
+    # -- the deep workflow file is invisible to both the glob and
+    # iter_assistant_turns's "immediate parent == subagents" check.
+    # All three real-world layouts, together:
+    top_level = tmp_path / "projA" / "session-1.jsonl"
+    _write_jsonl(top_level, [
+        _assistant_line(session_id="session-1", request_id="req-top-1"),
+    ])
+    flat_sub = tmp_path / "projA" / "session-1" / "subagents" / "agent-flat1.jsonl"
+    _write_jsonl(flat_sub, [
+        _assistant_line(session_id="session-1", request_id="req-flat-1", is_sidechain=True),
+    ])
+    deep_sub = (
+        tmp_path / "projA" / "session-1" / "subagents" / "workflows"
+        / "wf_xyz789" / "agent-deep1.jsonl"
+    )
+    _write_jsonl(deep_sub, [
+        _assistant_line(session_id="session-1", request_id="req-deep-1", is_sidechain=True),
+    ])
+    # A workflow journal.jsonl sitting right next to the deep agent
+    # file, real-shape lines (type: "started"/"result", no
+    # message.usage) -- must stay inert, matched by the wider glob but
+    # contributing zero rows, not an error.
+    journal = deep_sub.parent / "journal.jsonl"
+    _write_jsonl(journal, [
+        {"type": "started", "key": "v2:abc", "agentId": "agent-deep1"},
+        {"type": "result", "key": "v2:abc", "agentId": "agent-deep1", "result": {"summary": "ok"}},
+    ])
+
+    patterns = transcript_glob(base_dir=tmp_path)
+    rows_imported, sessions_seen, warnings = import_transcripts(patterns, db_file)
+
+    # 3 real assistant turns (top-level + flat subagent + deep
+    # workflow subagent); the journal.jsonl contributes 0.
+    assert rows_imported == 3
+    assert sessions_seen == {"session-1"}
+
+    conn = sqlite3.connect(db_file)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("SELECT * FROM cc_usage ORDER BY dedupe_key").fetchall()
+    assert len(rows) == 3
+    for r in rows:
+        assert r["project"] == "projA"
+        assert r["session_id"] == "session-1"
+    request_ids_seen = {r["dedupe_key"].split(":", 1)[1] for r in rows}
+    assert request_ids_seen == {"req-top-1", "req-flat-1", "req-deep-1"}
+
+
+def test_import_transcripts_deep_workflow_layout_is_idempotent(tmp_path, db_file):
+    deep_sub = (
+        tmp_path / "projD" / "session-4" / "subagents" / "workflows"
+        / "wf_qqq" / "agent-deep-idem.jsonl"
+    )
+    _write_jsonl(deep_sub, [
+        _assistant_line(session_id="session-4", request_id="req-deep-idem", is_sidechain=True),
+    ])
+    patterns = transcript_glob(base_dir=tmp_path)
+
+    rows1, _, _ = import_transcripts(patterns, db_file)
+    rows2, _, _ = import_transcripts(patterns, db_file)
+
+    assert rows1 == 1
+    assert rows2 == 0
+
+    conn = sqlite3.connect(db_file)
+    count = conn.execute("SELECT COUNT(*) FROM cc_usage").fetchone()[0]
+    assert count == 1
+
+
 def test_import_transcripts_accepts_single_string_pattern_backward_compat(tmp_path, db_file):
     # The pre-Task-6 API (single glob string) must keep working, since
     # both the CLI --transcripts-glob override and any external caller
