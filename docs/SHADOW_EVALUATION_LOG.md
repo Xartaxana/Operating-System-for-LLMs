@@ -207,3 +207,26 @@ finish_reason==length, детектор считает — mock-only риск F-
 полноразмерных парах) наблюдается в честном повторном прогоне:
 A (middle-oss + judge-gemini) — завтра по ролловой квоте судьи;
 B-длинные пары — после решения F-40.
+- 2026-07-14  category=coding  source=lead-sonnet target=middle-oss  n=6  sim=0.00  cost_source=$0.1281 cost_target=$0.0000  errors=6 truncated=0  -> estimated
+
+Поправка к записи 2026-07-14 (внесена тем же ходом, defect_found
+ref=t-091 в журнале): строка выше НЕВАЛИДНА как сигнал качества —
+0/6 пар реплеены (errors=6/6), judge-gemini НЕ вызван ни разу
+(квота нетронута), verdict "estimated" — код-fallback пустого
+прогона, не суждение. Причина ОТЛИЧАЕТСЯ от F-39 (та была
+truncation при отсутствующем потолке): здесь t-091's авто-режим
+max_tokens (source completion_tokens*1.3, floor 8192) САМ ПО СЕБЕ
+превышает TPM-потолок 8000 этой Groq-организации для
+openai/gpt-oss-120b на КАЖДОЙ строке — все 15 сохранённых
+lead-sonnet coding-строк (id 1121-1137) несут completion_tokens
+4138-19537, значит floor 8192 срабатывает всегда и всегда >8000.
+Структурно: middle-oss на этом Groq-тире НЕ МОЖЕТ завершить ни
+одного авто-режим реплея этого набора, независимо от паузы/сэмпла
+(проверено логами прокси: RateLimitError "Request too large ...
+Limit 8000, Requested 8421-21148" на всех 18 попытках/6 пар с
+2 ретраями каждая). Явный --max-tokens override ниже 8000 обошёл
+бы TPM, но возвращает риск truncation (7/15 строк набора >6000
+completion-ток.) — то самое напряжение, которое t-091 закрывал.
+Решение (override-потолок vs. вердикт «middle-oss инфра-непригоден
+на этом Groq-тире для coding») — в очередь калибровки ~07-18 рядом
+с coding->Middle (журнал defect_found + CURRENT_CONTEXT).
