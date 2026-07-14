@@ -158,3 +158,4 @@ Evidence is never deleted, only relocated.
   green, Router red (R1 12/30), Context closed by direct cache-aware
   measurement (C3 = 0.11% vs 25% threshold); the transition decision
   block lives in ROADMAP.md "Gate decision 2026-07-13".
+- [2026-07-13_middle-candidates-judge-haiku.md](2026-07-13_middle-candidates-judge-haiku.md) — закрытая часть дня Middle-кандидатов: алиасы, первые прогоны (F-39/F-40), фикс стенда t-091, провал judge-haiku 11/13 и схема судейства; перенос boot-diet раунда 6 (2026-07-14).
