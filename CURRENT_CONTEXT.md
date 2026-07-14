@@ -281,10 +281,12 @@ on-touch/evidence-gated.
   evening-closures + RELATED_WORK «OpenClaw survey»).
 - Habr article thread (t-036, 2026-07-10): blind A/B done — A=Sonnet,
   B=Opus, operator verdict B>A, neither publishable. draft-C written
-  by Lead, role fixes v2 (d3e52d2) → F-31. NEXT: operator writes the
-  final article based on docs/draft-C.md and hands it to Lead for
-  proofreading + comparison against the three AI drafts. Brief + all
-  drafts: docs/ARTICLE_BRIEF_2026-07-10.md, docs/draft-{A,B,C}.md.
+  by Lead, role fixes v2 (d3e52d2) → F-31. Финальная статья написана
+  ОПЕРАТОРОМ, вычитана Lead'ом 2026-07-14 (сравнение с драфтами
+  сделано в сессии; правки внесла оператор сама — её docx сессии не
+  правят). Денежная фраза статьи подтверждена биллингом (см. КАССА
+  выше). NEXT: публикация — слово оператора. Brief + all drafts:
+  docs/ARTICLE_BRIEF_2026-07-10.md, docs/draft-{A,B,C}.md.
 - White Paper: v0.2.1 написан 2026-07-13 по слову оператора («пиши
   v0.2.1, ревью сделаю сразу по ней») — evidence-апдейт 07-11..13:
   калибровка, тулкит v0.1.0 + обе установки, платный источник и
