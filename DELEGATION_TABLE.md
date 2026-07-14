@@ -44,6 +44,7 @@ subscription contour):
 | Implementation to a written spec, tests | High | Medium | builder (Sonnet subagent) | provisionally_validated |
 | Code review, unclear-bug debugging | High | High | critic (Opus subagent) | provisionally_validated |
 | Decomposition, spec writing, acceptance | High | Very high | Lead session only | provisionally_validated |
+| Spec DRAFTING from a Lead intent brief (forks returned, not decided) | High | pilot measures | designer (Opus; pilot 2026-07-14, docs/tasks/2026-07-14_opus-designer-pilot.md) | estimated |
 
 Evidence for the 2026-07-11 status moves (Update Rule 1) — first
 weekly calibration, `calibrated` journal event 2026-07-11, window
