@@ -13,14 +13,19 @@ import json
 import subprocess
 from pathlib import Path
 
-import journal_validator as jv
+try:
+    import journal_validator_d0076 as jv
+except ImportError:
+    import journal_validator as jv
 
 NOW = jv.datetime.datetime(2026, 7, 10, 12, 0, 0)
 
 
 def _line(event="delegated", ts="2026-07-10T08:00:00", agent="builder",
-          category="implementation", notes="note", **kw) -> str:
-    obj = {"ts": ts, "event": event, "agent": agent, "category": category, "notes": notes}
+          category="implementation", notes="note",
+          worker_ref="cli:2026-07-10T08:00:00", **kw) -> str:
+    obj = {"ts": ts, "event": event, "agent": agent, "category": category, "notes": notes,
+           "worker_ref": worker_ref}
     obj.update(kw)
     return json.dumps(obj, ensure_ascii=False)
 
@@ -122,6 +127,59 @@ def test_task_id_bad_format_fails():
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1
     assert any("формату t-NNN" in v for v in violations)
+
+
+# ---- 5b. worker_ref required for delegated (D-0076) ----
+
+def test_delegated_missing_worker_ref_fails():
+    obj = json.loads(_line(event="delegated", ts="2026-07-10T08:10:00", model="sonnet",
+                            task_id="t-002", notes="no worker_ref"))
+    del obj["worker_ref"]
+    staged = _staged(json.dumps(obj, ensure_ascii=False))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("worker_ref" in v for v in violations)
+
+
+def test_delegated_empty_worker_ref_fails():
+    staged = _staged(_line(event="delegated", ts="2026-07-10T08:10:00", model="sonnet",
+                            task_id="t-002", worker_ref="", notes="empty worker_ref"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("worker_ref" in v for v in violations)
+
+
+def test_delegated_whitespace_worker_ref_fails():
+    staged = _staged(_line(event="delegated", ts="2026-07-10T08:10:00", model="sonnet",
+                            task_id="t-002", worker_ref="   ", notes="whitespace worker_ref"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("worker_ref" in v for v in violations)
+
+
+def test_delegated_nonstring_worker_ref_fails():
+    staged = _staged(_line(event="delegated", ts="2026-07-10T08:10:00", model="sonnet",
+                            task_id="t-002", worker_ref=123, notes="nonstring worker_ref"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("worker_ref" in v for v in violations)
+
+
+def test_delegated_valid_worker_ref_passes():
+    staged = _staged(_line(event="delegated", ts="2026-07-10T08:10:00", model="sonnet",
+                            task_id="t-002", worker_ref="cli:2026-07-10T08:10:00",
+                            notes="valid worker_ref"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0
+
+
+def test_escalated_needs_no_worker_ref():
+    obj = json.loads(_line(event="escalated", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", notes="escalated, no worker_ref"))
+    del obj["worker_ref"]
+    staged = _staged(json.dumps(obj, ensure_ascii=False))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0
 
 
 # ---- 6. rejected: attempt / failure_class ----

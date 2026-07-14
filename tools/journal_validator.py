@@ -21,6 +21,11 @@
  4. model обязателен для delegated/escalated/accepted/rejected.
  5. task_id обязателен для delegated/accepted/rejected/escalated/
     defect_found, формат t-NNN (3+ цифр).
+ 5b. Каждая НОВАЯ строка delegated несёт типизированное поле worker_ref --
+    непустая строка (D-0076: хэндл, по которому следующая сессия находит
+    воркера/результат; ловит фантомный delegated без запуска воркера --
+    родня F-29). Только присутствие/тип/непустота; смысл хэндла судит
+    приёмка. escalated полем не нагружается.
  6. rejected: attempt -- целое >=1; failure_class из ENUM.
  7. accepted с agent=builder: witness непустая строка.
  8. defect_found: ref непустой.
@@ -287,6 +292,13 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
             witness = obj.get("witness")
             if not isinstance(witness, str) or not witness.strip():
                 violations.append(f"{tag}: 'witness' обязателен (непустая строка) для accepted+agent=builder")
+
+        if event == "delegated":
+            worker_ref = obj.get("worker_ref")
+            if not isinstance(worker_ref, str) or not worker_ref.strip():
+                violations.append(
+                    f"{tag}: 'worker_ref' обязателен (непустая строка) для delegated (D-0076)"
+                )
 
         if event == "defect_found":
             ref = obj.get("ref")

@@ -34,7 +34,7 @@ from session_context import (
 # This indirection means the test suite keeps working unchanged once that
 # move happens: only this import line needs to flip.
 try:
-    import session_context_b3 as sc
+    import session_context_d0076 as sc
 except ImportError:
     import session_context as sc
 
@@ -665,3 +665,166 @@ def test_main_b3_success_path_includes_model_and_boot_budget(tmp_path, capsys, m
     assert any(l.startswith("MODEL: claude-sonnet-5 -> tier builder-tier") for l in out)
     assert any(l.startswith("BOOT BUDGET:") for l in out)
     assert len(out) <= sc.MAX_LINES
+
+
+# ==== D-0076: OPEN DISPATCH lines ====================================
+
+
+def test_open_dispatches_delegated_last_is_open():
+    events = [_event("delegated", ts="2026-07-10T08:00:00", agent="builder", task_id="t-001")]
+    opens = sc.open_dispatches(events)
+    assert len(opens) == 1
+    assert opens[0]["task_id"] == "t-001"
+    assert opens[0]["event"] == "delegated"
+
+
+def test_open_dispatches_accepted_closes():
+    events = [
+        _event("delegated", ts="2026-07-10T08:00:00", agent="builder", task_id="t-001"),
+        _event("accepted", ts="2026-07-10T08:10:00", agent="builder", task_id="t-001"),
+    ]
+    assert sc.open_dispatches(events) == []
+
+
+def test_open_dispatches_retry_branch_open():
+    # delegated -> rejected -> delegated (attempt 2) = still open: the
+    # last lifecycle event for t-001 is 'delegated'.
+    events = [
+        _event("delegated", ts="2026-07-10T08:00:00", agent="builder", task_id="t-001"),
+        _event("rejected", ts="2026-07-10T08:10:00", agent="builder", task_id="t-001",
+               attempt=1, failure_class="spec"),
+        _event("delegated", ts="2026-07-10T08:20:00", agent="builder", task_id="t-001",
+               attempt=2),
+    ]
+    opens = sc.open_dispatches(events)
+    assert len(opens) == 1
+    assert opens[0]["ts"] == "2026-07-10T08:20:00"
+
+
+def test_open_dispatches_continuation_open():
+    # delegated to builder, then delegated to critic (acceptance-gate
+    # entry) on the same task_id = still open: last event is 'delegated'.
+    events = [
+        _event("delegated", ts="2026-07-10T08:00:00", agent="builder", task_id="t-001"),
+        _event("delegated", ts="2026-07-10T08:10:00", agent="critic", task_id="t-001"),
+    ]
+    opens = sc.open_dispatches(events)
+    assert len(opens) == 1
+    assert opens[0]["agent"] == "critic"
+
+
+def test_open_dispatches_decomposable_closes():
+    events = [
+        _event("delegated", ts="2026-07-10T08:00:00", agent="builder", task_id="t-001"),
+        _event("decomposable", ts="2026-07-10T08:10:00", agent="builder", task_id="t-001"),
+    ]
+    assert sc.open_dispatches(events) == []
+
+
+def test_open_dispatches_escalated_closes():
+    events = [
+        _event("delegated", ts="2026-07-10T08:00:00", agent="builder", task_id="t-001"),
+        _event("escalated", ts="2026-07-10T08:10:00", agent="builder", task_id="t-001"),
+    ]
+    assert sc.open_dispatches(events) == []
+
+
+def test_open_dispatches_dispatch_skipped_never_opens():
+    # dispatch_skipped is outside _OPEN_LIFECYCLE_EVENTS entirely -- it
+    # neither opens nor closes a task_id, even with no delegated at all.
+    events = [_event("dispatch_skipped", ts="2026-07-10T08:00:00", agent="scout",
+                     task_id="t-001")]
+    assert sc.open_dispatches(events) == []
+
+
+def test_open_dispatches_file_order_lies_ts_wins():
+    # t-029 mirror (F1 blocker, attempt 2): a retroactive `delegated` was
+    # inserted mid-file via Edit -- it physically sits AFTER its closing
+    # `accepted` in the journal, but its ts is earlier. File position must
+    # NOT decide "last" here; ts is the true order, so the task is CLOSED.
+    events = [
+        _event("delegated", ts="2026-07-10T09:23:00", agent="builder", task_id="t-001"),
+        _event("accepted", ts="2026-07-10T09:30:00", agent="builder", task_id="t-001"),
+        _event("delegated", ts="2026-07-10T09:03:00", agent="builder", task_id="t-001"),
+    ]
+    assert sc.open_dispatches(events) == []
+
+
+def test_open_dispatches_same_ts_later_line_wins():
+    # Retro pairs (D-0056b) write delegated and its closing event with the
+    # SAME ts -- the tie must break by file position (later line wins), so
+    # a delegated+accepted pair sharing one ts is closed...
+    events = [
+        _event("delegated", ts="2026-07-10T09:00:00", agent="builder", task_id="t-001"),
+        _event("accepted", ts="2026-07-10T09:00:00", agent="builder", task_id="t-001"),
+    ]
+    assert sc.open_dispatches(events) == []
+
+    # ...while a single delegated at that same ts, with nothing after it,
+    # stays open.
+    events_open = [
+        _event("delegated", ts="2026-07-10T09:00:00", agent="builder", task_id="t-001"),
+    ]
+    opens = sc.open_dispatches(events_open)
+    assert len(opens) == 1
+    assert opens[0]["task_id"] == "t-001"
+
+
+def test_open_dispatches_accepted_closes_even_when_ts_lies():
+    # t-007 mirror (t-097 escalation): the delegated's ts was WRITTEN
+    # WRONG (later than the accepted's ts), and the accepted physically
+    # follows it -- ts lies, file position is true. The opposite of
+    # t-029. No ordering rule resolves both; journal LAW does: any
+    # `accepted` closes its task unconditionally (reopen is forbidden,
+    # D-0060), regardless of ts or position.
+    events = [
+        _event("delegated", ts="2026-07-09T13:05:00", agent="scout", task_id="t-001"),
+        _event("accepted", ts="2026-07-09T12:37:30", agent="scout", task_id="t-001"),
+    ]
+    assert sc.open_dispatches(events) == []
+
+
+def test_open_dispatch_lines_cap_three_plus_summary():
+    events = [
+        _event("delegated", ts=f"2026-07-10T08:0{i}:00", agent="builder", task_id=f"t-00{i}")
+        for i in range(1, 6)
+    ]
+    lines = sc.open_dispatch_lines(events)
+    assert len(lines) == 4
+    assert lines[0].startswith("OPEN DISPATCH: t-001")
+    assert lines[1].startswith("OPEN DISPATCH: t-002")
+    assert lines[2].startswith("OPEN DISPATCH: t-003")
+    assert lines[3] == "OPEN DISPATCHES: 5 total, 2 more not shown"
+
+
+def test_open_dispatch_lines_sanitizes_external_values():
+    events = [_event("delegated", ts="2026-07-10T08:00:00", agent="строитель",
+                     task_id="t-001")]
+    lines = sc.open_dispatch_lines(events)
+    assert lines
+    for line in lines:
+        assert line.isascii()
+        assert "\n" not in line
+
+
+def test_open_dispatch_lines_empty_journal():
+    assert sc.open_dispatch_lines([]) == []
+
+
+def test_build_context_lines_shows_open_dispatch(tmp_path):
+    events = [
+        _event("lead_degraded", ts="2026-07-10T07:30:00"),
+        _event("delegated", ts="2026-07-10T08:00:00", agent="builder", task_id="t-001"),
+        _event("calibrated", ts="2026-07-08T00:00:00"),
+    ]
+    root = _seed_repo(tmp_path, events=events)
+    now = datetime.datetime(2026, 7, 10, 12, 0, 0)
+    lines = sc.build_context_lines(root, now)
+    assert any(l.startswith("OPEN DISPATCH: t-001") for l in lines)
+    degradation_idx = next(i for i, l in enumerate(lines) if l.startswith("OPEN DEGRADATION WINDOW"))
+    dispatch_idx = next(i for i, l in enumerate(lines) if l.startswith("OPEN DISPATCH:"))
+    calibration_idx = next(i for i, l in enumerate(lines) if l.startswith("Last calibration:"))
+    assert degradation_idx < dispatch_idx < calibration_idx
+    assert len(lines) <= sc.MAX_LINES
+    for line in lines:
+        assert line.isascii()

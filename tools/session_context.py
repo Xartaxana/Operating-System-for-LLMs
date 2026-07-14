@@ -10,18 +10,35 @@ picture:
   WARN/BREACH thresholds, without waiting for a weekly calibration run
   or a manual `wc -c` to notice a slow creep.
 
+Plus the D-0076 extension: OPEN DISPATCH lines. Class-defect this line
+guards against: a session wrote a `delegated` event to the routing log
+and never actually launched the worker -- a phantom open dispatch, the
+journal recording intent as fact (kin to F-29, which is the same failure
+mode for timestamps instead of task lifecycles). A task_id counts as
+OPEN iff its LAST lifecycle event (delegated/accepted/rejected/
+escalated/decomposable -- see _OPEN_LIFECYCLE_EVENTS) is `delegated`;
+anything else (dispatch_skipped, defect_found, lead_*, journal_created,
+calibrated) neither opens nor closes a task and is ignored by this scan.
+
 Built as a draft (session_context_b3.py) per D-0069 -- a SessionStart
 hook registered in .claude/settings.json is a self-activating
 enforcement file, so the builder delivered it under a sibling name and
 Lead placed it on this path at acceptance (t-043; critic input: REWORK
-on stdin sanitization, fixed attempt 2).
+on stdin sanitization, fixed attempt 2). Same pattern repeats here: this
+D-0076 revision lands under yet another sibling name
+(session_context_d0076.py) and Lead places it on the live path at
+acceptance, with a critic-gate entry per CLAUDE.md rule 3.
 
 Hard constraints inherited from t-027 (all still load-bearing, all
-still true here):
+still true here, and still true after the D-0076 addition -- see 2.4 in
+the spec this file was built from):
 - NEVER breaks session start: any exception anywhere below collapses to
   ONE line, 'session-context warning: ...', and exit 0 (fail-open).
   main() is the single try/except boundary -- see its docstring for why
-  a per-section try/except was deliberately NOT used.
+  a per-section try/except was deliberately NOT used. The new
+  open_dispatches()/open_dispatch_lines() functions follow the same
+  rule: no local try/except, failures propagate to main()'s one
+  boundary, exactly like quota_lines().
 - Fast (<2s) and NO network at all (the NOW line's whole point is
   anti-F-29: read the system clock, not a narrated/inferred time).
 - ASCII-safe output: this environment's console is cp1251. Every line
@@ -29,7 +46,14 @@ still true here):
   NON-hardcoded source (MODEL from stdin), which goes through
   _ascii_sanitize (critic t-043 blocker: unsanitized stdin could break
   this invariant, inject lines past MAX_LINES, or crash print mid-flush).
-- <=25 lines total (MAX_LINES).
+  OPEN DISPATCH lines are built from journal-sourced task_id/agent/ts,
+  also externally-sourced (an agent field could in principle carry
+  anything a session wrote into the journal) -- so each of those three
+  values is routed through the same _ascii_sanitize helper before being
+  formatted into a line.
+- <=25 lines total (MAX_LINES) -- not raised by this change; the D-0076
+  addition can only ever add up to 4 lines (3 OPEN DISPATCH + 1 summary)
+  and build_context_lines() still truncates to MAX_LINES at the end.
 - Reading stdin must never block: only attempted when stdin is not a
   TTY (a manual `python tools/session_context.py` run from an
   interactive shell with nothing piped in must return instantly, not
@@ -98,6 +122,12 @@ _MODEL_TIER_SUBSTRINGS = (
     ("haiku", "scout-tier"),
 )
 
+# D-0076: events that open/close a dispatch's lifecycle. A task_id is
+# OPEN iff its LAST such event is 'delegated'. Events outside this set
+# (dispatch_skipped, defect_found, lead_*, journal_created, calibrated)
+# neither open nor close a task.
+_OPEN_LIFECYCLE_EVENTS = {"delegated", "accepted", "rejected", "escalated", "decomposable"}
+
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
@@ -153,6 +183,71 @@ def open_degradation_window(events: list):
         elif event == "lead_restored":
             open_since = None
     return open_since
+
+
+def open_dispatches(events: list) -> list:
+    """A task_id is OPEN iff it has no `accepted` AND its LAST remaining
+    event from _OPEN_LIFECYCLE_EVENTS is 'delegated' (D-0076: a delegated
+    with no closing event is a phantom open dispatch -- the class-defect
+    that motivated this hook line: a session wrote 'delegated' and never
+    launched the worker). Returns those last-delegated event dicts sorted
+    by ts ascending (oldest first). Continuation dispatches (critic-gate
+    entry) and retries stay open until a closing event. No local
+    try/except -- failures propagate to main()'s single fail-open
+    boundary, like quota_lines().
+
+    Closure by `accepted` is JOURNAL LAW, not event ordering: reopen
+    after accepted is forbidden (D-0060, validator-enforced), so ANY
+    accepted closes its task unconditionally -- regardless of where the
+    line sits or what ts it carries. This is what survives both live
+    journal anomalies, which lie in OPPOSITE directions: t-029 (orphan
+    delegated inserted mid-file AFTER its accepted -- file position lies,
+    ts is true) and t-007 (delegated ts written wrong, 13:05 vs actual
+    ~12:26, admitted in the accepted's own notes -- ts lies, position is
+    true). No (ts, position) ordering rule can resolve both; the law
+    does not need to. For tasks WITHOUT an accepted, 'last' is judged by
+    (ts, file position): max ts wins, file position only breaks exact ts
+    ties (retro pairs -- D-0056b -- share one ts, and the closing line is
+    written below the delegated one, so on a tie the later line wins)."""
+    accepted_tids = set()
+    last = {}  # tid -> (ts_str, file_idx, event_dict)
+    for idx, e in enumerate(events):
+        event = e.get("event")
+        if event not in _OPEN_LIFECYCLE_EVENTS:
+            continue
+        tid = e.get("task_id")
+        if not tid:
+            continue
+        if event == "accepted":
+            accepted_tids.add(tid)
+        key = (str(e.get("ts") or ""), idx)
+        if tid not in last or key > last[tid][:2]:
+            last[tid] = (key[0], key[1], e)
+    opens = [
+        t[2] for tid, t in last.items()
+        if tid not in accepted_tids and t[2].get("event") == "delegated"
+    ]
+    opens.sort(key=lambda e: str(e.get("ts") or ""))
+    return opens
+
+
+def open_dispatch_lines(events: list) -> list:
+    """Up to 3 'OPEN DISPATCH: t-NNN agent=X since <ts>' lines (oldest
+    first) plus one summary line when more than 3 are open. task_id,
+    agent and ts are journal-sourced -> each goes through _ascii_sanitize
+    (cp1251-console invariant). Empty when nothing is open."""
+    opens = open_dispatches(events)
+    if not opens:
+        return []
+    lines = []
+    for e in opens[:3]:
+        tid = _ascii_sanitize(str(e.get("task_id") or "-"))
+        agent = _ascii_sanitize(str(e.get("agent") or "-"))
+        ts = _ascii_sanitize(str(e.get("ts") or "-"))
+        lines.append(f"OPEN DISPATCH: {tid} agent={agent} since {ts}")
+    if len(opens) > 3:
+        lines.append(f"OPEN DISPATCHES: {len(opens)} total, {len(opens) - 3} more not shown")
+    return lines
 
 
 def last_calibration_line(events: list, now: datetime.datetime = None) -> str:
@@ -283,10 +378,12 @@ def model_tier(model_id: str) -> str:
 def _ascii_sanitize(s: str, max_len: int = 80) -> str:
     """Fix for the class "an output line built from a NON-hardcoded
     source must stay ASCII/single-line before a cp1251 console" (critic
-    t-043). MODEL is this module's only externally-sourced input; if a
-    second consumer of externally-sourced text shows up, whether it
-    shares this helper or gets its own SIBLING_MAP axis is a recorded
-    Lead decision, not something to infer here."""
+    t-043). MODEL was this module's only externally-sourced input at the
+    time that class was named; D-0076's OPEN DISPATCH lines are the
+    second consumer the t-043 docstring flagged as a future possibility
+    -- task_id/agent/ts there are journal-sourced (a session could in
+    principle write anything into those fields), so they route through
+    this same helper rather than getting a parallel one."""
     s = str(s).strip()
     s = re.sub(r"[\x00-\x1f\x7f]", "", s)  # control chars incl. \n \r \t
     s = s.encode("ascii", "replace").decode("ascii")
@@ -409,6 +506,8 @@ def build_context_lines(
     open_since = open_degradation_window(events)
     if open_since:
         lines.append(f"OPEN DEGRADATION WINDOW since {open_since}")
+
+    lines.extend(open_dispatch_lines(events))
 
     lines.append(last_calibration_line(events, now))
     lines.extend(quota_lines(gateway_root, now))
