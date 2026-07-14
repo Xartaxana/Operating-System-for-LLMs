@@ -260,6 +260,14 @@ Q3 PASS) для чека 14в; «haiku сохраняем» в силе.
 
 ## Environment Notes (this machine)
 
+- ALLOWLIST СУЖЕН 2026-07-14 (слово оператора «да сужай до дефолта»):
+  из .claude/settings.local.json удалены 4 правила произвольного
+  выполнения (Bash(python *), два python -c, python -) — взамен узкий
+  канон (обе pytest-формы, journal_validator, permission_audit *,
+  json.tool *). MASKED-блок аудита пуст. Следствие: ad-hoc python -c
+  теперь спрашивает — это штатное детекторное поведение (чек 25), не
+  регресс; настройки перечитываются новыми (суб)агентами.
+
 - Ollama 0.31.1 (winget); NVIDIA driver 582.28 — Qwen3-4B runs 100%
   on the GTX 1060 GPU (~5 s warm vs ~15 s CPU).
 - ПРОКСИ — КОНВЕНЦИЯ ВЛАДЕНИЯ (слово оператора 2026-07-13): при
