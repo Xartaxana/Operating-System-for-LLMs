@@ -656,6 +656,181 @@ def test_import_transcripts_deep_workflow_layout_is_idempotent(tmp_path, db_file
     assert count == 1
 
 
+# ---- max-output-tokens dedup (t-094/F-43, attempt 2) ----
+#
+# A split subagent turn's lines share input/cache tokens but carry a
+# placeholder output_tokens (2-7) on every line except the one that
+# carries the real value. The pre-t-094 importer deduped by FIRST
+# occurrence (INSERT OR IGNORE), so it kept the placeholder. Attempt 1
+# fixed that by tie-breaking on LAST occurrence instead, but was
+# REJECTED on review: it depends on `sorted(paths)`/line order, which
+# is wrong for the cross-file collision case covered further below
+# (test_max_wins_for_cross_file_dedupe_key_collision) -- occurrence
+# order there is an artifact of glob/filename sort, unrelated to which
+# file holds the real value. Attempt 2 ties-break on VALUE instead:
+# output_tokens/accounted_cost_usd is only overwritten when the new
+# line's output_tokens is STRICTLY GREATER than what is stored (MAX-
+# wins), which is order-independent by construction. These tests build
+# the split-turn shape directly (not via `_assistant_line`, which
+# hardcodes output_tokens=5 for every line) and PIN the fix: on the
+# pre-t-094 code (attempt-1 first-wins OR the rejected attempt-1
+# last-wins), test_max_wins_for_split_turn_output_tokens fails because
+# the stored value is not 383.
+
+def _split_turn_lines(session_id, request_id, outputs, model="claude-sonnet-5",
+                       is_sidechain=True, agent_id="agent-e1-id",
+                       attribution_agent="builder"):
+    lines = []
+    for i, out in enumerate(outputs):
+        obj = {
+            "type": "assistant",
+            "uuid": f"uuid-{request_id}-{i}",
+            "requestId": request_id,
+            "sessionId": session_id,
+            "isSidechain": is_sidechain,
+            "timestamp": "2026-07-14T00:00:00.000Z",
+            "parentUuid": None,
+            "message": {
+                "id": f"msg_{request_id}_{i}",
+                "model": model,
+                "role": "assistant",
+                "usage": {
+                    "input_tokens": 100, "output_tokens": out,
+                    "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+                },
+                "content": [{"type": "text", "text": "synthetic fixture text"}],
+            },
+        }
+        if is_sidechain:
+            obj["agentId"] = agent_id
+            obj["attributionAgent"] = attribution_agent
+        lines.append(obj)
+    return lines
+
+
+def test_max_wins_for_split_turn_output_tokens(tmp_path, db_file):
+    # PIN (D-0052, t-094): on the pre-t-094 code (INSERT OR IGNORE,
+    # first line wins), this test fails -- the stored output_tokens is
+    # 5 (the first line's placeholder), not 383 (the real value, only
+    # on the last line). It also passes under the rejected attempt-1
+    # last-wins code, since here the real value happens to be last --
+    # see test_max_wins_for_cross_file_dedupe_key_collision below for
+    # the case that distinguishes max-wins from last-wins.
+    sub = tmp_path / "projE" / "session-5" / "subagents" / "agent-e1.jsonl"
+    _write_jsonl(sub, _split_turn_lines("session-5", "req-split-1", [5, 5, 5, 383]))
+
+    rows_imported, _, _ = import_transcripts(str(sub), db_file)
+    assert rows_imported == 1  # one distinct API turn (one dedupe_key)
+
+    conn = sqlite3.connect(db_file)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT * FROM cc_usage WHERE dedupe_key = 'session-5:req-split-1'"
+    ).fetchone()
+    assert row is not None
+    assert row["output_tokens"] == 383
+    assert row["input_tokens"] == 100  # unaffected -- identical across all 4 lines
+    input_price, output_price = PRICES_PER_TOKEN_USD["claude-sonnet-5"]
+    assert row["accounted_cost_usd"] == pytest.approx(100 * input_price + 383 * output_price)
+
+
+def test_max_wins_survives_reimport_and_stays_idempotent(tmp_path, db_file):
+    # Re-running the importer over the SAME split-turn file must keep
+    # the corrected value (not regress it back to a placeholder
+    # mid-way through the re-scan) and must not inflate rows_imported
+    # once the row is already correct. Under max-wins this also covers
+    # the case where the re-scan re-presents an EQUAL (not smaller)
+    # value -- output_tokens must stay at 383, not merely "not regress
+    # to something smaller".
+    sub = tmp_path / "projF" / "session-6" / "subagents" / "agent-f1.jsonl"
+    _write_jsonl(sub, _split_turn_lines("session-6", "req-split-2", [3, 383]))
+
+    rows1, _, _ = import_transcripts(str(sub), db_file)
+    rows2, _, _ = import_transcripts(str(sub), db_file)
+
+    assert rows1 == 1
+    assert rows2 == 0  # nothing NEW on the second run
+
+    conn = sqlite3.connect(db_file)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT * FROM cc_usage WHERE dedupe_key = 'session-6:req-split-2'"
+    ).fetchone()
+    assert row["output_tokens"] == 383
+    count = conn.execute("SELECT COUNT(*) FROM cc_usage").fetchone()[0]
+    assert count == 1  # still exactly one row, no duplicate
+
+
+def test_max_wins_does_not_break_main_chain_identical_duplicates(tmp_path, db_file):
+    # Main-chain duplicate lines are byte-identical (first == last, per
+    # the module docstring) -- confirm the max-wins fix is a genuine
+    # no-op in value for that already-correct case (equal values are
+    # never "strictly greater", so the conditional UPDATE never fires),
+    # just as it was before t-094.
+    top_level = tmp_path / "projG" / "session-7.jsonl"
+    _write_jsonl(top_level, _split_turn_lines(
+        "session-7", "req-main-dup", [50, 50], is_sidechain=False,
+    ))
+
+    rows_imported, _, _ = import_transcripts(str(top_level), db_file)
+    assert rows_imported == 1
+
+    conn = sqlite3.connect(db_file)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT * FROM cc_usage WHERE dedupe_key = 'session-7:req-main-dup'"
+    ).fetchone()
+    assert row["output_tokens"] == 50
+
+
+def test_max_wins_for_cross_file_dedupe_key_collision(tmp_path, db_file):
+    # PIN (D-0052, t-094 attempt 2): the same dedupe_key can appear in
+    # TWO DIFFERENT sibling subagent files under one session's
+    # subagents/ directory, not just on two lines of one file (8 live
+    # cases found on this machine -- see module docstring). This test
+    # reproduces the exact shape of the confirmed live collision:
+    # agent-a8d4....jsonl (sorts FIRST) carries the real output_tokens
+    # (3772); agent-afaf....jsonl (sorts LATER, "f" > "8") carries only
+    # a placeholder line for the SAME requestId.
+    #
+    # On the REJECTED attempt-1 code (last-occurrence-wins), this test
+    # FAILS: import_transcripts() processes files in sorted(paths)
+    # order, so the later-sorting placeholder file overwrites the
+    # earlier-sorting real value, leaving output_tokens == 3, not 3772.
+    # Confirmed by running this exact test against the attempt-1
+    # version of usage_report.py saved to scratchpad before attempt 2's
+    # edits (see builder report for the witness) -- max-wins (this
+    # attempt) is order-independent and keeps 3772 regardless of which
+    # file the glob visits first.
+    session_id = "fa851d7b-0a78-4faa-9f0c-517a32b756ec"
+    request_id = "req_011CczxBZbB2ADDHUcJqvj1h"
+    real_file = tmp_path / "projH" / session_id / "subagents" / "agent-a8d4111111111111.jsonl"
+    placeholder_file = tmp_path / "projH" / session_id / "subagents" / "agent-afaf222222222222.jsonl"
+    assert str(real_file) < str(placeholder_file)  # sanity: matches the live sort order
+
+    _write_jsonl(real_file, _split_turn_lines(
+        session_id, request_id, [3772], agent_id="agent-a8d4111111111111", attribution_agent="worker-a",
+    ))
+    _write_jsonl(placeholder_file, _split_turn_lines(
+        session_id, request_id, [3], agent_id="agent-afaf222222222222", attribution_agent="worker-b",
+    ))
+
+    patterns = str(tmp_path / "*" / "*" / "subagents" / "*.jsonl")
+    rows_imported, _, _ = import_transcripts(patterns, db_file)
+    assert rows_imported == 1  # one distinct dedupe_key across the two files
+
+    conn = sqlite3.connect(db_file)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT * FROM cc_usage WHERE dedupe_key = ?",
+        (f"{session_id}:{request_id}",),
+    ).fetchone()
+    assert row is not None
+    assert row["output_tokens"] == 3772
+    input_price, output_price = PRICES_PER_TOKEN_USD["claude-sonnet-5"]
+    assert row["accounted_cost_usd"] == pytest.approx(100 * input_price + 3772 * output_price)
+
+
 def test_import_transcripts_accepts_single_string_pattern_backward_compat(tmp_path, db_file):
     # The pre-Task-6 API (single glob string) must keep working, since
     # both the CLI --transcripts-glob override and any external caller

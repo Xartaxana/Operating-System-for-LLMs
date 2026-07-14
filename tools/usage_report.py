@@ -17,13 +17,24 @@ Empirical findings (verified 2026-07-07 on this machine, see
 CURRENT_CONTEXT.md "Delegated Task 5" for detail):
 
 - One assistant API turn can appear as MULTIPLE JSONL lines sharing
-  the same `requestId` (each with an identical `message.usage` block)
-  -- observed when a single response contains several content blocks
-  (e.g. multiple tool_use calls). `uuid` is unique per LINE, not per
-  turn, so it is the wrong dedupe key: dedupe by `requestId` (first
-  occurrence wins) or the API's true row identity would be inflated
-  by a large factor (419 duplicate-requestId groups found in a single
-  project's transcripts alone).
+  the same `requestId` -- observed when a single response contains
+  several content blocks (e.g. multiple tool_use calls). `uuid` is
+  unique per LINE, not per turn, so it is the wrong dedupe key: dedupe
+  by `requestId` (419 duplicate-requestId groups found in a single
+  project's transcripts alone) or the API's true row identity would be
+  inflated by a large factor. CORRECTION (t-094, F-43, 2026-07-14):
+  this bullet originally claimed every split line carries "an
+  identical `message.usage` block" and so it didn't matter which
+  occurrence dedup kept. That is true for MAIN-chain turns (re-
+  verified across the full local history: 0 discrepancies on 3907
+  requestId groups, first line == last line byte-for-byte) but FALSE
+  for SUBAGENT/sidechain turns: there, input/cache token counts are
+  identical across all lines of one requestId, but `output_tokens` is
+  a small placeholder (2-7) on every line except the LAST, which
+  carries the real value. Deduping by first-occurrence therefore threw
+  away 53-96% of subagent output tokens by model, systematically.
+  Dedup semantics are now LAST-occurrence-wins, not first (see
+  import_transcripts() below and the "dedupe_key convention" comment).
 - `message.model == "<synthetic>"` rows are harness-internal
   rate-limit notices ("You've hit your session limit..."), always
   carrying all-zero usage. Skipped per spec.
@@ -121,6 +132,83 @@ with a `usage` block) are matched by the wider glob but remain inert:
 iter_assistant_turns() already skips every line whose `type` isn't
 "assistant" before it ever looks at `usage`, so a file with no
 assistant/usage lines simply yields zero rows, not an error.
+
+t-094 (2026-07-14 follow-up, F-43, found during t-093's own DoD
+sanity check -- a builder honestly reported the DoD number coming in
+lower than expected instead of adjusting the fixture to match): the
+importer's dedupe was FIRST-occurrence-wins (INSERT OR IGNORE on the
+UNIQUE dedupe_key constraint -- the first line for a given requestId
+claims the row, every later line with the same key is silently
+dropped). For a split subagent turn (see the docstring correction
+above), the first line is exactly the one carrying a placeholder
+output_tokens value, not the real one -- so first-occurrence-wins was
+the systematically wrong choice for that case, even though it was
+provably correct for main-chain turns (where first == last already).
+Measured impact before this fix, machine-wide: sonnet-5 sidechain
+output undercounted 86% (2.15M of 2.49M missing), opus-4-8 96%,
+haiku-4-5 91%, sonnet-4-6 53%, fable-5 71%.
+
+Fixed (attempt 1, LAST-occurrence-wins) by making import_transcripts()
+unconditionally UPDATE output_tokens/accounted_cost_usd to whichever
+line was processed last for a given dedupe_key. That attempt was
+REJECTED on review (2026-07-14, journal rejected@03:08:40, t-094
+attempt=1): it only re-verified that split lines of ONE requestId
+never collide WITHIN a single subagent file, and never checked
+whether the SAME requestId can appear in TWO DIFFERENT files. It can:
+live-data audit of this machine's `~/.claude/projects` found 8
+dedupe_key collisions BETWEEN sibling agent-*.jsonl files under the
+same session's subagents/ directory -- e.g.
+`fa851d7b-0a78-4faa-9f0c-517a32b756ec:req_011CczxBZbB2ADDHUcJqvj1h`
+lives in both agent-a8d4....jsonl (carries the real output_tokens,
+3772) and agent-afaf....jsonl (carries only a placeholder line,
+output_tokens=3) under the same session's subagents/ directory. Since
+import_transcripts() processes files in `sorted(paths)` order and
+"agent-a8d4" sorts BEFORE "agent-afaf", last-occurrence-wins picked
+the LATER file's placeholder (3) over the EARLIER file's real value
+(3772) -- a regression against first-occurrence-wins, which
+(accidentally, for this specific pair) had kept the correct value.
+Whichever of first/last wins is fundamentally the wrong tie-break
+rule for a cross-file collision, because it depends on `sorted(paths)`
+glob ordering, an implementation detail with no relationship to which
+file holds the real number.
+
+Fixed instead (attempt 2, MAX-occurrence-wins, per Lead's decision at
+rejection) by tie-breaking on VALUE instead of ORDER: for a given
+dedupe_key, output_tokens (and accounted_cost_usd, recomputed from
+that output_tokens together with the row's input/cache tokens, which
+are identical across colliding lines/files per the empirical findings
+above) is only ever UPDATEd when the newly-seen line's output_tokens
+is STRICTLY GREATER than what is currently stored. Since a placeholder
+is always small (2-7) and the real value is always the largest number
+seen for that dedupe_key -- true both for split lines within one file
+and for the 8 confirmed cross-file collisions -- taking the max is
+correct regardless of file iteration order, line order within a file,
+or how many times the importer is re-run. This makes the outcome for
+a given dedupe_key a pure function of the SET of lines sharing it, not
+of the order they are visited in -- the property attempt 1 lacked.
+agent_id/agent_type keep their original COALESCE (fill-if-still-NULL)
+semantics from Task 7, unaffected by this change -- those fields don't
+have a placeholder-vs-real split, so a max/order-independent rule
+would be pointless for them. Idempotency and the "rows_imported"
+counter's meaning are unchanged from attempt 1 (see below).
+
+RE-RUNNING the importer over history (no separate migration script)
+is how already-persisted rows with the old, too-low output_tokens get
+corrected -- the same mechanism that already backfilled agent_id/
+agent_type for pre-Task-7 rows now also backfills correct
+output_tokens/cost for pre-t-094 rows, including the 8 live cross-file
+collisions above.
+
+Known accepted trade-off (Lead's decision at rejection, owner of
+D-0032): every UPDATE recomputes accounted_cost_usd using whatever
+PRICES_PER_TOKEN_USD is CURRENT at import time, not the price that was
+in effect when the original row was first imported. Accounted prices
+have not changed since this module was written, so no historical row
+has actually been repriced by this behavior yet. If PRICES_PER_TOKEN_USD
+is ever edited for a real reason (not this task), already-imported
+historical rows will silently be repriced at the new rate on their
+next import-time UPDATE -- revisit this behavior at that point rather
+than assuming it is still fine.
 """
 
 import argparse
@@ -167,10 +255,24 @@ _TASK7_NEW_COLUMNS = ("agent_id", "agent_type")
 
 # dedupe_key convention: session_id + ":" + requestId. Verified empirically
 # 2026-07-07 that a single API turn can be split across multiple JSONL
-# lines (distinct `uuid` per line, identical `message.usage`, shared
-# `requestId`) -- requestId (scoped to its session; request IDs are not
-# guaranteed globally unique across sessions) is the correct one-row-
-# per-API-turn key, not uuid. See module docstring.
+# lines (distinct `uuid` per line, shared `requestId`) -- requestId
+# (scoped to its session; request IDs are not guaranteed globally unique
+# across sessions) is the correct one-row-per-API-turn key, not uuid.
+# The split lines' `message.usage` blocks are NOT always identical
+# (t-094/F-43 correction of the original 2026-07-07 claim): identical
+# for main-chain turns, but for subagent/sidechain turns only
+# input/cache tokens match across lines -- output_tokens is a
+# placeholder except on the line that carries the real value.
+# CORRECTION (t-094 attempt 2, rejected@03:08:40): a dedupe_key can
+# also collide BETWEEN two sibling subagent files of the same session
+# (8 confirmed live cases on this machine, not zero as attempt 1's
+# docstring claimed -- see module docstring for the concrete example).
+# Because which file/line is "first" or "last" is an artifact of
+# `sorted(paths)` glob order, not a signal of which value is real,
+# import_transcripts() dedupes by MAX(output_tokens), not by
+# occurrence order: a stored row's output_tokens/accounted_cost_usd is
+# only overwritten when a newly-seen line's output_tokens is strictly
+# greater. See module docstring.
 
 # Accounted API list prices, USD per token (D-0032 Rule #1, D-0034).
 # Source: Anthropic pricing, as cached in the claude-api skill
@@ -417,21 +519,42 @@ def import_transcripts(glob_pattern, db_file: Path):
     Task 6). Paths matched by more than one pattern are processed only
     once.
 
-    Backfill (Delegated Task 7): this function ALSO backfills rows
-    that were already imported before agent_id/agent_type existed as
-    columns, or before their model had a price. There is no separate
-    --backfill flag -- backfilling runs automatically as part of every
-    normal import, since both passes are naturally idempotent (a
-    second run touches 0 rows once caught up):
-    - agent fields: when INSERT OR IGNORE finds a dedupe_key already
-      present (rowcount == 0) and this transcript line carries an
-      agent_id/agent_type, an UPDATE ... WHERE agent_id IS NULL OR
-      agent_type IS NULL fills the existing row's NULL column(s)
-      without touching a row that already has them.
-    - costs: backfill_costs() runs once at the end over the whole
+    Backfill (Delegated Task 7, extended t-094 attempt 2/F-43): this
+    function ALSO backfills rows that were already imported before
+    agent_id/agent_type existed as columns, before their model had a
+    price, or (t-094) with a too-low output_tokens because an earlier
+    import run kept a placeholder value instead of the real one --
+    whether that placeholder came from an earlier line of the same
+    split subagent turn, or from a SIBLING subagent file sharing the
+    same dedupe_key (t-094 attempt 2's fix; see module docstring for
+    why occurrence-order tie-breaks, first OR last, are both wrong for
+    that case). There is no separate --backfill flag -- backfilling
+    runs automatically as part of every normal import, since all of it
+    is naturally idempotent (re-running over unchanged data touches 0
+    NEWLY-imported rows, though see the note below on why the backfill
+    UPDATE itself always runs regardless):
+    - output_tokens / accounted_cost_usd: when INSERT OR IGNORE finds
+      a dedupe_key already present (rowcount == 0) -- whether from an
+      earlier line/file processed earlier in THIS run, or from a row a
+      PREVIOUS run already inserted -- a CONDITIONAL UPDATE overwrites
+      output_tokens and accounted_cost_usd with this line's values
+      ONLY IF this line's output_tokens is STRICTLY GREATER than what
+      is currently stored (MAX-wins, t-094 attempt 2). This makes the
+      final value for a given dedupe_key depend only on the SET of
+      lines/files that share it, not on the order they are visited in
+      -- unlike either first- or last-occurrence-wins.
+    - agent fields: a separate, unconditional UPDATE fills
+      agent_id/agent_type via COALESCE (keep-existing-if-already-set,
+      fill-if-NULL) -- unlike output_tokens these don't have a
+      placeholder-vs-real split, so a max/order-independent rule would
+      be pointless; COALESCE is what Task 7 shipped and t-094 leaves
+      it unchanged.
+    - costs for rows this run's transcripts don't touch at all:
+      backfill_costs() still runs once at the end over the whole
       table, recomputing accounted_cost_usd for any row still NULL
       (covers rows whose model has since been added to
-      PRICES_PER_TOKEN_USD, e.g. haiku, GAP 2)."""
+      PRICES_PER_TOKEN_USD, e.g. haiku, GAP 2, when the transcript
+      that produced that row is no longer being re-scanned)."""
     patterns = [glob_pattern] if isinstance(glob_pattern, str) else list(glob_pattern)
     warnings = []
     sessions_seen = set()
@@ -475,19 +598,55 @@ def import_transcripts(glob_pattern, db_file: Path):
                     ),
                 )
                 rows_imported += cur.rowcount
-                if cur.rowcount == 0 and (turn["agent_id"] is not None or turn["agent_type"] is not None):
-                    # Row already existed (pre-Task-7 import, or a prior
-                    # run of this same loop) -- backfill its agent
-                    # fields if still NULL. COALESCE keeps whatever is
-                    # already there, so this is a no-op once filled.
+                if cur.rowcount == 0:
+                    # Row already existed -- either a dedupe_key seen
+                    # earlier in THIS run (an earlier line of a split
+                    # subagent turn, possibly from a DIFFERENT sibling
+                    # file -- t-094 attempt 2/F-43 found 8 live
+                    # cross-file collisions) or a row left over from a
+                    # PREVIOUS import run. Re-running the importer is
+                    # how history gets corrected, but occurrence order
+                    # (first or last) is the WRONG tie-break -- it
+                    # tracks `sorted(paths)` glob order, not which line
+                    # holds the real value (attempt 1 was rejected for
+                    # exactly this: it picked a later-sorting file's
+                    # placeholder over an earlier file's real value).
+                    # Tie-break on VALUE instead: only overwrite
+                    # output_tokens/accounted_cost_usd when THIS line's
+                    # output_tokens is strictly greater than what is
+                    # already stored (MAX-wins) -- order-independent,
+                    # a no-op in value for main-chain turns (whose
+                    # duplicate lines are byte-identical, so never
+                    # strictly greater).
+                    conn.execute(
+                        """
+                        UPDATE cc_usage
+                        SET output_tokens = ?,
+                            accounted_cost_usd = ?
+                        WHERE dedupe_key = ? AND output_tokens < ?
+                        """,
+                        (
+                            turn["output_tokens"], cost,
+                            turn["dedupe_key"], turn["output_tokens"],
+                        ),
+                    )
+                    # agent fields keep their original COALESCE
+                    # (fill-if-still-NULL) semantics from Task 7,
+                    # unconditionally (independent of the output_tokens
+                    # comparison above) -- unlike output_tokens they
+                    # have no placeholder-vs-real split, so there is
+                    # nothing for a max rule to fix there.
                     conn.execute(
                         """
                         UPDATE cc_usage
                         SET agent_id = COALESCE(agent_id, ?),
                             agent_type = COALESCE(agent_type, ?)
-                        WHERE dedupe_key = ? AND (agent_id IS NULL OR agent_type IS NULL)
+                        WHERE dedupe_key = ?
                         """,
-                        (turn["agent_id"], turn["agent_type"], turn["dedupe_key"]),
+                        (
+                            turn["agent_id"], turn["agent_type"],
+                            turn["dedupe_key"],
+                        ),
                     )
         backfill_costs(conn)
         conn.commit()
