@@ -168,8 +168,15 @@ def build_launch_plan(manifest):
             arm = arms_by_name[arm_name]
             text = arm.get("prefix", "") + task["text"] + arm.get("suffix", "")
             cwd = polygon_root / arm_name / task_id
+            # Resolve the real executable: on Windows the npm shim is
+            # claude.cmd, and CreateProcess does not apply PATHEXT to
+            # a bare "claude" (FileNotFoundError on first real launch,
+            # 2026-07-15 -- masked in tests, which mock the spawn).
+            # shutil.which honours PATHEXT; fall back to the bare name
+            # so dry-run plans still build on machines without claude.
+            claude_exe = shutil.which("claude") or "claude"
             cmd = [
-                "claude", "-p", text,
+                claude_exe, "-p", text,
                 "--model", manifest["model"],
                 "--dangerously-skip-permissions",
             ]
