@@ -49,7 +49,7 @@ lines over the SQLite log the gateway already writes.
 - `budgets.yaml` — daily $ budgets and sliding-window token quotas (`quota_windows`) per gateway alias; `GATEWAY_BUDGETS_PATH` overrides.
 - `metrics.py` — the Ledger: daily digest over the request log (no LLM).
 - `analyst.py` — the Analyst: local small model narrating the digest.
-- `shadow_eval.py` — Shadow Evaluation: replay + compare, updates DELEGATION_TABLE.md.
+- `shadow_eval.py` — Shadow Evaluation: replay + compare, appends evidence lines to docs/SHADOW_EVALUATION_LOG.md (table statuses move only via weekly calibration, Update Rule 1 — t-095).
 - `judge_calibration.json` — replay pairs manually labeled with semantic verdicts; the automated LLM judge is calibrated against it.
 - `test_sqlite_logger.py`, `test_guard.py`, `test_metrics.py`, `test_analyst.py`, `test_shadow_eval.py` — tests, no API keys required.
 - `requests.db` — the request log (created on first request, not committed).
@@ -158,7 +158,7 @@ Requires the proxy and Ollama running.
 ## Shadow Evaluation
 
 ```
-python shadow_eval.py --source-model lead --target-model intern [--days N] [--sample N] [--update-table] [--json]
+python shadow_eval.py --source-model lead --target-model intern [--days N] [--sample N] [--record-evidence] [--json]
 ```
 
 Samples successful requests logged for `--source-model`, replays each
@@ -191,19 +191,20 @@ judge. `lead-gemini` as judge hits its 5 req/min free-tier limit on
 an 11-pair set and also has a self-preference bias when judging its
 own source answers; `analyst` (4B) was not evaluated.
 
-`--update-table` writes `validated`/`rejected` verdicts into
-`DELEGATION_TABLE.md` row Status cells (`--table`, default
-`../DELEGATION_TABLE.md`) and appends one evidence line per run to
+`--record-evidence` appends one evidence line per run (verdict
+vocabulary: `provisionally_validated`/`rejected`/`estimated`) to
 `docs/SHADOW_EVALUATION_LOG.md` (`--shadow-log`, default
 `../docs/SHADOW_EVALUATION_LOG.md`) — relocated out of the table by
-D-0067 so closed run history doesn't bloat the boot path; the table
-keeps only current Status cells and points to the log as evidence for
-Update Rule 1.
+D-0067 so closed run history doesn't bloat the boot path. No code
+path writes DELEGATION_TABLE.md status cells (t-095): statuses move
+only via weekly calibration citing these evidence lines
+(Update Rule 1).
 
 Caveat (Update Rule 4): this replays each prompt once. It measures
 one-shot answer quality and cost, not retry-loop cost — a category
-marked `validated` here has not yet been checked against the "cheap
-model needs 10 retries" failure mode rule 4 warns about.
+marked `provisionally_validated` here has not yet been checked
+against the "cheap model needs 10 retries" failure mode rule 4
+warns about.
 
 ## Tests
 

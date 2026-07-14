@@ -32,7 +32,8 @@ not a guarantee.
 1. **Status changes require review.** A judge verdict that CHANGES a
    DELEGATION_TABLE.md row status is accepted only after the chief
    judge (or the Architect) reviews the actual pairs.
-   `--update-table` output is not self-certifying.
+   `--record-evidence` output is not self-certifying (the flag only
+   appends evidence lines; no code path writes table statuses, t-095).
 
 2. **Reviews grow the calibration set.** Every pair the chief judge
    reviews (rule 1 or rule 3) is appended to

@@ -21,13 +21,21 @@ runs to cross the --min-samples bar.
 
 Per DELEGATION_TABLE.md Update Rule 4, cost comparison uses TOTAL
 replay cost. Caveat: a single-shot replay does not measure retry
-loops, so a "validated" verdict here only confirms one-shot quality,
-not the retry-loop cost risk rule 4 warns about; note this in
+loops, so a "provisionally_validated" verdict here only confirms
+one-shot quality, not the retry-loop cost risk rule 4 warns about --
+and never means "production_validated" (that status requires a
+full-week window + cost-per-accepted-task evidence, per
+DELEGATION_TABLE.md's status vocabulary, D-0035); note the caveat in
 DELEGATION_TABLE.md when relying on it.
+
+Table status cells move ONLY via the weekly calibration process
+(DELEGATION_TABLE.md Update Rule 1); this module no longer writes to
+the table. Use --record-evidence to append this run's evidence line
+to docs/SHADOW_EVALUATION_LOG.md for that process to consume.
 
 Usage:
     python shadow_eval.py --source-model lead --target-model intern
-    python shadow_eval.py --source-model lead --target-model intern --update-table
+    python shadow_eval.py --source-model lead --target-model intern --record-evidence
 """
 
 import argparse
@@ -46,7 +54,10 @@ import litellm
 from metrics import categorize
 
 # metrics.py category -> exact "Task type" cell text in DELEGATION_TABLE.md.
-# Categories with no row (e.g. "other") are evaluated but never update the table.
+# Used only as a human-readable label in reports/evidence lines: no code
+# path updates the table (t-095) -- statuses move via weekly calibration
+# only (Update Rule 1). Categories with no row (e.g. "other") are still
+# evaluated and recorded.
 CATEGORY_TO_TASK_TYPE = {
     "coding": "Routine code generation",
     "summarization": "Summarization",
@@ -355,6 +366,11 @@ def decide_status(agg: dict, similarity_threshold: float, min_samples: int,
                   pass_threshold: float = DEFAULT_PASS_THRESHOLD) -> str:
     """"estimated" means inconclusive here (not enough evidence yet to
     move off the table's default), distinct from a positive validation.
+    A positive shadow-eval run can only ever return
+    "provisionally_validated" (DELEGATION_TABLE.md status vocabulary,
+    D-0035): a single-shot replay against a sample is exactly what that
+    status means, and never "production_validated" (which requires a
+    full-week real-traffic window + cost-per-accepted-task evidence).
     When judge verdicts are present (pass_rate) they override the
     difflib similarity — the heuristic produces false rejections on
     verbose-but-correct answers (see judge_calibration.json)."""
@@ -363,20 +379,8 @@ def decide_status(agg: dict, similarity_threshold: float, min_samples: int,
     if agg["mean_target_cost_usd"] > agg["mean_source_cost_usd"]:
         return "rejected"
     if agg.get("pass_rate") is not None:
-        return "validated" if agg["pass_rate"] >= pass_threshold else "rejected"
-    return "validated" if agg["mean_similarity"] >= similarity_threshold else "rejected"
-
-
-def update_table_status(text: str, task_type: str, new_status: str) -> str:
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
-        if not line.startswith("|"):
-            continue
-        parts = [p.strip() for p in line.split("|")]
-        if len(parts) >= 6 and parts[1] == task_type:
-            parts[-2] = new_status
-            lines[i] = "| " + " | ".join(parts[1:-1]) + " |"
-    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+        return "provisionally_validated" if agg["pass_rate"] >= pass_threshold else "rejected"
+    return "provisionally_validated" if agg["mean_similarity"] >= similarity_threshold else "rejected"
 
 
 _SHADOW_EVAL_HEADER_RE = re.compile(
@@ -408,19 +412,23 @@ def append_evidence_log(text: str, entries: list) -> str:
     return "\n".join(lines) + "\n"
 
 
-def update_delegation_table(table_path: Path, shadow_log_path: Path, date: str,
-                            source_model: str, target_model: str, aggregated: dict,
-                            statuses: dict, judge_model: str = None):
-    """Writes to TWO files, split by D-0067 (boot-diet round 2): status
-    cells stay in table_path (DELEGATION_TABLE.md, the boot-path table),
-    evidence lines go to shadow_log_path (docs/SHADOW_EVALUATION_LOG.md,
-    relocated out of the table so closed run history doesn't bloat the
-    boot path). Before D-0067 both lived in the same file/path; a status
-    change in table_path still cites its evidence line in shadow_log_path
-    by date, same as before."""
-    table_text = table_path.read_text(encoding="utf-8")
+def record_evidence(shadow_log_path: Path, date: str, source_model: str,
+                    target_model: str, aggregated: dict, statuses: dict,
+                    judge_model: str = None):
+    """Appends this run's evidence lines to shadow_log_path
+    (docs/SHADOW_EVALUATION_LOG.md). Table status cells are NOT touched
+    here: per DELEGATION_TABLE.md Update Rule 1, statuses move only via
+    the weekly calibration process, which reads this log as evidence.
+    Before D-0067 both the table and the evidence lived in the same
+    file/path; D-0067 split them into separate files, and this function
+    now only writes the evidence side of that split -- the former
+    table-writing code path (update_table_status /
+    update_delegation_table's table_text edits) was removed as a
+    dedicated-word/write-path defect (t-095): a code path writing table
+    statuses is exactly what Update Rule 1 says must not exist outside
+    weekly calibration."""
     entries = []
-    for category, task_type in CATEGORY_TO_TASK_TYPE.items():
+    for category in CATEGORY_TO_TASK_TYPE:
         if category not in aggregated:
             continue
         agg = aggregated[category]
@@ -450,9 +458,6 @@ def update_delegation_table(table_path: Path, shadow_log_path: Path, date: str,
             f"  errors={agg.get('errors', 0)} truncated={agg.get('truncated', 0)}"
             f"  -> {status}"
         )
-        if status in ("validated", "rejected"):
-            table_text = update_table_status(table_text, task_type, status)
-    table_path.write_text(table_text, encoding="utf-8")
     if entries:
         shadow_log_path = Path(shadow_log_path)
         log_text = shadow_log_path.read_text(encoding="utf-8") if shadow_log_path.exists() else ""
@@ -464,7 +469,7 @@ def calibrate(pairs: list, judge_model: str, gateway: str,
               pace: float = 0.0, **kwargs) -> dict:
     """Runs the judge on manually labeled pairs (judge_calibration.json)
     and reports agreement with the human labels. The judge must
-    reproduce them before its verdicts are trusted in --update-table.
+    reproduce them before its verdicts are trusted in --record-evidence.
     pace: seconds to sleep between pairs (free-tier RPM ceilings, e.g.
     Gemini free tier is 5 req/min)."""
     agreements, mismatches = 0, []
@@ -492,7 +497,7 @@ def format_report(source_model, target_model, aggregated, statuses) -> str:
         lines.append(f"  no successful {source_model!r} requests in range")
         return "\n".join(lines)
     for category, agg in sorted(aggregated.items()):
-        mapped = CATEGORY_TO_TASK_TYPE.get(category, "(unmapped, table not updated)")
+        mapped = CATEGORY_TO_TASK_TYPE.get(category, "(no table row)")
         judged = (
             f" pass_rate={agg['pass_rate']:.0%}" if agg.get("pass_rate") is not None else ""
         )
@@ -526,7 +531,7 @@ def main():
     parser.add_argument("--min-samples", type=int, default=DEFAULT_MIN_SAMPLES)
     parser.add_argument("--judge-model", help="gateway alias for the LLM judge; overrides difflib similarity")
     parser.add_argument("--pass-threshold", type=float, default=DEFAULT_PASS_THRESHOLD,
-                        help="min share of 'equivalent' judge verdicts for 'validated'")
+                        help="min share of 'equivalent' judge verdicts for 'provisionally_validated'")
     parser.add_argument("--calibrate", metavar="PAIRS_JSON",
                         help="run --judge-model on labeled pairs and report agreement; no replay")
     parser.add_argument("--pace", type=float, default=0.0,
@@ -540,12 +545,10 @@ def main():
     parser.add_argument("--categories",
                         help="comma-separated category whitelist (e.g. 'coding');"
                         " restricts the run to rows whose Delegate-to tier matches the target")
-    parser.add_argument("--update-table", action="store_true")
     parser.add_argument(
-        "--table",
-        default=Path(__file__).parent.parent / "DELEGATION_TABLE.md",
-        help="DELEGATION_TABLE.md path; only Status cells are written here"
-             " (evidence lines go to --shadow-log, D-0067)",
+        "--record-evidence", action="store_true",
+        help="append run evidence lines to docs/SHADOW_EVALUATION_LOG.md;"
+             " table statuses move only via weekly calibration, Update Rule 1",
     )
     parser.add_argument(
         "--shadow-log",
@@ -596,9 +599,8 @@ def main():
     else:
         print(format_report(args.source_model, args.target_model, aggregated, statuses))
 
-    if args.update_table and aggregated:
-        update_delegation_table(
-            Path(args.table),
+    if args.record_evidence and aggregated:
+        record_evidence(
             Path(args.shadow_log),
             datetime.date.today().isoformat(),
             args.source_model,

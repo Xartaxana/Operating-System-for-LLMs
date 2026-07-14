@@ -19,11 +19,10 @@ from shadow_eval import (
     format_report,
     judge_pair,
     parse_verdict,
+    record_evidence,
     replay,
     sample_requests,
     similarity,
-    update_delegation_table,
-    update_table_status,
 )
 
 
@@ -445,9 +444,9 @@ def test_format_report_includes_truncated_count():
     assert "errors=0 truncated=3" in report
 
 
-def test_decide_status_validated():
+def test_decide_status_provisionally_validated():
     agg = {"n": 3, "mean_similarity": 0.9, "mean_source_cost_usd": 0.02, "mean_target_cost_usd": 0.001, "errors": 0}
-    assert decide_status(agg, similarity_threshold=0.5, min_samples=2) == "validated"
+    assert decide_status(agg, similarity_threshold=0.5, min_samples=2) == "provisionally_validated"
 
 
 def test_decide_status_rejected_low_similarity():
@@ -504,14 +503,61 @@ def test_aggregate_pass_rate():
 
 
 def test_decide_status_judge_overrides_similarity():
-    # low difflib sim but judge says equivalent -> validated
+    # low difflib sim but judge says equivalent -> provisionally_validated
     agg = {"n": 2, "mean_similarity": 0.1, "mean_source_cost_usd": 0.02,
            "mean_target_cost_usd": 0.001, "errors": 0, "pass_rate": 1.0}
-    assert decide_status(agg, similarity_threshold=0.5, min_samples=2) == "validated"
+    assert decide_status(agg, similarity_threshold=0.5, min_samples=2) == "provisionally_validated"
     # high sim but judge says worse -> rejected
     agg["pass_rate"] = 0.0
     agg["mean_similarity"] = 0.9
     assert decide_status(agg, similarity_threshold=0.5, min_samples=2) == "rejected"
+
+
+def test_decide_status_vocabulary_pin():
+    # t-095: decide_status must only ever return one of the 4-status
+    # DELEGATION_TABLE.md vocabulary's non-production values (D-0035) --
+    # "estimated" (inconclusive), "provisionally_validated" (positive
+    # shadow-eval result), or "rejected". It must NEVER return the bare
+    # legacy word "validated" (not in the 4-status model) nor
+    # "production_validated" (a shadow-eval run is one-shot evidence,
+    # never sufficient for that status per the module's own docstring).
+    representative_aggs = [
+        # too few samples -> estimated
+        {"n": 1, "mean_similarity": 0.9, "mean_source_cost_usd": 0.02,
+         "mean_target_cost_usd": 0.001, "errors": 0},
+        # all errored -> estimated
+        {"n": 2, "mean_similarity": 0.0, "mean_source_cost_usd": 0.02,
+         "mean_target_cost_usd": 0.0, "errors": 2},
+        # difflib path, high similarity -> provisionally_validated
+        {"n": 3, "mean_similarity": 0.9, "mean_source_cost_usd": 0.02,
+         "mean_target_cost_usd": 0.001, "errors": 0},
+        # difflib path, low similarity -> rejected
+        {"n": 3, "mean_similarity": 0.1, "mean_source_cost_usd": 0.02,
+         "mean_target_cost_usd": 0.001, "errors": 0},
+        # target costs more than source -> rejected
+        {"n": 3, "mean_similarity": 0.9, "mean_source_cost_usd": 0.001,
+         "mean_target_cost_usd": 0.02, "errors": 0},
+        # judge path, pass_rate above threshold -> provisionally_validated
+        {"n": 2, "mean_similarity": 0.1, "mean_source_cost_usd": 0.02,
+         "mean_target_cost_usd": 0.001, "errors": 0, "pass_rate": 1.0},
+        # judge path, pass_rate below threshold -> rejected
+        {"n": 2, "mean_similarity": 0.9, "mean_source_cost_usd": 0.02,
+         "mean_target_cost_usd": 0.001, "errors": 0, "pass_rate": 0.0},
+    ]
+    verdicts = {
+        decide_status(agg, similarity_threshold=0.5, min_samples=2)
+        for agg in representative_aggs
+    }
+    assert verdicts <= {"estimated", "provisionally_validated", "rejected"}
+    assert verdicts  # sanity: the representative set actually exercised something
+    # Literal check (D-0054 DoD wording): the bare word "validated" must
+    # never occur as a standalone verdict -- only as the suffix of
+    # "provisionally_validated" (or "production_validated", which
+    # decide_status must never return at all).
+    for verdict in verdicts:
+        assert verdict != "validated"
+        if "validated" in verdict:
+            assert verdict in ("provisionally_validated", "production_validated")
 
 
 def test_calibrate_reports_agreement_and_mismatches():
@@ -529,16 +575,11 @@ def test_calibrate_reports_agreement_and_mismatches():
     assert report["mismatches"][0]["got"] == "equivalent"
 
 
-def test_update_delegation_table_evidence_line_includes_judge_cost(tmp_path):
-    # D-0067 split: Status cells stay in DELEGATION_TABLE.md, evidence
-    # lines go to a SEPARATE docs/SHADOW_EVALUATION_LOG.md file.
-    table_path = tmp_path / "DELEGATION_TABLE.md"
-    table_path.write_text(
-        "| Task type | Cost (Lead) | Value of Lead | Delegate to | Status |\n"
-        "|---|---|---|---|---|\n"
-        "| Summarization | Medium | Medium | Junior | estimated |\n",
-        encoding="utf-8",
-    )
+def test_record_evidence_writes_evidence_line_includes_judge_cost(tmp_path):
+    # D-0067 split: Status cells stay in DELEGATION_TABLE.md (moved only
+    # by weekly calibration, Update Rule 1), evidence lines go to a
+    # SEPARATE docs/SHADOW_EVALUATION_LOG.md file that record_evidence
+    # writes exclusively.
     shadow_log_path = tmp_path / "SHADOW_EVALUATION_LOG.md"
     shadow_log_path.write_text(
         "# Shadow Evaluation Log\n\n"
@@ -552,30 +593,21 @@ def test_update_delegation_table_evidence_line_includes_judge_cost(tmp_path):
             "mean_judge_cost_usd": 0.0004, "errors": 0,
         }
     }
-    statuses = {"summarization": "validated"}
-    update_delegation_table(
-        table_path, shadow_log_path, "2026-07-04", "lead-gemini", "middle-groq",
+    statuses = {"summarization": "provisionally_validated"}
+    record_evidence(
+        shadow_log_path, "2026-07-04", "lead-gemini", "middle-groq",
         aggregated, statuses, judge_model="judge-groq",
     )
-    table_text = table_path.read_text(encoding="utf-8")
     log_text = shadow_log_path.read_text(encoding="utf-8")
-    assert "| Summarization | Medium | Medium | Junior | validated |" in table_text
-    assert "judge=judge-groq pass_rate=1.00 judge_cost=$0.0004" not in table_text
     assert "judge=judge-groq pass_rate=1.00 judge_cost=$0.0004" in log_text
+    assert "-> provisionally_validated" in log_text
 
 
-def test_update_delegation_table_evidence_line_judge_cost_unknown(tmp_path):
+def test_record_evidence_judge_cost_unknown(tmp_path):
     # Rule #1 decoupling (2026-07-07 Lead review finding #2): when the
     # judge ran (pass_rate present) but cost extraction failed, the
     # evidence line must still carry judge= and pass_rate=, with an
     # explicit judge_cost=unknown instead of dropping the segment.
-    table_path = tmp_path / "DELEGATION_TABLE.md"
-    table_path.write_text(
-        "| Task type | Cost (Lead) | Value of Lead | Delegate to | Status |\n"
-        "|---|---|---|---|---|\n"
-        "| Summarization | Medium | Medium | Junior | estimated |\n",
-        encoding="utf-8",
-    )
     shadow_log_path = tmp_path / "SHADOW_EVALUATION_LOG.md"
     shadow_log_path.write_text("# Shadow Evaluation Log\n\n", encoding="utf-8")
     aggregated = {
@@ -585,26 +617,19 @@ def test_update_delegation_table_evidence_line_judge_cost_unknown(tmp_path):
             "mean_judge_cost_usd": None, "errors": 0,
         }
     }
-    statuses = {"summarization": "validated"}
-    update_delegation_table(
-        table_path, shadow_log_path, "2026-07-04", "lead-gemini", "middle-groq",
+    statuses = {"summarization": "provisionally_validated"}
+    record_evidence(
+        shadow_log_path, "2026-07-04", "lead-gemini", "middle-groq",
         aggregated, statuses, judge_model="judge-groq",
     )
     log_text = shadow_log_path.read_text(encoding="utf-8")
     assert "judge=judge-groq pass_rate=1.00 judge_cost=unknown" in log_text
 
 
-def test_update_delegation_table_creates_shadow_log_when_missing(tmp_path):
+def test_record_evidence_creates_shadow_log_when_missing(tmp_path):
     # If docs/SHADOW_EVALUATION_LOG.md doesn't exist yet (fresh checkout,
     # or a path typo), append_evidence_log's own no-heading branch creates
     # it -- this must not raise even though shadow_log_path.exists() is False.
-    table_path = tmp_path / "DELEGATION_TABLE.md"
-    table_path.write_text(
-        "| Task type | Cost (Lead) | Value of Lead | Delegate to | Status |\n"
-        "|---|---|---|---|---|\n"
-        "| Summarization | Medium | Medium | Junior | estimated |\n",
-        encoding="utf-8",
-    )
     shadow_log_path = tmp_path / "SHADOW_EVALUATION_LOG.md"
     assert not shadow_log_path.exists()
     aggregated = {
@@ -614,9 +639,9 @@ def test_update_delegation_table_creates_shadow_log_when_missing(tmp_path):
             "mean_judge_cost_usd": None, "errors": 0,
         }
     }
-    statuses = {"summarization": "validated"}
-    update_delegation_table(
-        table_path, shadow_log_path, "2026-07-04", "lead-gemini", "middle-groq",
+    statuses = {"summarization": "provisionally_validated"}
+    record_evidence(
+        shadow_log_path, "2026-07-04", "lead-gemini", "middle-groq",
         aggregated, statuses,
     )
     assert shadow_log_path.exists()
@@ -625,16 +650,50 @@ def test_update_delegation_table_creates_shadow_log_when_missing(tmp_path):
     assert "category=summarization" in log_text
 
 
-def test_update_table_status_replaces_only_matching_row():
-    text = (
+def test_record_evidence_does_not_touch_delegation_table(tmp_path):
+    # t-095: the code path that wrote status cells into DELEGATION_TABLE.md
+    # (update_table_status / update_delegation_table's table_text edits)
+    # was removed -- record_evidence's signature no longer accepts a
+    # table_path at all, and a DELEGATION_TABLE.md placed next to the
+    # shadow log in tmp_path must come out byte-for-byte unchanged: table
+    # statuses move only via weekly calibration (Update Rule 1).
+    table_path = tmp_path / "DELEGATION_TABLE.md"
+    original_table_bytes = (
         "| Task type | Cost (Lead) | Value of Lead | Delegate to | Status |\n"
         "|---|---|---|---|---|\n"
         "| Summarization | Medium | Medium | Junior | estimated |\n"
-        "| Classification, tagging | Low | Low | Junior | estimated |\n"
+    ).encode("utf-8")
+    table_path.write_bytes(original_table_bytes)
+    shadow_log_path = tmp_path / "SHADOW_EVALUATION_LOG.md"
+    shadow_log_path.write_text("# Shadow Evaluation Log\n\n", encoding="utf-8")
+    aggregated = {
+        "summarization": {
+            "n": 2, "mean_similarity": 0.9, "mean_source_cost_usd": 0.002,
+            "mean_target_cost_usd": 0.0001, "pass_rate": None,
+            "mean_judge_cost_usd": None, "errors": 0,
+        }
+    }
+    statuses = {"summarization": "provisionally_validated"}
+
+    import inspect
+
+    import shadow_eval as shadow_eval_module
+
+    # negative check: record_evidence no longer takes a table_path param
+    assert "table_path" not in inspect.signature(record_evidence).parameters
+    # negative check: no code path in the module writes to DELEGATION_TABLE
+    source = inspect.getsource(shadow_eval_module)
+    write_lines = [
+        line for line in source.splitlines()
+        if "DELEGATION_TABLE" in line and (".write_text(" in line or ".write_bytes(" in line)
+    ]
+    assert write_lines == []
+
+    record_evidence(
+        shadow_log_path, "2026-07-04", "lead-gemini", "middle-groq",
+        aggregated, statuses,
     )
-    updated = update_table_status(text, "Summarization", "validated")
-    assert "| Summarization | Medium | Medium | Junior | validated |" in updated
-    assert "| Classification, tagging | Low | Low | Junior | estimated |" in updated
+    assert table_path.read_bytes() == original_table_bytes
 
 
 def test_append_evidence_log_creates_section_once():
