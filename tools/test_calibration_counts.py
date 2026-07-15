@@ -339,6 +339,11 @@ def test_schema_constants_match_journal_validator():
     assert cc.MODEL_REQUIRED_EVENTS == jv.MODEL_REQUIRED_EVENTS
     assert cc.TASK_ID_REQUIRED_EVENTS == jv.TASK_ID_REQUIRED_EVENTS
     assert cc.FAILURE_CLASSES == jv.FAILURE_CLASSES
+    # t-129 M1: REPLACES_WORKER_RE -- продублированный literal (правило
+    # 9в2), не импорт -- .pattern сравнивается, т.к. re.Pattern не
+    # определяет __eq__ по значению (два скомпилированных regex с
+    # одинаковым исходником не равны через ==, если это не тот же объект).
+    assert cc.REPLACES_WORKER_RE.pattern == jv.REPLACES_WORKER_RE.pattern
 
 
 # ---------------------------------------------------------------------
@@ -430,6 +435,84 @@ def test_rejected_distribution_grouping(tmp_path):
     dist = {(d["failure_class"], d["agent"], d["model"]): d["count"]
             for d in report["rejected_distribution"]}
     assert dist == {("tooling", "scout", "haiku"): 1, ("spec", "builder", "sonnet"): 1}
+
+
+# ---------------------------------------------------------------------
+# 9в2 (t-129 M1): классификация ветки replaces_worker -- зеркало
+# journal_validator 9в2 на стороне СЧЁТЧИКА (не гейта). Ветка вставлена
+# после retry и перед other; existing branches (critic-вход/кандидат-
+# дубль/continuation/retry/other) не меняются -- регресс уже покрыт
+# существующими тестами выше (в т.ч. test_duplicate_delegate_after_
+# escalated_without_attempt_is_other -- та же позиция в цепочке, но БЕЗ
+# маркера, всё ещё "other").
+# ---------------------------------------------------------------------
+def test_duplicate_delegate_replacement_valid_marker(tmp_path):
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        ev("2026-07-15T00:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-001", category="implementation", notes="n", worker_ref="agent:OLD"),
+        ev("2026-07-15T00:10:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-001", category="implementation", worker_ref="agent:NEW",
+           notes="критик остановлен без вердикта, продолжает новый воркер "
+                 "replaces_worker:agent:OLD"),
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-16T00:00:00"))
+    dups = report["duplicate_delegates"]
+    assert len(dups) == 1
+    assert dups[0]["branch"] == "replacement"
+
+
+def test_duplicate_delegate_replacement_fake_handle(tmp_path):
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        ev("2026-07-15T00:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-001", category="implementation", notes="n", worker_ref="agent:OLD"),
+        ev("2026-07-15T00:10:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-001", category="implementation", worker_ref="agent:NEW",
+           notes="replaces_worker:agent:NEVER_EXISTED"),
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-16T00:00:00"))
+    dups = report["duplicate_delegates"]
+    assert len(dups) == 1
+    assert dups[0]["branch"] == "replacement-фиктивный"
+
+
+def test_duplicate_delegate_replacement_self_reference_is_fake(tmp_path):
+    # маркер ссылается на worker_ref ЭТОЙ ЖЕ (новой) строки, не прежней --
+    # ещё не harvest'нут в task_worker_refs на момент классификации ->
+    # фиктивная замена, зеркалит негатив (б) валидатора t-129 M3.
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        ev("2026-07-15T00:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-001", category="implementation", notes="n", worker_ref="agent:OLD"),
+        ev("2026-07-15T00:10:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-001", category="implementation", worker_ref="agent:SELF",
+           notes="replaces_worker:agent:SELF"),
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-16T00:00:00"))
+    dups = report["duplicate_delegates"]
+    assert len(dups) == 1
+    assert dups[0]["branch"] == "replacement-фиктивный"
+
+
+def test_duplicate_delegate_no_marker_still_other_regression(tmp_path):
+    # регресс: повторный delegated без маркера в той же позиции цепочки
+    # (agent совпадает, prior не accepted/rejected, attempt не >=2) --
+    # классификация остаётся "other", как до t-129 M1.
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        ev("2026-07-15T00:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-001", category="implementation", notes="n", worker_ref="agent:OLD"),
+        ev("2026-07-15T00:10:00", "escalated", agent="builder", model="sonnet",
+           task_id="t-001", category="implementation", notes="n"),
+        ev("2026-07-15T00:20:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-001", category="implementation", worker_ref="agent:NEW",
+           notes="no marker here"),
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-16T00:00:00"))
+    dups = report["duplicate_delegates"]
+    assert len(dups) == 1
+    assert dups[0]["branch"] == "other"
 
 
 # ---------------------------------------------------------------------

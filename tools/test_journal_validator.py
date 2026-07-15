@@ -384,6 +384,43 @@ def test_9v2_marker_with_wrong_agent_still_uses_case_b_not_marker():
     assert code == 0, violations
 
 
+# ---- 9в2 adversarial regression locks (t-129 M3, critic t-127 session) ----
+
+def test_9v2_replaces_worker_marker_does_not_save_reopen_of_closed_task():
+    # (a) task_id t-001 is CLOSED (accepted above it in HEAD). A new
+    # delegated on it carries a VALID replaces_worker marker (handle
+    # matches the prior delegated's worker_ref exactly) -- must still
+    # FAIL: reopen is forbidden regardless of the marker (checked before
+    # the marker branch in validate_new_lines -- closed_tasks gate wins).
+    head_with_accept = HEAD_TEXT + _line(
+        event="accepted", ts="2026-07-10T08:05:00", agent="builder", model="sonnet",
+        task_id="t-001", witness="pytest ok", by="opus", notes="t-001 already accepted",
+    ) + "\n"
+    staged = head_with_accept + _line(
+        event="delegated", ts="2026-07-10T08:10:00", agent="builder", model="sonnet",
+        task_id="t-001", worker_ref="agent:NEW",
+        notes="replaces_worker:cli:2026-07-10T08:00:00",  # matches HEAD_LINE's worker_ref exactly
+    ) + "\n"
+    code, violations = jv.decide(staged, head_with_accept, NOW)
+    assert code == 1
+    assert any("reopen запрещён" in v for v in violations)
+
+
+def test_9v2_replaces_worker_self_reference_fails():
+    # (b) the marker on the NEW delegated line references that SAME
+    # line's OWN worker_ref, not a prior one. The replaced worker must
+    # come from the past -- self-reference must FAIL as a fake
+    # replacement (the new line's own worker_ref is only harvested into
+    # task_worker_refs AFTER this line's checks run).
+    staged = _staged(_line(event="delegated", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", worker_ref="agent:SELF",
+                            notes="replaces_worker:agent:SELF"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("фиктивная замена запрещена" in v for v in violations)
+    assert any("replaces_worker" in v for v in violations)
+
+
 # ---- 10. ts monotonicity / no narrative future ----
 
 def test_ts_not_monotonic_relative_to_previous_new_line_fails():

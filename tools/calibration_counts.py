@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -47,6 +48,24 @@ TASK_ID_REQUIRED_EVENTS = {"delegated", "accepted", "rejected", "escalated", "de
 FAILURE_CLASSES = {"spec", "capability", "recon", "tooling"}
 LIFECYCLE_EVENTS = {"delegated", "accepted", "rejected", "escalated"}
 ALWAYS_REQUIRED_FIELDS = ("agent", "category", "notes")
+# Маркер замены умершего воркера (2026-07-15, правило 9в2 / t-129 M1):
+# литерал-зеркало REPLACES_WORKER_RE из journal_validator.py. Продублирован
+# намеренно, не импортирован -- calibration_counts работает с ОБОИМИ
+# журналами (OS/AO3) и не зависит от journal_validator (см. docstring
+# файла); синхронизация конста проверяется тестом
+# test_schema_constants_match_journal_validator в test_calibration_counts.py.
+REPLACES_WORKER_RE = re.compile(r"replaces_worker:(\S+)")
+
+
+def extract_replaces_worker(notes: Optional[str]) -> Optional[str]:
+    """Правило 9(в2), сторона счётчика (не гейта): вытаскивает хэндл из
+    маркера "replaces_worker:<хэндл>" в notes -- та же логика, что
+    journal_validator.extract_replaces_worker, но эта копия только
+    классифицирует ветку КАНДИДАТА для отчёта, ничего не блокирует."""
+    if not isinstance(notes, str):
+        return None
+    m = REPLACES_WORKER_RE.search(notes)
+    return m.group(1) if m else None
 
 
 def parse_ts(ts: Optional[str]) -> Optional[datetime]:
@@ -242,6 +261,12 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
     # само попадает в окно.
     last_status: Dict[str, str] = {}          # task_id -> event яруса lifecycle
     seen_delegated: Dict[str, bool] = {}      # task_id -> уже видели хоть один delegated
+    # task_id -> множество worker_ref всех ПРЕДЫДУЩИХ delegated этого task_id
+    # (любого agent) -- зеркало journal_validator.task_worker_refs, правило
+    # 9в2. Пополняется ПОСЛЕ классификации текущей строки (harvest-after-
+    # check порядок, как в валидаторе) -- self-reference (маркер ссылается
+    # на worker_ref ЭТОЙ ЖЕ новой строки) не находит себя в prior_refs.
+    task_worker_refs: Dict[str, set] = {}
     duplicate_delegates = []
     for pl in parsed_lines:
         d = pl.data
@@ -266,7 +291,22 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
                 elif has_attempt_ge2:
                     branch = "retry"
                 else:
-                    branch = "other"
+                    # (t-129 M1) замена умершего воркера (правило 9в2):
+                    # маркер в notes + хэндл найден среди ПРЕДЫДУЩИХ
+                    # worker_ref этого task_id -> легальная ветка
+                    # "replacement"; маркер есть, но хэндл не встречается
+                    # выше (или ссылается на самого себя -- ещё не
+                    # harvest'нут) -> "replacement-фиктивный" (кандидат-
+                    # нарушение). Без маркера -- прежний catch-all "other".
+                    replaces_handle = extract_replaces_worker(d.get("notes"))
+                    if replaces_handle is not None:
+                        prior_refs = task_worker_refs.get(tid, set())
+                        if replaces_handle in prior_refs:
+                            branch = "replacement"
+                        else:
+                            branch = "replacement-фиктивный"
+                    else:
+                        branch = "other"
                 if _in_window(pl, window_start, window_end):
                     duplicate_delegates.append({
                         "line": pl.line_no, "task_id": tid, "agent": agent,
@@ -274,6 +314,9 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
                     })
             seen_delegated[tid] = True
             last_status[tid] = "delegated"
+            worker_ref = d.get("worker_ref")
+            if isinstance(worker_ref, str) and worker_ref.strip():
+                task_worker_refs.setdefault(tid, set()).add(worker_ref.strip())
         elif ev in ("accepted", "rejected", "escalated"):
             last_status[tid] = ev
         # defect_found не двигает lifecycle-статус исходной задачи (у него
