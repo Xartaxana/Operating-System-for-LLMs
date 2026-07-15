@@ -26,6 +26,23 @@ task, 2026-07-15):
   against real exam_release2 project dirs on this machine -- read
   beyond the manifest's read-only 'given' bucket, reported as such in
   the builder report).
+- t-132 (multi-session task, spec
+  docs/tasks/2026-07-15_economy-exam-set2.md): a task may carry
+  'sessions': [text, ...] instead of 'text' -- N SEPARATE headless
+  `claude -p` sessions run SEQUENTIALLY in the one (task, arm) sandbox
+  cwd, session N+1 starting only after session N's rc is known. A
+  non-zero rc stops the chain by default (no "continue on error"
+  flag -- YAGNI, spec). Each session is a fresh process, not
+  --continue/--resume (spec: a returning user opens a new chat; state
+  lives in the sandbox's files, not session memory). The classic
+  single-'text' task's run_log/stdout-file shape is unchanged
+  (backward compatibility, spec point 2). Note: this classic shape is
+  keyed off the RUNTIME session count (len(launch['sessions']) == 1),
+  not off which manifest key the task used -- a task written as
+  'sessions': [only_one_text] is therefore recorded in run_log.json
+  exactly like a classic 'text' task (flat entry, no
+  sessions_total/stopped_early, stdout file without the '-sN' suffix),
+  not as a length-1 multi-session record.
 """
 
 import argparse
@@ -100,8 +117,25 @@ def validate_manifest(manifest):
         raise ValueError("manifest.tasks must be a non-empty list")
     task_ids = set()
     for task in manifest["tasks"]:
-        if "id" not in task or "text" not in task:
-            raise ValueError(f"task missing 'id' or 'text': {task}")
+        if "id" not in task:
+            raise ValueError(f"task missing 'id': {task}")
+        has_text = "text" in task
+        has_sessions = "sessions" in task
+        if not has_text and not has_sessions:
+            raise ValueError(f"task missing 'text' or 'sessions': {task}")
+        if has_text and has_sessions:
+            raise ValueError(
+                f"task {task.get('id')!r} has both 'text' and 'sessions' -- "
+                f"'sessions' is an alternative to 'text', not additive: {task}"
+            )
+        if has_sessions:
+            sessions = task["sessions"]
+            if not isinstance(sessions, list) or not sessions or not all(
+                isinstance(s, str) for s in sessions
+            ):
+                raise ValueError(
+                    f"task {task.get('id')!r} 'sessions' must be a non-empty list of strings: {task}"
+                )
         task_ids.add(task["id"])
 
     if not isinstance(manifest["order"], dict):
@@ -156,8 +190,23 @@ def build_launch_plan(manifest):
     """Returns the flattened, ORDERED list of the 3x3 launches: for
     each task in manifest['tasks'] order, for each arm in
     manifest['order'][task_id] order, one launch dict with
-    order_index, task_id, arm, cwd (str), text (prefix+task+suffix),
-    cmd (argv list for subprocess)."""
+    order_index, task_id, arm, cwd (str), cmd (argv list for
+    subprocess), sessions (ORDERED list of prompt strings, each
+    already wrapped in the arm's prefix/suffix -- len 1 for a classic
+    single-'text' task, len N for a task['sessions'] list of N
+    prompts), and text (== sessions[0], kept for backward
+    compatibility with callers/tests reading the pre-t-132 single-text
+    field).
+
+    A task's 'sessions' list (t-132: multi-session task, spec
+    docs/tasks/2026-07-15_economy-exam-set2.md) is an alternative to
+    'text', not additive (enforced in validate_manifest). All N
+    session prompts of such a task get the SAME arm prefix/suffix
+    wrapping applied per-session -- this is the existing
+    prefix+task+suffix mechanism (already how the headless-escalation
+    suffix reaches a single-session task's prompt, per
+    PROCESS/DEPLOYMENT_ECONOMY_EXAM.md 'Headless-протез эскалации'),
+    extended to every session instead of only the first."""
     polygon_root = Path(manifest["polygon_root"])
     arms_by_name = {a["name"]: a for a in manifest["arms"]}
     plan = []
@@ -166,7 +215,8 @@ def build_launch_plan(manifest):
         task_id = task["id"]
         for arm_name in manifest["order"][task_id]:
             arm = arms_by_name[arm_name]
-            text = arm.get("prefix", "") + task["text"] + arm.get("suffix", "")
+            raw_texts = task["sessions"] if "sessions" in task else [task["text"]]
+            texts = [arm.get("prefix", "") + t + arm.get("suffix", "") for t in raw_texts]
             cwd = polygon_root / arm_name / task_id
             # Resolve the real executable: on Windows the npm shim is
             # claude.cmd, and CreateProcess does not apply PATHEXT to
@@ -192,7 +242,8 @@ def build_launch_plan(manifest):
                 "task_id": task_id,
                 "arm": arm_name,
                 "cwd": str(cwd),
-                "text": text,
+                "text": texts[0],
+                "sessions": texts,
                 "cmd": cmd,
             })
             idx += 1
@@ -206,6 +257,8 @@ def _print_plan(plan):
             f"[{launch['order_index'] + 1}/{len(plan)}] "
             f"task={launch['task_id']} arm={launch['arm']} cwd={launch['cwd']}"
         )
+        if len(launch["sessions"]) > 1:
+            _print(f"    sessions: {len(launch['sessions'])} (sequential, same cwd)")
         _print(f"    cmd: {launch['cmd']}")
 
 
@@ -395,16 +448,17 @@ def prepare(manifest, dry_run=False):
 # ---------------------------------------------------------------------------
 
 
-def _execute_launch(launch, polygon_root):
-    """Runs one launch and persists its FULL stdout to
-    <polygon_root>/stdout/<arm>-<task>.txt (utf-8) -- run_log.json
-    itself only keeps a 2000-char tail (chat-report friendly) plus the
-    stdout_file path. Precedent: run #3's T2 chat reports were built
-    off the tail alone and died truncated when the real content sat
-    earlier in a long transcript."""
+def _run_one_session(cmd, cwd, text, polygon_root, arm, task_id, filename_suffix):
+    """Runs exactly one headless `claude -p` invocation and persists
+    its FULL stdout to <polygon_root>/stdout/<arm>-<task><suffix>.txt
+    (utf-8) -- the per-session unit both the classic single-session
+    path and the t-132 multi-session path are built from. Returns the
+    same {start_ts, end_ts, rc, stdout_tail, stdout_file} shape either
+    way; the caller attaches order_index/task_id/arm/cwd (classic) or
+    session_index (multi)."""
     start_ts = datetime.utcnow().isoformat() + "Z"
     proc = subprocess.run(
-        launch["cmd"], cwd=launch["cwd"], input=launch["text"],
+        cmd, cwd=cwd, input=text,
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     end_ts = datetime.utcnow().isoformat() + "Z"
@@ -412,14 +466,10 @@ def _execute_launch(launch, polygon_root):
 
     stdout_dir = Path(polygon_root) / "stdout"
     stdout_dir.mkdir(parents=True, exist_ok=True)
-    stdout_file = stdout_dir / f"{launch['arm']}-{launch['task_id']}.txt"
+    stdout_file = stdout_dir / f"{arm}-{task_id}{filename_suffix}.txt"
     stdout_file.write_text(stdout, encoding="utf-8")
 
     return {
-        "order_index": launch["order_index"],
-        "task_id": launch["task_id"],
-        "arm": launch["arm"],
-        "cwd": launch["cwd"],
         "start_ts": start_ts,
         "end_ts": end_ts,
         "rc": proc.returncode,
@@ -428,15 +478,79 @@ def _execute_launch(launch, polygon_root):
     }
 
 
+def _execute_launch(launch, polygon_root):
+    """Runs one launch. Classic (single-session, len(sessions)==1)
+    launches keep the EXACT pre-t-132 run_log shape (order_index,
+    task_id, arm, cwd, start_ts, end_ts, rc, stdout_tail, stdout_file)
+    and stdout filename (<arm>-<task>.txt) -- backward compatibility,
+    spec point 2.
+
+    Multi-session (t-132) launches run every launch['sessions'] prompt
+    SEQUENTIALLY in the SAME cwd -- session N+1 starts only after
+    session N's rc is known -- each as a SEPARATE headless `claude -p`
+    process (fresh context per session, per spec: a returning user
+    opens a new chat, not --continue/--resume). A non-zero rc stops
+    the chain by default (remaining sessions do not start); the
+    aggregate carries per-session records under 'sessions', the last
+    executed session's rc as the top-level 'rc', and an explicit
+    'stopped_early' flag (True whenever fewer sessions ran than were
+    planned) so the run_log makes the stop visible without the reader
+    having to infer it from a short 'sessions' list."""
+    sessions = launch["sessions"]
+
+    if len(sessions) == 1:
+        result = _run_one_session(
+            launch["cmd"], launch["cwd"], sessions[0], polygon_root,
+            launch["arm"], launch["task_id"], "",
+        )
+        return {
+            "order_index": launch["order_index"],
+            "task_id": launch["task_id"],
+            "arm": launch["arm"],
+            "cwd": launch["cwd"],
+            **result,
+        }
+
+    session_results = []
+    for i, text in enumerate(sessions):
+        result = _run_one_session(
+            launch["cmd"], launch["cwd"], text, polygon_root,
+            launch["arm"], launch["task_id"], f"-s{i + 1}",
+        )
+        result["session_index"] = i
+        session_results.append(result)
+        if result["rc"] != 0:
+            break
+
+    return {
+        "order_index": launch["order_index"],
+        "task_id": launch["task_id"],
+        "arm": launch["arm"],
+        "cwd": launch["cwd"],
+        "rc": session_results[-1]["rc"],
+        "sessions_total": len(sessions),
+        "stopped_early": len(session_results) < len(sessions),
+        "sessions": session_results,
+    }
+
+
 def run(manifest, dry_run=False):
-    """Executes (or, dry-run, just prints) the 9-launch plan built by
+    """Executes (or, dry-run, just prints) the launch plan built by
     build_launch_plan(), respecting manifest['order'] per-task arm
     order and bounding concurrency to manifest['parallel'] (default 1
     -- sequential, clean speed metric per spec). Non-dry-run writes
-    <polygon_root>/run_log.json with start/end ts, rc, a 2000-char
-    stdout tail, and stdout_file per launch -- the FULL stdout is
-    persisted separately to <polygon_root>/stdout/<arm>-<task>.txt
-    (2026-07-15 backlog fix 1)."""
+    <polygon_root>/run_log.json with one entry per launch: a classic
+    single-session launch keeps start/end ts, rc, a 2000-char stdout
+    tail, and stdout_file (full stdout persisted separately to
+    <polygon_root>/stdout/<arm>-<task>.txt, 2026-07-15 backlog fix 1);
+    a t-132 multi-session launch (task['sessions']) instead carries a
+    'sessions' list of that same per-session shape (stdout at
+    <polygon_root>/stdout/<arm>-<task>-s<N>.txt) plus the aggregate
+    'rc'/'sessions_total'/'stopped_early' -- see _execute_launch's
+    docstring. Concurrency is bounded across LAUNCHES (distinct
+    (task, arm) sandboxes); the sessions WITHIN one multi-session
+    launch always run sequentially in the same cwd regardless of
+    manifest['parallel']."""
     plan = build_launch_plan(manifest)
     if dry_run:
         _print_plan(plan)
@@ -608,6 +722,25 @@ def run_dossier_tests(sandbox_dir, baseline_files):
 ARTIFACT_URL_MARKER = "claude.ai/code/artifact/"
 
 
+def _run_log_stdout_files(entry):
+    """Returns the ORDERED list of stdout_file paths a run_log.json
+    entry references -- one path for a classic single-session entry
+    (its flat 'stdout_file'), one per session (session order) for a
+    t-132 multi-session entry ('sessions'[i]['stdout_file']).
+
+    collect()'s artifact-deliverable detection reads stdout_file paths
+    off THIS (the entry actually written by run()) rather than
+    reconstructing a '<arm>-<task>.txt' filename -- the reconstruction
+    only ever matches a classic entry's stdout file and silently finds
+    nothing for every multi-session sandbox (whose files are named
+    '<arm>-<task>-s<N>.txt'), which disabled the detector across an
+    entire multi-session run (critic t-132 retry blocker, 2026-07-15)."""
+    if entry and "sessions" in entry:
+        return [s["stdout_file"] for s in entry["sessions"] if s.get("stdout_file")]
+    stdout_file = entry.get("stdout_file") if entry else None
+    return [stdout_file] if stdout_file else []
+
+
 def detect_artifact_deliverable(stdout_text):
     """True if stdout_text references an Artifact URL
     (claude.ai/code/artifact/) -- Artifacts are private to the
@@ -691,9 +824,14 @@ def collect(manifest, dry_run=False):
     (project=slug OR LIKE slug-% -- folds in sub-slug projects),
     dossier pytest runs scoped to session-created non-click test files
     (baseline_manifest.json diff), file-composition diff against
-    baseline_manifest.json, artifact-deliverable warning from
-    <polygon_root>/stdout/<arm>-<task>.txt (2026-07-15 backlog fixes
-    1-4); (3) window load table for OTHER projects in the exam's
+    baseline_manifest.json, artifact-deliverable warning aggregated
+    over EVERY stdout file run_log.json's entry for that (arm, task)
+    references (one file classic, one per session multi-session,
+    t-132 retry fix -- ANY session's stdout carrying the marker warns
+    the whole task; falls back to the classic '<arm>-<task>.txt'
+    reconstruction when run_log.json is absent/has no matching entry,
+    e.g. a stdout file assembled without a run) (2026-07-15 backlog
+    fixes 1-4); (3) window load table for OTHER projects in the exam's
     [min..max] ts window; (4) writes <polygon_root>/dossier.{md,json}.
     No verdicts, no Runs-log write (non-goal). --dry-run: no-op (no
     side effects), per DoD."""
@@ -714,6 +852,12 @@ def collect(manifest, dry_run=False):
         if baseline_path.exists():
             baseline_manifest = json.loads(baseline_path.read_text(encoding="utf-8"))
 
+        run_log_by_key = {}
+        run_log_path = polygon_root / "run_log.json"
+        if run_log_path.exists():
+            for entry in json.loads(run_log_path.read_text(encoding="utf-8")):
+                run_log_by_key[(entry["arm"], entry["task_id"])] = entry
+
         results = []
         exclude_projects = []
         for task in manifest["tasks"]:
@@ -729,10 +873,20 @@ def collect(manifest, dry_run=False):
                 metrics = sandbox_metrics(conn, project)
                 tests = run_dossier_tests(sandbox_dir, baseline)
 
-                stdout_path = polygon_root / "stdout" / f"{arm['name']}-{task['id']}.txt"
-                artifact_warning = (
-                    detect_artifact_deliverable(stdout_path.read_text(encoding="utf-8", errors="replace"))
-                    if stdout_path.exists() else False
+                run_log_entry = run_log_by_key.get((arm["name"], task["id"]))
+                stdout_files = _run_log_stdout_files(run_log_entry)
+                if not stdout_files:
+                    # No run_log.json entry (or none matching) -- fall
+                    # back to the classic single-file reconstruction
+                    # (e.g. a stdout file assembled without a run()
+                    # call, as the pre-t-132 dossier-wiring test does).
+                    fallback = polygon_root / "stdout" / f"{arm['name']}-{task['id']}.txt"
+                    stdout_files = [str(fallback)] if fallback.exists() else []
+                artifact_warning = any(
+                    detect_artifact_deliverable(
+                        Path(p).read_text(encoding="utf-8", errors="replace")
+                    )
+                    for p in stdout_files if Path(p).exists()
                 )
 
                 results.append({

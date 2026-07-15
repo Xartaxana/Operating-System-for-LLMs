@@ -660,3 +660,307 @@ def test_collect_wires_artifact_warning_test_scoping_and_like_metrics(tmp_path, 
 
     md = (polygon_root / "dossier.md").read_text(encoding="utf-8")
     assert "deliverable = внешний артефакт (может быть недоступен вне аккаунта)" in md
+
+
+# ---------------------------------------------------------------------------
+# 10. multi-session tasks (t-132, spec
+#     docs/tasks/2026-07-15_economy-exam-set2.md): task['sessions'] is an
+#     alternative to task['text'] -- N separate headless sessions run
+#     SEQUENTIALLY in the same (task, arm) sandbox cwd, with per-session
+#     run_log accounting and a default stop-the-chain on nonzero rc.
+# ---------------------------------------------------------------------------
+
+
+def test_validate_manifest_task_with_sessions_ok(tmp_path):
+    manifest = {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": str(tmp_path),
+        },
+        "model": "haiku",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "sessions": ["do X", "do Y"], "needs": []}],
+        "order": {"t1": ["A"]},
+    }
+    validated = validate_manifest(manifest)
+    assert validated["parallel"] == 1
+
+
+def test_validate_manifest_task_missing_text_and_sessions_raises():
+    manifest = {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1"}],
+        "order": {"t1": ["A"]},
+    }
+    with pytest.raises(ValueError, match="'text' or 'sessions'"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_task_both_text_and_sessions_raises():
+    manifest = {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "text": "hi", "sessions": ["hi"]}],
+        "order": {"t1": ["A"]},
+    }
+    with pytest.raises(ValueError, match="both 'text' and 'sessions'"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_task_sessions_empty_list_raises():
+    manifest = {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "sessions": []}],
+        "order": {"t1": ["A"]},
+    }
+    with pytest.raises(ValueError, match="non-empty list of strings"):
+        validate_manifest(manifest)
+
+
+def test_build_launch_plan_sessions_wraps_each_with_arm_prefix_suffix(tmp_path):
+    manifest = {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": str(tmp_path),
+        },
+        "model": "haiku",
+        "parallel": 1,
+        "arms": [{"name": "C", "layout": "empty", "prefix": "PFX\n\n", "suffix": "\n\nSFX"}],
+        "tasks": [{"id": "t1", "sessions": ["session one", "session two"], "needs": []}],
+        "order": {"t1": ["C"]},
+    }
+    plan = build_launch_plan(manifest)
+    assert len(plan) == 1
+    launch = plan[0]
+    # The arm's prefix/suffix (the same mechanism the headless-escalation
+    # protez suffix travels through, PROCESS/DEPLOYMENT_ECONOMY_EXAM.md)
+    # is applied to EVERY session, not just the first.
+    assert launch["sessions"] == ["PFX\n\nsession one\n\nSFX", "PFX\n\nsession two\n\nSFX"]
+    # backward-compat 'text' field mirrors the first session.
+    assert launch["text"] == launch["sessions"][0]
+    assert launch["cwd"] == str(Path(manifest["polygon_root"]) / "C" / "t1")
+
+
+def _multi_session_manifest(tmp_path, texts, model="haiku"):
+    return {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": str(tmp_path),
+        },
+        "model": model,
+        "parallel": 1,
+        "arms": [{"name": "A", "layout": "empty", "prefix": "", "suffix": ""}],
+        "tasks": [{"id": "t1", "sessions": texts, "needs": []}],
+        "order": {"t1": ["A"]},
+    }
+
+
+def test_run_multi_session_sequential_same_cwd_and_per_session_accounting(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    calls = []
+
+    def fake_subprocess_run(cmd, **kwargs):
+        calls.append({"cwd": kwargs.get("cwd"), "input": kwargs.get("input")})
+
+        class FakeProc:
+            returncode = 0
+            stdout = f"ok session {len(calls)}"
+        return FakeProc()
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", fake_subprocess_run)
+
+    manifest = _multi_session_manifest(tmp_path, ["do ping", "do pong"])
+    results = run(manifest, dry_run=False)
+
+    assert len(results) == 1
+    entry = results[0]
+    assert entry["sessions_total"] == 2
+    assert entry["stopped_early"] is False
+    assert len(entry["sessions"]) == 2
+    assert entry["rc"] == 0
+
+    # Both claude invocations targeted the SAME sandbox cwd (spec: one
+    # cwd for the whole multi-session task).
+    assert calls[0]["cwd"] == calls[1]["cwd"] == entry["cwd"]
+    # Prompts delivered in session order via stdin (session N+1 only
+    # after N -- guaranteed here by the plain in-process loop, verified
+    # by the ordered fake_subprocess_run call log).
+    assert calls[0]["input"] == "do ping"
+    assert calls[1]["input"] == "do pong"
+
+    polygon_root = Path(manifest["polygon_root"])
+    s1 = entry["sessions"][0]
+    s2 = entry["sessions"][1]
+    assert s1["session_index"] == 0
+    assert s2["session_index"] == 1
+    assert s1["stdout_file"] == str(polygon_root / "stdout" / "A-t1-s1.txt")
+    assert s2["stdout_file"] == str(polygon_root / "stdout" / "A-t1-s2.txt")
+    assert Path(s1["stdout_file"]).read_text(encoding="utf-8") == "ok session 1"
+    assert Path(s2["stdout_file"]).read_text(encoding="utf-8") == "ok session 2"
+    assert s1["start_ts"] and s1["end_ts"]
+    assert s2["start_ts"] and s2["end_ts"]
+
+    run_log = json.loads((polygon_root / "run_log.json").read_text(encoding="utf-8"))
+    assert run_log[0]["sessions_total"] == 2
+    assert run_log[0]["stopped_early"] is False
+
+
+def test_run_multi_session_stops_chain_on_nonzero_rc(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    def fake_subprocess_run(cmd, **kwargs):
+        idx = fake_subprocess_run.calls
+        fake_subprocess_run.calls += 1
+
+        class FakeProc:
+            returncode = 1 if idx == 1 else 0
+            stdout = f"session {idx}"
+        return FakeProc()
+    fake_subprocess_run.calls = 0
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", fake_subprocess_run)
+
+    manifest = _multi_session_manifest(tmp_path, ["s1 ok", "s2 fails", "s3 never runs"])
+    results = run(manifest, dry_run=False)
+
+    entry = results[0]
+    assert entry["sessions_total"] == 3
+    assert entry["stopped_early"] is True
+    assert len(entry["sessions"]) == 2  # s3 never launched -- chain stopped on s2's rc=1
+    assert entry["rc"] == 1
+    assert entry["sessions"][0]["rc"] == 0
+    assert entry["sessions"][1]["rc"] == 1
+
+    polygon_root = Path(manifest["polygon_root"])
+    stdout_dir = polygon_root / "stdout"
+    assert (stdout_dir / "A-t1-s1.txt").exists()
+    assert (stdout_dir / "A-t1-s2.txt").exists()
+    assert not (stdout_dir / "A-t1-s3.txt").exists()  # never invoked
+    assert fake_subprocess_run.calls == 2
+
+
+def test_run_classic_single_text_task_unaffected_by_sessions_feature(tmp_path, monkeypatch):
+    """Backward compatibility (spec point 2): a classic single-'text'
+    task's run_log entry keeps the exact pre-t-132 flat shape -- no
+    'sessions'/'sessions_total'/'stopped_early' keys leak in."""
+    import exam_runner as exam_runner_module
+
+    class FakeProc:
+        returncode = 0
+        stdout = "classic ok"
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda cmd, **kw: FakeProc())
+
+    manifest = _minimal_run_manifest(tmp_path)
+    results = run(manifest, dry_run=False)
+
+    entry = results[0]
+    assert "sessions" not in entry
+    assert "sessions_total" not in entry
+    assert "stopped_early" not in entry
+    assert entry["rc"] == 0
+    assert set(entry.keys()) == {
+        "order_index", "task_id", "arm", "cwd",
+        "start_ts", "end_ts", "rc", "stdout_tail", "stdout_file",
+    }
+
+
+# ---------------------------------------------------------------------------
+# 11. collect() artifact-deliverable detection for multi-session tasks
+#     (critic t-132 retry blocker, 2026-07-15): the classic
+#     '<arm>-<task>.txt' filename reconstruction never matches a
+#     multi-session task's '-sN.txt' stdout files, so the detector was
+#     silently False for every multi-session sandbox. Fixed by reading
+#     stdout_file paths off run_log.json's own entry (flat for
+#     classic, per-session list for multi-session) instead of
+#     reconstructing a name.
+# ---------------------------------------------------------------------------
+
+
+def _collect_db_setup(tmp_path, monkeypatch):
+    """Empty cc_usage db + no real transcripts to import -- collect()
+    still needs SOMETHING at usage_report.db_path()/transcript_glob()
+    to run its import/metrics steps without touching the real machine
+    state (same pattern as test_collect_wires_artifact_warning...)."""
+    db_file = tmp_path / "requests.db"
+    conn = sqlite3.connect(db_file)
+    conn.execute(SCHEMA)
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(usage_report, "db_path", lambda: db_file)
+    monkeypatch.setattr(usage_report, "transcript_glob", lambda: [])
+
+
+def test_collect_artifact_warning_true_when_any_multi_session_stdout_has_url(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    def fake_subprocess_run(cmd, **kwargs):
+        call = fake_subprocess_run.calls
+        fake_subprocess_run.calls += 1
+
+        class FakeProc:
+            returncode = 0
+            # No marker in session 1's stdout; session 2's carries the
+            # Artifact URL -- this is the exact shape the old
+            # reconstruction missed (it only ever looked at a
+            # '<arm>-<task>.txt' file that a multi-session run never
+            # writes).
+            stdout = (
+                "session 1: nothing to see here"
+                if call == 0
+                else "session 2: report at https://claude.ai/code/artifact/deadbeef"
+            )
+        return FakeProc()
+    fake_subprocess_run.calls = 0
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", fake_subprocess_run)
+
+    manifest = _multi_session_manifest(tmp_path, ["s1 text", "s2 text"])
+    run(manifest, dry_run=False)  # writes run_log.json + per-session stdout files
+
+    _collect_db_setup(tmp_path, monkeypatch)
+    dossier = collect(manifest, dry_run=False)
+
+    row = dossier["sandboxes"][0]
+    assert row["artifact_warning"] is True
+
+
+def test_collect_artifact_warning_false_when_no_multi_session_stdout_has_url(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    def fake_subprocess_run(cmd, **kwargs):
+        class FakeProc:
+            returncode = 0
+            stdout = "plain text, no deliverable link in any session"
+        return FakeProc()
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", fake_subprocess_run)
+
+    manifest = _multi_session_manifest(tmp_path, ["s1 text", "s2 text"])
+    run(manifest, dry_run=False)
+
+    _collect_db_setup(tmp_path, monkeypatch)
+    dossier = collect(manifest, dry_run=False)
+
+    row = dossier["sandboxes"][0]
+    assert row["artifact_warning"] is False
