@@ -474,7 +474,12 @@ def boot_budget_lines(root: Path) -> list:
     missing_suffix = "".join(f" [missing: {name}]" for name in missing)
 
     if total > BOOT_BREACH_THRESHOLD:
-        status_suffix = " BREACH -> run boot-diet skill (D-0068)"
+        # Informs the Boot Report's Next Required Action line; NOT an
+        # auto-run command — boot recovery is not work authorization
+        # (BOOT_REPORT_PROTOCOL rule 4; precedent 2026-07-15: a session
+        # read the old "run boot-diet skill" wording as an imperative
+        # and executed the diet before the Boot Report).
+        status_suffix = " BREACH -> boot-diet due (D-0068; report first, operator word starts it)"
     elif total > BOOT_WARN_THRESHOLD:
         status_suffix = " WARN"
     else:

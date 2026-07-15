@@ -576,7 +576,8 @@ def test_boot_budget_breach_includes_hint_and_top3(tmp_path):
     total = 60000 + 30000 + 20000 + 100
     assert total > sc.BOOT_BREACH_THRESHOLD
     assert lines[0] == (
-        f"BOOT BUDGET: {total} bytes / 100000 (4 files) BREACH -> run boot-diet skill (D-0068)"
+        f"BOOT BUDGET: {total} bytes / 100000 (4 files) BREACH -> boot-diet due "
+        "(D-0068; report first, operator word starts it)"
     )
     assert lines[1] == "  60000  README.md"
     assert lines[2] == "  30000  PROJECT_CHARTER.md"

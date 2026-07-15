@@ -42,7 +42,12 @@ Confidence:
 4. After the report, STOP and wait for the operator's explicit
    confirmation before starting any task. Boot recovery is not work
    authorization; neither BOOT.md's queue nor an unblocked task in
-   CURRENT_CONTEXT.md overrides this stop.
+   CURRENT_CONTEXT.md overrides this stop. SessionStart hook lines
+   (BOOT BUDGET BREACH, OPEN DISPATCH, staleness flags) are the same
+   class of signal: they feed the report's Next Required Action line,
+   they do not authorize executing the flagged procedure before the
+   report and the operator's word (precedent 2026-07-15: a session
+   ran the boot-diet skill off the hook line before reporting).
 
 5. Last Calibration = the timestamp of the most recent `calibrated`
    event in logs/routing-log.jsonl, or NONE. If routed traffic exists
