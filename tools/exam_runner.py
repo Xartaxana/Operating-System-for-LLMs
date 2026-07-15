@@ -395,14 +395,26 @@ def prepare(manifest, dry_run=False):
 # ---------------------------------------------------------------------------
 
 
-def _execute_launch(launch):
+def _execute_launch(launch, polygon_root):
+    """Runs one launch and persists its FULL stdout to
+    <polygon_root>/stdout/<arm>-<task>.txt (utf-8) -- run_log.json
+    itself only keeps a 2000-char tail (chat-report friendly) plus the
+    stdout_file path. Precedent: run #3's T2 chat reports were built
+    off the tail alone and died truncated when the real content sat
+    earlier in a long transcript."""
     start_ts = datetime.utcnow().isoformat() + "Z"
     proc = subprocess.run(
         launch["cmd"], cwd=launch["cwd"], input=launch["text"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     end_ts = datetime.utcnow().isoformat() + "Z"
-    stdout_tail = (proc.stdout or "")[-2000:]
+    stdout = proc.stdout or ""
+
+    stdout_dir = Path(polygon_root) / "stdout"
+    stdout_dir.mkdir(parents=True, exist_ok=True)
+    stdout_file = stdout_dir / f"{launch['arm']}-{launch['task_id']}.txt"
+    stdout_file.write_text(stdout, encoding="utf-8")
+
     return {
         "order_index": launch["order_index"],
         "task_id": launch["task_id"],
@@ -411,7 +423,8 @@ def _execute_launch(launch):
         "start_ts": start_ts,
         "end_ts": end_ts,
         "rc": proc.returncode,
-        "stdout_tail": stdout_tail,
+        "stdout_tail": stdout[-2000:],
+        "stdout_file": str(stdout_file),
     }
 
 
@@ -420,8 +433,10 @@ def run(manifest, dry_run=False):
     build_launch_plan(), respecting manifest['order'] per-task arm
     order and bounding concurrency to manifest['parallel'] (default 1
     -- sequential, clean speed metric per spec). Non-dry-run writes
-    <polygon_root>/run_log.json with start/end ts, rc, stdout tail per
-    launch."""
+    <polygon_root>/run_log.json with start/end ts, rc, a 2000-char
+    stdout tail, and stdout_file per launch -- the FULL stdout is
+    persisted separately to <polygon_root>/stdout/<arm>-<task>.txt
+    (2026-07-15 backlog fix 1)."""
     plan = build_launch_plan(manifest)
     if dry_run:
         _print_plan(plan)
@@ -429,6 +444,7 @@ def run(manifest, dry_run=False):
 
     parallel = max(1, int(manifest.get("parallel", 1)))
     results = [None] * len(plan)
+    polygon_root = manifest["polygon_root"]
 
     if parallel == 1:
         # Plain loop: plan order is guaranteed by construction. A
@@ -438,13 +454,13 @@ def run(manifest, dry_run=False):
         # M1), and the rotation order is a pinned protocol
         # requirement ("no favourite last arm").
         for i, launch in enumerate(plan):
-            results[i] = _execute_launch(launch)
+            results[i] = _execute_launch(launch, polygon_root)
     else:
         sem = threading.Semaphore(parallel)
 
         def worker(i, launch):
             with sem:
-                results[i] = _execute_launch(launch)
+                results[i] = _execute_launch(launch, polygon_root)
 
         threads = [threading.Thread(target=worker, args=(i, launch)) for i, launch in enumerate(plan)]
         for t in threads:
@@ -496,11 +512,18 @@ def stall_estimate(turns):
 def sandbox_metrics(conn, project):
     """turns/cost/side_cost/side_share/wall(min,max ts)/stall_est for
     one project's cc_usage rows, read from an open sqlite3 connection
-    (schema per usage_report.SCHEMA)."""
+    (schema per usage_report.SCHEMA).
+
+    Matches project = slug OR project LIKE '<slug>-%' -- when a
+    session (or a subagent it spawns) starts with cwd inside a
+    sandbox subdirectory, Claude Code logs it under a distinct
+    sub-slug project (e.g. '...-C-t2' plus '...-C-t2-click'), which a
+    plain equality match would miss entirely. Precedent: run #3's C/t2
+    rerun partly landed under such a sub-slug and undercounted."""
     rows = conn.execute(
         "SELECT ts, output_tokens, accounted_cost_usd, is_sidechain "
-        "FROM cc_usage WHERE project = ? ORDER BY ts",
-        (project,),
+        "FROM cc_usage WHERE project = ? OR project LIKE ? ORDER BY ts",
+        (project, project + "-%"),
     ).fetchall()
     turns = len(rows)
     total_cost = sum(r[2] or 0.0 for r in rows)
@@ -542,18 +565,35 @@ def window_load(conn, exclude_projects, window_start, window_end):
     return [{"project": r[0], "turns": r[1], "out_tokens": r[2] or 0} for r in rows]
 
 
-def run_dossier_tests(sandbox_dir):
-    """Finds every test_*.py under sandbox_dir (any depth, skipping
-    .git/__pycache__/.pytest_cache), runs `python -m pytest <file> -q`
+def run_dossier_tests(sandbox_dir, baseline_files):
+    """Finds test_*.py under sandbox_dir (any depth, skipping
+    .git/__pycache__/.pytest_cache) that the SESSION created --
+    i.e. NOT present in baseline_files (the sandbox's file set right
+    after prepare(), from baseline_manifest.json) -- AND not inside a
+    needs=click clone subtree (click/**, the literal dest name used by
+    prepare()'s needs=click copy). Runs `python -m pytest <file> -q`
     for each (this is NOT a claude invocation -- it genuinely executes,
-    per spec), and returns a list of {file, rc, output_tail}."""
+    per spec), and returns a list of {file, rc, output_tail}.
+
+    Precedent (run #3, C/t2): without this scoping, dossier test runs
+    swept in click's own upstream test_*.py files (33 of them,
+    click/tests/test_*.py) that were already part of the prepared
+    baseline, not written by the session -- pure noise, some failing
+    against the sandbox's system Python package rather than any
+    session defect."""
     sandbox_dir = Path(sandbox_dir)
     results = []
     if not sandbox_dir.exists():
         return results
+    baseline_files = set(baseline_files)
     for test_file in sorted(sandbox_dir.rglob("test_*.py")):
         rel = test_file.relative_to(sandbox_dir)
         if any(part in SKIP_DIR_PARTS for part in rel.parts):
+            continue
+        if rel.parts and rel.parts[0] == "click":
+            continue
+        rel_str = str(rel).replace("\\", "/")
+        if rel_str in baseline_files:
             continue
         proc = subprocess.run(
             [sys.executable, "-m", "pytest", str(test_file), "-q"],
@@ -561,8 +601,21 @@ def run_dossier_tests(sandbox_dir):
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         tail = (proc.stdout or "")[-2000:]
-        results.append({"file": str(rel).replace("\\", "/"), "rc": proc.returncode, "output_tail": tail})
+        results.append({"file": rel_str, "rc": proc.returncode, "output_tail": tail})
     return results
+
+
+ARTIFACT_URL_MARKER = "claude.ai/code/artifact/"
+
+
+def detect_artifact_deliverable(stdout_text):
+    """True if stdout_text references an Artifact URL
+    (claude.ai/code/artifact/) -- Artifacts are private to the
+    operator's own claude.ai account and can go unreachable to anyone
+    else reviewing the dossier later: the 'evidence dies with the
+    session' class (alongside dead scratchpad files and truncated
+    stdout tails, per docs/tasks/2026-07-15_economy-exam-runs3-4.md)."""
+    return ARTIFACT_URL_MARKER in (stdout_text or "")
 
 
 def _render_dossier_markdown(dossier):
@@ -577,6 +630,18 @@ def _render_dossier_markdown(dossier):
             f"| {r['arm']} | {r['task_id']} | {r['turns']} | {r['cost_usd']:.4f} | "
             f"{r['side_cost_usd']:.4f} | {share} | {r['stall_est_seconds']:.1f} |"
         )
+
+    lines.append("")
+    lines.append("## Artifact deliverable warnings")
+    warned = [r for r in dossier["sandboxes"] if r.get("artifact_warning")]
+    if not warned:
+        lines.append("(none)")
+    else:
+        for r in warned:
+            lines.append(
+                f"- {r['arm']}/{r['task_id']}: deliverable = внешний артефакт "
+                f"(может быть недоступен вне аккаунта)"
+            )
 
     lines.append("")
     lines.append("## Tests (executed pytest, not claude)")
@@ -622,12 +687,16 @@ def _render_dossier_markdown(dossier):
 def collect(manifest, dry_run=False):
     """(1) imports fresh transcripts via usage_report.import_transcripts
     (real ~/.claude/projects glob + gateway db, reused by import per
-    spec); (2) per sandbox: turns/cost/side/wall/stall from cc_usage,
-    dossier pytest runs, file-composition diff against
-    baseline_manifest.json; (3) window load table for OTHER projects in
-    the exam's [min..max] ts window; (4) writes
-    <polygon_root>/dossier.{md,json}. No verdicts, no Runs-log write
-    (non-goal). --dry-run: no-op (no side effects), per DoD."""
+    spec); (2) per sandbox: turns/cost/side/wall/stall from cc_usage
+    (project=slug OR LIKE slug-% -- folds in sub-slug projects),
+    dossier pytest runs scoped to session-created non-click test files
+    (baseline_manifest.json diff), file-composition diff against
+    baseline_manifest.json, artifact-deliverable warning from
+    <polygon_root>/stdout/<arm>-<task>.txt (2026-07-15 backlog fixes
+    1-4); (3) window load table for OTHER projects in the exam's
+    [min..max] ts window; (4) writes <polygon_root>/dossier.{md,json}.
+    No verdicts, no Runs-log write (non-goal). --dry-run: no-op (no
+    side effects), per DoD."""
     if dry_run:
         _print("[dry-run] collect skipped (no side effects)")
         return None
@@ -653,11 +722,18 @@ def collect(manifest, dry_run=False):
                 project = project_slug(sandbox_dir)
                 exclude_projects.append(project)
 
-                metrics = sandbox_metrics(conn, project)
-                tests = run_dossier_tests(sandbox_dir)
                 key = f"{arm['name']}/{task['id']}"
                 baseline = set(baseline_manifest.get(key, []))
                 current = _relative_file_set(sandbox_dir)
+
+                metrics = sandbox_metrics(conn, project)
+                tests = run_dossier_tests(sandbox_dir, baseline)
+
+                stdout_path = polygon_root / "stdout" / f"{arm['name']}-{task['id']}.txt"
+                artifact_warning = (
+                    detect_artifact_deliverable(stdout_path.read_text(encoding="utf-8", errors="replace"))
+                    if stdout_path.exists() else False
+                )
 
                 results.append({
                     "arm": arm["name"],
@@ -666,6 +742,7 @@ def collect(manifest, dry_run=False):
                     "tests": tests,
                     "files_added": sorted(current - baseline),
                     "files_removed": sorted(baseline - current),
+                    "artifact_warning": artifact_warning,
                 })
 
         starts = [r["wall_start"] for r in results if r["wall_start"]]

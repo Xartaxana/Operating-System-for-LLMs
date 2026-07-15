@@ -17,11 +17,16 @@ from pathlib import Path
 
 import pytest
 
+import usage_report
 from exam_runner import (
     build_launch_plan,
+    collect,
+    detect_artifact_deliverable,
     load_manifest,
     prepare,
     project_slug,
+    run,
+    run_dossier_tests,
     sandbox_metrics,
     stall_estimate,
     validate_manifest,
@@ -469,3 +474,189 @@ def test_project_slug_matches_this_repo_own_project_dir():
         project_slug("D:/Improving_AI/Operating-System-for-LLMs")
         == "D--Improving-AI-Operating-System-for-LLMs"
     )
+
+
+# ---------------------------------------------------------------------------
+# 6. run() persists FULL stdout to a file, tail-only in run_log.json
+#    (2026-07-15 backlog fix 1). subprocess.run is monkeypatched --
+#    `claude` itself is never invoked here.
+# ---------------------------------------------------------------------------
+
+
+def _minimal_run_manifest(tmp_path, model="haiku"):
+    return {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": str(tmp_path),
+        },
+        "model": model,
+        "parallel": 1,
+        "arms": [{"name": "A", "layout": "empty", "prefix": "", "suffix": ""}],
+        "tasks": [{"id": "t1", "text": "hi", "needs": []}],
+        "order": {"t1": ["A"]},
+    }
+
+
+def test_run_persists_full_stdout_and_truncates_run_log_tail(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    long_stdout = ("X" * 3000) + "END_MARKER"
+
+    class FakeProc:
+        returncode = 0
+        stdout = long_stdout
+
+    def fake_subprocess_run(cmd, **kwargs):
+        return FakeProc()
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", fake_subprocess_run)
+
+    manifest = _minimal_run_manifest(tmp_path)
+    results = run(manifest, dry_run=False)
+
+    polygon_root = Path(manifest["polygon_root"])
+    stdout_file = polygon_root / "stdout" / "A-t1.txt"
+    assert stdout_file.exists()
+    assert stdout_file.read_text(encoding="utf-8") == long_stdout
+
+    run_log = json.loads((polygon_root / "run_log.json").read_text(encoding="utf-8"))
+    assert run_log[0]["stdout_file"] == str(stdout_file)
+    assert run_log[0]["stdout_tail"] == long_stdout[-2000:]
+    assert len(run_log[0]["stdout_tail"]) == 2000
+    assert results[0]["stdout_file"] == str(stdout_file)
+
+
+# ---------------------------------------------------------------------------
+# 7. run_dossier_tests() scopes discovery to session-created, non-click
+#    test files (2026-07-15 backlog fix 2). Precedent: real run3c2
+#    C/t2 dossier ran 33 of click's own upstream test_*.py files.
+# ---------------------------------------------------------------------------
+
+
+def test_run_dossier_tests_scopes_to_new_non_click_files(tmp_path):
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+
+    # Part of the prepared baseline layout (e.g. a template test file)
+    # -- present in baseline_files, must NOT run.
+    (sandbox / "test_baseline.py").write_text("def test_x():\n    assert True\n", encoding="utf-8")
+
+    # Session-created at top level -- MUST run.
+    (sandbox / "test_new.py").write_text("def test_y():\n    assert True\n", encoding="utf-8")
+
+    # Session-created INSIDE a needs=click clone subtree -- must NOT
+    # run even though it is "new" relative to baseline, proving the
+    # click/** exclusion is independent of (in addition to) the diff.
+    click_dir = sandbox / "click"
+    click_dir.mkdir()
+    (click_dir / "test_click_new.py").write_text("def test_z():\n    assert True\n", encoding="utf-8")
+
+    baseline_files = {"test_baseline.py"}
+    results = run_dossier_tests(sandbox, baseline_files)
+
+    assert {r["file"] for r in results} == {"test_new.py"}
+
+
+# ---------------------------------------------------------------------------
+# 8. sandbox_metrics() LIKE-slug aggregation (2026-07-15 backlog fix 3).
+#    Precedent: real ~/.claude/projects dir
+#    'D--Improving-AI-exam-run3c2-v020-sonnet-C-t2-click' next to
+#    '...-C-t2' -- a sub-slug the plain equality match missed.
+# ---------------------------------------------------------------------------
+
+
+def test_sandbox_metrics_like_folds_in_sub_slug(cc_db):
+    conn = cc_db
+    proj = "D--fake-polygon-C-t2"
+    sub_slug = proj + "-click"
+
+    _insert_row(conn, proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.10)
+    _insert_row(conn, sub_slug, "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 30, 0.05)
+
+    metrics = sandbox_metrics(conn, proj)
+
+    assert metrics["turns"] == 2
+    assert metrics["cost_usd"] == pytest.approx(0.15)
+
+
+def test_sandbox_metrics_like_does_not_match_unrelated_project(cc_db):
+    conn = cc_db
+    proj = "D--fake-polygon-C-t2"
+    unrelated = "D--fake-polygon-C-t20"  # no '-' boundary after 't2' -> must NOT match
+
+    _insert_row(conn, proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.10)
+    _insert_row(conn, unrelated, "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 999, 9.99)
+
+    metrics = sandbox_metrics(conn, proj)
+
+    assert metrics["turns"] == 1
+    assert metrics["cost_usd"] == pytest.approx(0.10)
+
+
+# ---------------------------------------------------------------------------
+# 9. artifact-deliverable detection + full collect() wiring
+#    (2026-07-15 backlog fix 4). Real precedent: A-t1 dossiers whose
+#    deliverable was an Artifact link (dead outside the operator's own
+#    account) -- see docs/tasks/2026-07-15_economy-exam-runs3-4.md
+#    'evidence умирает с сессией'.
+# ---------------------------------------------------------------------------
+
+
+def test_detect_artifact_deliverable():
+    assert detect_artifact_deliverable("built it: https://claude.ai/code/artifact/abc123") is True
+    assert detect_artifact_deliverable("done, see gateway/test_metrics.py") is False
+    assert detect_artifact_deliverable("") is False
+    assert detect_artifact_deliverable(None) is False
+
+
+def test_collect_wires_artifact_warning_test_scoping_and_like_metrics(tmp_path, monkeypatch):
+    polygon_root = tmp_path / "polygon"
+    sandbox = polygon_root / "A" / "t1"
+    sandbox.mkdir(parents=True)
+    (sandbox / "test_new.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+
+    (polygon_root / "baseline_manifest.json").write_text(
+        json.dumps({"A/t1": []}), encoding="utf-8"
+    )
+
+    stdout_dir = polygon_root / "stdout"
+    stdout_dir.mkdir()
+    (stdout_dir / "A-t1.txt").write_text(
+        "report: https://claude.ai/code/artifact/deadbeef", encoding="utf-8"
+    )
+
+    db_file = tmp_path / "requests.db"
+    conn = sqlite3.connect(db_file)
+    conn.execute(SCHEMA)
+    conn.commit()
+    project = project_slug(sandbox)
+    _insert_row(conn, project, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.10)
+    _insert_row(conn, project + "-click", "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 30, 0.05)
+    conn.close()
+
+    monkeypatch.setattr(usage_report, "db_path", lambda: db_file)
+    monkeypatch.setattr(usage_report, "transcript_glob", lambda: [])
+
+    manifest = {
+        "polygon_root": str(polygon_root),
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": str(tmp_path),
+        },
+        "model": "haiku",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "text": "hi", "needs": []}],
+        "order": {"t1": ["A"]},
+    }
+    validate_manifest(manifest)
+
+    dossier = collect(manifest, dry_run=False)
+
+    row = dossier["sandboxes"][0]
+    assert row["cost_usd"] == pytest.approx(0.15)  # sub-slug folded in (fix 3)
+    assert row["artifact_warning"] is True  # fix 4
+    assert {t["file"] for t in row["tests"]} == {"test_new.py"}  # fix 2
+
+    md = (polygon_root / "dossier.md").read_text(encoding="utf-8")
+    assert "deliverable = внешний артефакт (может быть недоступен вне аккаунта)" in md
