@@ -175,8 +175,15 @@ def build_launch_plan(manifest):
             # shutil.which honours PATHEXT; fall back to the bare name
             # so dry-run plans still build on machines without claude.
             claude_exe = shutil.which("claude") or "claude"
+            # The prompt goes via STDIN, not argv: claude.cmd is a
+            # batch shim, and cmd.exe truncates a batch argument at
+            # the first newline -- runs 3/4 delivered ONLY the C-arm
+            # prefix (task text after \n\n silently lost; proven from
+            # the sessions' own transcripts, 2026-07-15). stdin
+            # bypasses cmd.exe argument parsing entirely, so the full
+            # multi-line message arrives byte-exact.
             cmd = [
-                claude_exe, "-p", text,
+                claude_exe, "-p",
                 "--model", manifest["model"],
                 "--dangerously-skip-permissions",
             ]
@@ -391,7 +398,7 @@ def prepare(manifest, dry_run=False):
 def _execute_launch(launch):
     start_ts = datetime.utcnow().isoformat() + "Z"
     proc = subprocess.run(
-        launch["cmd"], cwd=launch["cwd"],
+        launch["cmd"], cwd=launch["cwd"], input=launch["text"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     end_ts = datetime.utcnow().isoformat() + "Z"

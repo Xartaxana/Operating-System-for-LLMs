@@ -199,7 +199,13 @@ def test_build_launch_plan_order_and_content(tmp_path):
     b_t1 = plan[0]
     assert b_t1["text"] == "PFX: task one :SFX"
     assert "sonnet" in b_t1["cmd"]
-    assert "PFX: task one :SFX" in b_t1["cmd"]
+    # The prompt must NOT be an argv element: claude.cmd is a batch
+    # shim and cmd.exe truncates batch arguments at the first newline
+    # (runs 3/4 lost every C-arm task after the prefix's \n\n). The
+    # text travels via stdin (_execute_launch input=), so multi-line
+    # messages arrive byte-exact.
+    assert "PFX: task one :SFX" not in b_t1["cmd"]
+    assert "-p" in b_t1["cmd"]
     assert "--dangerously-skip-permissions" in b_t1["cmd"]
     assert b_t1["cwd"] == str(Path(manifest["polygon_root"]) / "B" / "t1")
 

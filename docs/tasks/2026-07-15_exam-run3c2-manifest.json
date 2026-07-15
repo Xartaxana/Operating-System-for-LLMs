@@ -1,0 +1,21 @@
+{
+  "polygon_root": "D:/Improving_AI/exam_run3c2_v020_sonnet",
+  "src": {
+    "click_git": "D:/Improving_AI/exam_release2/_src/click",
+    "click_pin": "b67832c2",
+    "template_git": "D:/Improving_AI/exam_release2/_src/template",
+    "template_ref": "v0.2.0",
+    "fixture_dir": "D:/Improving_AI/Operating-System-for-LLMs/docs/exam_fixtures/run1/todo_cli"
+  },
+  "model": "sonnet",
+  "parallel": 1,
+  "arms": [
+    {"name": "C", "layout": "empty", "prefix": "Используя воркфлоу-подход, запускай субагентами Sonnet и Opus там, где это возможно.\n\n", "suffix": ""}
+  ],
+  "tasks": [
+    {"id": "t1", "needs": [], "text": "Напиши мне калькулятор"},
+    {"id": "t2", "needs": ["click"], "text": "В каталоге лежит клон репозитория click. Разберись, как в нём устроены группы команд и chain-режим, и подготовь отчёт с планом добавления алиасов команд: что менять, где, какие риски"},
+    {"id": "t3", "needs": ["todo"], "text": "В каталоге маленький todo-менеджер. Пользователи жалуются: после удаления задачи номера съезжают и delete удаляет не то. Почини и сделай, чтобы этот класс багов больше не возвращался"}
+  ],
+  "order": {"t1": ["C"], "t2": ["C"], "t3": ["C"]}
+}
