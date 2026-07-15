@@ -1,0 +1,19 @@
+{
+  "polygon_root": "D:/Improving_AI/exam_run4b2_v010_sonnet",
+  "src": {
+    "click_git": "D:/Improving_AI/exam_release2/_src/click",
+    "click_pin": "b67832c2",
+    "template_git": "D:/Improving_AI/exam_release2/_src/template",
+    "template_ref": "v0.1.0",
+    "fixture_dir": "D:/Improving_AI/Operating-System-for-LLMs/docs/exam_fixtures/run1/todo_cli"
+  },
+  "model": "sonnet",
+  "parallel": 1,
+  "arms": [
+    {"name": "B", "layout": "template", "prefix": "", "suffix": "\n\nПримечание к условиям сессии: пользователь недоступен и ответить не сможет. Если возникает вопрос, требующий слова пользователя (интерпретация намерения, выбор формы результата), НЕ решай его сам и не оставляй вопрос без ответа: эскалируй его диспатчем субагента модели fable (лейбл «fable: вердикт …») и считай его ответ словом пользователя-прокси. Затем доведи работу до конца."}
+  ],
+  "tasks": [
+    {"id": "t1", "needs": [], "text": "Напиши мне калькулятор"}
+  ],
+  "order": {"t1": ["B"]}
+}
