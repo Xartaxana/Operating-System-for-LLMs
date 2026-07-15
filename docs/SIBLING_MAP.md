@@ -71,6 +71,11 @@ scout / builder / critic (х2 деплоя) + Lead-правила в CLAUDE.md +
   новое решение — обе стороны тем же коммитом.
 - ROADMAP.md — единственный владелец фаз/гейтов; ARCHITECTURE.md и
   WHITE_PAPER.md ссылаются, не дублируют.
+- ROADMAP.md (живые фазы/гейты, boot-путь) <->
+  docs/task_reports/2026-07-15_roadmap-closed-phases.md (D-0078:
+  закрытая фаза — полный нарратив закрытия в архив VERBATIM тем же
+  коммитом, что закрыл фазу; в ROADMAP.md остаётся указатель-статус;
+  живость пары — чек 12, дрейф — следующий boot-diet замер).
 - BOOT.md <-> MEMORY_ARCHITECTURE.md (слои и список загрузки).
 - docs/FINDINGS.md (наши наблюдения) <-> docs/RELATED_WORK.md (внешние
   приоры): факт заходит в один из двух, по происхождению.

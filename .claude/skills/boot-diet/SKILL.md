@@ -21,6 +21,8 @@ session-handoff триггерит его и не дублирует шагов.
 2. **Архивная развёртка** boot-файлов, имеющих архивный дом:
    - CURRENT_CONTEXT.md → docs/task_reports/ (D-0038);
    - DELEGATION_TABLE.md → docs/SHADOW_EVALUATION_LOG.md (D-0067);
+   - ROADMAP.md → docs/task_reports/2026-07-15_roadmap-closed-phases.md
+     (D-0078: закрытые фазы; живые гейты не трогать);
    - новый boot-файл с архивным домом входит в этот список тем же
      коммитом, что создал дом.
    Проход точечный, по маркерам закрытия (DONE / CLOSED / LANDED /
