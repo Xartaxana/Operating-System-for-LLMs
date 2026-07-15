@@ -317,6 +317,73 @@ def test_9g_delegated_after_accepted_fails_reopen_forbidden():
     assert any("reopen запрещён" in v for v in violations)
 
 
+# ---- 9в2 (2026-07-15): replaces_worker -- dead-worker replacement branch ----
+
+def test_9v2_replaces_worker_valid_marker_passes():
+    # t-001 delegated to builder in HEAD with worker_ref "agent:OLD". A new
+    # delegated on the SAME task_id, SAME agent, no attempt, no rejected --
+    # but notes carry "replaces_worker:agent:OLD" referencing the exact
+    # worker_ref of the prior delegated line. Legal replacement.
+    head = HEAD_TEXT.replace("cli:2026-07-10T08:00:00", "agent:OLD")
+    staged = head + _line(event="delegated", ts="2026-07-10T08:10:00", agent="builder",
+                           model="sonnet", task_id="t-001", worker_ref="agent:NEW",
+                           notes="критик остановлен без вердикта, продолжает новый воркер "
+                                 "replaces_worker:agent:OLD") + "\n"
+    code, violations = jv.decide(staged, head, NOW)
+    assert code == 0, violations
+
+
+def test_9v2_replaces_worker_unknown_handle_fails():
+    # marker present but the claimed prior worker_ref was never used for
+    # this task_id -- protection against fake replacement (DoD #2).
+    staged = _staged(_line(event="delegated", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", worker_ref="agent:NEW",
+                            notes="replaces_worker:agent:NEVER_EXISTED"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("фиктивная замена запрещена" in v for v in violations)
+    assert any("replaces_worker" in v for v in violations)
+
+
+def test_9g_duplicate_without_marker_still_fails_regression_and_hints_replaces_worker():
+    # regression: plain duplicate (no marker, no attempt, no rejected) must
+    # STILL fail (DoD #1 "дубль без маркера -- отказ"), and the failure
+    # message must now hint at replaces_worker (DoD #3).
+    staged = _staged(_line(event="delegated", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", notes="t-029-class duplicate, no marker"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("запрещённый дубль" in v for v in violations)
+    assert any("replaces_worker" in v for v in violations)
+
+
+def test_9v2_replacement_then_normal_accepted_passes():
+    # DoD #4: replacement followed later by a normal accepted on the same
+    # task_id passes cleanly (task_id reference / closure logic unaffected).
+    head = HEAD_TEXT.replace("cli:2026-07-10T08:00:00", "agent:OLD")
+    staged = head + "".join(l + "\n" for l in (
+        _line(event="delegated", ts="2026-07-10T08:10:00", agent="builder", model="sonnet",
+              task_id="t-001", worker_ref="agent:NEW",
+              notes="replaces_worker:agent:OLD"),
+        _line(event="accepted", ts="2026-07-10T08:20:00", agent="builder", model="sonnet",
+              task_id="t-001", witness="pytest ... 1 passed", by="opus",
+              notes="accepted after worker replacement"),
+    ))
+    code, violations = jv.decide(staged, head, NOW)
+    assert code == 0, violations
+
+
+def test_9v2_marker_with_wrong_agent_still_uses_case_b_not_marker():
+    # sanity: a DIFFERENT agent continuation-dispatch (case b) stays legal
+    # with or without a replaces_worker marker -- marker logic must not
+    # interfere with the pre-existing (b) path.
+    staged = _staged(_line(event="delegated", ts="2026-07-10T08:10:00", agent="critic",
+                            model="opus", task_id="t-001",
+                            notes="critic-gate continuation, unrelated replaces_worker text ignored"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
 # ---- 10. ts monotonicity / no narrative future ----
 
 def test_ts_not_monotonic_relative_to_previous_new_line_fails():
