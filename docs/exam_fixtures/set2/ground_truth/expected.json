@@ -1,0 +1,181 @@
+{
+  "generated_by": "ground_truth.py",
+  "counters": {
+    "bank_a": {
+      "rows_read": 57,
+      "duplicates_skipped": 1,
+      "rows_skipped_malformed": 0
+    },
+    "bank_b": {
+      "rows_read": 53,
+      "transfers_excluded": 1,
+      "rows_skipped_malformed": 0
+    },
+    "bank_c": {
+      "rows_read": 53,
+      "rows_skipped_malformed": 1,
+      "blank_lines_skipped": 2
+    }
+  },
+  "monthly_expense": {
+    "2026-03": {
+      "bank_a": "1117.65",
+      "bank_b": "1985.41",
+      "bank_c": "895.08",
+      "total": "3998.14"
+    },
+    "2026-04": {
+      "bank_a": "1298.51",
+      "bank_b": "-681.41",
+      "bank_c": "861.42",
+      "total": "1478.52"
+    },
+    "2026-05": {
+      "bank_a": "1323.04",
+      "bank_b": "859.29",
+      "bank_c": "933.96",
+      "total": "3116.29"
+    }
+  },
+  "march_plus_april_total_all_banks": "5476.66",
+  "totals_all_months": {
+    "bank_a": "3739.20",
+    "bank_b": "2163.29",
+    "bank_c": "2690.46",
+    "total": "8592.95"
+  },
+  "penny_precision_control": {
+    "description": "First 20 chronological expense rows of bank_a.csv (file order); Decimal sum must match exactly, a float implementation will drift.",
+    "rows": [
+      {
+        "id": 1,
+        "date": "2026-03-01",
+        "description": "KROGER #558",
+        "amount": "22.47"
+      },
+      {
+        "id": 2,
+        "date": "2026-03-02",
+        "description": "WALMART SUPERCENTER #331",
+        "amount": "27.21"
+      },
+      {
+        "id": 3,
+        "date": "2026-03-03",
+        "description": "TRADER JOE'S #142",
+        "amount": "73.59"
+      },
+      {
+        "id": 4,
+        "date": "2026-03-04",
+        "description": "SAFEWAY STORE 0442",
+        "amount": "87.59"
+      },
+      {
+        "id": 5,
+        "date": "2026-03-05",
+        "description": "WHOLE FOODS MKT 221",
+        "amount": "77.19"
+      },
+      {
+        "id": 6,
+        "date": "2026-03-06",
+        "description": "KROGER #558",
+        "amount": "139.03"
+      },
+      {
+        "id": 7,
+        "date": "2026-03-07",
+        "description": "STARBUCKS #4521",
+        "amount": "43.31"
+      },
+      {
+        "id": 8,
+        "date": "2026-03-08",
+        "description": "CHIPOTLE MEXICAN GRILL",
+        "amount": "32.01"
+      },
+      {
+        "id": 9,
+        "date": "2026-03-10",
+        "description": "PANERA BREAD #221",
+        "amount": "42.59"
+      },
+      {
+        "id": 10,
+        "date": "2026-03-11",
+        "description": "DUNKIN #33221",
+        "amount": "44.31"
+      },
+      {
+        "id": 11,
+        "date": "2026-03-15",
+        "description": "local coffee roasters",
+        "amount": "110.71"
+      },
+      {
+        "id": 12,
+        "date": "2026-03-17",
+        "description": "uber eats",
+        "amount": "17.19"
+      },
+      {
+        "id": 13,
+        "date": "2026-03-20",
+        "description": "uber trip 88213",
+        "amount": "23.91"
+      },
+      {
+        "id": 14,
+        "date": "2026-03-24",
+        "description": "shell oil 57712 gas",
+        "amount": "98.59"
+      },
+      {
+        "id": 15,
+        "date": "2026-03-25",
+        "description": "metro transit autopay",
+        "amount": "26.99"
+      },
+      {
+        "id": 16,
+        "date": "2026-03-27",
+        "description": "UBER *TRIP HELP.UBER.COM",
+        "amount": "118.11"
+      },
+      {
+        "id": 17,
+        "date": "2026-03-28",
+        "description": "Uber Trip 22140",
+        "amount": "85.41"
+      },
+      {
+        "id": 18,
+        "date": "2026-03-30",
+        "description": "LYFT *RIDE 2214",
+        "amount": "41.29"
+      },
+      {
+        "id": 19,
+        "date": "2026-03-31",
+        "description": "STARBUCKS #4521",
+        "amount": "6.15"
+      },
+      {
+        "id": 20,
+        "date": "2026-04-02",
+        "description": "UBER EATS 4471",
+        "amount": "130.67"
+      }
+    ],
+    "sum_expense": "1248.32"
+  },
+  "sanity_check_s4": {
+    "canonical_may_bank_a": "1323.04",
+    "canonical_may_bank_b": "859.29",
+    "canonical_may_a_plus_b": "2182.33",
+    "naive_may_prototype_style": "17308.74",
+    "naive_minus_canonical": "15126.41",
+    "holds": true
+  }
+}
