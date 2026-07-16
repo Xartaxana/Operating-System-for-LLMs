@@ -365,7 +365,14 @@ def build_fact(payload: dict):
             "file_path": file_path if isinstance(file_path, str) else None,
         }
 
-    if tool_name == "Bash":
+    # STAGING_HQ доп. 2026-07-16 (форензика первой живой сессии, класс
+    # t-151 "enforcement тихо-успешен вне среды"): штабные Windows-
+    # сессии гоняют команды PowerShell-тулом, kit-среда (CLI-песочницы
+    # экзаменов) -- Bash-тулом. Без PowerShell здесь (и в matcher'е
+    # settings.json) verification-прогоны штаба НЕВИДИМЫ треку: три
+    # no-green-run блока main_gate при фактически зелёных прогонах,
+    # runs=[] в живом треке. Kit-версию не трогать -- её среда Bash.
+    if tool_name in ("Bash", "PowerShell"):
         tool_input = payload.get("tool_input") or {}
         command = tool_input.get("command") or ""
         if is_verification_command(command):

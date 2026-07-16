@@ -5,7 +5,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Task",
+        "matcher": "Task|Agent",
         "hooks": [
           { "type": "command", "command": "python tools/dispatch_gate.py" },
           { "type": "command", "command": "python tools/critic_snapshot.py" }
@@ -14,7 +14,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
         "hooks": [
           { "type": "command", "command": "python tools/dod_track.py" }
         ]

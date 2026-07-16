@@ -83,6 +83,31 @@ def test_build_fact_bash_verification_command_green():
     assert entry["command"] == "python -m pytest tools/ -q"
 
 
+def test_build_fact_powershell_verification_command_green():
+    # STAGING_HQ 2026-07-16: штабные Windows-сессии гоняют команды
+    # PowerShell-тулом (kit-среда -- Bash); без этой ветки прогоны
+    # штаба невидимы треку (форензика первой живой сессии: runs=[]
+    # при фактических зелёных прогонах, три no-green-run блока).
+    payload = {
+        "tool_name": "PowerShell",
+        "tool_input": {"command": "python -m pytest tools/ -q"},
+        "tool_response": {"stdout": "131 passed in 2.64s", "stderr": ""},
+    }
+    kind, entry = dod_track.build_fact(payload)
+    assert kind == "run"
+    assert entry["outcome"] == "green"
+    assert entry["tool_name"] == "PowerShell"
+
+
+def test_build_fact_powershell_non_verification_command_ignored():
+    payload = {
+        "tool_name": "PowerShell",
+        "tool_input": {"command": "Get-ChildItem tools"},
+        "tool_response": {"stdout": "ok", "stderr": ""},
+    }
+    assert dod_track.build_fact(payload) is None
+
+
 def test_build_fact_bash_verification_command_red_on_failure_text():
     payload = {
         "tool_name": "Bash",
