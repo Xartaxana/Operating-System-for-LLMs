@@ -38,11 +38,9 @@ reject-сигнал coding->Middle, R1 coding = 31 пара / 6 прогонов
 строки прогонов — docs/SHADOW_EVALUATION_LOG.md; статус двигает
 только калибровка (кандидат-вердикт rejected).
 
-MIDDLE-КАНДИДАТЫ: закрыто VERBATIM в
-docs/task_reports/2026-07-13_middle-candidates-judge-haiku.md +
-SHADOW_EVALUATION_LOG «MIDDLE-КАНДИДАТЫ» (повтор A 07-14 невалиден,
-defect_found ref=t-091). На калибровку ~07-18: override vs
-инфра-непригодность middle-oss (со статусным ходом coding->Middle),
+MIDDLE-КАНДИДАТЫ: закрыто — архив 2026-07-13_middle-candidates-…md
++ SHADOW_EVALUATION_LOG. На калибровку ~07-18: override vs
+инфра-непригодность middle-oss (статусный ход coding->Middle),
 C3/F-40, judge_pair без max_tokens.
 
 API-ОКНО ЗАКРЫТО 2026-07-13 ($170.44, прокси опущен, сессии на
@@ -57,13 +55,11 @@ docs/task_reports/2026-07-15_roadmap-closed-phases.md); текущие
 Действующие рамки: ТУЛКИТ-МОРАТОРИЙ D-0074 (правка toolkit/ —
 только проверенным батчем по слову оператора; порт-очередь ниже).
 
-Закрытое 07-11/12 — индекс docs/task_reports/README.md
-(единственный владелец). Живой остаток: t-066 (golden set 6/7,
-Q3 PASS) для чека 14в; «haiku сохраняем» в силе.
-
-ПРИОРИТЕТ ОПЕРАТОРА 07-11: текстовые задачи builder-groq по ходу
-(прокси опущен — на паузе). Прочее: draft-C и WP v0.2.1 — у
-оператора; старая очередь — on-touch/evidence-gated.
+Закрытое 07-11/12 — индекс docs/task_reports/README.md. Живой
+остаток: t-066 (golden set 6/7, Q3 PASS) для чека 14в; «haiku
+сохраняем» в силе. ПРИОРИТЕТ 07-11: текстовые задачи builder-groq
+по ходу (прокси на паузе); draft-C и WP v0.2.1 — у оператора;
+старая очередь — on-touch/evidence-gated.
 
 ## Routing MVP — LIVE on both deployments
 
