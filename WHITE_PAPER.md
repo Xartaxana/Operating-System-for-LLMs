@@ -514,6 +514,109 @@ a formula across a measurement pair translates field semantics,
 never copies arithmetic — and semantics are verified empirically on
 live rows, not by reading the sibling's code.
 
+## 6.3 The Deployment Exam: A/B-Testing the Policy Itself
+
+If the judge and the coordinator are supervised workers, the last
+unexamined component is the deployment as a whole. The savings
+report is observational — actual spend against counterfactual
+prices, with no control group — so it cannot answer the question
+that matters: **does the delegation policy help, hurt, or merely
+cost?** The deployment exam answers it by controlled comparison.
+The same model, the same harness and the same tasks run in up to
+three arms: **A** — the bare model in an empty project; **B** — a
+fresh install of our full deployment (policy, tiered agents,
+journal, gates — the template's boot tax honestly included, since
+"boot context is paid" is our own thesis); **C** — a strong user's
+cheap alternative: no infrastructure, just a one-line prompt asking
+the model to use subagent workflows. C is the arm that keeps B
+honest: if C ≈ B, we are hauling dead weight.
+
+Tasks are deliberately UNDERSPECIFIED, the way real requests are
+("write me a calculator"). A fully specified task is worker-class
+work — any competent model passes it — and would exercise nothing
+of the coordination layer the exam exists to measure: turning
+intent into a plan, choosing an architecture, deciding what to
+delegate and to whom, asking the user when the intent forks.
+Acceptance keys are pinned before the run at the level of INTENT
+(what the result must be able to do), never as an implementation
+spec; a key that silently encodes one interpretation of an
+ambiguous intent is itself a defect of the exam — a lesson learned
+when the operator overturned such a verdict. Arms never see the
+keys, and the run is not announced as an exam: working behavior is
+what is measured. Headless runs get a recorded prosthesis for the
+question channel — a proxy verdict from the deployment's top-tier
+model stands in for the unavailable user, marked as such.
+
+**Quality is a vector, not a pass/fail bit.** Early runs used
+binary acceptance plus a small rubric and found them blind exactly
+where it mattered: an arm can pass every checklist item while its
+cheapness is paid for by invisible quality debt. The current
+scorecard has five axes in [0,1]: adversarial correctness
+(pre-pinned probe battery, identical for all arms), completeness
+against intent, TEST QUALITY measured by mutation kill rate — seeded
+defects of pinned classes must make the arm's own tests fail (test
+COUNT proved meaningless: an arm with 37 tests killed fewer mutants
+than a sibling with 22), persistence of evidence (acceptance
+reproducible from files alone), and auditability. A weighted sum
+gives the scalar; **F = dollars per weighted quality point** is the
+single Rule-#1 number that lets a cheap-but-hollow arm and an
+expensive-but-solid arm be compared honestly. The vector did in
+practice what the rubric could not: it shrank a phantom 45% cost
+advantage of the no-infrastructure arm to ~10% by pricing in its
+zero tests and non-reproducible acceptance.
+
+The exam comes in two sizes. The SMALL exam — three ~10-minute
+tasks (a product from scratch, a survey of a foreign repository, a
+bug fix in existing code) — is cheap enough to run at every weekly
+calibration; since single runs are noisy (a factor-of-2.6 spread
+between identical configurations was observed), no single run
+decides anything: verdicts accrue to the MEDIAN across calibration
+runs. The LARGE exam — one multi-session project driven through
+sequential fresh sessions — runs at release cadence only. Runs are
+driven by an automated runner from a pinned manifest; sandbox
+composition is diffed against its declared sources (an assembly
+error that silently mixed two configurations was caught only by its
+effect and is now checked by construction); the measurement window
+itself is measured, not declared, after two "clean windows" proved
+to carry parallel load.
+
+What the exam series has decided so far — each verdict a recorded
+change to the deployment, none of them decided by intuition:
+
+- **The critic diet is closed.** A monotonic five-point trend
+  showed that every step of restricting the reviewer (by text, by a
+  call limit, by the full restricted bundle) made results both
+  worse and more expensive; the per-diff critic returned as
+  standard. What survived from the diet is its coordinator-style
+  savings: batched journaling and bulk acceptance.
+- **Text does not program a mid-tier coordinator; code does.** A
+  policy-text instruction to change review cadence was read and
+  ignored by the field session; the same rule as a hook held
+  perfectly (zero false blocks across the gate series). This
+  confirmed two-layer enforcement (§6.2) on the coordinator itself
+  and produced the policy-as-code gate set now active in the
+  deployment: dispatch hygiene, edit-without-green-run blocking for
+  workers AND for the coordinator's own main thread — the latter
+  because forensics showed the main session was the one surface no
+  subagent-scoped gate could see.
+- **Questions routed upward pay for themselves.** In the large
+  exam, the only arm that asked the user-proxy before choosing an
+  interpretation won on quality — the operator's verdicts went "who
+  asked, won" — turning the question-routing rule from etiquette
+  into a measured economic asset.
+- **The bare-prompt alternative is cheaper and structurally
+  hollow.** Arm C reliably underprices B on small tasks and
+  reliably ships without persistent defenses: zero tests on the
+  from-scratch task, surviving mutants on the bug-fix task, its
+  review quality a lucky property of one conversation rather than
+  an invariant of the process. On survey-class work its
+  impromptu fan-out was both slower and costlier than B's policy.
+  The honest current reading: on ~10-minute tasks the
+  infrastructure roughly breaks even on F and wins on quality
+  durability; its designed advantage is the regime where quality
+  debt compounds — which is exactly what the accruing median
+  exists to test.
+
 ## 7. Empirical Status (2026-07-13)
 
 What the evidence currently supports — with honest caveats: Shadow
