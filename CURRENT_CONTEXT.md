@@ -178,22 +178,12 @@ docs/task_reports/2026-07-15_roadmap-closed-phases.md); текущие
   прецедент 9**9**9) + самопроверка диспатчера (правило 11, 07-16).
   Мораторий D-0074 в силе: правок
   toolkit/ не делать — ось 7 отвечается «в очередь порта» сюда.
-- ЭКЗАМЕН ЭКОНОМИИ — СЕРИЯ №1–№4 ЗАКРЫТА, ВСЕ РЕШЕНИЯ ПРИНЯТЫ 07-15
-  (слово оператора: экзамен НЕ привязан к срокам калибровки;
-  калибровка — запускатель готового). Действует: табель 6б с весами
-  оператора (протокол + docs/QUALITY_MEASUREMENT_PROPOSALS), метод
-  метрики 4 запинован, headless-протез штатно, каденция
-  раннер+Sonnet (Fable — якорь мажорных), D-0077/правило 11а,
-  раннер t-126 и валидатор t-127 приняты (critic ACCEPT оба).
-  Разборы и матрица 2×2: docs/tasks/2026-07-15_economy-exam-runs3-4.md
-  (+ …run2.md); ГЛАВНЫЙ ВЫВОД (вызов тезису: на 10-мин задачах
-  заборы не окупаются по измеримому качеству — кроссовер ищем на
-  крупной задаче) — там же; VERBATIM закрытого повествования недели —
-  docs/task_reports/2026-07-15_exam-week-context-closures.md.
-  ЖИВЫЕ ОЧЕРЕДИ: window_load LIKE-исключение под-слагов + ассерт «id
-  без дефисов» (t-126, ось 2); миноры t-127 ЗАКРЫТЫ 07-15 — M1/M3
-  принятым t-129 (ветка replacement в calibration_counts +
-  регресс-локи), M2 гайданс маркера в CLAUDE.md коммитом Lead;
+- СЕРИЯ №1–№4 ЗАКРЫТА 07-15 (табель 6б, метод метрики 4, протез,
+  каденция раннер+Sonnet, D-0077; разборы —
+  docs/tasks/2026-07-15_economy-exam-runs3-4.md + …run2.md; VERBATIM
+  недели — docs/task_reports/2026-07-15_exam-week-context-closures.md).
+  ЖИВЫЕ ОЧЕРЕДИ: window_load LIKE-исключение + ассерт «id без
+  дефисов» (t-126, ось 2);
   AO3 — builder.md п.7-класс + правило 11а + ветка replaces_worker
   в их log_append.py и CLAUDE.md + DoD-батарея интерактивных
   поверхностей + самопроверка диспатчера (правило 11, 07-16) +
@@ -239,50 +229,29 @@ docs/task_reports/2026-07-15_roadmap-closed-phases.md); текущие
   docs/task_reports/2026-07-14_external-review-triage.md; t-095
   принят — находки 2/11). На калибровку: staleness цен + economic
   margin; порт-п.13; 7/10 не берём (триггеры в триаже).
-- КАНДИДАТ ПОВЕСТКИ КАЛИБРОВКИ ~07-18 (предложение Lead 2026-07-14,
-  слово оператора НЕ дано — решить на разборе): формализовать
-  скип-порог числом на данных чеков 19/21/22 (сейчас порога нет:
-  «~4 известных целей» у разведки, неписаное «правка меньше
-  диспатча» у builder-класса; экзаменные ~10 мин — про вал системы,
-  не про маржинальный скип). Также на разборе: находки прогона №1
-  экзамена (F-41/42/43), ступенька экономтренда после backfill
-  t-094 (+$57.5 к сайдчейнам — не рост расхода, коррекция учёта).
-  ПЛЮС (вопрос оператора 07-14 «что делаем с находками гигиены»):
-  первый штатный прогон чека 25 + разбор находок пилота t-106 —
-  ПРОМОУШЕН-КАНДИДАТ по D-0063 (evidence утечки есть: cd-префикс =
-  76% подозрительных вызовов окна, гл. нарушитель — сам Lead):
-  PreToolUse-хук против cd-префикса/2>&1 на Bash-вызовах; решает
-  Rule #1 на разборе (цена хука vs цена шума). Тем же разбором —
-  фикс-у-источника ad-hoc Bash-чтений (Read/Grep вместо Bash) и
-  разноформенного pytest.
+- КАНДИДАТЫ ПОВЕСТКИ КАЛИБРОВКИ ~07-18 (слово оператора не дано —
+  решать на разборе): скип-порог числом (чеки 19/21/22); находки
+  №1 (F-41/42/43); ступенька экономтренда после backfill t-094
+  (коррекция учёта, не рост); первый прогон чека 25 + находки
+  t-106 — промоушен-кандидат PreToolUse-хук против cd-префикса/2>&1
+  (76% подозрительных вызовов, гл. нарушитель Lead; Rule #1 решает);
+  фикс-у-источника ad-hoc Bash-чтений и разноформенного pytest.
+  ПЛЮС от 07-15/16: рецидивы Lead (F-30 числа-до-замера ×2,
+  append-якорь ×4, python-c ×2 — чек 25); счётчик возвратов
+  воркеров; «Sonnet не держит текстом» в D-0058-разбор; синтетика
+  окон экзаменов №5–№10б (D-0075).
 - ПИЛОТ OPUS-ДИЗАЙНЕРА открыт 07-14:
   docs/tasks/2026-07-14_opus-designer-pilot.md — N≈5 спек
   чередованием до ~07-18; разбор — калибровка (чек 0);
   designer=estimated; пометка-пилот в правиле 2.
-- РЕТРО-БЭКЛОГ КАЛИБРОВКИ: docs/RETRO_PATTERNS.md (триггеры сверяет
-  чек 0). UI-witness внедрён (протокол экзамена + политика AO3
-  0e08a8e); в AO3 живым UI-диспатчем ещё не прожит — первый их
-  UI-диспатч = первая проба. Три F-41-стейла 07-14 — копилка чека 24.
+- РЕТРО-БЭКЛОГ: docs/RETRO_PATTERNS.md (чек 0); UI-witness в AO3 не
+  прожит — первый их UI-диспатч = проба; F-41-стейлы — чек 24.
 - AO3-ПОРТ D-0076 — ЗАКРЫТ 07-14 (t-100, critic ACCEPT, AO3-коммит
   1cfb8f8 запушен). Живой остаток по построению: порт-событие в ИХ
   журнале пишет их сессия (D-0060).
-- Evidence-gated residuals (каждый — на своём триггере): форензика
-  промптов workflow-агентов безжурнальных плеч экзамена (семантика
-  ретраев C; ~30 транскриптов, haiku-класс) — ТРИГГЕР: проблема с
-  пониманием статистики экзаменов на разборе (слово оператора
-  07-15: «оставь как вариант на будущее»); provider
-  column in sqlite_logger (N1/N2 root, axis 2); requests(model,ts)
-  index (только на latency evidence);
-  usage_report.py loud-fail on locked cc_usage DB (axis-2 candidate,
-  on evidence); t-018 wall admission-math (candidate on calibration
-  evidence, journal row 404); structured worker-report frames
-  (deferred until dispatch volume); builder-groq = CANDIDATE
-  API-contour builder binding (next text-shaped cycles dispatch
-  there; self-judging caveat pinned in config.yaml); F-17 stage 3
-  PreToolUse context-budget hook (data-gated: only if calibration
-  checks 10/11 show the discipline leaks); per-file boot-budget
-  breakdown в session-handoff чек 4 / SessionStart hook (on next
-  touch, OpenClaw prior art).
+- Evidence-gated residuals — 9 пунктов, каждый на своём триггере:
+  полный список VERBATIM —
+  docs/task_reports/2026-07-16_evidence-gated-residuals.md.
 - Eval plan stage 2 — В РАБОТЕ (цикл №1 07-13, конвейер d90cd03).
   Остаток: minimum-n/pass^k в Update Rules + numeric agreement в
   JUDGE_CALIBRATION_PROTOCOL (пороги с калибровки). NOT taken:
@@ -293,17 +262,12 @@ docs/task_reports/2026-07-15_roadmap-closed-phases.md); текущие
   SQLite/crash recovery, supply-chain tags, WXP; OpenClaw: channels,
   delegate identity, compaction/memory, utilityModel. Обоснования —
   RELATED_WORK «OpenClaw survey» + evening-closures.
-- Habr/LinkedIn (t-036): статья оператора вычитана 07-14 (docx
-  сессии не правят); EN-перевод: D:\Improving_AI\How I keep an eye
-  on AI (EN).docx; денежная фраза подтверждена (КАССА выше). NEXT:
-  публикация — слово оператора. Материалы:
-  docs/ARTICLE_BRIEF_2026-07-10.md + draft-{A,B,C} + журнал t-036.
-- White Paper: v0.2.1 написан 2026-07-13 по слову оператора («пиши
-  v0.2.1, ревью сделаю сразу по ней») — evidence-апдейт 07-11..13:
-  калибровка, тулкит v0.1.0 + обе установки, платный источник и
-  4х-reject coding->Middle, C3=0.11% прямым замером, гейт-решение
-  Phase 2, D-0069..75, F-37/38. AWAITING Architect review v0.2.1
-  (цель ревью смещена с v0.2.0 её же словом).
+- Habr/LinkedIn (t-036): статья вычитана 07-14, EN-перевод готов;
+  NEXT: публикация — слово оператора (материалы —
+  docs/ARTICLE_BRIEF_2026-07-10.md + draft-{A,B,C}).
+- White Paper v0.2.1 написан 07-13 — AWAITING Architect review
+  (кандидат-апдейт v0.2.2: экзамены №5–№10б, policy-as-code,
+  D-0076..79 — после ревью).
 
 ## Environment Notes (this machine)
 

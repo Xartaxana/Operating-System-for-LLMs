@@ -164,3 +164,4 @@ Evidence is never deleted, only relocated.
 
 - [2026-07-15_exam-week-context-closures.md](2026-07-15_exam-week-context-closures.md) — VERBATIM закрытого экзаменационного повествования недели из CURRENT_CONTEXT (boot-diet раунд 10): прогоны №2–№4 с вариациями, декомпозиция удвоения, D-0077-генезис, главный вывод и решения 07-15; полные разборы — docs/tasks/*economy-exam*, протокол Runs log.
 - [2026-07-15_roadmap-closed-phases.md](2026-07-15_roadmap-closed-phases.md) — VERBATIM закрытых фаз ROADMAP.md (boot-diet раунд 11, D-0078): Phase 0, Phase 1, Phase 1.5 (с блоком закрытия 07-11), Phase 3 (с блоком закрытия 07-12); в ROADMAP.md — указатели-статусы, живые гейты Phase 2 остались на месте. Постоянный архивный дом закрытых фаз: будущие закрытия едут сюда же.
+- [2026-07-16 evidence-gated residuals](2026-07-16_evidence-gated-residuals.md) — вынос очереди триггер-остатков при handoff-дожиме
