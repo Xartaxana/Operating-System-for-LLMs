@@ -74,6 +74,39 @@
     event/task_id, какая проверка упала. Крэш валидатора (исключение,
     не FAIL валидации) -> exit 2 с трейсбеком (fail-closed, как
     mechanism_gate: cм. main()).
+
+STANDALONE-режим (t-151, 2026-07-16): фикс класса «enforcement врёт ОК
+вне своей среды» -- прецедент трижды подтверждён (экзамены №5-B/№6-B/
+№8-t3, docs/tasks/2026-07-16_policy-as-code-design.md): в не-git
+песочнице is_journal_staged() раньше молча возвращала False (git-вызов
+падал/возвращал ошибку, но её returncode не проверялся -- пустой stdout
+неотличим от «git ответил: ничего не staged»), из-за чего _main() тихо
+делал exit 0 БЕЗ единой проверки -- ложный «валиден».
+
+ A. Автодетект: _git_available() отдельным вызовом (`git rev-parse
+    --is-inside-work-tree`) проверяет, что git-плюмбинг РЕАЛЬНО ответил
+    (репо существует, бинарник найден, returncode==0). Это НЕ трогает
+    is_journal_staged() -- штатный git-путь (репо есть, работает, но
+    ИМЕННО этот файл не staged в текущем коммите) остаётся, как был,
+    молчаливым exit 0 (легитимный no-op, а не баг: нечего проверять в
+    ЭТОМ коммите -- нарушение п.4 спеки t-151, главный риск правки,
+    было бы менять этот путь).
+ B. git недоступен (не репо / бинарник отсутствует) ИЛИ явный флаг
+    --standalone -> _run_standalone(): читает JOURNAL_PATH ПРЯМО с
+    диска (не через git show), печатает громкую строку "STANDALONE
+    MODE (git недоступен): проверен весь файл, N строк" ПЕРЕД любым
+    exit-кодом, затем валидирует ВСЕ строки файла через тот же decide()
+    -- append-only тривиально пропускается (decide(text, "", now):
+    check_append_only против пустого HEAD проходит вакуумно, ни одна
+    строка старого файла не теряется на пустом списке), с явной
+    строкой "standalone: append-only не проверяем, нет git-базы"
+    (append-only в принципе непроверяем без HEAD -- не то же самое,
+    что «не проверяли»). Файла нет вовсе -> отдельная честная строка
+    "нет файла журнала" + exit 0 (это факт о среде, не no-op: строка
+    напечатана, проверка признана невозможной явно, а не молча).
+ C. decide() и validate_new_lines() НЕ ИЗМЕНЕНЫ -- standalone
+    переиспользует их как есть (нулевой риск для существующего
+    покрытия и для штатного pre-commit пути).
 """
 from __future__ import annotations
 
@@ -83,6 +116,7 @@ import re
 import subprocess
 import sys
 import traceback
+from pathlib import Path
 
 JOURNAL_PATH = "logs/routing-log.jsonl"
 
@@ -463,13 +497,62 @@ def get_head_text(journal_path: str = JOURNAL_PATH) -> str:
     return proc.stdout if proc.returncode == 0 else ""
 
 
+def _git_available() -> bool:
+    """t-151 правило 1 (автодетект): True когда git-плюмбинг РЕАЛЬНО
+    ответил -- отдельный однозначный вызов (`rev-parse
+    --is-inside-work-tree`), а не побочный вывод is_journal_staged()
+    (её returncode никогда не проверялся -- корень старого no-op-бага:
+    "git упал" и "git ответил: пусто" давали неотличимый пустой stdout).
+    Намеренно НЕ переиспользует is_journal_staged()/её git-вызов --
+    отдельный маленький вызов, чтобы не трогать ни байта в протестированной
+    штатной функции (регресс-риск п.4 спеки t-151)."""
+    try:
+        proc = _git("rev-parse", "--is-inside-work-tree")
+    except (FileNotFoundError, OSError):
+        return False
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
+
+
+def _run_standalone(now: datetime.datetime, journal_path: str = JOURNAL_PATH) -> int:
+    """t-151 правило 1/2: standalone-режим -- читает journal_path ПРЯМО
+    с диска (git может быть вообще недоступен) и валидирует ВЕСЬ файл
+    всеми проверками decide(), не требующими git-базы. decide(text, "",
+    now) уже ровно это делает (append-only против пустого HEAD проходит
+    вакуумно -- см. check_append_only; validate_new_lines видит КАЖДУЮ
+    строку файла как "новую") -- переиспользуем decide() без изменений,
+    не заводим вторую копию логики валидации. Громкая строка гарантирует:
+    тихий exit 0 без единой проверки невозможен ни на одном под-пути --
+    либо честное "нет файла журнала", либо заголовок STANDALONE MODE +
+    N строк печатается ПЕРЕД любым exit 0/1."""
+    path = Path(journal_path)
+    if not path.exists():
+        print(f"journal_validator: STANDALONE MODE -- нет файла журнала ({journal_path}), "
+              "проверять нечего")
+        return 0
+    text = path.read_text(encoding="utf-8")
+    lines = split_lines(text)
+    print(f"STANDALONE MODE (git недоступен): проверен весь файл, {len(lines)} строк")
+    print("standalone: append-only не проверяем, нет git-базы")
+    code, violations = decide(text, "", now)
+    if code:
+        print(f"journal_validator: {journal_path} FAILED validation (standalone):", file=sys.stderr)
+        for v in violations:
+            print(f"  - {v}", file=sys.stderr)
+    return code
+
+
 def _main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    now = datetime.datetime.now()
+    if "--standalone" in argv or not _git_available():
+        return _run_standalone(now)
     if not is_journal_staged():
-        return 0  # правило: файл не staged -> молча exit 0
+        return 0  # правило: файл не staged В РАБОЧЕМ git-репо -> молча exit 0
+        # (легитимный no-op -- нечего проверять в этом коммите; git-контекст
+        # ПРИ ЭТОМ доступен и работает, поэтому это НЕ путь standalone --
+        # см. _git_available() выше и п.4 спеки t-151: этот путь не меняется)
     staged_text = get_staged_text()
     head_text = get_head_text()
-    now = datetime.datetime.now()
     code, violations = decide(staged_text, head_text, now)
     if code:
         print(f"journal_validator: {JOURNAL_PATH} FAILED validation:", file=sys.stderr)

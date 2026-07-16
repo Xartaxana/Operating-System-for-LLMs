@@ -603,3 +603,154 @@ def test_main_exits_one_on_real_staged_violation(tmp_path, capsys, monkeypatch):
     err = capsys.readouterr().err
     assert "FAILED validation" in err
     assert "новизна task_id" in err
+
+
+# ---- t-151: STANDALONE mode -- no silent exit-0-without-a-check outside git ----
+#
+# Precedent (docs/tasks/2026-07-16_policy-as-code-design.md, exams #5-B/#6-B/
+# #8-t3): in a non-git sandbox, is_journal_staged() used to swallow git's
+# failure (nonzero returncode never checked) and main() exited 0 silently,
+# with zero lines validated -- a false "valid". These tests lock the fix:
+# (a) auto-detect in a directory that is NOT a git repo at all validates the
+# WHOLE file and can fail; (b) --standalone forces the same path even inside
+# a working git repo; (c) a missing journal file gets an honest string, not
+# a bare 0; (d) the existing git-repo "nothing staged" no-op (item 4 of the
+# spec -- explicitly must not change) stays silent, proven with a violation
+# actually present on disk to show it is a real, load-bearing case, not a
+# vacuous one.
+
+def _write_journal(root: Path, text: str) -> None:
+    (root / "logs").mkdir(parents=True, exist_ok=True)
+    (root / "logs" / "routing-log.jsonl").write_text(text, encoding="utf-8")
+
+
+def test_standalone_autodetect_not_a_git_repo_clean_passes(tmp_path, capsys, monkeypatch):
+    # tmp_path is deliberately NEVER `git init`-ed -- this is the exact
+    # sandbox shape from the exam precedent.
+    clean_text = HEAD_TEXT + _line(event="delegated", ts="2026-07-10T08:10:00", model="sonnet",
+                                    task_id="t-002", notes="second task, clean") + "\n"
+    _write_journal(tmp_path, clean_text)
+    monkeypatch.chdir(tmp_path)
+    code = jv.main([])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "STANDALONE MODE" in out
+    assert "проверен весь файл, 2 строк" in out
+
+
+def test_standalone_autodetect_not_a_git_repo_violations_fail(tmp_path, capsys, monkeypatch):
+    # Same non-git sandbox, but the journal actually carries the precedent's
+    # class of defect (accepted missing 'category') -- must be CAUGHT, not
+    # silently passed.
+    bad_text = HEAD_TEXT + _line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
+                                  model="sonnet", task_id="t-001", by="opus", witness="w",
+                                  category=None, notes="accepted with null category") + "\n"
+    _write_journal(tmp_path, bad_text)
+    monkeypatch.chdir(tmp_path)
+    code = jv.main([])
+    assert code == 1
+    captured = capsys.readouterr()
+    out, err = captured.out, captured.err
+    assert "STANDALONE MODE" in out
+    assert "append-only не проверяем" in out
+    assert "FAILED validation (standalone)" in err
+    assert "category" in err
+
+
+def test_standalone_autodetect_not_a_git_repo_git_binary_missing_too(tmp_path, capsys, monkeypatch):
+    # Belt-and-braces: even if git IS on PATH but the specific check used by
+    # _git_available() blows up (simulated FileNotFoundError, e.g. git
+    # genuinely absent from the sandbox), standalone must still engage
+    # rather than propagate the exception or fall through to a silent 0.
+    clean_text = HEAD_TEXT
+    _write_journal(tmp_path, clean_text)
+    monkeypatch.chdir(tmp_path)
+
+    def _boom(*args, **kwargs):
+        raise FileNotFoundError("git: command not found")
+
+    monkeypatch.setattr(jv.subprocess, "run", _boom)
+    code = jv.main([])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "STANDALONE MODE" in out
+
+
+def test_standalone_no_journal_file_is_honest_not_silent(tmp_path, capsys, monkeypatch):
+    # No logs/ directory at all -- not the precedent's failure mode, but the
+    # DoD explicitly calls out this must be an honest printed fact, not a
+    # bare, unexplained exit 0.
+    monkeypatch.chdir(tmp_path)
+    code = jv.main([])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "нет файла журнала" in out
+
+
+def test_standalone_forced_flag_overrides_inside_real_git_repo(tmp_path, capsys, monkeypatch):
+    root = tmp_path
+    _init_repo(root)
+    _write_journal(root, HEAD_TEXT)
+    _git(root, "add", "logs/routing-log.jsonl")
+    _git(root, "commit", "-q", "-m", "seed journal")
+    # Modify the file on disk WITHOUT staging it -- normal mode would ignore
+    # this entirely (see regression test below). --standalone must still
+    # catch it, reading straight off disk.
+    bad_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-999", model="sonnet",
+                      notes="wrong novelty, unstaged")
+    (root / "logs" / "routing-log.jsonl").write_text(HEAD_TEXT + bad_line + "\n", encoding="utf-8")
+    monkeypatch.chdir(root)
+    code = jv.main(["--standalone"])
+    assert code == 1
+    captured = capsys.readouterr()
+    out, err = captured.out, captured.err
+    assert "STANDALONE MODE" in out
+    assert "новизна task_id" in err
+
+
+def test_standalone_forced_flag_clean_journal_passes_in_real_git_repo(tmp_path, capsys, monkeypatch):
+    root = tmp_path
+    _init_repo(root)
+    _write_journal(root, HEAD_TEXT)
+    _git(root, "add", "logs/routing-log.jsonl")
+    _git(root, "commit", "-q", "-m", "seed journal")
+    monkeypatch.chdir(root)
+    code = jv.main(["--standalone"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "STANDALONE MODE" in out
+    assert "проверен весь файл, 1 строк" in out
+
+
+def test_git_repo_nothing_staged_stays_silent_zero_even_with_violation_on_disk(tmp_path, capsys, monkeypatch):
+    # Regression lock for spec item 4: a REAL git repo where git works fine
+    # but the journal simply isn't staged in THIS commit must NOT switch to
+    # standalone just because "nothing is staged" -- that is the existing,
+    # explicitly-protected no-op (nothing to check in this commit, not "git
+    # is unavailable"). Proven with an actual violation sitting unstaged on
+    # disk, so this is not a vacuous pass.
+    root = tmp_path
+    _init_repo(root)
+    _write_journal(root, HEAD_TEXT)
+    _git(root, "add", "logs/routing-log.jsonl")
+    _git(root, "commit", "-q", "-m", "seed journal")
+    bad_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-999", model="sonnet",
+                      notes="wrong novelty, unstaged, no --standalone")
+    (root / "logs" / "routing-log.jsonl").write_text(HEAD_TEXT + bad_line + "\n", encoding="utf-8")
+    # deliberately NOT `git add`-ed
+    monkeypatch.chdir(root)
+    code = jv.main([])
+    assert code == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_git_available_helper_true_in_real_repo(tmp_path, monkeypatch):
+    root = tmp_path
+    _init_repo(root)
+    monkeypatch.chdir(root)
+    assert jv._git_available() is True
+
+
+def test_git_available_helper_false_outside_repo(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # never git-init'ed
+    assert jv._git_available() is False
