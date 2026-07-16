@@ -423,6 +423,21 @@ D:\AO3_tests), cc_usage через tools/usage_report.py, git-история
     cd-префикс = 76% подозрительных вызовов, 2 heredoc-аппенда
     журнала, 3 MASKED-правила).
 
+26. **Policy-as-code гейты штаба (порт t-159, активация 2026-07-16).**
+    Зарегистрированный 10(в)-детектор отказа гейтов
+    dispatch_gate/critic_snapshot/dod_track/dod_gate/main_gate:
+    (а) ПОСТАНОВКА — .claude/settings.json содержит все пять хуков
+    (PreToolUse Task ×2, PostToolUse Edit|Write|MultiEdit|
+    NotebookEdit|Bash, SubagentStop, Stop); (б) ЖИВОСТЬ — при живых
+    диспатчах окна .claude/dod_track/<session>.json непусты и
+    critic_snapshot.json обновлялся; молчание ВСЕХ гейтов при живых
+    диспатчах = отказ постановки (хук слетел/переименован), не
+    «нарушений не было»; (в) БЛОКИ — события gate_log
+    (blocked/skipped_after_2_blocks, ключ gate) сверяются с фактами
+    сессий: ложный блок = находка о гейте (экзамены №9–№10б: 0
+    ложных блоков / 4 прогона — baseline), скип-предохранитель без
+    последующего зелёного прогона = находка о сессии.
+
 ## Завершение прогона
 
 Статусы DELEGATION_TABLE.md двигаются только по этим данным
