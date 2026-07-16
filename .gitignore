@@ -6,3 +6,7 @@ gateway/*.log
 .env
 gateway/.env
 .pytest_cache/
+# рабочие данные policy-as-code гейтов (t-161): пер-сессионный трек
+# правка/прогон и снимок критика - эфемерные, не для истории
+.claude/dod_track/
+.claude/critic_snapshot.json
