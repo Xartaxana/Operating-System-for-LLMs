@@ -152,6 +152,55 @@ def test_validate_manifest_unknown_layout_raises():
         validate_manifest(manifest)
 
 
+def test_validate_manifest_arm_template_override_one_field_only_raises():
+    manifest = {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+        "arms": [{"name": "B", "layout": "template", "template_git": "alt-repo"}],
+        "tasks": [{"id": "t1", "text": "hi"}],
+        "order": {"t1": ["B"]},
+    }
+    with pytest.raises(ValueError, match="template_git.*template_ref"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_arm_template_override_ref_only_raises():
+    manifest = {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+        "arms": [{"name": "B", "layout": "template", "template_ref": "deadbeef"}],
+        "tasks": [{"id": "t1", "text": "hi"}],
+        "order": {"t1": ["B"]},
+    }
+    with pytest.raises(ValueError, match="template_git.*template_ref"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_arm_template_override_both_fields_ok():
+    manifest = {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+        "arms": [
+            {"name": "B", "layout": "template", "template_git": "alt-repo", "template_ref": "deadbeef"},
+        ],
+        "tasks": [{"id": "t1", "text": "hi"}],
+        "order": {"t1": ["B"]},
+    }
+    validate_manifest(manifest)  # must not raise
+
+
 def test_validate_manifest_order_references_unknown_arm_raises():
     manifest = {
         "polygon_root": "x",
@@ -344,6 +393,199 @@ def test_prepare_dry_run_has_no_side_effects(tmp_path):
 
     polygon = Path(manifest["polygon_root"])
     assert not polygon.exists()
+
+
+# ---------------------------------------------------------------------------
+# 3b. per-arm template override (t-141): an arm with layout=='template'
+#     may carry its own template_git/template_ref, overriding
+#     manifest.src's default for THAT arm only -- comparing two
+#     policy-kit variants (two different git repos) in one exam run.
+# ---------------------------------------------------------------------------
+
+
+def test_prepare_per_arm_template_override_lays_different_content(tmp_path):
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+
+    default_template_repo = tmp_path / "fake_template_default"
+    default_template_sha = _make_local_repo(default_template_repo, {
+        "README.md": "DEFAULT TEMPLATE README",
+    })
+
+    alt_template_repo = tmp_path / "fake_template_alt"
+    alt_template_sha = _make_local_repo(alt_template_repo, {
+        "README.md": "ALT TEMPLATE README",
+    })
+
+    fixture_dir = tmp_path / "todo_fixture"
+    fixture_dir.mkdir()
+    (fixture_dir / "todo.py").write_text("# todo cli", encoding="utf-8")
+
+    manifest = {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": str(click_repo),
+            "click_pin": click_sha,
+            "template_git": str(default_template_repo),
+            "template_ref": default_template_sha,
+            "fixture_dir": str(fixture_dir),
+        },
+        "model": "sonnet",
+        "parallel": 1,
+        "arms": [
+            {"name": "B", "layout": "template", "prefix": "", "suffix": ""},
+            {
+                "name": "D", "layout": "template", "prefix": "", "suffix": "",
+                "template_git": str(alt_template_repo),
+                "template_ref": alt_template_sha,
+            },
+        ],
+        "tasks": [{"id": "t1", "needs": [], "text": "hi"}],
+        "order": {"t1": ["B", "D"]},
+    }
+    validate_manifest(manifest)
+    actions = prepare(manifest, dry_run=False)
+
+    polygon = Path(manifest["polygon_root"])
+    # B: no override -> default template source.
+    assert (polygon / "B" / "t1" / "README.md").read_text(encoding="utf-8") == "DEFAULT TEMPLATE README"
+    # D: per-arm override -> DIFFERENT content from the alt source, not
+    # the default -- proves the override actually reaches this arm's
+    # sandbox rather than falling back silently.
+    assert (polygon / "D" / "t1" / "README.md").read_text(encoding="utf-8") == "ALT TEMPLATE README"
+
+    # Two separate _src clones: default at _src/template, override at
+    # _src/template_<armname> (existing-style naming extension).
+    assert (polygon / "_src" / "template" / "README.md").read_text(encoding="utf-8") == "DEFAULT TEMPLATE README"
+    assert (polygon / "_src" / "template_D" / "README.md").read_text(encoding="utf-8") == "ALT TEMPLATE README"
+    # _src clones keep their .git (only sandbox copies strip it).
+    assert (polygon / "_src" / "template" / ".git").exists()
+    assert (polygon / "_src" / "template_D" / ".git").exists()
+
+    # VERIFY line emitted for EACH source (default and override).
+    verify_lines = [a for a in actions if a.startswith("VERIFY")]
+    verify_names = {line.split(":")[0].split()[1] for line in verify_lines}
+    assert "template" in verify_names
+    assert "template_D" in verify_names
+    assert any(default_template_sha in line for line in verify_lines if line.startswith("VERIFY template:"))
+    assert any(alt_template_sha in line for line in verify_lines if line.startswith("VERIFY template_D:"))
+
+
+def test_prepare_per_arm_template_override_shares_clone_for_identical_source(tmp_path):
+    """Two arms overriding to the IDENTICAL (git, ref) pair share ONE
+    clone -- 'for each unique source, own clone' (spec point 2), not
+    one clone per arm."""
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    default_template_repo = tmp_path / "fake_template_default"
+    default_template_sha = _make_local_repo(default_template_repo, {"README.md": "DEFAULT"})
+    alt_template_repo = tmp_path / "fake_template_alt"
+    alt_template_sha = _make_local_repo(alt_template_repo, {"README.md": "ALT"})
+    fixture_dir = tmp_path / "todo_fixture"
+    fixture_dir.mkdir()
+
+    manifest = {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": str(click_repo), "click_pin": click_sha,
+            "template_git": str(default_template_repo), "template_ref": default_template_sha,
+            "fixture_dir": str(fixture_dir),
+        },
+        "model": "sonnet",
+        "arms": [
+            {
+                "name": "D1", "layout": "template",
+                "template_git": str(alt_template_repo), "template_ref": alt_template_sha,
+            },
+            {
+                "name": "D2", "layout": "template",
+                "template_git": str(alt_template_repo), "template_ref": alt_template_sha,
+            },
+        ],
+        "tasks": [{"id": "t1", "needs": [], "text": "hi"}],
+        "order": {"t1": ["D1", "D2"]},
+    }
+    validate_manifest(manifest)
+    actions = prepare(manifest, dry_run=False)
+
+    polygon = Path(manifest["polygon_root"])
+    # Both arms' sandboxes get the alt content.
+    assert (polygon / "D1" / "t1" / "README.md").read_text(encoding="utf-8") == "ALT"
+    assert (polygon / "D2" / "t1" / "README.md").read_text(encoding="utf-8") == "ALT"
+    # Only ONE extra _src clone for the shared override source (keyed
+    # off the first arm, D1) -- D2 does not get its own _src/template_D2.
+    assert (polygon / "_src" / "template_D1").exists()
+    assert not (polygon / "_src" / "template_D2").exists()
+
+    verify_lines = [a for a in actions if a.startswith("VERIFY")]
+    verify_names = [line.split(":")[0].split()[1] for line in verify_lines]
+    assert verify_names.count("template_D1") == 1
+    assert "template_D2" not in verify_names
+
+
+def test_prepare_per_arm_template_override_dry_run_lists_both_sources(tmp_path):
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    default_template_repo = tmp_path / "fake_template_default"
+    default_template_sha = _make_local_repo(default_template_repo, {"README.md": "DEFAULT"})
+    alt_template_repo = tmp_path / "fake_template_alt"
+    alt_template_sha = _make_local_repo(alt_template_repo, {"README.md": "ALT"})
+    fixture_dir = tmp_path / "todo_fixture"
+    fixture_dir.mkdir()
+
+    manifest = {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": str(click_repo), "click_pin": click_sha,
+            "template_git": str(default_template_repo), "template_ref": default_template_sha,
+            "fixture_dir": str(fixture_dir),
+        },
+        "model": "sonnet",
+        "arms": [
+            {"name": "B", "layout": "template"},
+            {
+                "name": "D", "layout": "template",
+                "template_git": str(alt_template_repo), "template_ref": alt_template_sha,
+            },
+        ],
+        "tasks": [{"id": "t1", "needs": [], "text": "hi"}],
+        "order": {"t1": ["B", "D"]},
+    }
+    validate_manifest(manifest)
+    actions = prepare(manifest, dry_run=True)
+
+    polygon = Path(manifest["polygon_root"])
+    assert not polygon.exists()  # dry-run: no side effects (existing guarantee)
+    dry_lines = [a for a in actions if "ensure" in a]
+    assert any(str(polygon / "_src" / "template") in a for a in dry_lines)
+    assert any(str(polygon / "_src" / "template_D") in a for a in dry_lines)
+
+
+def test_prepare_backward_compatible_no_override_still_uses_single_default_src(tmp_path):
+    """Backward compatibility (DoD): a manifest with NO per-arm
+    overrides lays down template content exactly as before -- single
+    _src/template clone, no stray template_<armname> dirs, VERIFY
+    'template' line still present."""
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    template_repo = tmp_path / "fake_template"
+    template_sha = _make_local_repo(template_repo, {"README.md": "TEMPLATE README"})
+    fixture_dir = tmp_path / "todo_fixture"
+    fixture_dir.mkdir()
+    (fixture_dir / "todo.py").write_text("# todo cli", encoding="utf-8")
+    (fixture_dir / "README.md").write_text("FIXTURE README", encoding="utf-8")
+
+    manifest = _base_manifest(tmp_path, click_repo, click_sha, template_repo, template_sha, fixture_dir)
+    actions = prepare(manifest, dry_run=False)
+
+    polygon = Path(manifest["polygon_root"])
+    assert (polygon / "_src" / "template").exists()
+    src_dirs = {p.name for p in (polygon / "_src").iterdir()}
+    assert src_dirs == {"click", "template"}  # no template_<arm> dirs appear
+
+    verify_lines = [a for a in actions if a.startswith("VERIFY")]
+    assert any(line.startswith("VERIFY template:") for line in verify_lines)
+    assert any(line.startswith("VERIFY click:") for line in verify_lines)
 
 
 # ---------------------------------------------------------------------------

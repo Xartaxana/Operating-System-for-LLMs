@@ -111,6 +111,14 @@ def validate_manifest(manifest):
                 f"unknown layout {arm.get('layout')!r} for arm {arm.get('name')!r} "
                 f"(known layouts: {sorted(KNOWN_LAYOUTS)})"
             )
+        has_template_git = "template_git" in arm
+        has_template_ref = "template_ref" in arm
+        if has_template_git != has_template_ref:
+            raise ValueError(
+                f"arm {arm.get('name')!r} has 'template_git' without 'template_ref' "
+                f"(or vice versa) -- per-arm template override needs both fields "
+                f"together or neither (falls back to manifest.src.template_*): {arm}"
+            )
         arm_names.add(arm["name"])
 
     if not manifest["tasks"]:
@@ -343,6 +351,51 @@ def _relative_file_set(root):
     return files
 
 
+def _template_source_map(manifest):
+    """Resolves every template source the manifest references (t-141:
+    per-arm template_git/template_ref override) into two dicts:
+
+    - `sources`: dest Path (under polygon_root/_src) -> (git, ref) for
+      every UNIQUE template source -- the manifest.src default PLUS
+      one entry per DISTINCT (template_git, template_ref) override
+      pair carried by an arm with layout=='template'. Two arms
+      overriding to the identical (git, ref) pair share one dest (one
+      clone), matching the spec's "for each unique source, own clone".
+      The default is always included, even if no arm ends up using it
+      (matches prepare()'s pre-t-141 behavior of unconditionally
+      ensuring _src/template).
+    - `arm_template_dest`: arm name -> the dest Path that arm's
+      layout=='template' copy should read from (only populated for
+      layout=='template' arms; an override on a non-template-layout
+      arm is accepted by validate_manifest but never resolved into a
+      clone here since layout=='empty' never reads a template source).
+
+    Naming (existing-style extension): default dest is _src/template
+    (unchanged); an override's dest is _src/template_<armname>, keyed
+    off the FIRST arm that introduces that distinct source."""
+    polygon_root = Path(manifest["polygon_root"])
+    src = manifest["src"]
+    default_source = (src["template_git"], src["template_ref"])
+    default_dest = polygon_root / "_src" / "template"
+
+    dest_by_source = {default_source: default_dest}
+    arm_template_dest = {}
+
+    for arm in manifest["arms"]:
+        if arm.get("layout") != "template":
+            continue
+        if arm.get("template_git") and arm.get("template_ref"):
+            key = (arm["template_git"], arm["template_ref"])
+        else:
+            key = default_source
+        if key not in dest_by_source:
+            dest_by_source[key] = polygon_root / "_src" / f"template_{arm['name']}"
+        arm_template_dest[arm["name"]] = dest_by_source[key]
+
+    sources = {dest: source for source, dest in dest_by_source.items()}
+    return sources, arm_template_dest
+
+
 def prepare(manifest, dry_run=False):
     """Idempotent polygon assembly: _src/ clones (pinned), then for
     every (task, arm) sandbox: template-layout base copy (git-free)
@@ -352,20 +405,32 @@ def prepare(manifest, dry_run=False):
     <polygon_root>/baseline_manifest.json (non-dry-run only) recording
     each sandbox's file set right after assembly, consumed by
     collect()'s composition diff. Returns the list of action strings
-    (also printed)."""
+    (also printed).
+
+    t-141: an arm with layout=='template' may carry its own
+    template_git/template_ref, overriding manifest.src's default for
+    THAT arm only (comparing two policy-kit variants in one exam run).
+    _template_source_map() resolves the set of unique template sources
+    referenced (default plus every distinct override) -- prepare()
+    clones/pins each of them under its own _src/template[_<armname>]
+    dir and VERIFYs each one's HEAD, same as the pre-t-141 single
+    _src/template did. An arm without an override reads the default
+    _src/template exactly as before (byte-identical behavior)."""
     polygon_root = Path(manifest["polygon_root"])
     src = manifest["src"]
     actions = []
 
     src_click = polygon_root / "_src" / "click"
-    src_template = polygon_root / "_src" / "template"
+    template_sources, arm_template_dest = _template_source_map(manifest)
 
     if dry_run:
         actions.append(f"[dry-run] ensure {src_click} at {src['click_git']}@{src['click_pin']}")
-        actions.append(f"[dry-run] ensure {src_template} at {src['template_git']}@{src['template_ref']}")
+        for dest, (git, ref) in template_sources.items():
+            actions.append(f"[dry-run] ensure {dest} at {git}@{ref}")
     else:
         _ensure_src_repo(src_click, src["click_git"], src["click_pin"], actions)
-        _ensure_src_repo(src_template, src["template_git"], src["template_ref"], actions)
+        for dest, (git, ref) in template_sources.items():
+            _ensure_src_repo(dest, git, ref, actions)
 
     baseline_manifest = {}
     for task in manifest["tasks"]:
@@ -380,7 +445,7 @@ def prepare(manifest, dry_run=False):
 
             sandbox.mkdir(parents=True, exist_ok=True)
             if arm["layout"] == "template":
-                _copy_tree_excluding_git(src_template, sandbox)
+                _copy_tree_excluding_git(arm_template_dest[arm["name"]], sandbox)
             # layout == "empty": nothing to lay down beyond needs below.
             # (any other layout value was already rejected by
             # validate_manifest() at load time.)
@@ -427,10 +492,10 @@ def prepare(manifest, dry_run=False):
             actions.append(f"prepared {sandbox}")
 
     if not dry_run:
-        for name, dest, ref in (
-            ("click", src_click, src["click_pin"]),
-            ("template", src_template, src["template_ref"]),
-        ):
+        verify_targets = [("click", src_click, src["click_pin"])]
+        for dest, (git, ref) in template_sources.items():
+            verify_targets.append((dest.name, dest, ref))
+        for name, dest, ref in verify_targets:
             rev = _git_rev_parse(dest, "HEAD")
             actions.append(f"VERIFY {name}: HEAD={rev} (target {ref})")
         polygon_root.mkdir(parents=True, exist_ok=True)
