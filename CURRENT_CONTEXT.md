@@ -203,9 +203,12 @@ docs/task_reports/2026-07-15_roadmap-closed-phases.md); текущие
   УСТОЙЧИВО: 0 ложных блоков за 4 прогона; снимок/standalone-
   валидатор/форензика работают; main-сессия — единственная слепота
   (4 подтверждения). Kit'ы: fullgates v4.1 @ 42b6812, diet v3
-  @ 61f3c8d; validator standalone в штабе (b5a33c0). ОЧЕРЕДЬ v5:
-  Stop(main)-гейт; VERIFICATION_COMMAND_RE без самотестов инфры;
-  чек «kit-сборка диффом против эталона» (defect_found t-155).
+  @ 61f3c8d; validator standalone в штабе (b5a33c0). ОЧЕРЕДЬ v5
+  (6 пунктов, консолидирована в разбор-доке): Stop(main)-гейт;
+  VERIFICATION_COMMAND_RE (самотесты инфры + witness-формы);
+  dispatch_gate кириллица stdin; снимок vs continuation; КРИТИК НА
+  ПЛАН (слово 07-16: recon-спека дорогой реализации — критик до
+  кода); чек kit-сборки диффом (t-155).
   Порт гейтов в штаб/тулкит — слово оператора. Большой прогон — по
   каденции. РЕЗЕРВ — генератор сайта.
 - A5 witness auto-collection (builder-class; WHEN: first REAL
