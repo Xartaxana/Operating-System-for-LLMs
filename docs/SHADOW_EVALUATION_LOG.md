@@ -6,6 +6,23 @@ Evaluation run. Relocated VERBATIM from DELEGATION_TABLE.md
 path, closed run history does not). NEW runs append HERE; a table
 status change cites its evidence line in this file.
 
+## Evidence block for the 2026-07-11 status moves (relocated VERBATIM from DELEGATION_TABLE.md 2026-07-16, boot diet, same D-0067 home)
+
+Evidence for the 2026-07-11 status moves (Update Rule 1) — first
+weekly calibration, `calibrated` journal event 2026-07-11, window
+2026-07-08..11 (~3.4 days, real routed traffic, small volume — hence
+provisionally, NOT production): scout-haiku 14 accepted / 1
+tooling-rejected / 0 defect_found + golden set 7/7 x3; builder-sonnet
+11 window dispatches, all acceptances witness-backed, rejects 2x
+spec-class (one was a Lead spec error), 0 capability fails, 0
+defect_found; critic-opus 9 dispatches, 7 verdicts accepted, findings
+repeatedly confirmed by Lead spot-checks (t-001/t-009/t-031); Lead
+row confirmed from the failure side — both window defect_found
+events sit on the coordinator itself (F-29 ts, t-029 duplicate) and
+the F-22 incident shows below-Lead coordination self-certifying.
+production_validated requires a full-week window + cost-per-accepted-
+unit trend (second calibration).
+
 Caveat on cost_target=$0.0000 (2026-07-04, Rule #1 cost accounting
 fix): every evidence line below dated <= 2026-07-03 shows
 cost_target=$0.0000 as a CLIENT-SIDE ACCOUNTING ARTIFACT, not an

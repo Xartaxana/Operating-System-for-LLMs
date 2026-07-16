@@ -46,20 +46,10 @@ subscription contour):
 | Decomposition, spec writing, acceptance | High | Very high | Lead session only | provisionally_validated |
 | Spec DRAFTING from a Lead intent brief (forks returned, not decided) | High | pilot measures | designer (Opus; pilot 2026-07-14, docs/tasks/2026-07-14_opus-designer-pilot.md) | estimated |
 
-Evidence for the 2026-07-11 status moves (Update Rule 1) — first
-weekly calibration, `calibrated` journal event 2026-07-11, window
-2026-07-08..11 (~3.4 days, real routed traffic, small volume — hence
-provisionally, NOT production): scout-haiku 14 accepted / 1
-tooling-rejected / 0 defect_found + golden set 7/7 x3; builder-sonnet
-11 window dispatches, all acceptances witness-backed, rejects 2x
-spec-class (one was a Lead spec error), 0 capability fails, 0
-defect_found; critic-opus 9 dispatches, 7 verdicts accepted, findings
-repeatedly confirmed by Lead spot-checks (t-001/t-009/t-031); Lead
-row confirmed from the failure side — both window defect_found
-events sit on the coordinator itself (F-29 ts, t-029 duplicate) and
-the F-22 incident shows below-Lead coordination self-certifying.
-production_validated requires a full-week window + cost-per-accepted-
-unit trend (second calibration).
+Evidence for the 2026-07-11 status moves: relocated VERBATIM to
+docs/SHADOW_EVALUATION_LOG.md (boot diet 2026-07-16, same D-0067
+home; summary — provisionally on a 3.4-day real-traffic window;
+production_validated requires a full week + trend).
 
 Flat delegation rule (D-0037): subagents never spawn subagents.
 Parallelism = the Lead launches several subagents with independent
