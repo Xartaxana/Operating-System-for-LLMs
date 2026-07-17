@@ -415,9 +415,13 @@ D:\AO3_tests), cc_usage через tools/usage_report.py, git-история
     чеке — D-0048 п.2, находка о самом чеке; второй экземпляр того
     же класса — PROJECT.md/BUG-001). AO3-перечень
     документов-владельцев: docs/01 (test-strategist), docs/03,
-    docs/04-roadmap (владелец Lead, обновление при смене ФАЗЫ —
-    шапка файла), docs/05, docs/06, docs/07, docs/09 (живой план),
-    docs/environment-setup, README. Исключены: docs/HANDOFF.md
+    docs/04-roadmap (обновление при смене ФАЗЫ — шапка файла),
+    docs/05, docs/06, docs/07, docs/09 (живой план: контент ведёт
+    Lead при закрытии этапов; приоритеты/скоуп пунктов — решения
+    оператора, Lead их только отражает), docs/environment-setup,
+    README. Владелец по умолчанию для дока без пометки — Lead-сессия
+    (вопрос оператора 2026-07-17: перечень без владельца = находки
+    без того, кто чинит). Исключены: docs/HANDOFF.md
     (живость держит session-handoff + Session Start-детектор),
     генерируемые state/factory-status.md и state/coverage-map.md
     (свежесть держат генераторы + A4), docs/feature-registry.yaml
