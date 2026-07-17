@@ -109,7 +109,9 @@ D:\AO3_tests), cc_usage через tools/usage_report.py, git-история
    AO3 HANDOFF/журнала перенесены в карту.
 10. **F-8 / D-0038 — рост живых файлов.** Число строк файлов
     boot-пути ОБОИХ деплоев (OS: список BOOT.md + CLAUDE.md +
-    CURRENT_CONTEXT.md; AO3: CLAUDE.md + docs/HANDOFF.md — ось 1:
+    CURRENT_CONTEXT.md; AO3: CLAUDE.md + docs/HANDOFF.md +
+    docs/09-improvement-plan.md, в буте с 2026-07-17 — статусный
+    [X]-срез, нарративы обязаны жить в docs/09-history.md — ось 1:
     автозагружаемый контекст пилота такой же платный) плюс
     docs/SIBLING_MAP.md (D-0048: карта обязана оставаться малой);
     сравнить с прошлым прогоном (числа — в notes события
