@@ -56,9 +56,13 @@ import yaml
 # Оба потока: тексты отказа гейта — кириллица и в stdout, и в stderr;
 # без reconfigure Windows-консоль искажает их (класс найден в AO3-твине,
 # их задача e4-impact-selection 2026-07-14; ось 1 SIBLING_MAP — фикс парный).
+# errors="replace" (порт AO3 «Мелкое хозяйство» п.1, 2026-07-18): голый
+# encoding="utf-8" оставлял errors="strict" — replace убирает последний
+# шанс ValueError на повторной кодировке без потери диагностируемости
+# (гейт печатает текст, не бинарные данные).
 for _stream in (sys.stdout, sys.stderr):
     try:
-        _stream.reconfigure(encoding="utf-8")
+        _stream.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):
         pass
 
