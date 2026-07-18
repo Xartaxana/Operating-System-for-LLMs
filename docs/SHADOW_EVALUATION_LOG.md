@@ -285,3 +285,64 @@ F-40 judge capacity unresolved). Evidence lines:
 docs/SHADOW_EVALUATION_LOG.md (2026-07-11..14 runs + closing entry
 2026-07-18). VALIDATED_DELEGABLE_CATEGORIES (gateway/metrics.py)
 updated same commit per check 12.
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-18, target=lead-sonnet, ground truth = git-дифф Lead)
+
+- 2026-07-18  shadow-replay  task=1 commit=3243e0e353eae45e7d89d195d5a0f3293b001887 kind=script  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-gemini cost_target=$0.0824 judge_cost=$0.0312  truncated=1
+- 2026-07-18  shadow-replay  task=2 commit=c5c360612009b492441dd2d1694a48b721d60d14 kind=feature  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-gemini cost_target=$0.0824 judge_cost=$0.0140  truncated=1
+- 2026-07-18  shadow-replay  task=4 commit=9f31cda72d103a598b427fa8eacb353ae2b71d94 kind=docs-edit  source=git-lead target=lead-sonnet  verdict=equivalent  judge=judge-gemini cost_target=$0.0099 judge_cost=$0.0046  truncated=0
+- 2026-07-18  shadow-replay  task=5 commit=8fa8d65146b69c11177424f2c8c4e44b1365c9e2 kind=feature  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-gemini cost_target=$0.1201 judge_cost=$0.0097  truncated=1
+- 2026-07-18  shadow-replay  task=7 commit=d91ec9bf83cc009c05f0ec46d509274849cff344 kind=config  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-gemini cost_target=$0.0447 judge_cost=$0.0092  truncated=0
+- 2026-07-18  shadow-replay  task=11 commit=e9f7f270d41a2373e1e973fa87c267c64cfcad6f kind=bugfix  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-gemini cost_target=$0.1042 judge_cost=$0.0152  truncated=1
+- 2026-07-18  shadow-replay  task=12 commit=478c3959bd3453247cd8716ab8e5b178e5563ab0 kind=bugfix  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-gemini cost_target=$0.1210 judge_cost=$0.0111  truncated=1
+- 2026-07-18  shadow-replay  task=15 commit=f1f4f18e129f569cab421c062a9f52dd38e2c93d kind=mechanism-fix  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-gemini cost_target=$0.1168 judge_cost=$0.0057  truncated=1
+- 2026-07-18  shadow-replay SUMMARY  source=git-lead target=lead-sonnet  n=8  equivalent=1/8  judge=judge-gemini  cost_target_total=$0.6815 judge_cost_total=$0.1007  errors=0 truncated=6
+
+КАВЕРАТ ПРОГОНА (Lead, тем же днём): (1) truncated=6 — шесть worse-
+вердиктов выше НЕВАЛИДНЫ как сигнал качества (класс F-39: судья
+мерил обрезку стенда при max_tokens=8192 на задачах «файлы целиком»);
+честный сигнал первого захода — только пары с truncated=0: task=4
+equivalent, task=7 worse. Перепрогон шести — блок ниже (--max-tokens
+32000). (2) Судья НЕ калиброван на паре «git-дифф vs полный файл»
+(N2 критика t-180) — вердикты совещательные до chief-judge аудита;
+аудит-строки ниже. (3) Интерпретационная оговорка (вопрос оператора
+07-18): equivalent ≠ «надо было делегировать» — прогон меряет только
+СПОСОБНОСТЬ яруса; накладные диспатча (спека/передача/приёмка —
+главный едок по экзаменам №5–№10) в вердикте не учтены; сведение
+способность × накладные — за калибровкой, практический вывод при
+equivalent-классах — БАТЧИНГ мелочей, не поштучная передача.
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-18, target=lead-sonnet, ground truth = git-дифф Lead)
+
+- 2026-07-18  shadow-replay  task=1 commit=3243e0e353eae45e7d89d195d5a0f3293b001887 kind=script  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-gemini cost_target=$0.0980 judge_cost=$0.0259  truncated=0
+- 2026-07-18  shadow-replay  task=2 commit=c5c360612009b492441dd2d1694a48b721d60d14 kind=feature  source=git-lead target=lead-sonnet  verdict=equivalent  judge=judge-gemini cost_target=$0.1293 judge_cost=$0.0257  truncated=0
+- 2026-07-18  shadow-replay  task=5 commit=8fa8d65146b69c11177424f2c8c4e44b1365c9e2 kind=feature  source=git-lead target=lead-sonnet  verdict=equivalent  judge=judge-gemini cost_target=$0.2693 judge_cost=$0.0395  truncated=0
+- 2026-07-18  shadow-replay  task=11 commit=e9f7f270d41a2373e1e973fa87c267c64cfcad6f kind=bugfix  source=git-lead target=lead-sonnet  verdict=equivalent  judge=judge-gemini cost_target=$0.1749 judge_cost=$0.0190  truncated=0
+- 2026-07-18  shadow-replay  task=12 commit=478c3959bd3453247cd8716ab8e5b178e5563ab0 kind=bugfix  source=git-lead target=lead-sonnet  verdict=equivalent  judge=judge-gemini cost_target=$0.3343 judge_cost=$0.0356  truncated=0
+- 2026-07-18  shadow-replay  task=15 commit=f1f4f18e129f569cab421c062a9f52dd38e2c93d kind=mechanism-fix  source=git-lead target=lead-sonnet  verdict=equivalent  judge=judge-gemini cost_target=$0.2514 judge_cost=$0.0309  truncated=0
+- 2026-07-18  shadow-replay SUMMARY  source=git-lead target=lead-sonnet  n=6  equivalent=5/6  judge=judge-gemini  cost_target_total=$1.2572 judge_cost_total=$0.1766  errors=0 truncated=0
+
+CHIEF-JUDGE РЕВЬЮ ПРОГОНА (Lead Fable, 2026-07-18, D-0031 — 3
+аудита по requests.db id 1646/1650/1668):
+- task=4 equivalent — ПОДТВЕРЖДЁН (баннер удалён, README сохранён).
+- task=7 worse — формально верен, но ИСКЛЮЧЁН из сигнала
+  способности: промпт корпуса не назвал, КАКИЕ алиасы добавлять
+  (имена остались в соседней колонке корпус-дока) — вердикт мерит
+  недоопределённость промпта, не модель. Урок корпусу.
+- task=15 equivalent — ОСПОРЕН: target дал ядро фикса (PostToolUse
+  +PowerShell, ветка dod_track/COMMAND_TOOL_NAMES — проверено по
+  ответу id 1668), но НЕ расширил PreToolUse-matcher на Agent —
+  несущую часть фактического диффа; промпт Agent тоже не называл
+  (второй экземпляр класса task=7) + судейский недосмотр различия.
+ЧЕСТНЫЙ ИТОГ ПРОГОНА (обе волны, с аудитом): из 8 кандидатов —
+equivalent подтверждённых/неоспоренных 5 (task 2,4,5,11,12), worse 1
+(task=1 — крупнейшая работа корпуса, счётный скрипт), оспорен
+аудитом 1 (task=15, частичное выполнение), исключён дефектом
+промпта 1 (task=7). Полная цена измерения: target $1.94 + judge
+$0.28 (обе волны). ИНТЕРПРЕТАЦИЯ — для калибровки №3, с оговоркой
+(3) каверата выше: сигнал «Sonnet держит большинство мелких
+Lead-самоисполнений по качеству» НЕ равен «поштучная передача
+окупается»; практический кандидат-вывод — батчинг мелочей;
+класс-урок корпусов: replay-промпт обязан нести ВСЮ спецификацию
+задачи (2/8 промптов недоопределены — оба «worse/оспорен»
+артефактно).
