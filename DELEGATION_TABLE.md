@@ -22,7 +22,7 @@ Value = how much frontier intelligence actually improves the result.
 | Strategic planning, architecture | High | Very high | Lead only | estimated |
 | Research, hard debugging | High | Very high | Lead only | estimated |
 | Idea generation | Medium | High | Lead, cheap model for expansion | estimated |
-| Routine code generation | High | Medium | Middle | provisionally_validated |
+| Routine code generation | High | Medium | Middle | rejected |
 | Summarization | Medium | Medium | Junior | provisionally_validated |
 | Re-explaining known context | High | Low | eliminate via context management | estimated |
 | Checking lists, verification passes | Medium | Low | Junior | estimated |
@@ -50,6 +50,20 @@ Evidence for the 2026-07-11 status moves: relocated VERBATIM to
 docs/SHADOW_EVALUATION_LOG.md (boot diet 2026-07-16, same D-0067
 home; summary — provisionally on a 3.4-day real-traffic window;
 production_validated requires a full week + trend).
+
+2026-07-18 status move (calibration #2, Update Rule 1): "Routine
+code generation -> Middle" provisionally_validated -> REJECTED on
+the current Middle bindings — 4 consecutive reject runs with a PAID
+source (pass_rate 0.05–0.50 on real accepted builder tasks; R1
+volume 31 pairs / 6 runs vs >=30/2), middle-oss ruled
+infrastructure-unfit on this Groq tier (TPM 8000 < auto max_tokens
+floor), earlier "validated" evidence was free-source n=2
+microtasks. Row may return to `estimated` on a NEW Middle binding
+(middle-gemini 50% on judged subset is a signal, not a basis —
+F-40 judge capacity unresolved). Evidence lines:
+docs/SHADOW_EVALUATION_LOG.md (2026-07-11..14 runs + closing entry
+2026-07-18). VALIDATED_DELEGABLE_CATEGORIES (gateway/metrics.py)
+updated same commit per check 12.
 
 Flat delegation rule (D-0037): subagents never spawn subagents.
 Parallelism = the Lead launches several subagents with independent

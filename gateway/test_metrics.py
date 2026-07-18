@@ -472,20 +472,24 @@ def seed_categorized(conn, category, cost, prompt="irrelevant prompt text", ts=N
 
 
 def test_r2_met_when_validated_categories_dominate_spend(conn):
-    seed_categorized(conn, "coding", 0.30)
+    # exemplar switched coding -> summarization at the 2026-07-18 calibration
+    # status move (coding -> Middle is now a REJECTED row).
+    seed_categorized(conn, "summarization", 0.30)
     seed_categorized(conn, "other", 0.10)
     readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     # 0.30 / 0.40 = 75% >= 25% threshold
     assert readiness["R2"]["status"] == "met"
-    assert "coding" in readiness["R2"]["detail"]
+    assert "summarization" in readiness["R2"]["detail"]
 
 
 def test_r2_not_met_when_validated_categories_below_threshold(conn):
-    # 'classification' has a DELEGATION_TABLE.md row but it is REJECTED, so
-    # it must NOT count toward the validated-delegable share -- if it did,
-    # 0.30 + 0.05 = 0.35 / 0.35 = 100% would wrongly read "met".
-    seed_categorized(conn, "classification", 0.30)
-    seed_categorized(conn, "coding", 0.05)
+    # 'classification' AND (since 2026-07-18) 'coding' have DELEGATION_TABLE
+    # rows but they are REJECTED, so they must NOT count toward the
+    # validated-delegable share -- if either did, the share would wrongly
+    # read "met".
+    seed_categorized(conn, "classification", 0.15)
+    seed_categorized(conn, "coding", 0.15)
+    seed_categorized(conn, "formatting", 0.05)
     readiness = phase2_readiness(conn, days=14, shadow_log_path="/does/not/exist.md")
     # 0.05 / 0.35 ~= 14% < 25% threshold
     assert readiness["R2"]["status"] == "not_met"

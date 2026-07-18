@@ -47,12 +47,14 @@ def categorize(prompt_text: str) -> str:
 # (D-0035) currently marks provisionally_validated or production_validated --
 # i.e. have a delegate whose suitability has actually been checked, as
 # opposed to "estimated" (not yet checked) or "rejected" (checked and found
-# harmful). Mirrors DELEGATION_TABLE.md rows: "Routine code generation"
-# (coding), "Summarization" (summarization), "Data extraction, JSON
-# conversion" (extraction), "Formatting (Markdown, tables)" (formatting) --
-# all provisionally_validated. "classification" maps to "Classification,
-# tagging", which DELEGATION_TABLE.md marks REJECTED, so it is excluded here
-# even though the row exists; "other" has no corresponding table row at all.
+# harmful). Mirrors DELEGATION_TABLE.md rows: "Summarization"
+# (summarization), "Data extraction, JSON conversion" (extraction),
+# "Formatting (Markdown, tables)" (formatting) -- all
+# provisionally_validated. "classification" ("Classification, tagging") and,
+# since the 2026-07-18 calibration status move, "coding" ("Routine code
+# generation" -> Middle, 4 consecutive paid-source reject runs) are REJECTED
+# rows, so they are excluded here even though the rows exist; "other" has no
+# corresponding table row at all.
 # Used by R2 readiness (ROADMAP.md "Money on the table"). No machine link to
 # DELEGATION_TABLE.md; the drift detector is REGISTERED (rule 10в): weekly
 # calibration check 12 (PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md) diffs this
@@ -60,7 +62,7 @@ def categorize(prompt_text: str) -> str:
 # statuses move ONLY at calibration (Update Rule 1), so any status move must
 # update this set in the same commit (critic t-090 blocker resolution).
 VALIDATED_DELEGABLE_CATEGORIES = frozenset({
-    "coding", "summarization", "extraction", "formatting",
+    "summarization", "extraction", "formatting",
 })
 
 
