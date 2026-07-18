@@ -1,0 +1,229 @@
+"""hygiene_gate.py (t-<текущая>) -- PreToolUse-хук командной гигиены в
+WARN-РЕЖИМЕ (НЕ блокирующий) для тулов Bash|PowerShell. Механизирует
+пп.3-5 секции «Командная гигиена» CLAUDE.md кита: cd-префикс, ` 2>&1`,
+`python -c`/`python - <<` мимо Edit/Write, запись в журнал
+routing-log мимо Edit/Write -- ловит их ДО выполнения команды и
+показывает модели предупреждение с канонической альтернативой, но
+НИКОГДА не блокирует вызов (в отличие от tools/dispatch_gate.py --
+тот блокирует exit 2 + stderr; здесь всегда exit 0, побочный эффект
+только на stdout при совпадении).
+
+ЭМПИРИКА КАНАЛА ДОСТАВКИ (спека прямо просила сверить, не гадать):
+корзина этой задачи утверждает, что tools/dispatch_gate.py и
+tools/dod_track.py -- образцы «выхода через hookSpecificOutput». Это
+НЕ подтвердилось: оба файла прочитаны целиком -- dispatch_gate.py
+доставляет решение ИСКЛЮЧИТЕЛЬНО через exit-code (0/2) + текст в
+stderr, dod_track.py вообще ничего не пишет в stdout/stderr (чистый
+side-effect PostToolUse-хук, всегда exit 0 без вывода). Ни строки
+"hookSpecificOutput" тем более "additionalContext" нет НИГДЕ в
+репозитории -- контроль: `grep -i hookSpecific` по всему репо дал 0
+совпадений; позитивный контроль тем же Grep-тулом на "dod_track" в
+той же попытке дал 22 файла -- труба работает, отсутствие настоящее,
+не промах вызова (F-30/F-34). Из образцов пришлось взять только их
+байт-безопасный паттерн чтения stdin (sys.stdin.buffer.read() +
+decode(errors="replace")) и fail-open на битый JSON -- ровно то, что
+докстринг корзины и просил явно.
+
+Раз образцы КИТА не дают канала для самого предупреждения, спека
+прямо разрешает следующий шаг: «следуй образцам [метода] и
+зафиксируй решение в отчёте». Решение: сверил РЕАЛЬНЫЙ контракт
+харнесса тем же форензик-методом, что уже использован в этом ките
+(докстринг tools/dod_track.py -- `grep -a` по установленному
+`claude.exe`, позитив/негатив-контроль). Позитивный контроль:
+`permissionDecision` (18 совпадений), `additionalContext` (43),
+`hookSpecificOutput` (36) -- все найдены; негативный контроль
+(заведомо не существующая строка) -- 0. Извлечённый контекст (Zod,
+дословно из бинарника):
+
+  A.object({hookEventName:A.literal("PreToolUse"),
+            permissionDecision:Wqh().optional(),
+            permissionDecisionReason:A.string().optional(),
+            updatedInput:A.record(...).optional(),
+            additionalContext:A.string().optional()})
+
+и рантайм-ветка разбора ответа хука: `e.hookSpecificOutput?.
+hookEventName==="PreToolUse"&&e.hookSpecificOutput.permissionDecision)
+switch(e.hookSpecificOutput.permissionDecision){case"allow": ...`;
+доквыдержка помощи: `permissionDecision:'"allow" | "deny" | "ask" |
+"defer" (optional)'`. Это ДОСЛОВНО те три поля, что просила спека
+(`hookSpecificOutput.permissionDecision="allow"` + `additionalContext`)
+-- подтверждено эмпирикой бинарника, не домыслом по памяти. Формат
+ответа хука здесь:
+
+  {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                           "additionalContext": "<список классов>"}}
+
+(permissionDecision опущен НАМЕРЕННО -- блокер B1 критика t-177:
+"allow" авто-аппрувил бы флагнутую команду, подавляя штатный
+permission-prompt; спека предписывала "allow" -- дефект спеки Lead,
+исправлен при приёмке.)
+
+записан ОДНОЙ JSON-строкой в stdout при exit 0. Живого перехвата
+реального PreToolUse-вызова под активным хуком НЕ делалось (та же
+оговорка метода, что в dod_track.py: живой смок -- через
+Task/Agent-диспатч или правку settings.json сессии, оба вне роли
+builder на этой задаче/non-goals манифеста) -- финальная сверка на
+реальном харнессе за Lead (см. отчёт).
+
+ДЕТЕКТ-КЛАССЫ (все проверки НЕЗАВИСИМЫ, в additionalContext идёт
+СПИСОК всех сработавших -- не первый найденный, как в dispatch_gate.py;
+здесь нет конфликта "одно сообщение блокирует", WARN не эксклюзивен):
+
+ (а) cd-префикс: команда начинается с `cd <непустой аргумент>`
+     (реальный путь, не голое "cd" и не "cd&&...") И где-то дальше
+     есть `&&` или `;`.
+ (б) подстрока ` 2>&1` -- буквальная, как в спеке.
+ (в) `python -c` или `python - <<` -- буквально "python" (НЕ
+     "python3" -- спека называет ровно эти два токена, расширять
+     самостоятельно не стал), \b-границы, чтобы не матчить
+     "mypython -c" как substring (тот же принцип, что WRITE_INDICATORS_RE
+     dispatch_gate.py после t-152 retry).
+ (г) запись в журнал мимо Edit/Write -- САМОСТОЯТЕЛЬНОЕ инженерное
+     решение по неоднозначной формулировке спеки, ЗАДОКУМЕНТИРОВАНО
+     (тот же принцип "решение не молча", что t-152/dispatch_gate.py):
+     буквальный текст спеки "редирект `>`/`>>` или printf/echo с
+     подстрокой routing-log" грамматически допускает два прочтения --
+     (i) ЛЮБОЙ редирект `>`/`>>` уже триггерит класс, ИЛИ printf/echo
+     только когда есть "routing-log"; (ii) подстрока "routing-log"
+     обязательна ДЛЯ ОБЕИХ форм (редирект И printf/echo). Выбрано
+     (ii): заголовок класса в спеке -- «запись в журнал мимо
+     Edit/Write» (не «любой редирект в файл мимо Edit/Write» --
+     это уже покрыто отдельным правилом 4 CLAUDE.md про Edit/Write-
+     тулы вообще, а классы (в)/(г) спеки специально РАЗДЕЛЕНЫ: (в) --
+     правки/скрипты вообще (правило 4), (г) -- именно ЖУРНАЛ (правило
+     5, "Записи в журнал — Edit/Write-тулом"). Прочтение (i) сделало
+     бы класс (г) triggered на ЛЮБОЙ команде с `>` независимо от
+     журнала (`ls > out.txt` и т.п.) -- расходится с заголовком и
+     нормой-источником (правило 5), не про журнал вовсе. Прочтение
+     (ii) -- единственное, соответствующее заголовку класса и норме.
+     Impact низкий в любом случае (WARN, не блокирует), но выбор
+     осознанный, не угадан молча.
+     Условие: substring "routing-log" (case-insensitive) ЕСТЬ в
+     команде И (есть `>` ИЛИ есть токен printf/echo).
+
+Регистронезависимость -- для ВСЕХ классов (спека явно не оговаривает
+per-класс регистр; выбран единообразный case-insensitive, тот же
+подход, что MANIFEST_*_RE/LABEL_MODEL_PREFIX_RE в dispatch_gate.py).
+
+БЕЗОПАСНОСТЬ НА БОЛЬШИХ ВХОДАХ (DoD п.3, адверсариальная батарея --
+команда >100КБ): все проверки -- substring (`in`, O(n)) или простые
+\b-регексы БЕЗ вложенных квантификаторов (никаких `.*...*` цепочек,
+которые могли бы дать катастрофический backtracking) -- линейны по
+длине команды.
+
+Fail-open: не-Bash/PowerShell тул, пустой/битый stdin, payload не
+dict, command не строка/пустая строка -- везде (0, None) -- тихий
+пропуск без побочных эффектов на stdout. Хук НИКОГДА не возвращает
+ненулевой exit code (WARN-режим по спеке п.4: "Ни при каких входах
+не блокировать и не падать ненулевым кодом").
+"""
+
+import json
+import re
+import sys
+
+CD_PREFIX_START_RE = re.compile(r"^\s*cd\s+\S", re.IGNORECASE)
+PY_DASH_C_RE = re.compile(r"\bpython\s+-c\b", re.IGNORECASE)
+PY_HEREDOC_RE = re.compile(r"\bpython\s+-\s*<<", re.IGNORECASE)
+PRINTF_ECHO_RE = re.compile(r"\b(printf|echo)\b", re.IGNORECASE)
+
+MSG_CD_PREFIX = "не префиксуй cd, вызывай из корня (гигиена п.3)"
+MSG_REDIRECT_STDERR = "не добавляй 2>&1 (гигиена п.3)"
+MSG_PYTHON_DASH_C = "правки/скрипты — Edit/Write-тулом или именованным скриптом (гигиена п.4)"
+MSG_JOURNAL_BYPASS = "журнал пишется только Edit/Write (гигиена п.5)"
+
+
+def _is_cd_prefix(command: str) -> bool:
+    if not CD_PREFIX_START_RE.match(command):
+        return False
+    return "&&" in command or ";" in command
+
+
+def _is_python_dash_c(command: str) -> bool:
+    return bool(PY_DASH_C_RE.search(command) or PY_HEREDOC_RE.search(command))
+
+
+def _is_journal_bypass(command: str) -> bool:
+    if "routing-log" not in command.lower():
+        return False
+    has_redirect = ">" in command
+    has_printf_echo = bool(PRINTF_ECHO_RE.search(command))
+    return has_redirect or has_printf_echo
+
+
+def decide(payload: dict) -> tuple[int, dict | None]:
+    """Чистая логика, без I/O -- тестируемая напрямую (тот же стиль,
+    что dispatch_gate.decide/dod_track.build_fact). exit_code ВСЕГДА
+    0 (WARN-режим). Возвращает (0, None) на тихий пропуск, (0, dict)
+    -- dict уже готов к json.dumps на stdout при совпадении хотя бы
+    одного класса."""
+    if not isinstance(payload, dict):
+        return 0, None
+
+    tool_name = payload.get("tool_name")
+    if tool_name not in ("Bash", "PowerShell"):
+        return 0, None
+
+    tool_input = payload.get("tool_input") or {}
+    if not isinstance(tool_input, dict):
+        return 0, None
+    command = tool_input.get("command")
+    if not isinstance(command, str) or not command:
+        return 0, None
+
+    triggered = []
+    if _is_cd_prefix(command):
+        triggered.append(MSG_CD_PREFIX)
+    if " 2>&1" in command:
+        triggered.append(MSG_REDIRECT_STDERR)
+    if _is_python_dash_c(command):
+        triggered.append(MSG_PYTHON_DASH_C)
+    if _is_journal_bypass(command):
+        triggered.append(MSG_JOURNAL_BYPASS)
+
+    if not triggered:
+        return 0, None
+
+    context = "Командная гигиена (WARN, не блокирует): " + "; ".join(triggered)
+    # B1 (critic t-177): ключа permissionDecision здесь НЕТ НАМЕРЕННО --
+    # "allow" авто-аппрувил бы флагнутую (грязную) команду, подавляя
+    # permission-prompt оператора; additionalContext доставляется модели
+    # и без него, а решение о разрешении остаётся штатному permission-пути.
+    return 0, {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": context,
+        }
+    }
+
+
+def _reconfigure_stdout_utf8():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
+def main() -> int:
+    _reconfigure_stdout_utf8()
+
+    # Тот же байт-безопасный паттерн, что t-159-фикс dispatch_gate.py/
+    # dod_track.py этого кита: sys.stdin.buffer.read() обходит
+    # платформенную кодировку текстового sys.stdin (cp1251 на этой
+    # машине), явный decode utf-8 с errors="replace" -- fail-open на
+    # битые байты.
+    raw_bytes = sys.stdin.buffer.read()
+    raw = raw_bytes.decode("utf-8", errors="replace")
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return 0
+
+    exit_code, output = decide(payload)
+    if output is not None:
+        sys.stdout.write(json.dumps(output, ensure_ascii=False) + "\n")
+    return exit_code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

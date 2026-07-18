@@ -456,12 +456,20 @@ D:\AO3_tests), cc_usage через tools/usage_report.py, git-история
     cd-префикс = 76% подозрительных вызовов, 2 heredoc-аппенда
     журнала, 3 MASKED-правила).
 
-26. **Policy-as-code гейты штаба (порт t-159, активация 2026-07-16).**
+26. **Policy-as-code гейты штаба (порт t-159, активация 2026-07-16;
+    hygiene_gate добавлен 2026-07-18, t-177/D-0080).**
     Зарегистрированный 10(в)-детектор отказа гейтов
-    dispatch_gate/critic_snapshot/dod_track/dod_gate/main_gate:
-    (а) ПОСТАНОВКА — .claude/settings.json содержит все пять хуков
-    (PreToolUse Task ×2, PostToolUse Edit|Write|MultiEdit|
-    NotebookEdit|Bash, SubagentStop, Stop); (б) ЖИВОСТЬ — при живых
+    dispatch_gate/critic_snapshot/dod_track/dod_gate/main_gate/
+    hygiene_gate:
+    (а) ПОСТАНОВКА — .claude/settings.json содержит все шесть хуков
+    (PreToolUse Task ×2 + PreToolUse Bash|PowerShell warn-хук
+    hygiene_gate, PostToolUse Edit|Write|MultiEdit|
+    NotebookEdit|Bash, SubagentStop, Stop); hygiene_gate НЕ несёт
+    permissionDecision (B1 t-177: warn не трогает permission-путь) —
+    появление этого ключа в его выводе = регресс; живость
+    hygiene_gate сверяется ЧЕКОМ 25: находки аудита (cd-префикс/
+    2>&1/python -c/журнал мимо Edit) при ПУСТЫХ warn-строках хука в
+    тех же транскриптах = хук молчит/слетел, отказ постановки; (б) ЖИВОСТЬ — при живых
     диспатчах окна .claude/dod_track/<session>.json непусты и
     critic_snapshot.json обновлялся; молчание ВСЕХ гейтов при живых
     диспатчах = отказ постановки (хук слетел/переименован), не
