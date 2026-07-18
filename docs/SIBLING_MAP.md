@@ -137,9 +137,11 @@ scout / builder / critic (х2 деплоя) + Lead-правила в CLAUDE.md +
 
 ## Ось 5 — Тестовая обвязка
 
-tools/test_usage_report.py <-> gateway/tests (паттерн изоляции:
-tmp DB, conftest snapshot/restore litellm-колбэков). Класс: «фикс
-затронул схему/учёт — проверь изоляцию и фикстуры на обеих сторонах».
+tools/test_usage_report.py <-> gateway/test_*.py + gateway/conftest.py
+(паттерн изоляции: tmp DB, conftest snapshot/restore litellm-колбэков;
+путь уточнён калибровкой №2 — каталога gateway/tests не существует,
+тесты лежат файлами в gateway/). Класс: «фикс затронул схему/учёт —
+проверь изоляцию и фикстуры на обеих сторонах».
 
 ## Ось 6 — Внутренние оси AO3_tests (для сессий пилота)
 
