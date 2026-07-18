@@ -268,3 +268,20 @@ judge-gemini (20 req/day). Возврат строки в estimated — толь
 НОВОЙ Middle-привязкой (сигнал middle-gemini 50% на судимом
 подмножестве записан, статуса не имеет).
 VALIDATED_DELEGABLE_CATEGORIES обновлён тем же коммитом (чек 12).
+
+Table-side note (relocated VERBATIM from DELEGATION_TABLE.md by
+boot-diet 2026-07-18; оригинал стоял под evidence-блоком 07-11):
+
+2026-07-18 status move (calibration #2, Update Rule 1): "Routine
+code generation -> Middle" provisionally_validated -> REJECTED on
+the current Middle bindings — 4 consecutive reject runs with a PAID
+source (pass_rate 0.05–0.50 on real accepted builder tasks; R1
+volume 31 pairs / 6 runs vs >=30/2), middle-oss ruled
+infrastructure-unfit on this Groq tier (TPM 8000 < auto max_tokens
+floor), earlier "validated" evidence was free-source n=2
+microtasks. Row may return to `estimated` on a NEW Middle binding
+(middle-gemini 50% on judged subset is a signal, not a basis —
+F-40 judge capacity unresolved). Evidence lines:
+docs/SHADOW_EVALUATION_LOG.md (2026-07-11..14 runs + closing entry
+2026-07-18). VALIDATED_DELEGABLE_CATEGORIES (gateway/metrics.py)
+updated same commit per check 12.
