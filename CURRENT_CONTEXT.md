@@ -29,31 +29,17 @@ Phase 2 — ROADMAP.md.
 
 ## Current Task (Authoritative, D-0025)
 
-СЕССИЯ 07-16 ВЕЧЕР ЗАКРЫТА ЦЕЛИКОМ (t-159..t-172): приёмка t-159 +
-порт гейтов в штаб (активированы 19b4c91) + критик-на-план (ef30590)
-+ critic.md 13/14 с экзаменом PASS (2f082c7) + прогон №11 (скаляр
-0.88, второй серии) + порт-батчи AO3 (3f4014b+bc297bc) и тулкит
-v0.3.0 (1a6bfe5) + WP 6.3 + решение п.13 Safe telemetry. VERBATIM —
+СЕССИЯ 07-16 ВЕЧЕР ЗАКРЫТА ЦЕЛИКОМ (t-159..t-172; гейты активны
+19b4c91, тулкит v0.3.0, порт-батчи AO3) — VERBATIM:
 docs/task_reports/2026-07-16_evening-closures-port-run11.md.
-ЖИВОЕ ИЗ СЕССИИ: гейты активны во всех штабных сессиях (класс t-151
-пойман и зачинен: matcher'ы под штабную среду Task|Agent+PowerShell);
-на kit-касание — staging_hq/ не в песочницы + red-run t2 флаг +
-kit-сиблинги dod_gate; «OPEN DISPATCH» хука session_context не парсит
-закрытие-notes (прогонные t-133/134/142 «висят» ложно — при касании).
-   НАХОДКИ о гейтах (чек 26в) на калибровку ~07-18: (1) dotfiles без
-   суффикса → fail-closed (грань дизайна; цена ~3с, Rule #1 может
-   сказать «не чинить»); (2) doc-only «целиком-или-никак» — одна
-   не-doc правка в треке лишает освобождения весь хвост сессии;
-   (3) наблюдаемость gate_log — записи без ts и без agent_id
-   (после per-agent расщепления блок не атрибутируется воркеру);
-   (4-остаток, критик t-163) предохранитель consecutive_blocks
-   session-global при per-agent решении: воркер Z может проскочить
-   на чужом счётчике (fail-open) / застрявший X может не достичь
-   порога при чужих green (бэкстоп — харнесс-cap) — ось «счётчик
-   следует гранулярности решения» (main_gate уже держит свой
-   отдельно); kit-сиблинг dod_gate (та же черта + находка 4) — в
-   очередь следующего касания kit'а. Всё — механизменным касанием
-   гейтов с тестами, не спешкой.
+ОЧЕРЕДЬ ГЕЙТ-КАСАНИЯ (механизменно, с тестами; калибровка №2
+подтвердила — ложных блоков сверх этих находок нет): (1) dotfiles
+fail-closed (Rule #1 может сказать «не чинить»); (2) doc-only
+«целиком-или-никак»; (3) gate_log без ts/agent_id; (4) предохранитель
+consecutive_blocks session-global при per-agent решении + kit-сиблинг
+dod_gate; на kit-касание также staging_hq/ не в песочницы + red-run
+t2 флаг; «OPEN DISPATCH» хука не парсит закрытие-notes (10 ложных
+«висяков» на боте 07-18) — фикс при касании session_context.
 
 КАЛИБРОВКА №2 ВЫПОЛНЕНА 2026-07-18 (окно 07-11..18, 28 чеков +
 ретро-контур; событие calibrated 07-18; коммиты 2b67482 F-47 +
@@ -93,11 +79,9 @@ BOOT-БЮДЖЕТ: история раундов — коммиты диет; т
 Рамки: ТУЛКИТ-МОРАТОРИЙ D-0074 (toolkit/ — батчем по слову;
 порт-очередь ниже).
 
-Закрытое 07-11/12 — индекс docs/task_reports/README.md. Живой
-остаток: t-066 (golden set 6/7, Q3 PASS) для чека 14в; «haiku
-сохраняем» в силе. ПРИОРИТЕТ 07-11: текстовые задачи builder-groq
-по ходу (прокси на паузе); draft-C и WP v0.2.1 — у оператора;
-старая очередь — on-touch/evidence-gated.
+Закрытое 07-11/12 — индекс docs/task_reports/README.md; «haiku
+сохраняем» в силе; старая очередь — on-touch/evidence-gated
+(приоритеты 07-11 исчерпаны, драфты у оператора).
 
 ## Routing MVP — LIVE on both deployments
 
@@ -156,16 +140,11 @@ BOOT-БЮДЖЕТ: история раундов — коммиты диет; т
   поглощает подписка; биллинг сессиям НЕ виден, источник — только
   оператор. Вход для R5 и чеков 10/11 калибровки ~07-18.
 
-- $1,177.48 accounted all-time (8747 turns, 79 sessions, 4 projects).
-  Per model: sonnet-4-6 $735 / opus-4-8 $206 / fable-5 $198 /
-  sonnet-5 $39.
-- CACHE READS DOMINATE: 97.6% of input-side tokens are cache reads;
-  accounted savings vs uncached $7,117 on a $1,178 total — first
-  hard evidence for the D-0036 ordering (measure net-of-cache before
-  building any compression).
-- G1 LOOKS GREEN RETROACTIVELY: real traffic 20 consecutive days
-  (>=14 required). Formal check = Task 3 digest + written gate
-  report + Architect signature (D-0033). G2 (judge 13/13) holds.
+- Исторические baseline-срезы (all-time $1,177 на 07-07, cache-reads
+  97.6%, ретро-G1) — сняты с бут-пути: G1/G2 формально закрыты
+  гейт-отчётом 07-13; живой тренд даёт savings_report каждой
+  калибровкой (№2: $471/день, экономия 65%, $3.77/единицу — notes
+  calibrated 07-18). Архив: calibration2-closures.md.
 - SPEND MIX — ARCHITECT CORRECTION (2026-07-07): the baseline is
   CENSORED data (operator rationed frontier usage), so it cannot
   refute "the smartest model burns most". Correct reading — frontier
@@ -177,12 +156,10 @@ BOOT-БЮДЖЕТ: история раундов — коммиты диет; т
 
 ## Remaining Lead-tier Queue (live only; закрытые блоки — evening-closures)
 
-- WORKSTREAM 3 — оценка носителей закрыта 07-13
-  (docs/TASK_CARRIER_EVAL_2026-07-13.md); ПИЛОТ ОТКРЫТ (полигон —
-  задачи репо/AO3, НЕ тулкит; слово оператора):
-  docs/tasks/2026-07-13_calibration-week.md — N1/N4 закрыты (статусы
-  и досрочность N4 — в DAG-доке и приложении гейт-отчёта), N2/N3/N5
-  ждут ~07-18; AO3 — кандидат второй точки; adoption — разбор N5.
+- WORKSTREAM 3 — ЗАКРЫТ ЦИКЛ: оценка носителей 07-13, пилот N1–N5
+  done 07-18, adoption = D-0080 (правило 4а CLAUDE.md). Дальше по
+  D-0059: код/автоматизация — только по evidence ценности артефакта.
+  Архив блока: 2026-07-18_calibration2-closures.md.
 - Упрочнение tier-гейта (builder-class; WHEN: на evidence первого
   инцидента — Rule #1, критик t-068 находка 2 пометил не-блокером):
   find_tier_declaration матчит ПЕРВУЮ строку `tier:` — сообщение с
@@ -226,8 +203,7 @@ BOOT-БЮДЖЕТ: история раундов — коммиты диет; т
 - НАБОР №2 ЗАКРЫТ 07-16 (разбор —
   docs/tasks/2026-07-15_economy-exam-runs5-6.md + Runs log).
   ОСТАТОК: раннер «пустой stdout при rc=0» — фикс в очереди;
-  калибровке — синтетика окон (D-0075), счётчик возвратов, «Sonnet
-  не держит текстом» в D-0058-разбор.
+  синтетика окон — пометка в Runs log при следующем прогоне.
 - ЭКЗАМЕН-СЕРИЯ 07-16 ЗАКРЫТА и РАЗВЁРНУТА (очередь v5 выполнена
   t-159, порт гейтов выполнен вечером 07-16; VERBATIM —
   evening-closures-port-run11 + разбор
@@ -240,30 +216,16 @@ BOOT-БЮДЖЕТ: история раундов — коммиты диет; т
   sessions to wrap; binding decided at calibration): wrapper runs
   the canonical pytest form after a Pi builder session and attaches
   verbatim output as a witness DRAFT; acceptance stays with Lead.
-- Уроки ярусам — ЗАКРЫТО 07-16 (2f082c7, экзамен PASS t-162). ЖИВОЙ
-  остаток: кандидат (№9) DoD-самобатарея «уже выбранной формы» —
-  builder/DoD-класс (правило 11); на разбор калибровки.
-- ВНЕШНЕЕ РЕВЬЮ 07-13 закрыто (триаж
-  docs/task_reports/2026-07-14_external-review-triage.md; t-095
-  принят — находки 2/11). На калибровку: staleness цен + economic
-  margin; порт-п.13; 7/10 не берём (триггеры в триаже).
-- КАНДИДАТЫ ПОВЕСТКИ КАЛИБРОВКИ ~07-18 (слово оператора не дано —
-  решать на разборе): скип-порог числом (чеки 19/21/22); находки
-  №1 (F-41/42/43); ступенька экономтренда после backfill t-094
-  (коррекция учёта, не рост); первый прогон чека 25 + находки
-  t-106 — промоушен-кандидат PreToolUse-хук против cd-префикса/2>&1
-  (76% подозрительных вызовов, гл. нарушитель Lead; Rule #1 решает);
-  фикс-у-источника ad-hoc Bash-чтений и разноформенного pytest.
-  ПЛЮС от 07-15/16: рецидивы Lead (F-30 числа-до-замера ×2,
-  append-якорь ×4, python-c ×2 — чек 25); счётчик возвратов
-  воркеров; «Sonnet не держит текстом» в D-0058-разбор; синтетика
-  окон экзаменов №5–№10б (D-0075).
-- ПИЛОТ OPUS-ДИЗАЙНЕРА открыт 07-14:
-  docs/tasks/2026-07-14_opus-designer-pilot.md — N≈5 спек
-  чередованием до ~07-18; разбор — калибровка (чек 0);
-  designer=estimated; пометка-пилот в правиле 2.
+- ВНЕШНЕЕ РЕВЬЮ 07-13 закрыто (триаж 2026-07-14_external-review-
+  triage.md; 7/10 не берём — триггеры там). Остаток: staleness цен —
+  мелкой builder-задачей при следующем касании учёта.
+- ПОВЕСТКА КАЛИБРОВКИ ~07-18 РАЗОБРАНА ЦЕЛИКОМ — вердикты в notes
+  calibrated 07-18; VERBATIM + вердикты:
+  2026-07-18_calibration2-closures.md.
+- ПИЛОТ OPUS-ДИЗАЙНЕРА ПРОДЛЁН до калибровки №3 (3 точки/0
+  реджектов — мало; designer=estimated; DAG-док 2026-07-14).
 - РЕТРО-БЭКЛОГ: docs/RETRO_PATTERNS.md (чек 0); UI-witness в AO3 не
-  прожит — первый их UI-диспатч = проба; F-41-стейлы — чек 24.
+  прожит — первый их UI-диспатч = проба.
 - Evidence-gated residuals — 9 пунктов, каждый на своём триггере:
   полный список VERBATIM —
   docs/task_reports/2026-07-16_evidence-gated-residuals.md.
