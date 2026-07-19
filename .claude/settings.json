@@ -29,8 +29,7 @@
     "SubagentStop": [
       {
         "hooks": [
-          { "type": "command", "command": "python tools/dod_gate.py" },
-          { "type": "command", "command": "python tools/tier_echo.py" }
+          { "type": "command", "command": "python tools/dod_gate.py" }
         ]
       }
     ],
