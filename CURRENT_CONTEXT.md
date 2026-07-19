@@ -209,8 +209,10 @@ BOOT-БЮДЖЕТ: история — коммиты диет; мелкие ра
   RELATED_WORK «OpenClaw survey» + evening-closures.
 - Habr/LinkedIn (t-036): готово; публикация — слово оператора
   (ARTICLE_BRIEF + drafts A/B/C).
-- White Paper v0.2.1 — AWAITING Architect review (кандидат v0.2.2:
-  экзамены, policy-as-code, D-0076..81, critic-lite — после ревью).
+- White Paper v0.2.1 — AWAITING Architect review; по слову оператора
+  07-20 дописан §6.4 «Driving the Price Down» (история снижения цены:
+  провал диеты критика → critic-lite −37% → батчинг → ядро −41%;
+  сеть ~40% $/точку качества) — входит в кандидата v0.2.2.
 
 ## Environment Notes (this machine)
 

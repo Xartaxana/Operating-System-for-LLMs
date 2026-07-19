@@ -617,6 +617,97 @@ change to the deployment, none of them decided by intuition:
   debt compounds — which is exactly what the accruing median
   exists to test.
 
+## 6.4 Driving the Price Down: What We Tried, What Held
+
+Once the exam could price quality honestly, it became the
+instrument for a deliberate cost-reduction campaign. The campaign
+is worth recounting in full — including the direction that failed —
+because the pattern that emerged is more useful than any single
+number.
+
+**Diagnosis first.** The early runs and the coordinator forensics
+agreed on where the money actually went: not into any single
+expensive answer, but into COORDINATION OVERHEAD — per-event journal
+writes, piecemeal acceptance of workers, clarification loops (the
+micro-cycle tax), and the reviewer's reading habits (on one
+calculator-sized task the review tier spent 101 turns where the
+implementation needed 105). Dispersion between identical runs was
+×2.6, so every candidate cut was given a pre-registered bar and
+measured against the accruing median, never against a single point.
+
+**The direction that failed: starving the reviewer.** The intuitive
+cut — the reviewer is the most expensive tier, so restrict it — was
+tried three escalating ways (§6.3): softer review by text, a
+hard call limit by hook, the full restricted bundle. The five-point
+trend was monotonic and damning: quality fell from 0.93 to 0.65
+while cost per accepted task ROSE. Removing judgment does not make
+a system cheaper; it makes rework and defect debt, and the exam
+priced that debt visibly. The diet was closed as a recorded verdict.
+
+**What held, cut one: move the mechanics down-tier, keep the
+verdict up-tier.** The successful reviewer economy was a
+reassignment, not a restriction. In the two-layer scheme the
+MECHANICAL layer — re-running tests, control values, smoke matrices
+— is executed by the submitting worker or a script and attached
+verbatim BEFORE the verdict; the top-tier reviewer's zone narrows to
+what actually requires its intelligence: architecture, semantics,
+class completeness of a fix. On the same task set this held the
+scalar (0.95, the series' best band) at −37% price; review-tier
+turns on the calculator task dropped 101 → 27, and a boundary-test
+defect class that had survived four runs died the first time the
+narrowed reviewer was pointed at it. Forensics added a nuance worth
+recording: the savings came from FOCUSING the verdict (less reading,
+fewer loops), not from skipping re-runs — the reviewer still
+re-ran the cheap checks, which is fine, because re-running attached
+evidence costs pennies while re-deriving it costs the expensive
+tier's attention.
+
+**What held, cut two: batch the coordinator.** The micro-cycle tax
+was attacked directly: journal events accumulate and land as one
+batched append at stage boundaries; small non-blocking edits are
+never self-executed piecemeal by the coordinator but accumulate
+into a single batched dispatch; worker acceptance happens in bulk
+at stage boundaries. The measured effect on the coordinator's
+self-execution stream: sixteen piecemeal skip-class actions in the
+baseline window, one in the window after the rule — with the
+batching economics confirmed rather than assumed at the next
+calibration.
+
+**What held, cut three: put the always-loaded context on a diet and
+make the exam prove it kept its teeth.** The auto-loaded policy is
+a per-session tax on every session of every day. It was rewritten
+as a norms-only kernel — rationale, precedents and history moved to
+an on-demand companion — cutting the boot payload by 41%. The risk
+(a policy that loses its teeth when its explanations leave the
+context) was treated as an empirical question: three exam runs with
+pre-registered keys, compared against the full-policy band. The
+kernel held the band (0.94 / 0.90 / 0.92 against a 0.93–0.95
+recent full-policy band) — and when one run showed journal
+discipline slipping (eleven malformed journal lines), the fix was
+chosen the same way the reviewer fix was: not more prose, but a
+shape TABLE in the kernel plus a write-moment validation hook that
+warns the author the instant a defective line lands. The next run's
+journals were defect-free, and the hook caught its first real
+mistake in the authors' own deployment within an hour of being
+installed.
+
+**The net effect,** measured on the same three-task set, same
+coordinator model, with the caveat that these are few-point series
+under ×2.6 dispersion: cost per accepted task on the full-policy
+arm fell from $6.01 (scalar 0.94) to $3.81 (0.95) with the
+two-layer review, to $3.38–4.16 (0.90–0.96) on the dieted kernel —
+roughly a 40% reduction in dollars per weighted quality point
+against the section's opening baseline, with the quality vector
+held rather than traded away.
+
+The pattern, stated once: **every cut that survived removed
+overhead or relocated mechanical work to a cheaper executor; every
+cut that failed removed judgment.** And every one of these
+decisions — including the failed diet — exists as a pre-registered,
+measured, recorded verdict that the next calibration can re-check,
+which is the difference between a cost-reduction campaign and a
+cost-reduction anecdote.
+
 ## 7. Empirical Status (2026-07-13)
 
 What the evidence currently supports — with honest caveats: Shadow
