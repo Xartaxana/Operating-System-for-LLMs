@@ -41,7 +41,14 @@ checks; release note states it).
 - N1 recon [DONE t-211].
 - N2 builder A: P1+P2+P4+P5 [dispatched t-212].
 - N3 builder B: P3 [dispatched t-213].
-- N4 critic on the whole staging diff [after N2+N3] — including the
-  negative check «no exam-cadence entered the delivery».
-- N5 Lead: acceptance, staging commit (mechanism axes), snapshot,
-  tag v0.4.0, push [after N4].
+- N4 critic release gate [DONE t-214: ПРИНЯТЬ; negative re-checked
+  with positive form control; 4 non-blockers placed].
+- N5 [DONE 2026-07-20]: staging commit f9598b1 (axes + tier),
+  git-based tracked-only snapshot (86 files; caches with HQ paths
+  excluded per critic NB-1), public clone commit d139f3a, tag
+  v0.4.0 pushed. Release note states the exam-cadence exclusion.
+  RESIDUALS to the next batch queue: permission_audit
+  CLAUDE_PROJECTS env fallback (critic NB-4); HQ-side port of the
+  GATEWAY_LOG_RAW_TEXT flag (builder B finding: штабной
+  sqlite_logger — same class); `error` column masking — recorded
+  decision (diagnostic, not raw-class), revisit by operator word.
