@@ -29,6 +29,7 @@ critic проверяет классовую полноту фикса ПО КА
 | .githooks/commit-msg + tools/mechanism_gate.py (enforce правила 10б, D-0055; + tier-декларация D-0072) | .githooks/commit-msg + scripts/mechanism_gate.py (карта читается из OS-репо; tier-парность портом 2026-07-12, их 0a0a8c6) |
 | — | .claude/skills/qa-loop/SKILL.md (журналирование диспатчей) |
 | .claude/skills/session-handoff (D-0050) | .claude/skills/session-handoff (порт t-021, коммит 0911cf6) |
+| CURRENT_CONTEXT.md — носитель очереди OS (D-0082: кросс-деплойный пункт пишется в носитель ЦЕЛИ тем же ходом) | docs/HANDOFF.md «Открытые хвосты» — носитель очереди AO3 (та же обязанность их стороной) |
 
 ## Ось 2 — Контуры измерения (Rule #1, D-0032: учёт честен на обоих)
 
