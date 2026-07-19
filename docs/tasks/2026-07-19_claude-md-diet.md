@@ -162,10 +162,16 @@ justified.
   k4 inline-DoD declining across kernel runs (6/9 → 1/6) — the ONE
   kernel-attributable suspect (R11 compression), candidate for a
   targeted R11 line if the operator orders another round.
-- **N3 — cut decision** [CONDITIONALLY AUTHORIZED by the operator's
-  word 2026-07-19 («если результат удовлетворительный, то режем
-  CLAUDE.md и переносим все правки в основную ветку»), gate = №17
-  median bar above; Lead+Architect, D-0068]. If GO, the
+- **N3 — CUT EXECUTED 2026-07-19** [operator word «да делай 1»:
+  median 0.92 accepted vs the 0.93 bar as a deliberate trade
+  (−41% boot bytes, ~−35% run cost, −0.02 median), with the k4 fix
+  (R11 inline-DoD line) folded into the cut]. Mechanics: CLAUDE.md
+  := kernel v4 (20 989 B); old full policy VERBATIM →
+  docs/POLICY_FULL.md (rationale home; kernel wins on divergence);
+  candidate file retired; decision D-0084; SIBLING_MAP axis-4 pair
+  added; kit main inherits the kernel by «kit = штаб» sync. Boot
+  path drops ~14.8 KB.
+- **N4 — RU mirror** [still optional, untouched]. If GO, the
   cut commit (full rule-10 mechanism): CLAUDE.md := kernel;
   docs/POLICY_FULL.md created with VERBATIM relocation of removed
   rationale/precedents; SIBLING_MAP axis 4 gains the kernel↔FULL pair;

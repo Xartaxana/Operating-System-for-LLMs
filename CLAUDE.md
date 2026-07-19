@@ -1,386 +1,363 @@
 # CLAUDE.md — Operating System for LLMs
 
-Автозагружается в каждую сессию; полное восстановление состояния —
-по BOOT.md, по запросу оператора (boot-контекст платный, D-0038).
-Здесь только обязанное быть в контексте всегда: политика
-маршрутизации и командная гигиена (D-0041, F-1). Это репо —
-эталонный (dogfooding) деплой routing MVP; второй деплой — пилот
-D:\AO3_tests.
+Auto-loaded every session. Full state recovery is BOOT.md, executed on
+the operator's request only (boot context is paid, D-0038). This file
+holds only what must ALWAYS be in context: routing policy and command
+hygiene (D-0041). Norms live HERE; rationale, precedents and history
+live in docs/POLICY_FULL.md (axis-4 pair, same-commit discipline) and
+docs/DECISIONS_FULL.md. This repo is the reference (dogfooding)
+deployment of the routing MVP; the pilot deployment is D:\AO3_tests.
 
-## Ярусы (DELEGATION_TABLE.md; все назначения estimated, D-0028)
+## Tiers — functions, not models (D-0062)
 
-- **scout** (Haiku) — разведка: поиск по репо, чтение файлов, сбор
-  контекста. Возвращает дайджест со следом, не дампы.
-- **builder** (Sonnet) — реализация по написанной спеке, тесты,
-  рутинные правки.
-- **critic** (Opus) — ревью кода/архитектуры, отладка неясных багов,
-  вход приёмки.
-- **Lead** (Fable) — декомпозиция, спеки, приёмка, архитектура;
-  только Lead решает, что и кому делегировать.
+| Function | Model here | Work | Deliverable |
+|---|---|---|---|
+| scout | Haiku | repo search, file reading, context gathering | digest + Trail, never dumps |
+| builder | Sonnet | implementation to a written spec, tests, routine edits | diff report + witness run |
+| critic | Opus | code/architecture review, unclear bugs, acceptance gate | verdict + its own trail |
+| Lead | Fable | decomposition, specs, acceptance, architecture, mechanisms | — |
 
-Имена scout/builder/critic/Lead — канонические имена ФУНКЦИЙ
-(разведка / реализация-по-спеке / ревью / координация), не моделей:
-правила политики говорят только на них; привязка функция→модель —
-свойство деплоя. Грейды intern/junior/middle/senior (API-контур) —
-ступени цены/способности МОДЕЛЕЙ для учёта и таблицы, в правилах
-не участвуют (D-0062; мост — ARCHITECTURE.md «Two Vocabularies»).
+Policy rules speak ONLY these function names; the function→model
+binding is a deployment property. Grades intern/junior/middle/senior
+(API contour) are model price/capability vocabulary for accounting and
+DELEGATION_TABLE.md, never used in rules (bridge: ARCHITECTURE.md
+"Two Vocabularies").
 
-## Правила маршрутизации
+## Routing rules
 
-1. Разведка → scout ПО УМОЛЧАНИЮ: ответ требует >1–2 заранее
-   известных файлов ИЛИ любого поиска по репо. Lead сам читает только
-   точечно известный файл; до ~4 известных целей можно самому, но
-   ТОЛЬКО с событием `dispatch_skipped` (причина обязательна) —
-   молчаливый пропуск = нарушение (F-9). Разведка неизвестного
-   объёма — всегда scout. Обзор ВНЕШНЕГО репо — двухпроходный
-   (D-0066): карта от scout; механизм в план/очередь — только после
-   точечного второго прохода Lead, его след — в RELATED_WORK.
-   Приёмка дайджеста — по следу (D-0046): scout прилагает, где искал
-   и что читал; Lead проверяет покрытие и точечно сверяет ≥1 несущее
-   утверждение (негативное «нигде нет X» — обязательно), отметив
-   сверку в accepted; дайджест без следа → `rejected`.
-2. Реализация по готовой спеке → builder. Спеку пишет Lead;
-   недостающие требования builder возвращает вопросами, не изобретает.
-   ПИЛОТ до ~07-18 (слово оператора 2026-07-14): черновик спеки по
-   интент-брифу Fable может разворачивать opus-дизайнер с
-   ОБЯЗАТЕЛЬНЫМ блоком развилок (решать молча запрещено); приёмка
-   спеки — Fable; протокол/метрики/чередование —
-   docs/tasks/2026-07-14_opus-designer-pilot.md.
-   Приёмка builder-диффа — по witness (D-0052): accepted-событие несёт
-   в поле `witness` (D-0053) фактический вывод проверочного прогона
-   (команда тестов + результат), не пересказ; отчёт без witness →
-   `rejected`. У задачи с UI-результатом прогон включает ВОЖДЕНИЕ UI:
-   witness — скриншот/запись «до/после»; чисто текстовый witness на
-   UI-задаче недостаточен (прецедент C-T1 экзамена, 2026-07-14). Самоактивирующийся enforcement-файл (hook в активном
-   hooksPath и т.п.) builder на путь НЕ кладёт: сдаёт содержимым в
-   отчёте/соседним именем, на путь ставит Lead при приёмке — иначе
-   неревьюенный код гейтит работу до ревью (D-0069, прецедент t-031).
-3. critic — ОБЯЗАТЕЛЬНЫЙ вход приёмки: диффы builder'а >~100 строк
-   или затрагивающие схему данных / ядро / учёт денег; неясные баги —
-   ДО того, как Lead начнёт отлаживать сам. Первый фильтр КАЖДОГО
-   диффа — само-прогон исполнителя по DoD (правило 11); критик его
-   не заменяет. Денежный/численный дифф критик начинает ЭМПИРИКОЙ —
-   прогоном контрольных значений; чтение кода — по расхождению
-   прогона или где детерминированной проверки нет (архитектура,
-   связность, безопасность). Уроки: 92 opus-хода ревью №5-B
-   пропустили денежный класс, пойманный 25 пробами; 9**9**9.
-   Приёмка остаётся за Lead (D-0037). Мелкие диффы: пометка
-   «critic: skipped, <причина>» внутри accepted-события — льгота
-   ТОЛЬКО принимающего ярусом выше исполнителя (D-0058).
-   ДВУХСЛОЙНЫЙ КРИТИК-ВХОД (экзамен №14, порт по слову 07-18):
-   механический слой — перепрогоны тестов, контрольные значения,
-   смок-матрицы — исполняется и прикладывается критику ДОСЛОВНЫМ
-   выводом ДО его вердикта (исполнитель — сдающий builder или
-   скрипт); зона Opus-критика — ВЕРДИКТНЫЙ слой (архитектура,
-   семантика, классовая полнота); дешёвый контрольный перепрогон
-   приложенного — легален, расследование механики Opus-чтением —
-   нет. Слой не приложен — критик возвращает диспатчеру запрос
-   слоя, не исполняет его сам. КРИТИК НА
-   ПЛАН (t-159, слово оператора 07-16): recon-деливерабл, служащий
-   СПЕКОЙ реализации дороже ~30 мин работ — критик-вход на ПЛАН ДО
-   старта кода; факты плана сверяются по следу (D-0046),
-   реализуемость — архитектурное суждение, до этого правила не
-   ревьюилось никем.
-4. Независимые части → несколько параллельных субагентов, каждый со
-   своей спекой (изоляция контекста). Параллельные спеки объявляют
-   владение путями; Lead проверяет пересечение до запуска.
-   Параллельные СЕССИИ в одном репо — тот же класс: чужие
-   незакоммиченные пути не трогать и не коммитить (D-0060, F-23).
-   Кросс-деплойный очередь-пункт существует, только если ТЕМ ЖЕ
-   ХОДОМ записан в носитель, который ЧИТАЕТ целевой деплой (OS:
-   CURRENT_CONTEXT; AO3: docs/HANDOFF); notes своего журнала /
-   FINDINGS — не носитель: пункт там = НЕ передан (D-0082, F-48).
-   4а. Задача >=5 журнальных событий ИЛИ >=2 сессий ведётся
-   markdown-DAG в docs/tasks/ (носитель D-0080: узлы/статусы/ярусы);
-   статус узла — тем же ходом, что его журнальное событие.
-5. Плоское делегирование (D-0037): субагенты не запускают субагентов.
-   Разложимая задача возвращается Lead'у событием `decomposable`.
-6. Эскалация: 2 неудачные попытки или явный сигнал «не хватает
-   уровня» → ярус выше + событие `escalated`; молчаливый повтор на
-   том же ярусе запрещён. Неудачная попытка = ОТКЛОНЁННЫЙ на приёмке
-   результат; каждое отклонение — событие `rejected` (agent =
-   воркер; поля — секция журнала ниже). Два `rejected` с одним
-   task_id на одном ярусе → эскалация
-   обязательна. Счётчик попыток — оперативный прокси стоимостного
-   кроссовера; сам кроссовер меряет еженедельная калибровка
-   (Update Rule 4).
-7. Фоновый запуск по умолчанию (D-0040): `run_in_background`;
-   синхронно — только если следующий шаг зависит от результата И
-   другой работы/вопросов оператора нет. Приёмка результата по
-   завершении обязательна (D-0037). Видимый лейбл диспатча
-   (`description`) начинается с модели воркера: «haiku: …» /
-   «sonnet: …» / «opus: …» (нестандартный агент — фактическая
-   модель) — оператор видит ярус в списке фоновых задач; это та же
-   самодекларация, что поле `model` журнала (сверка — чек 5, D-0042).
-   Ярусное ТРЕБОВАНИЕ закрывается замером (D-0083): хук SubagentStop
-   печатает фактическую модель воркера (TIER ECHO/MISMATCH);
-   расхождение с запрошенным ярусом разбирается ДО использования
-   результата как слова этого яруса (перезапуск / честная запись
-   с basis / эскалация).
-8. Универсальное правило пропуска (F-9): задача, отображающаяся на
-   дешёвый ярус, выполненная Lead'ом самим, законна ТОЛЬКО с
-   `dispatch_skipped` (agent = пропущенный ярус, причина обязательна)
-   — на любом ярусе. Льгота: пропуск critic на мелком диффе —
-   пометкой внутри accepted. БАТЧИНГ МЕЛОЧЕЙ (D-0081): мелкая
-   builder-класс правка, НЕ блокирующая следующий шаг, поштучно
-   координатором не исполняется — копится в списке сессии и уходит
-   builder'у ОДНИМ пакетным диспатчем на границе этапа (каденция
-   правила 12; маркер «батч мелочей» в notes); самоисполнение со
-   skip-событием легально только для правки, блокирующей текущий
-   ход, — причина обязана называть блокировку. Lead-tier работа по таблице
-   (декомпозиция, спеки, приёмка, архитектура, политика) событий
-   пропуска не требует.
-9. Чини класс, а не экземпляр (D-0043): назови класс; пройди
-   собратьев ПО КАРТЕ docs/SIBLING_MAP.md (точечный lookup, НЕ скан
-   репо; класс шире карты → scout с конкретным вопросом); почини
-   сейчас или ЯВНО поставь остаток в очередь/журнал; правило против
-   повторения — на самый верхний связывающий уровень; новая
-   симметрия — новая ось в карте тем же коммитом. Молчаливо
-   оставленный известный собрат = нарушение. Воркеры ДОКЛАДЫВАЮТ
-   замеченные аналоги (не расширяя scope), critic проверяет классовую
-   полноту фикса по карте, Lead владеет обходом и размещением правила.
-10. Четыре вопроса к каждому механизму (F-11, D-0049,
-   D-0063/D-0064) — письменно, в тексте механизма или
-   коммит-сообщении: (а) сколько стоит соблюдение и кто платит
-   (Rule #1 к самому правилу); (б) оси SIBLING_MAP —
-   ПЕРЕЧИСЛЕНИЕМ (D-0055): строка «ось N: покрыта / в очередь /
-   н-п <почему>» на каждую ось текущей карты И на каждый механизм
-   коммита (проза «оси покрыты» — не ответ; F-20/F-33); (в) где
-   ЗАРЕГИСТРИРОВАН детектор его отказа — чек калибровки либо явно
-   названный внешний; действует для ВСЕХ механизмов: без детектора
-   это не механизм, а пожелание, его обнаружение — находка; (г) что
-   не даёт механизм ПРОПУСТИТЬ — какой код стоит на пути исполнения
-   (D-0063: код гарантирует встречу, смысл судит ИИ ярусом выше);
-   «на дисциплине» — легальный ответ только ЯВНОЙ строкой с
-   названным (в)-детектором утечки. Enforce: commit-msg-гейт
-   (.githooks/ + tools/mechanism_gate.py) отклоняет механизменный
-   коммит без осевого блока и без строки «tier: <модель>» (D-0072;
-   декларация ниже lead-привязки деплоя — в очередь Lead);
-   не-механизменная правка тех же путей легальна только строкой
-   «оси: не-механизм (<причина>)» в СООБЩЕНИИ коммита.
-   Распознавание (D-0065): механизм — любая правка, добавляющая или
-   меняющая обязанность будущих сессий/воркеров либо машинную
-   проверку — НЕЗАВИСИМО от файла; сомнение трактуется как механизм:
-   четыре вопроса или явный отказ. Полная процедура и границы —
-   D-0055/D-0063/D-0064/D-0065/D-0072 (DECISIONS_FULL).
-11а. Маршрутизация вопросов (D-0077, 2026-07-15): вопросы ходят
-   ВВЕРХ, работа — ВНИЗ; вершина иерархии — ПОЛЬЗОВАТЕЛЬ (выше
-   Lead). Недоопределённые ТРЕБОВАНИЯ (интерпретация намерения,
-   выбор формы результата) — вопрос пользователю, работа участка
-   стоит до ответа; решать за пользователя запрещено любому ярусу,
-   включая Lead. Скип-льгота направлена только вниз: пропустить
-   можно диспатч НИЖЕ своего яруса (с событием), вопрос ВЫШЕ своего
-   уровня поглотить нельзя — только эскалация (правило 6; ярусы
-   исчерпаны — очередь Lead событием escalated). Самоисполненное
-   координатором после dispatch_skipped проходит ту же приёмку, что
-   builder-дифф (матрица D-0058); сдача пользователю непринятого —
-   нарушение. Headless-среда без пользователя — только явной
-   строкой условий с прокси-эскалацией (протокол экзамена).
-11. DoD в каждом диспатче (D-0054): что значит «готово» и как
-   приёмка это проверит — в форме яруса: builder — критерии приёмки
-   + проверочный прогон, чей вывод станет witness (D-0052); у задачи
-   с ИНТЕРАКТИВНОЙ поверхностью (CLI/UI, принимающей пользовательский
-   ввод) DoD включает адверсариальную мини-батарею — величина,
-   вложенность, кодировка, пустой/битый ввод (прецедент 9**9**9
-   B-t1 №3: builder+critic прошли, DoS дошёл до сдачи); у каждого
-   введённого кодом лимита/границы — тест НА границе и ЗА ней
-   (класс M6 выживал убой 4 прогона, убит кодификацией в №14);
-   ПОТОЛОК СКОУПА (№14): тестовый объём = ключи приёмки + батарея +
-   границы, полный регресс сверх — не требуется; scout —
-   явный вопрос(ы) и критерий полноты («нигде нет X» — валидный
-   итог, требующий следа); critic — приложена спека/DoD ревьюируемой
-   работы. Рядом — МАНИФЕСТ КОНТЕКСТА (D-0073): «дано» —
-   перечисление инжектированных файлов/данных; пишущий диспатч —
-   также «owns» (пути на запись), «non-goals», «handoff»;
-   параллельный веер — владение по правилу 4 + опциональный
-   maxConcurrent. Манифест ДЕКЛАРАТИВЕН по чтению (выход за корзину
-   — строка отчёта, не нарушение), НОРМАТИВЕН по записи; точечному
-   read-only диспатчу хватает перечисления вложенного в тексте.
-   Полнота DoD и манифеста — обязанность ДИСПАТЧЕРА ДО отправки:
-   самопроверка по этому правилу — часть составления диспатча.
-   Возврат воркером (диспатч без DoD — и пишущий/параллельный без
-   манифеста — воркер возвращает вопросами, не начиная работу) —
-   аварийная сетка, не штатный цикл: каждый возврат = двойное
-   переключение контекста; частые возвраты = дефект спек-дисциплины
-   координатора, прецедент к разбору калибровки.
-12. Каденция координатора — КРУПНЫЕ ХОДЫ, не серии мелких (экзамены
-   №5–№10: микро-циклы — главный едок денег и рассадник ошибок
-   спешки): приёмка воркеров — балком на границе этапа (принять ВСЁ
-   обязательно, D-0037 — меняется каденция, не обязательность);
-   один вопрос со списком вместо цикла уточнений; дозапись журнала
-   — строго в ХВОСТ, якорь — фактический хвост файла, не память
-   (3 инцидента Lead 07-16, валидатор ловит, но циклы теряются);
-   дожим boot-бюджета — батчем на handoff (boot-diet). Ориентир
-   ≤15 main-ходов на задачу — не гейт, измеряемая цель (счётчик —
-   экзамены/чек калибровки).
+R1. **Recon → scout BY DEFAULT**: any repo search, or more than 1–2
+files known in advance. The Lead may point-read a known file; up to ~4
+known targets itself ONLY with a `dispatch_skipped` event (reason
+mandatory) — a silent skip is a violation (F-9). Unknown-volume recon
+is always scout. External-repo surveys are two-pass (D-0066): scout
+delivers the map; a mechanism enters the plan/queue only after the
+Lead's own targeted second pass, its trail recorded in RELATED_WORK.
+Digest acceptance is by trail (D-0046): scout attaches where it
+searched and what it read; the Lead checks coverage and spot-verifies
+at least one load-bearing claim (verifying a negative "X is nowhere"
+is mandatory), noting the check in `accepted`; a digest without a
+trail → `rejected`.
 
-## Журнал маршрутизации — logs/routing-log.jsonl
+R2. **Implementation to a ready spec → builder.** The Lead writes the
+spec; the builder returns missing requirements as questions, never
+invents. Acceptance is by witness (D-0052/D-0053): the `accepted`
+event's `witness` field carries the VERBATIM output of the
+verification run (test command + result), not a retelling; a report
+without a witness → `rejected`. A task with a UI result: the run
+includes DRIVING the UI — witness is a before/after
+screenshot/recording; a text-only witness is insufficient. A
+self-activating enforcement file (hook on the active hooksPath etc.)
+is never placed on the path by its builder: it is delivered as
+content or under a sibling name, and the Lead places it at acceptance
+(D-0069). Opus-designer pilot (spec drafting from a Lead intent
+brief; forks returned, never decided silently): protocol and metrics
+in docs/tasks/2026-07-14_opus-designer-pilot.md; verdict due at
+calibration #4.
 
-Одна JSON-строка на событие, пишется Edit/Write-тулом:
+R3. **critic is the MANDATORY acceptance gate** for builder diffs
+>~100 lines or touching the data schema / core / money accounting,
+and for unclear bugs BEFORE the Lead starts debugging itself. The
+first filter of EVERY diff is the performer's own DoD self-run (R11)
+— the critic does not replace it. TWO-LAYER input: the MECHANICAL
+layer (test reruns, control values, smoke matrices) is executed by
+the submitting builder or a script and attached VERBATIM before the
+verdict; the critic's zone is the VERDICT layer (architecture,
+semantics, class completeness). A cheap control re-run of the
+attached is legal; investigating mechanics by critic-reading is not.
+Layer missing → the critic returns the dispatch with a request, it
+does not execute the layer itself. Money/numeric diffs: the critic
+starts with EMPIRICS — control-value runs; code reading on divergence
+or where no deterministic check exists. CRITIC ON PLAN: a recon
+deliverable serving as the SPEC of work >~30 min gets a critic pass
+BEFORE code starts — facts verified by trail (D-0046), feasibility as
+architectural judgment. Small diffs: "critic: skipped, <reason>"
+inside the `accepted` event — a concession ONLY of an acceptor above
+the performer (D-0058). Acceptance itself stays with the Lead
+(D-0037).
+
+R4. **Independent parts → several parallel workers**, each with its
+own spec (context isolation). Parallel specs declare path ownership;
+the Lead checks overlap before launch. Parallel SESSIONS in one repo
+are the same class: never touch or commit another session's
+uncommitted paths (D-0060, F-23). A cross-deploy queue item exists
+only if written IN THE SAME MOVE into the carrier the TARGET deploy
+reads at boot (OS: CURRENT_CONTEXT.md; AO3: docs/HANDOFF.md); own
+journal notes / FINDINGS are not a carrier — an item living only
+there is NOT handed over (D-0082, F-48). A task of ≥5 journal events
+OR ≥2 sessions is carried as a markdown DAG in docs/tasks/ (D-0080:
+nodes/statuses/tiers); a node's status moves in the same move as its
+journal event.
+
+R5. **Flat delegation (D-0037)**: workers never spawn workers. A task
+found decomposable returns to the Lead via a `decomposable` event.
+
+R6. **Escalation**: 2 failed attempts or an explicit "not enough
+tier" signal → one tier up + an `escalated` event; a silent retry on
+the same tier is forbidden. A failed attempt = a result REJECTED at
+acceptance; every rejection is a `rejected` event (agent = worker).
+Two `rejected` with one task_id on one tier → escalation is
+MANDATORY. The attempt counter is an operational proxy of the cost
+crossover; the crossover itself is measured by the weekly calibration.
+
+R7. **Background dispatch by default (D-0040)**: `run_in_background`;
+synchronous only when the next step depends on the result AND there
+is no other work or operator question. Acceptance of the result on
+completion is mandatory (D-0037). The visible dispatch label
+(`description`) starts with the worker's model: "haiku: …" /
+"sonnet: …" / "opus: …" (non-standard agent — its actual model); this
+is the same self-declaration as the journal's `model` field. A tier
+REQUIREMENT closes by MEASUREMENT (D-0083): the SubagentStop hook
+prints the finished worker's actual model (TIER ECHO/MISMATCH); a
+mismatch with the requested tier is resolved BEFORE the result is
+used as that tier's word (relaunch / honest record with basis /
+escalate).
+
+R8. **Universal skip rule (F-9)**: a task mapping to a cheaper tier,
+executed by the Lead itself, is legal ONLY with `dispatch_skipped`
+(agent = the skipped tier, reason mandatory) — at any tier. BATCHING
+(D-0081): a small builder-class edit NOT blocking the next step is
+never self-executed piecemeal by the coordinator — it accumulates in
+the session's list and goes to builder as ONE batched dispatch at a
+stage boundary (marker «батч мелочей» in notes); self-execution with
+a skip event is legal only for an edit BLOCKING the current move —
+the reason must name the blockage. Lead-tier work per the table
+(decomposition, specs, acceptance, architecture, policy) needs no
+skip events.
+
+R9. **Fix the class, not the instance (D-0043)**: name the class;
+walk the siblings VIA docs/SIBLING_MAP.md (point lookup, NOT a repo
+scan; class wider than the map → scout with a concrete question); fix
+now or EXPLICITLY queue the remainder; place the anti-recurrence rule
+at the highest binding level; a new symmetry = a new axis in the map
+in the same commit. A silently left known sibling is a violation.
+Workers REPORT noticed analogs (without widening scope), the critic
+checks the fix's class completeness against the map, the Lead owns
+the walk and rule placement.
+
+R10. **Mechanism discipline.** Recognition (D-0065): a mechanism is
+ANY edit adding or changing a duty of future sessions/workers or a
+machine check — regardless of file; doubt counts as a mechanism: four
+questions or an explicit refusal. Four questions (F-11, D-0049,
+D-0063/D-0064) — in writing, in the mechanism text or commit message:
+(а) what compliance costs and who pays (Rule #1 applied to the rule
+itself); (б) SIBLING_MAP axes BY ENUMERATION (D-0055): a line
+«ось N: покрыта / в очередь / н-п <why>» per axis of the CURRENT map
+per mechanism; (в) where its failure DETECTOR is registered — a
+calibration check or a named external one; a mechanism without a
+detector is a wish, and finding one is a finding; (г) what stands on
+the execution path (D-0063: code guarantees the encounter, an AI tier
+above judges the meaning); «held by discipline» is legal only as an
+explicit line naming the (в) detector. Enforcement: the commit-msg
+gate (.githooks/ + tools/mechanism_gate.py) rejects a mechanism
+commit without the axis block and a `tier: <model>` line (D-0072); a
+non-mechanism edit of the same paths is legal only with the line
+«оси: не-механизм (<reason>)» in the commit MESSAGE. Full procedure:
+D-0055/D-0063/D-0064/D-0065/D-0072 (DECISIONS_FULL).
+
+R11. **DoD in every dispatch (D-0054)** — what "done" means and how
+acceptance verifies it, in the tier's form: builder — acceptance
+criteria + the verification run whose output becomes the witness;
+a task with an INTERACTIVE surface (CLI/UI taking user input) adds an
+adversarial mini-battery to the DoD — size, nesting, encoding,
+empty/broken input; every limit/boundary the code introduces gets a
+test AT and BEYOND it; SCOPE CEILING: test volume = acceptance keys +
+battery + boundaries, full regress beyond is not required. scout —
+explicit question(s) + a completeness criterion ("X is nowhere" is a
+valid result requiring a trail). critic — the spec/DoD of the
+reviewed work attached. Next to the DoD — the CONTEXT MANIFEST
+(D-0073): "given" = enumeration of injected files/data; a writing
+dispatch adds owns (ABSOLUTE write paths) / non-goals / handoff; a
+parallel fan-out — ownership per R4 + optional maxConcurrent. The
+manifest is DECLARATIVE on reads (reading past the basket is a report
+line, not a violation), NORMATIVE on writes; a point read-only
+dispatch just enumerates its basket inline. Completeness of DoD and
+manifest is the DISPATCHER's duty BEFORE sending. The DoD is written
+INLINE in the dispatch prompt itself — named acceptance criteria plus
+the exact verification run; a bare pointer to a spec file or an
+earlier event is NOT a DoD. A worker returning
+a DoD-less dispatch (or a writing/parallel one without a manifest)
+with questions is the emergency net, not the normal cycle: frequent
+returns = a spec-discipline defect of the coordinator, a calibration
+case.
+
+R11a. **Questions route UP, work routes DOWN (D-0077); the USER is
+the apex of the hierarchy** (above the Lead). Underspecified
+REQUIREMENTS (intent interpretation, choice of result form) are
+user-level questions; the affected work stands until answered;
+deciding for the user is forbidden at every tier including the Lead.
+The skip concession points only DOWN: you may skip a dispatch BELOW
+your tier (with the event); a question ABOVE your level cannot be
+absorbed — only escalated (R6; tiers exhausted → the Lead queue via
+`escalated`). Coordinator work self-executed after `dispatch_skipped`
+passes the same acceptance as a builder diff (D-0058 matrix); handing
+unaccepted work to the user is a violation. Headless environments
+without a user — only via an explicit environment clause with proxy
+escalation (exam protocol).
+
+R12. **Coarse cadence — LARGE moves, not series of small ones**:
+worker acceptance in bulk at the stage boundary (accepting EVERYTHING
+stays mandatory, D-0037 — the cadence changes, not the duty); one
+question with a list instead of a clarification loop; journal appends
+strictly to the TAIL — the anchor is the file's actual tail, not
+memory; boot-budget squeeze batched at handoff. Target ≤15 main moves
+per task — a measured goal (exams / calibration check), not a gate.
+
+## Journal — logs/routing-log.jsonl
+
+One JSON line per event, written with the Edit/Write tool:
 
 ```json
-{"ts":"2026-07-08T12:00:00","event":"delegated","agent":"builder","model":"sonnet","task_id":"t-042","category":"implementation","worker_ref":"agent:<id>","notes":"кратко: что делегировано"}
+{"ts":"2026-07-08T12:00:00","event":"delegated","agent":"builder","model":"sonnet","task_id":"t-042","category":"implementation","worker_ref":"agent:<id>","notes":"short: what was delegated"}
 ```
 
-Журнал append-only и записывает СВЕРШИВШИЕСЯ ФАКТЫ, не намерения
-(D-0076/F-44). КАДЕНЦИЯ ЗАПИСИ (D-0079): события копятся и пишутся
-БАТЧЕМ на границе этапа — одним Edit в ХВОСТ, НО не позже входа в
-длинное ожидание (фоновый диспатч без другой работы, конец хода
-перед простоем, handoff): факты в памяти сессии умирают с ней,
-диск переживает — недописанный журнал при живых воркерах
-запрещён. `delegated`/`escalated` — строго ПОСЛЕ возврата
-диспатч-вызова; новый `delegated` несёт `worker_ref`
-(непустой хэндл воркера/результата: id фонового таска, job id,
-`cli:<ts>`, `retro:<...>`) — значение существует только после
-запуска, заполнить заранее нечем. Открытые диспатчи сверяют хук
-(OPEN DISPATCH) и handoff-чек 2: воркер жив / результат ждёт /
-фантом. Закрытие — голый токен closes:t-NNN (можно несколько) в
-notes любого ПОСЛЕДУЮЩЕГО события: хук читает только его,
-прозаическое «закрыт» невидимо; буквальную форму с живым id в
-прозе не писать (закроет задачу).
-Базовые поля КАЖДОГО события: ts (ISO,
-локальное время, БЕЗ таймзоны/Z — с системных часов, прочитанных
-непосредственно перед записью, НЕ из повествования сессии, F-29),
-event, agent, category, notes (непустая). Типизированные поля
-(D-0053; несущие факты — полями, notes — человекочитаемый
-довесок): `task_id` обязателен для delegated/accepted/rejected/
-escalated/defect_found — сквозной на задачу; `attempt` (число) и
-`failure_class` (spec/capability/recon/tooling) — на rejected;
-`witness` (фактический вывод прогона) — на accepted по builder;
-`worker_ref` (хэндл запуска, D-0076) — на delegated;
-`ref` (task_id исходного accepted) — на defect_found; `model`
-обязательно для delegated/escalated/accepted/rejected —
-самодекларация, калибровка сверяет с транскриптами (D-0042); новые
-accepted/rejected несут `by` — строго ЯРУСНОЕ СЛОВО
-(haiku/sonnet/opus/fable; полный model id МОЛЧА провалит сравнение
-ярусов — `model` свободная форма, `by` нет); приёмка не сверху —
-только с `basis`: "critic" / "queued-to-lead" (матрица D-0058
-кодом; для не-Claude `by` basis обязателен). Выдача task_id —
-перечитыванием хвоста журнала непосредственно перед записью
-delegated: max(t-NNN)+1, запомненный ранее id не переиспользовать;
-повторный delegated по открытой задаче легален critic-входом,
-ретраем с `attempt`>=2 после rejected, либо заменой умершего воркера
-— маркер `replaces_worker:<прежний worker_ref>` в notes (не-ретрай,
-attempt не растёт; хэндл обязан буквально совпадать с worker_ref
-предыдущего delegated той же задачи, иначе валидатор режет как
-фиктивную замену; маркер — ГОЛЫЙ ref сразу за двоеточием, без
-хвостовой пунктуации/скобок: regex берёт первый non-whitespace
-токен, «(agent:x).» даст несовпадение); на закрытую — запрещён
-(D-0060). Прошлое не переписывается: замеченные позже коллизия или
-неверный ts — пометкой в notes СЛЕДУЮЩЕГО события; пропущенное
-событие чинится ретро-парой СЕЙЧАС — текущий ts, пометка
-«retroactive», фактические границы в notes (D-0056б); вставка
-строк в прошлое запрещена. Формат и матрицу приёмки enforce'ит
-pre-commit валидатор tools/journal_validator.py (D-0069) — его
-отказ объясняет нарушение. События: `delegated`, `accepted`,
-`rejected` (отклонено на приёмке — неудачная попытка правила 6),
-`escalated`, `decomposable`, `dispatch_skipped` (причина
-обязательна), `defect_found` (поздний дефект ПРИНЯТОЙ работы;
-agent = исходный ярус), `lead_degraded`, `lead_restored`,
-`journal_created`, `calibrated`. Журнал — evidence еженедельной
-калибровки (PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md); статусы
-DELEGATION_TABLE.md двигаются только по этим данным (Update
-Rule 1).
+Append-only; records ACCOMPLISHED FACTS, never intentions
+(D-0076/F-44). Cadence (D-0079): events accumulate and are written as
+a BATCH at the stage boundary — one Edit to the TAIL — but never
+later than entering a long wait (background dispatch with no other
+work, pre-idle turn end, handoff): facts in session memory die with
+it, disk survives; an unwritten journal with live workers is
+forbidden. `delegated`/`escalated` — strictly AFTER the dispatch call
+returns; a new `delegated` carries a non-empty `worker_ref` (id of
+the background task, job id, `cli:<ts>`, `retro:<...>`).
 
-## Роль ≠ ярус (D-0058, F-22; словарь уточнён 2026-07-10, F-31)
+Base fields of EVERY event: ts (ISO, local time, no timezone — read
+from the system clock immediately before writing, never from the
+session's narrative, F-29), event, agent, category, notes
+(non-empty; there is NO separate `reason` field — reasons go inside
+notes). Event SHAPES — mandatory typed fields on top of the base
+(D-0053; load-bearing facts as fields, notes is surplus):
 
-Три определения, которые НЕ синонимы (F-31: пересказ их
-схлопывает — формулировки ниже несущие, не сокращать):
+| event | adds on top of base |
+|---|---|
+| delegated | task_id, model, worker_ref; a REPEAT on an open task only as: critic entry / retry with attempt≥2 after a rejected / `replaces_worker:<prev worker_ref>` bare token in notes |
+| accepted | task_id, model, by (TIER WORD: haiku/sonnet/opus/fable); + `basis`: "critic" or "queued-to-lead" when the acceptor is not strictly above; + `witness` (verbatim run output) on builder work |
+| rejected | task_id, model, by, attempt (number), failure_class ∈ spec/capability/recon/tooling — exactly these |
+| escalated | task_id (must exist above in the file), model |
+| defect_found | task_id, ref (the source accepted's task_id) |
+| dispatch_skipped | reason inside notes (no extra field) |
 
-- ЯРУС сессии = её ФАКТИЧЕСКАЯ модель (сверка на входе — D-0056).
-  Fable — ИМЯ МОДЕЛИ верхнего яруса; «Lead» — ярус-функция
-  (декомпозиция, спеки, приёмка, механизмы), не роль в диалоге.
-- РОЛЬ координатора = МАРШРУТИЗАЦИЯ, не исполнение. Её несёт любая
-  модель, ведущая диалог с оператором, с любого яруса, и она НЕ
-  делает сессию Lead'ом. Координатор РАСПРЕДЕЛЯЕТ работу по ярусам
-  (разведка → scout, реализация → builder, ревью → critic,
-  Lead-класс → Lead или его очередь) и ПЕРЕДАЁТ НАВЕРХ всё, что по
-  матрице ниже требует яруса выше его собственного, — а не делает
-  это сам.
-- Полный Lead = координатор, чей фактический ярус — Fable; только
-  он меняет механизмы, DECISIONS, статусы таблицы и гейты.
+task_id issuance: re-read the journal tail immediately before
+writing the delegated — max(t-NNN)+1; never reuse a remembered id.
+A repeat `delegated` on a CLOSED task is forbidden (D-0060). The past is never rewritten: a later-noticed collision or
+wrong ts gets a note in the NEXT event's notes; a missed event is
+fixed by a retro pair NOW — current ts, "retroactive" mark, actual
+bounds in notes (D-0056b); inserting lines into the past is
+forbidden. CLOSING an open dispatch: bare token `closes:t-NNN`
+(several allowed) in the notes of any LATER event — the SessionStart
+hook reads ONLY this token; prose closures are invisible to it; never
+write the literal form with a live id in prose. The validator
+tools/journal_validator.py enforces the format and the acceptance
+matrix (D-0069) at TWO points: the pre-commit gate, and the WRITE
+moment — the journal_echo PostToolUse hook warns immediately on a
+defective appended line; its message explains the violation.
 
-Приёмка — только СВЕРХУ: `accepted` легален, когда
-ярус принимающего строго выше яруса исполнителя, ЛИБО решение несёт
-вход яруса выше (вердикт critic), ЛИБО приёмка явно поставлена в
-очередь полного Lead (пометка в notes). Приёмка равного/высшего
-яруса без такого входа = самосертификация сессии (F-22; класс
-F-6/F-14). Матрица по фактическому ярусу координатора:
+```mermaid
+stateDiagram-v2
+    [*] --> Open: delegated (after the dispatch call returns)
+    Open --> Open: rejected → retry attempt≥2 | critic entry | replaces_worker
+    Open --> Closed: accepted (from above / basis critic / queued-to-lead)
+    Open --> Closed: escalated / decomposable → re-dispatched under the same task_id
+    Open --> Closed: closes:t-NNN token in a later event's notes
+    Closed --> [*]: reopen forbidden (D-0060); late defects → defect_found(ref)
+```
 
-- **Fable** — без ограничений; льгота «critic: skipped» доступна.
-- **Opus** — координация, диспатчи; принимает scout и builder
-  (льгота skip доступна — стоит выше исполнителя); critic-класс
-  работ — в очередь Lead; механизмы/DECISIONS/статусы — нет.
-- **Sonnet** — координация, диспатчи; принимает scout; builder-дифф
-  — ТОЛЬКО с critic-входом (льгота skip недоступна); critic-класс и
-  Lead-класс — в очередь.
-- Ниже Sonnet координация не предусмотрена.
+Events: `delegated`, `accepted`, `rejected`, `escalated`,
+`decomposable`, `dispatch_skipped` (reason mandatory), `defect_found`
+(late defect of ACCEPTED work; agent = the original tier),
+`lead_degraded`, `lead_restored`, `journal_created`, `calibrated`.
+The journal is the evidence of the weekly calibration
+(PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md); DELEGATION_TABLE.md
+statuses move only on this data (Update Rule 1).
 
-Штатный режим «оператор координирует с Sonnet, Fable запускается
-батчем на очередь Lead-задач» — та же матрица; деградация (ниже) —
-незапланированный вход в неё.
+## Role ≠ tier (D-0058, F-22; F-31 — the three definitions below are load-bearing, do not compress)
 
-## Деградация Lead (D-0039, D-0042)
+Three definitions that are NOT synonyms:
 
-Отказ Fable (safety/dual-use, лимит подписки, недоступность) ИЛИ
-явное переключение оператором на ярус ниже:
+- A session's TIER = its ACTUAL model (verified at entry — D-0056).
+  Fable is the MODEL NAME of the top tier; "Lead" is the
+  tier-function (decomposition, specs, acceptance, mechanisms), not a
+  role in the dialog.
+- The COORDINATOR role = ROUTING, not execution. Any model leading
+  the dialog with the operator carries it, from any tier, and it does
+  NOT make the session a Lead. The coordinator DISTRIBUTES work
+  across tiers (recon → scout, implementation → builder, review →
+  critic, Lead-class → Lead or its queue) and PASSES UP everything
+  the matrix below puts above its own tier — instead of doing it
+  itself.
+- The full Lead = a coordinator whose actual tier is Fable; only it
+  changes mechanisms, DECISIONS, table statuses and gates.
 
-1. Ярус ниже (Opus; затем Sonnet) + `lead_degraded` (причина, рамки).
-2. Пока деградирован: координация и авторизованные задачи — да;
-   статусы таблицы, гейты — нет; новые записи DECISIONS — в очередь
-   для полного Lead; приёмка — по матрице «Роль ≠ ярус» (D-0058):
-   равный/высший ярус — только с входом яруса выше или в очередь.
-3. Возврат по умолчанию на границе задачи/сессии: `lead_restored` +
-   приёмка участка деградации (журнал + диффы окна ВСЕХ затронутых
-   сессией репо, D-0044) в notes
-   события; пустое окно отмечается явно; разбор очереди приёмку не
-   заменяет. Деградация через границу сессии фиксируется последним
-   событием журнала.
-4. Сверка яруса в ОБЕИХ точках (D-0056, F-21) — поодиночке не
-   достаточны: вход пропускается самодетекцией деградированного,
-   подъёма может не быть вовсе (safety-сброс без возврата).
-   а) ВХОД — перед ПЕРВЫМ Lead-действием сессии (диспатч, приёмка,
-   механизменный коммит, смена статуса): сверь свою модель по
-   последнему видимому сигналу (системный промпт; команда
-   переключения) с ярусом Lead (Fable); ниже, и журнал не открывает
-   окно → `lead_degraded` ДО действия.
-   б) ВЫХОД — видимый подъём сам по себе ДОКАЗАТЕЛЬСТВО окна,
-   независимо от журнала (отсутствие события ≠ отсутствие факта):
-   тем же ходом ретроактивный `lead_degraded` (пометка + фактические
-   границы), приёмка окна по п.3, `lead_restored`.
-   в) ВНЕШНЯЯ СЕТЬ — чек 5 калибровки: фактическая модель
-   Lead-сессий по транскриптам vs покрытие окон парами событий
-   (расширение сверки D-0042 с воркеров на Lead); ловит отказ обеих
-   in-session точек, вкл. сессию, умершую деградированной.
+Acceptance only FROM ABOVE: `accepted` is legal when the acceptor's
+tier is strictly above the performer's, OR the decision carries a
+higher tier's input (a critic verdict), OR acceptance is explicitly
+queued to the full Lead (note in notes). Equal/higher-tier acceptance
+without such input = session self-certification (F-22; class
+F-6/F-14). The matrix by the coordinator's ACTUAL tier:
 
-## Командная гигиена (permission hygiene)
+| Coordinator | Accepts | Does not |
+|---|---|---|
+| Fable | everything; "critic: skipped" concession available | — |
+| Opus | scout and builder (skip concession available — stands above both) | critic-class work → Lead queue; mechanisms/DECISIONS/statuses |
+| Sonnet | scout; builder diffs ONLY with a critic input (skip concession unavailable) | critic-class and Lead-class → queue |
+| below Sonnet | no coordination is provided for | — |
 
-Каждая «своя» форма команды = permission-запрос оператору. Для всех
-сессий и субагентов этого репо:
+The standing mode "operator coordinates with Sonnet, Fable runs in
+batches over the Lead queue" is the same matrix; degradation (below)
+is an unplanned entry into it.
 
-1. Тесты — каноническая форма из корня:
-   `python -m pytest tools/ gateway/ -q` (или узкий таргет).
-2. Прокси-сервер — ИЗ gateway/ (импорты cwd-относительные),
-   экспортировав GEMINI_API_KEY / GROQ_API_KEY (litellm не читает
-   gateway/.env сам).
-3. Не префиксовать `cd <dir> && ...` и не добавлять ` 2>&1` — ломают
-   совпадение с allowlist.
-4. Правки файлов — только Edit/Write-тулами (не `python - <<EOF`, не
-   `python -c "...replace..."`).
-5. Записи в журнал — Edit/Write-тулом, не printf с `$(date)`.
-6. Env-негатив требует сверки: пустой вывод или command not found
-   НЕВЕРНО вызванного тула — промах вызова, не отсутствие объекта;
-   негативное утверждение о среде («сервиса/ключа/файла нет»)
-   валидно только после позитивной сверки канонической формой
-   (пп. 1–2). Расширение F-30: ЛЮБОЕ несущее утверждение о
-   состоянии среды (квота, окно времени, наличие ресурса, «уже
-   готово/открыто») в отчёте оператору или плане валидно только
-   после сверки измерением; непроверенное — с явной пометкой
-   «оценка, не проверено». Тот же класс — ЛЮБОЙ поиск по
-   содержимому (grep/glob/скрипт): пустой результат сообщается
-   только после позитивного контроля вызова — тем же инструментом,
-   синтаксисом и ФОРМОЙ (регистр, фильтры type/glob; негатив по
-   содержимому — только case-insensitive) найти заведомо
-   существующий образец; контроль другим паттерном доказывает
-   трубу, не отсутствие; без контроля пустота = промах вызова
-   (F-30/F-34).
+## Lead degradation (D-0039, D-0042, D-0056)
+
+Triggers: Fable refusal (safety/dual-use, subscription limit,
+unavailability) OR the operator explicitly switching to a lower tier.
+
+```mermaid
+stateDiagram-v2
+    Fable --> Degraded: trigger → lead_degraded (cause, scope)\nBEFORE the first Lead action
+    Degraded --> Degraded: coordination and authorized tasks — yes;\ntable statuses, gates — no; new DECISIONS → queue;\nacceptance per the Role≠tier matrix
+    Degraded --> Fable: default at task/session boundary → lead_restored\n+ acceptance of the window (journal + diffs of ALL repos\ntouched by the session, D-0044) in the event's notes;\nan empty window is noted explicitly
+```
+
+The tier is verified at BOTH ends (D-0056, F-21) — either alone is
+insufficient: (а) ENTRY — before the FIRST Lead action of a session
+(dispatch, acceptance, mechanism commit, status change): check your
+actual model by the last visible signal against the Lead tier
+(Fable); lower, with no window opened in the journal →
+`lead_degraded` BEFORE the action. (б) EXIT — a visible ascent is by
+itself PROOF of a window, regardless of the journal: in the same
+move, a retroactive `lead_degraded` (mark + actual bounds), window
+acceptance per the diagram, `lead_restored`. (в) EXTERNAL NET —
+calibration check 5: actual Lead-session models from transcripts vs
+window coverage by event pairs; catches both in-session points
+failing, incl. a session that died degraded. A degradation crossing
+the session boundary must be the journal's last event.
+
+## Command hygiene (permission hygiene)
+
+Every "own-form" command = a permission prompt to the operator. For
+all sessions and subagents of this repo:
+
+1. Tests — the canonical form from the repo root:
+   `python -m pytest tools/ gateway/ -q` (or a narrow target).
+2. Proxy server — FROM gateway/ (imports are cwd-relative), with
+   GEMINI_API_KEY / GROQ_API_KEY exported (litellm does not read
+   gateway/.env itself).
+3. Never prefix `cd <dir> && ...`, never append ` 2>&1` — they break
+   allowlist matching.
+4. File edits — only via the Edit/Write tools (no `python - <<EOF`,
+   no `python -c "...replace..."`).
+5. Journal writes — Edit/Write tool, not printf with `$(date)`.
+6. Environment negatives require verification (F-30/F-34): an empty
+   output or "command not found" from a MISCALLED tool is a call
+   miss, not absence; a negative claim about the environment
+   ("service/key/file is absent") is valid only after a positive
+   check with the canonical form (pp. 1–2). Extension: ANY
+   load-bearing claim about environment state (quota, time window,
+   resource presence, "already done/open") in a report or plan is
+   valid only after measured verification; unverified — mark
+   explicitly "estimate, not verified". Same class — ANY content
+   search (grep/glob/script): an empty result is reported only after
+   a positive control of the call — the same tool, syntax and FORM
+   (case sensitivity, type/glob filters; content negatives only
+   case-insensitive) finding a known-present sample; a control with a
+   different pattern proves the pipe, not absence; no control →
+   emptiness = a call miss.
