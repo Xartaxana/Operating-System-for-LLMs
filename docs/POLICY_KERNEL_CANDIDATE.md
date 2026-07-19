@@ -116,7 +116,12 @@ is no other work or operator question. Acceptance of the result on
 completion is mandatory (D-0037). The visible dispatch label
 (`description`) starts with the worker's model: "haiku: …" /
 "sonnet: …" / "opus: …" (non-standard agent — its actual model); this
-is the same self-declaration as the journal's `model` field.
+is the same self-declaration as the journal's `model` field. A tier
+REQUIREMENT closes by MEASUREMENT (D-0083): the SubagentStop hook
+prints the finished worker's actual model (TIER ECHO/MISMATCH); a
+mismatch with the requested tier is resolved BEFORE the result is
+used as that tier's word (relaunch / honest record with basis /
+escalate).
 
 R8. **Universal skip rule (F-9)**: a task mapping to a cheaper tier,
 executed by the Lead itself, is legal ONLY with `dispatch_skipped`
