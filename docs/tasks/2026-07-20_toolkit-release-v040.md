@@ -47,8 +47,41 @@ checks; release note states it).
   git-based tracked-only snapshot (86 files; caches with HQ paths
   excluded per critic NB-1), public clone commit d139f3a, tag
   v0.4.0 pushed. Release note states the exam-cadence exclusion.
-  RESIDUALS to the next batch queue: permission_audit
-  CLAUDE_PROJECTS env fallback (critic NB-4); HQ-side port of the
-  GATEWAY_LOG_RAW_TEXT flag (builder B finding: штабной
-  sqlite_logger — same class); `error` column masking — recorded
-  decision (diagnostic, not raw-class), revisit by operator word.
+  RESIDUALS → next batch queue (detail below).
+
+## Next batch queue — detail (moratorium; opens by operator word)
+
+1. **permission_audit: CLAUDE_PROJECTS env fallback + empty-dir
+   warning** (critic NB-4). The ported script derives the
+   transcripts directory from a slug computed off the repo path;
+   the slug algorithm is empirically confirmed only for `:`/`\`/`_`
+   → `-` (dots/spaces unverified), and the docstring's "override
+   CLAUDE_PROJECTS" advice is not backed by code — the constant is
+   computed unconditionally. On an unusual install path the tool
+   silently reports "Scanned 0" (the silent-zero class, same family
+   as the shadow_eval symptom). Fix shape: read a `CLAUDE_PROJECTS`
+   env override; WARN when the computed directory does not exist or
+   yields zero transcripts («likely wrong slug — set
+   CLAUDE_PROJECTS»); tests for dot/space paths. Sibling check:
+   штабной permission_audit has a hardcoded correct slug, but the
+   warn-on-empty is the same class — port it home too.
+2. **HQ-side port of GATEWAY_LOG_RAW_TEXT** (builder-B finding: our
+   own gateway/sqlite_logger.py still writes prompt/response
+   unconditionally). Needs a DEPLOYMENT DECISION, not just code: our
+   pipelines READ raw text (Shadow Evaluation replay; metrics
+   context-repetition C1; categorize() fallback), so flipping the
+   default to false at HQ would silently starve them (the kit
+   README documents this degradation). Recommended shape: port the
+   flag with HQ default TRUE (behavior unchanged, gains the honest
+   startup banner + the switch), flip to false only by operator
+   word for privacy windows. Sibling: metrics.py degradation note —
+   same doc line as the kit's.
+3. **`error` column masking — operator decision**. Failure rows'
+   `error` can echo provider exceptions that sometimes quote
+   fragments of the prompt (content-policy errors especially); the
+   kit masks prompt/response but not error — recorded decision
+   (diagnostic field). Options: (а) leave as is; (б) at raw-off,
+   truncate error to ~200 chars / first line — keeps the diagnosis,
+   bounds the leak; (в) full masking (hurts debuggability).
+   Recommendation: (б); trades a little forensics for bounded
+   leakage — needs the word because it touches debuggability.
