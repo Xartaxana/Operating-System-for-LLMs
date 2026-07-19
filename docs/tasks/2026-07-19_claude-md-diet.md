@@ -150,13 +150,18 @@ justified.
   stops, 4 destroyed worker finals; defect_found ref t-203); D-0083
   norm stands, delivery point in redesign (candidate: coordinator
   Stop-hook over fresh subagent transcripts).
-  Run №17: kit exp-17-kernel @ b30337b = main 020138a (= штаб
-  5c8534f), arm Bkn3, same set/protez. PRE-REGISTERED: k1–k5 as
-  №15/№16; k2 EXPECTATION ~0 defects (both reworks live in cells);
-  k6 reduced to its replay part (proxy claims vs cc_usage) — no
-  in-cell echo until the D-0083 delivery redesign. Bar for the
-  operator's conditional GO: median of three kernel points
-  (0.94/0.90/№17) ≥0.93 with no new kernel-caused class → N3 cut.
+  Run №17 RESULT [DONE; t-206/t-207; Runs log №17, registry 64–67]:
+  scalar 0.92 (t1 0.93 / t2 0.85 / t3 0.98); **k2 = 0/0/0 — the
+  journal class is DEAD, both reworks confirmed by data on the first
+  run** (11 → 0); JOURNAL ECHO consistent silence. MEDIAN of three
+  kernel points 0.94/0.90/0.92 = **0.92 — the 0.93 bar missed by
+  0.01** → cut stands, reported. Findings: 2nd measured instance of
+  the D-0083 class (partial mid-worker substitution: declared-fable
+  worker billed sonnet for 2/11 closing turns — harness behavior);
+  missing rejected event on a critic refusal (rule-6 discipline);
+  k4 inline-DoD declining across kernel runs (6/9 → 1/6) — the ONE
+  kernel-attributable suspect (R11 compression), candidate for a
+  targeted R11 line if the operator orders another round.
 - **N3 — cut decision** [CONDITIONALLY AUTHORIZED by the operator's
   word 2026-07-19 («если результат удовлетворительный, то режем
   CLAUDE.md и переносим все правки в основную ветку»), gate = №17
