@@ -182,10 +182,12 @@ BOOT-БЮДЖЕТ: история — коммиты диет; мелкие ра
   LIKE-исключение + ассерт «id без дефисов» (t-126, ось 2).
   AO3-порты 07-16 (3f4014b+bc297bc) и 07-18 (bec081f) закрыты;
   живой остаток AO3 — в их носителе docs/HANDOFF.md (D-0082).
-- НАБОР №2 ЗАКРЫТ 07-16 (разбор —
-  docs/tasks/2026-07-15_economy-exam-runs5-6.md + Runs log).
-  ОСТАТОК: раннер «пустой stdout при rc=0» — фикс в очереди;
-  синтетика окон — пометка в Runs log при следующем прогоне.
+- CLAUDE.md DEEP DIET: N1 закрыт 07-19 — ядро-кандидат EN+mermaid,
+  20379 Б (−43%), все нормы сохранены; N2 = экзамен ядра (по слову,
+  платный); DAG: docs/tasks/2026-07-19_claude-md-diet.md.
+- НАБОР №2 закрыт 07-16 (economy-exam-runs5-6 + Runs log); остаток:
+  раннер «пустой stdout при rc=0»; синтетика окон — пометка при
+  прогоне.
 - ЭКЗАМЕН-СЕРИЯ: №1–№14 закрыты (разборы — evening-closures +
   docs/tasks/*economy-exam* + evening-run-series); медиана малых
   0.88–0.95 копится; большой — по каденции; РЕЗЕРВ — генератор
@@ -212,8 +214,8 @@ BOOT-БЮДЖЕТ: история — коммиты диет; мелкие ра
   SQLite/crash recovery, supply-chain tags, WXP; OpenClaw: channels,
   delegate identity, compaction/memory, utilityModel. Обоснования —
   RELATED_WORK «OpenClaw survey» + evening-closures.
-- Habr/LinkedIn (t-036): готово, публикация — слово оператора
-  (docs/ARTICLE_BRIEF_2026-07-10.md + draft-{A,B,C}).
+- Habr/LinkedIn (t-036): готово; публикация — слово оператора
+  (ARTICLE_BRIEF + drafts A/B/C).
 - White Paper v0.2.1 — AWAITING Architect review (кандидат v0.2.2:
   экзамены, policy-as-code, D-0076..81, critic-lite — после ревью).
 
