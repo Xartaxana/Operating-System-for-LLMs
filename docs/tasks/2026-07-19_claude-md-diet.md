@@ -105,10 +105,18 @@ justified.
   from THIS state — the pair (kernel vs full) is clean only against
   kit main e1ccd50; if the scalar lands below band, the control is a
   B-full arm on e1ccd50, not a verdict against the kernel.
-- **N2b — run №16: second kernel point with the D-0083 hook in cells**
-  [RUNNING 2026-07-19; operator word «добавь в экзаменационный набор
-  … и прогони экзамен с ядром ещё раз; если результат
-  удовлетворительный — режем»]. Kit branch exp-16-kernel @ 0526ca6 =
+- **N2b — run №16** [DONE 2026-07-19; journal t-202/t-203/t-204;
+  Runs log №16, registry rows 60–63]. RESULT: scalar 0.90 (t1 0.91 /
+  t2 0.82 / t3 0.96) — **the pre-registered 0.93 bar NOT met → cut
+  stands, reported to operator.** Failure profile is DISCIPLINE-form,
+  not content: A/B/C axes strong (unicode hole closed structurally —
+  first t1 of the series; 18/18 file:line; kills 8/8 + 6/7), scalar
+  eaten by k2 journal defects 11 (vs 3 on the SAME kernel in №15 —
+  inter-run dispersion), non-persisted t2 plan, one k3
+  self-certification. k6: no proxy substitution anywhere (11/11
+  honest, measured); TIER ECHO invisible via stderr@exit0 → channel
+  switched to hookSpecificOutput (872b5e6), live e2e pending next
+  run with cells. Kernel points so far: 0.94 / 0.90 (median 0.92). Kit branch exp-16-kernel @ 0526ca6 =
   kit main 2cbc84d (= штаб 1a11b80, v5.4: tier_echo in cells,
   hardened proxy protez) + CLAUDE.md := kernel v2 (R7 D-0083 line,
   20659 B); manifest docs/tasks/2026-07-19_exam-run16-manifest.json,
