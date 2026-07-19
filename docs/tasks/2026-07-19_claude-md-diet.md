@@ -136,10 +136,31 @@ justified.
   band (≥0.93 after any Lead adjustments) with no NEW kernel-caused
   failure class → N3 cut proceeds on the operator's already-given
   word; below band or a new kernel-caused class → stop and report.
+- **N2c — journal-discipline rework + run №17 (third point)**
+  [RUNNING 2026-07-19; operator word «делай» on the proposed rework].
+  Rework shipped: (1) kernel v3 — event-SHAPE table replacing prose
+  (+21 B, byte-neutral) + two-point enforcement clause; (2)
+  journal_echo hook — validator at WRITE time (PostToolUse,
+  coordinator-channel; critic ACCEPT; 636 passed; wired by Lead) —
+  kills the k2 class at the source for cells AND штаб; AO3 covered
+  by recognized difference (log_append.py is already write-time).
+  Incident en route: tier_echo UNWIRED (hotfix 9e18347) —
+  SubagentStop additionalContext feeds the STOPPING SUBAGENT, not
+  the coordinator (6 echo user-turns in a critic transcript, looped
+  stops, 4 destroyed worker finals; defect_found ref t-203); D-0083
+  norm stands, delivery point in redesign (candidate: coordinator
+  Stop-hook over fresh subagent transcripts).
+  Run №17: kit exp-17-kernel @ b30337b = main 020138a (= штаб
+  5c8534f), arm Bkn3, same set/protez. PRE-REGISTERED: k1–k5 as
+  №15/№16; k2 EXPECTATION ~0 defects (both reworks live in cells);
+  k6 reduced to its replay part (proxy claims vs cc_usage) — no
+  in-cell echo until the D-0083 delivery redesign. Bar for the
+  operator's conditional GO: median of three kernel points
+  (0.94/0.90/№17) ≥0.93 with no new kernel-caused class → N3 cut.
 - **N3 — cut decision** [CONDITIONALLY AUTHORIZED by the operator's
   word 2026-07-19 («если результат удовлетворительный, то режем
-  CLAUDE.md и переносим все правки в основную ветку»), gate = №16
-  bar above; Lead+Architect, D-0068]. If GO, the
+  CLAUDE.md и переносим все правки в основную ветку»), gate = №17
+  median bar above; Lead+Architect, D-0068]. If GO, the
   cut commit (full rule-10 mechanism): CLAUDE.md := kernel;
   docs/POLICY_FULL.md created with VERBATIM relocation of removed
   rationale/precedents; SIBLING_MAP axis 4 gains the kernel↔FULL pair;
