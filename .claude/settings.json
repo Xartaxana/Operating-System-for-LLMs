@@ -22,7 +22,8 @@
       {
         "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
         "hooks": [
-          { "type": "command", "command": "python tools/dod_track.py" }
+          { "type": "command", "command": "python tools/dod_track.py" },
+          { "type": "command", "command": "python tools/journal_echo.py" }
         ]
       }
     ],

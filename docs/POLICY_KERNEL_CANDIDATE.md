@@ -231,35 +231,33 @@ the background task, job id, `cli:<ts>`, `retro:<...>`).
 Base fields of EVERY event: ts (ISO, local time, no timezone — read
 from the system clock immediately before writing, never from the
 session's narrative, F-29), event, agent, category, notes
-(non-empty). Typed fields (D-0053; load-bearing facts as fields,
-notes is human-readable surplus): `task_id` mandatory for
-delegated/accepted/rejected/escalated/defect_found; `attempt`
-(number) and `failure_class` (spec/capability/recon/tooling) on
-rejected; `witness` (actual run output) on builder-accepted;
-`worker_ref` on delegated; `ref` (source accepted's task_id) on
-defect_found; `model` mandatory for
-delegated/escalated/accepted/rejected; accepted/rejected carry `by` —
-strictly a TIER WORD (haiku/sonnet/opus/fable); acceptance
-not-from-above only with `basis`: "critic" / "queued-to-lead"
-(D-0058 matrix in code).
+(non-empty; there is NO separate `reason` field — reasons go inside
+notes). Event SHAPES — mandatory typed fields on top of the base
+(D-0053; load-bearing facts as fields, notes is surplus):
+
+| event | adds on top of base |
+|---|---|
+| delegated | task_id, model, worker_ref; a REPEAT on an open task only as: critic entry / retry with attempt≥2 after a rejected / `replaces_worker:<prev worker_ref>` bare token in notes |
+| accepted | task_id, model, by (TIER WORD: haiku/sonnet/opus/fable); + `basis`: "critic" or "queued-to-lead" when the acceptor is not strictly above; + `witness` (verbatim run output) on builder work |
+| rejected | task_id, model, by, attempt (number), failure_class ∈ spec/capability/recon/tooling — exactly these |
+| escalated | task_id (must exist above in the file), model |
+| defect_found | task_id, ref (the source accepted's task_id) |
+| dispatch_skipped | reason inside notes (no extra field) |
 
 task_id issuance: re-read the journal tail immediately before
-writing the delegated — max(t-NNN)+1; never reuse a remembered id. A
-repeat `delegated` on an OPEN task is legal as a critic entry, a
-retry with `attempt`≥2 after a rejected, or a dead-worker replacement
-— marker `replaces_worker:<previous worker_ref>` in notes (bare
-token right after the colon, no trailing punctuation; must literally
-match the previous worker_ref). On a CLOSED task it is forbidden
-(D-0060). The past is never rewritten: a later-noticed collision or
+writing the delegated — max(t-NNN)+1; never reuse a remembered id.
+A repeat `delegated` on a CLOSED task is forbidden (D-0060). The past is never rewritten: a later-noticed collision or
 wrong ts gets a note in the NEXT event's notes; a missed event is
 fixed by a retro pair NOW — current ts, "retroactive" mark, actual
 bounds in notes (D-0056b); inserting lines into the past is
 forbidden. CLOSING an open dispatch: bare token `closes:t-NNN`
 (several allowed) in the notes of any LATER event — the SessionStart
 hook reads ONLY this token; prose closures are invisible to it; never
-write the literal form with a live id in prose. The pre-commit
-validator tools/journal_validator.py enforces the format and the
-acceptance matrix (D-0069) — its rejection explains the violation.
+write the literal form with a live id in prose. The validator
+tools/journal_validator.py enforces the format and the acceptance
+matrix (D-0069) at TWO points: the pre-commit gate, and the WRITE
+moment — the journal_echo PostToolUse hook warns immediately on a
+defective appended line; its message explains the violation.
 
 ```mermaid
 stateDiagram-v2

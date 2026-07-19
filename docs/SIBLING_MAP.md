@@ -121,9 +121,11 @@ scout / builder / critic (х2 деплоя) + Lead-правила в CLAUDE.md +
   каждого прогона; живость пары — чек 12.
 - D:\Improving_AI\exam_fullgates_kit\tools (гейты policy-as-code —
   экзаменационный источник) <-> tools/{dispatch_gate,critic_snapshot,
-  dod_track,dod_gate,main_gate,tier_echo}.py + test_* (штабные
-  адаптации; порт t-159, активация 2026-07-16; tier_echo рождён в
-  ШТАБЕ 2026-07-19, D-0083 — в кит уходит синком подготовки прогона). Отличия штаба ЗАДОКУМЕНТИРОВАНЫ
+  dod_track,dod_gate,main_gate,tier_echo,journal_echo}.py + test_*
+  (штабные адаптации; порт t-159, активация 2026-07-16; tier_echo и
+  journal_echo рождены в ШТАБЕ 2026-07-19 — в кит уходят синком
+  подготовки прогона; tier_echo с пути СНЯТ 9e18347 — SubagentStop-
+  канал кормит субагента, точка доставки в редизайне). Отличия штаба ЗАДОКУМЕНТИРОВАНЫ
   блоком «STAGING_HQ ВАРИАНТ» в докстринге каждого файла (снятие
   kit-исключения 2а, file_path в edit-записях, doc-only-правило
   .md/.json/.jsonl) — фикс/правка гейта на одной стороне требует
