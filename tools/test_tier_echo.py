@@ -2,20 +2,31 @@
 ФАКТИЧЕСКУЮ модель(и) завершившегося субагента из его jsonl-транскрипта
 -- ответ на инцидент прогона №15, см. докстринг tools/tier_echo.py).
 
+КАНАЛ (прогон №16, ключ k6): subprocess-смоки ниже проверяют stdout-JSON
+{"hookSpecificOutput": {"hookEventName": "SubagentStop",
+"additionalContext": "TIER ECHO (measured): ..."}} -- канал, реально
+доходящий до координатора (эмпирика: stderr при exit 0 глотается
+харнессом). stderr по-прежнему пишется хуком (сохранён "вдобавок", не
+заменён) и по-прежнему проверяется там, где это не усложняет тест --
+но КОНТРАКТ доставки координатору теперь на stdout.
+
 Покрывает DoD спеки этой задачи буквально:
- - валидный payload + транскрипт с одной моделью;
+ - валидный payload + транскрипт с одной моделью -> stdout-JSON с
+   additionalContext == "TIER ECHO (measured): ...";
  - транскрипт с несколькими моделями (порядок вывода = порядок первого
    появления в файле);
  - MISMATCH-ветка (запрошен fable через description, измерен opus) и
-   совпадение (запрошен opus, измерен opus -- без флага);
+   совпадение (запрошен opus, измерен opus -- без флага) -- обе через
+   stdout-JSON;
  - payload без нужных полей (agent_transcript_path отсутствует/пусто/
-   не строка) -> тихий exit 0;
- - транскрипт отсутствует -> тихий exit 0;
+   не строка) -> тихий exit 0, stdout ПУСТ;
+ - транскрипт отсутствует -> тихий exit 0, stdout ПУСТ;
  - битые jsonl-строки среди валидных -> не падает, считает валидные;
- - пустой транскрипт -> тихий exit 0;
+ - пустой транскрипт -> тихий exit 0, stdout ПУСТ;
  - model не-строка -> ход не считается, не падает;
  - граница формата префикса description: без двоеточия / "opus2:"
-   (не ярусное слово ровно) -> флага нет.
+   (не ярусное слово ровно) -> флага нет;
+ - non-ASCII модель -> additionalContext в JSON остаётся чистым ASCII.
 
 Стиль -- по образцу tools/test_dod_gate.py: чистая логика (build_line/
 count_models/_extract_*) юнит-тестами напрямую + subprocess-смок всего
@@ -54,6 +65,18 @@ def _write_transcript(tmp_path: Path, name: str, lines) -> Path:
 
 def _assistant_line(model):
     return {"type": "assistant", "message": {"model": model}}
+
+
+def _parse_stdout_json(stdout: str) -> dict:
+    """Парсит stdout хука как JSON и возвращает
+    hookSpecificOutput.additionalContext-контракт -- падает громко
+    (AssertionError/KeyError/json.JSONDecodeError), если stdout не
+    JSON или структура не та, что ожидает контракт (не глотать здесь
+    -- смок должен явно показать несовпадение формы)."""
+    payload = json.loads(stdout)
+    hook_output = payload["hookSpecificOutput"]
+    assert hook_output["hookEventName"] == "SubagentStop"
+    return hook_output
 
 
 def _stop_payload(transcript_path, description=None) -> dict:
@@ -322,14 +345,17 @@ def test_iter_transcript_models_missing_file_raises_oserror():
 # ---------------------------------------------------------------------
 
 
-def test_echo_single_model_stderr_output(tmp_path):
+def test_echo_single_model_stdout_json_output(tmp_path):
     transcript = _write_transcript(tmp_path, "sub.jsonl", [_assistant_line("claude-opus-4-8")])
     result = _run_hook(_stop_payload(transcript))
     assert result.returncode == 0
+    hook_output = _parse_stdout_json(result.stdout)
+    assert hook_output["additionalContext"] == "TIER ECHO (measured): claude-opus-4-8=1"
+    # stderr сохранён вдобавок к stdout-JSON (не заменён, см. докстринг).
     assert result.stderr.strip() == "TIER ECHO (measured): claude-opus-4-8=1"
 
 
-def test_echo_multiple_models_stderr_output(tmp_path):
+def test_echo_multiple_models_stdout_json_output(tmp_path):
     transcript = _write_transcript(
         tmp_path,
         "sub.jsonl",
@@ -337,14 +363,16 @@ def test_echo_multiple_models_stderr_output(tmp_path):
     )
     result = _run_hook(_stop_payload(transcript))
     assert result.returncode == 0
-    assert result.stderr.strip() == "TIER ECHO (measured): claude-sonnet-5=2, claude-opus-4-8=1"
+    hook_output = _parse_stdout_json(result.stdout)
+    assert hook_output["additionalContext"] == "TIER ECHO (measured): claude-sonnet-5=2, claude-opus-4-8=1"
 
 
 def test_echo_mismatch_declared_fable_measured_opus(tmp_path):
     transcript = _write_transcript(tmp_path, "sub.jsonl", [_assistant_line("claude-opus-4-8")])
     result = _run_hook(_stop_payload(transcript, description="fable: do the architecture review"))
     assert result.returncode == 0
-    assert result.stderr.strip() == (
+    hook_output = _parse_stdout_json(result.stdout)
+    assert hook_output["additionalContext"] == (
         "TIER ECHO (measured): claude-opus-4-8=1 MISMATCH vs declared 'fable'"
     )
 
@@ -353,7 +381,8 @@ def test_echo_no_mismatch_declared_opus_measured_opus(tmp_path):
     transcript = _write_transcript(tmp_path, "sub.jsonl", [_assistant_line("claude-opus-4-8")])
     result = _run_hook(_stop_payload(transcript, description="opus: review the diff"))
     assert result.returncode == 0
-    assert result.stderr.strip() == "TIER ECHO (measured): claude-opus-4-8=1"
+    hook_output = _parse_stdout_json(result.stdout)
+    assert hook_output["additionalContext"] == "TIER ECHO (measured): claude-opus-4-8=1"
 
 
 def test_echo_synthetic_line_excluded_normal_model_counted(tmp_path):
@@ -370,13 +399,16 @@ def test_echo_synthetic_line_excluded_normal_model_counted(tmp_path):
     )
     result = _run_hook(_stop_payload(transcript))
     assert result.returncode == 0
-    assert "<synthetic>" not in result.stderr
-    assert result.stderr.strip() == "TIER ECHO (measured): claude-opus-4-8=2"
+    hook_output = _parse_stdout_json(result.stdout)
+    assert "<synthetic>" not in hook_output["additionalContext"]
+    assert hook_output["additionalContext"] == "TIER ECHO (measured): claude-opus-4-8=2"
 
 
 def test_echo_only_synthetic_lines_silent_exit(tmp_path):
     # Критик attempt 2, п.2б, subprocess-уровень: транскрипт целиком из
-    # synthetic-строк -- как пустой транскрипт, тихий exit без строки.
+    # synthetic-строк -- как пустой транскрипт, тихий exit, stdout ПУСТ
+    # (никакого JSON -- нечего доложить, п.2 спеки: "при пустом counts
+    # -- по-прежнему тихо").
     transcript = _write_transcript(
         tmp_path,
         "sub.jsonl",
@@ -388,16 +420,20 @@ def test_echo_only_synthetic_lines_silent_exit(tmp_path):
     result = _run_hook(_stop_payload(transcript))
     assert result.returncode == 0
     assert result.stderr == ""
+    assert result.stdout == ""
 
 
 def test_echo_non_ascii_model_ascii_output(tmp_path):
     # Критик attempt 2, п.2в, subprocess-уровень: не-ASCII в
-    # message.model (кириллица) -- вывод остаётся чистым ASCII.
+    # message.model (кириллица) -- вывод остаётся чистым ASCII, включая
+    # additionalContext внутри JSON (ASCII-инвариант п.3 спеки).
     transcript = _write_transcript(tmp_path, "sub.jsonl", [_assistant_line("клод-опус")])
     result = _run_hook(_stop_payload(transcript))
     assert result.returncode == 0
-    assert result.stderr.strip() == "TIER ECHO (measured): ????-????=1"
-    assert result.stderr.isascii()
+    hook_output = _parse_stdout_json(result.stdout)
+    assert hook_output["additionalContext"] == "TIER ECHO (measured): ????-????=1"
+    assert hook_output["additionalContext"].isascii()
+    assert result.stdout.isascii()
 
 
 def test_echo_invalid_utf8_bytes_in_transcript_file_no_crash(tmp_path):
@@ -411,7 +447,8 @@ def test_echo_invalid_utf8_bytes_in_transcript_file_no_crash(tmp_path):
 
     result = _run_hook(_stop_payload(transcript))
     assert result.returncode == 0
-    assert "claude-opus-4-8=2" in result.stderr
+    hook_output = _parse_stdout_json(result.stdout)
+    assert "claude-opus-4-8=2" in hook_output["additionalContext"]
 
 
 def test_echo_missing_transcript_path_field_silent_exit(tmp_path):
@@ -432,6 +469,7 @@ def test_echo_transcript_does_not_exist_silent_exit(tmp_path):
     result = _run_hook(_stop_payload(missing))
     assert result.returncode == 0
     assert result.stderr == ""
+    assert result.stdout == ""
 
 
 def test_echo_empty_transcript_silent_exit(tmp_path):
@@ -440,6 +478,7 @@ def test_echo_empty_transcript_silent_exit(tmp_path):
     result = _run_hook(_stop_payload(transcript))
     assert result.returncode == 0
     assert result.stderr == ""
+    assert result.stdout == ""
 
 
 def test_echo_malformed_lines_among_valid_still_counts(tmp_path):
@@ -450,21 +489,24 @@ def test_echo_malformed_lines_among_valid_still_counts(tmp_path):
     )
     result = _run_hook(_stop_payload(transcript))
     assert result.returncode == 0
-    assert result.stderr.strip() == "TIER ECHO (measured): claude-opus-4-8=2"
+    hook_output = _parse_stdout_json(result.stdout)
+    assert hook_output["additionalContext"] == "TIER ECHO (measured): claude-opus-4-8=2"
 
 
 def test_echo_description_without_colon_no_mismatch_check(tmp_path):
     transcript = _write_transcript(tmp_path, "sub.jsonl", [_assistant_line("claude-opus-4-8")])
     result = _run_hook(_stop_payload(transcript, description="opus review the diff"))
     assert result.returncode == 0
-    assert result.stderr.strip() == "TIER ECHO (measured): claude-opus-4-8=1"
+    hook_output = _parse_stdout_json(result.stdout)
+    assert hook_output["additionalContext"] == "TIER ECHO (measured): claude-opus-4-8=1"
 
 
 def test_echo_description_non_tier_word_prefix_no_mismatch_check(tmp_path):
     transcript = _write_transcript(tmp_path, "sub.jsonl", [_assistant_line("claude-opus-4-8")])
     result = _run_hook(_stop_payload(transcript, description="opus2: review the diff"))
     assert result.returncode == 0
-    assert result.stderr.strip() == "TIER ECHO (measured): claude-opus-4-8=1"
+    hook_output = _parse_stdout_json(result.stdout)
+    assert hook_output["additionalContext"] == "TIER ECHO (measured): claude-opus-4-8=1"
 
 
 def test_echo_malformed_json_payload_fails_open():
@@ -477,6 +519,7 @@ def test_echo_malformed_json_payload_fails_open():
     )
     assert result.returncode == 0
     assert result.stderr == ""
+    assert result.stdout == ""
 
 
 def test_echo_payload_not_a_dict_fails_open():
@@ -489,6 +532,7 @@ def test_echo_payload_not_a_dict_fails_open():
     )
     assert result.returncode == 0
     assert result.stderr == ""
+    assert result.stdout == ""
 
 
 def test_echo_raw_utf8_bytes_stdin_no_crash(tmp_path):
@@ -502,3 +546,6 @@ def test_echo_raw_utf8_bytes_stdin_no_crash(tmp_path):
         stderr=subprocess.PIPE,
     )
     assert result.returncode == 0
+    stdout_text = result.stdout.decode("utf-8")
+    hook_output = _parse_stdout_json(stdout_text)
+    assert hook_output["additionalContext"] == "TIER ECHO (measured): claude-opus-4-8=1"
