@@ -125,8 +125,45 @@ _MODEL_TIER_SUBSTRINGS = (
 # D-0076: events that open/close a dispatch's lifecycle. A task_id is
 # OPEN iff its LAST such event is 'delegated'. Events outside this set
 # (dispatch_skipped, defect_found, lead_*, journal_created, calibrated)
-# neither open nor close a task.
+# neither open nor close a task BY THEIR OWN TYPE -- but see _CLOSES_RE
+# below: their `notes` field is still scanned for closes: tokens.
 _OPEN_LIFECYCLE_EVENTS = {"delegated", "accepted", "rejected", "escalated", "decomposable"}
+
+# Follow-up fix (t-133 remainder): open_dispatches() below used to read
+# ONLY the event TYPE, never the `notes` field -- so a plain-English
+# closing note ("Закрытие t-133: ...", CLAUDE.md's own convention for
+# closing an open dispatch inside the next event's notes) was invisible
+# to the scan, producing false OPEN DISPATCH lines for tasks a session
+# had, in fact, already closed out in prose. Fix: a bare `closes:t-NNN`
+# token in ANY event's notes (lifecycle or not) closes dispatch t-NNN.
+# The format is deliberately exact -- no whitespace after the colon,
+# lowercase literal, task id must start with `t-` -- the same "bare
+# token right after the colon" contract as `replaces_worker:` (CLAUDE.md
+# journal section: regex takes the first non-whitespace token, so loose
+# punctuation right after the marker breaks the match by design).
+#
+# Left-anchored (critic-gate finding, t-133 remainder attempt 2): a bare
+# `closes:` substring would otherwise match INSIDE a longer word too --
+# `discloses:t-001` or `encloses:t-133` both contain the literal
+# "closes:" and would silently close a task nobody meant to close (the
+# dangerous direction: a false CLOSE hides a real phantom dispatch).
+# `(?<!\w)` requires the character immediately before "closes:" to be
+# either absent (start of string) or a non-word character -- so
+# start-of-notes and punctuation/whitespace before the token are both
+# legal, but a preceding letter/digit/underscore is not.
+_CLOSES_RE = re.compile(r"(?<!\w)closes:(t-\d+)")
+
+
+def _closes_task_ids(notes) -> list:
+    """Extracts closes:t-NNN task ids from a notes field via findall.
+    Returns [] for anything that is not a string (missing notes, or a
+    malformed journal line where notes ended up a number/None in JSON)
+    -- must never raise; open_dispatches() has no local try/except
+    either, so this has to be safe on its own rather than relying on a
+    boundary above it."""
+    if not isinstance(notes, str):
+        return []
+    return _CLOSES_RE.findall(notes)
 
 
 def repo_root() -> Path:
@@ -208,10 +245,39 @@ def open_dispatches(events: list) -> list:
     does not need to. For tasks WITHOUT an accepted, 'last' is judged by
     (ts, file position): max ts wins, file position only breaks exact ts
     ties (retro pairs -- D-0056b -- share one ts, and the closing line is
-    written below the delegated one, so on a tie the later line wins)."""
+    written below the delegated one, so on a tie the later line wins).
+
+    Follow-up fix (t-133 remainder): the check above only ever read
+    event TYPE, so a prose closing note in a later event's `notes`
+    ("Закрытие t-133: ...") was invisible to the scan -- 13 tasks that
+    were, in fact, already closed out in the journal's own notes text
+    still showed up as OPEN DISPATCH on boot. Fix: a bare `closes:t-NNN`
+    token (see _CLOSES_RE) in ANY event's notes -- lifecycle or not,
+    e.g. `calibrated`, `dispatch_skipped` -- is a closing TOUCH of that
+    task, keyed by the marker-carrying event's own (ts, file_idx). Per
+    task_id, every touch is compared as (ts, idx, sub): a real lifecycle
+    event contributes sub=0, a closes: marker contributes sub=1 at the
+    SAME (ts, idx) as the event it sits in -- so at an exact tie the
+    marker outranks the lifecycle event it came from. The task is OPEN
+    iff its overall-latest touch is a real `delegated` event: a later
+    marker closes it (even one sitting in an unrelated event's notes); a
+    later `delegated` (retry/replacement) reopens it past an earlier
+    marker; and -- documented as a deliberate contract, not a bug -- a
+    closes:t-X token placed in t-X's OWN delegated event's notes closes
+    that same event, because its marker-touch key ties the lifecycle key
+    and the marker wins ties. `accepted` does not participate in this
+    ts/idx comparison at all: it stays the unconditional law above,
+    checked first and independent of any marker."""
     accepted_tids = set()
-    last = {}  # tid -> (ts_str, file_idx, event_dict)
+    lifecycle_last = {}  # tid -> (ts_str, file_idx, event_dict): last real lifecycle touch
+    close_last = {}  # tid -> (ts_str, file_idx): last closes: marker touch
     for idx, e in enumerate(events):
+        ts_key = (str(e.get("ts") or ""), idx)
+
+        for closed_tid in _closes_task_ids(e.get("notes")):
+            if closed_tid not in close_last or ts_key > close_last[closed_tid]:
+                close_last[closed_tid] = ts_key
+
         event = e.get("event")
         if event not in _OPEN_LIFECYCLE_EVENTS:
             continue
@@ -220,13 +286,20 @@ def open_dispatches(events: list) -> list:
             continue
         if event == "accepted":
             accepted_tids.add(tid)
-        key = (str(e.get("ts") or ""), idx)
-        if tid not in last or key > last[tid][:2]:
-            last[tid] = (key[0], key[1], e)
-    opens = [
-        t[2] for tid, t in last.items()
-        if tid not in accepted_tids and t[2].get("event") == "delegated"
-    ]
+            continue
+        if tid not in lifecycle_last or ts_key > lifecycle_last[tid][:2]:
+            lifecycle_last[tid] = (ts_key[0], ts_key[1], e)
+
+    opens = []
+    for tid, (ts, idx, e) in lifecycle_last.items():
+        if tid in accepted_tids:
+            continue
+        if e.get("event") != "delegated":
+            continue
+        marker = close_last.get(tid)
+        if marker is not None and marker >= (ts, idx):
+            continue
+        opens.append(e)
     opens.sort(key=lambda e: str(e.get("ts") or ""))
     return opens
 
