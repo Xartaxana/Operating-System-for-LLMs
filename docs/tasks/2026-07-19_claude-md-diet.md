@@ -69,8 +69,18 @@ justified.
   no dispatch]. Deliverables: this file;
   docs/POLICY_KERNEL_CANDIDATE.md (~15 KB target, EN + 2 mermaid
   diagrams). Candidate is NOT active policy; CLAUDE.md untouched.
-- **N2 — exam: kernel vs current policy** [RUNNING 2026-07-19,
-  operator word «запускай экзамен»]. Run №15 solo arm Bkn1 (mechanics
+- **N2 — exam: kernel vs current policy** [DONE 2026-07-19; journal
+  t-199 run / t-200 grading; Runs log №15 + registry rows 56–59].
+  RESULT: scalar 0.94 (t1 0.96 / t2 0.93 / t3 0.94 after the Lead's
+  proxy-substitution adjustment) = №13-Bfg4 band at −44% cost
+  ($10.13); k2 journals 0/3/0 validator defects vs base 5 — the
+  kernel did NOT lose field typing without the cheat-sheet; k3
+  matrix clean by record, with one measured F-37-class finding (t3
+  proxy declared fable, ran opus — not a kernel-text defect; protez
+  hardening queued); k4 ruled satisfied (DoD lives in dispatch
+  prompts). Single point, dispersion ×2.6 — the verdict below may
+  demand a second point.
+- **N2 original plan** [archived]: Run №15 solo arm Bkn1 (mechanics
   of №14): kit branch exp-15-kernel @ 8333adf = kit main e1ccd50
   (= штаб f5b27d5, sync v5.3) + CLAUDE.md := kernel verbatim; manifest
   docs/tasks/2026-07-19_exam-run15-manifest.json (set №1, sonnet
