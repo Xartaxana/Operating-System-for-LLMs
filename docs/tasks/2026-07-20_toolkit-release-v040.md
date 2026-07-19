@@ -49,6 +49,15 @@ checks; release note states it).
   v0.4.0 pushed. Release note states the exam-cadence exclusion.
   RESIDUALS → next batch queue (detail below).
 
+## Next batch queue — EXECUTED 2026-07-20 as batch-2 / v0.4.1
+
+All three items shipped same day (operator word «выполняй»): t-215
+(permission_audit both sides) + t-216 (raw flag home, default TRUE;
+error truncation option «б» both contours), critic t-217 ACCEPT with
+money-class empirics, HQ commit 00545db, public clone f63b0be + tag
+v0.4.1. HQ logger takes effect on the proxy's next start. Original
+detail kept below for the record.
+
 ## Next batch queue — detail (moratorium; opens by operator word)
 
 1. **permission_audit: CLAUDE_PROJECTS env fallback + empty-dir
