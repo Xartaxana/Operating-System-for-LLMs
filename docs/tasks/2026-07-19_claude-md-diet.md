@@ -69,15 +69,32 @@ justified.
   no dispatch]. Deliverables: this file;
   docs/POLICY_KERNEL_CANDIDATE.md (~15 KB target, EN + 2 mermaid
   diagrams). Candidate is NOT active policy; CLAUDE.md untouched.
-- **N2 — exam: kernel vs current policy** [QUEUED; needs operator word
-  — exam runs are paid]. Mechanics: deployment-economy exam
-  (PROCESS/DEPLOYMENT_ECONOMY_EXAM.md, same harness as №12–№14) on a
-  branch whose CLAUDE.md = kernel candidate; pre-registered keys;
-  compare per-task scalars vs the №12–№14 baseline (0.95 median).
-  Special scrutiny keys: Role≠tier matrix behavior (F-31 translation
-  risk), journal typed-field compliance (details now taught by
-  validator errors, not by the policy text), mechanism recognition
-  (rule 10 stub sufficiency).
+- **N2 — exam: kernel vs current policy** [RUNNING 2026-07-19,
+  operator word «запускай экзамен»]. Run №15 solo arm Bkn1 (mechanics
+  of №14): kit branch exp-15-kernel @ 8333adf = kit main e1ccd50
+  (= штаб f5b27d5, sync v5.3) + CLAUDE.md := kernel verbatim; manifest
+  docs/tasks/2026-07-19_exam-run15-manifest.json (set №1, sonnet
+  coordinator, parallel 3, headless proxy suffix as in №14).
+  PRE-REGISTERED N2 keys (beyond the pinned set-№1 keys and табель
+  6б), judged at grading:
+  (k1) scalar bar — per-task 6б scalar in the recent B-band
+  (№13-Bfg4 0.94 / №14-Bcl1 0.95; series dispersion ×2.6 — one point
+  below band = repeat before conclusions, not an automatic fail);
+  (k2) journal discipline WITHOUT the field cheat-sheet — validator
+  standalone defect count on field journals, baseline: №14-t1 had 5
+  defects under the FULL policy (kernel must be no worse);
+  (k3) Role≠tier fidelity (F-31 translation risk) — by/basis
+  correctness in field journals, no self-certification acceptances;
+  (k4) DoD-in-dispatch presence — grader forensics of dispatch
+  prompts (criteria + verification run named);
+  (k5) mechanism recognition — NOT exercisable by set №1 (no
+  mechanism edits in sandbox tasks): out of denominator, honest note.
+  Comparability caveat (recorded before the run): baseline №13/№14
+  ran on kit v5.2.1/№14-branch; штаб has since absorbed the critic-
+  lite port + D-0082 + closes: convention, and the kernel is derived
+  from THIS state — the pair (kernel vs full) is clean only against
+  kit main e1ccd50; if the scalar lands below band, the control is a
+  B-full arm on e1ccd50, not a verdict against the kernel.
 - **N3 — cut decision** [QUEUED; Lead+Architect, D-0068]. If GO, the
   cut commit (full rule-10 mechanism): CLAUDE.md := kernel;
   docs/POLICY_FULL.md created with VERBATIM relocation of removed
