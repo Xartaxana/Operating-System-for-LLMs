@@ -26,6 +26,7 @@ Run from the repo root: python -m pytest tools/test_journal_echo.py -q
 """
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -104,7 +105,16 @@ def _post_tool_use_payload(file_path, tool_name="Edit") -> dict:
     }
 
 
-def _run_hook(payload, timeout=10) -> subprocess.CompletedProcess:
+def _run_hook(payload, timeout=10, env=None) -> subprocess.CompletedProcess:
+    # env=None -> subprocess.run inherits the current process environment
+    # unchanged (identical to the original behaviour before this parameter
+    # existed). TIER ECHO subprocess-level tests pass a MODIFIED env (see
+    # _env_with_home) so the CHILD process's Path.home() resolves to a
+    # tmp_path sandbox -- monkeypatching journal_echo._projects_root in
+    # THIS (parent) process has no effect on the subprocess, since main()
+    # runs in a separate Python interpreter (empirically confirmed before
+    # writing these tests: `Path.home()` in a subprocess DOES follow an
+    # overridden USERPROFILE/HOME env var on this machine).
     return subprocess.run(
         [sys.executable, str(SCRIPT)],
         input=json.dumps(payload),
@@ -112,7 +122,41 @@ def _run_hook(payload, timeout=10) -> subprocess.CompletedProcess:
         text=True,
         encoding="utf-8",
         timeout=timeout,
+        env=env,
     )
+
+
+# ---------------------------------------------------------------------
+# helpers -- TIER ECHO при записи: фейковый HOME + транскрипты субагентов
+# ---------------------------------------------------------------------
+
+
+def _assistant_line(model):
+    return {"type": "assistant", "message": {"model": model}}
+
+
+def _write_agent_transcript(home: Path, agent_id: str, lines,
+                            proj="proj-slug", sess="sess-id") -> Path:
+    """Пишет транскрипт по РЕАЛЬНОЙ структуре, эмпирически подтверждённой
+    на этой машине (find по ~/.claude/projects перед реализацией):
+    <home>/.claude/projects/<proj>/<sess>/subagents/agent-<id>.jsonl."""
+    path = home / ".claude" / "projects" / proj / sess / "subagents" / f"agent-{agent_id}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(json.dumps(line) if not isinstance(line, str) else line for line in lines) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _env_with_home(home: Path) -> dict:
+    """Оверрайд USERPROFILE/HOME для ДОЧЕРНЕГО процесса хука -- Path.home()
+    в main() тогда резолвится в песочницу tmp_path/"home", не в реальный
+    домашний каталог этой машины (см. докстринг _run_hook)."""
+    env = dict(os.environ)
+    env["USERPROFILE"] = str(home)
+    env["HOME"] = str(home)
+    return env
 
 
 def _parse_stdout_json(stdout: str) -> dict:
@@ -562,6 +606,520 @@ def test_echo_giant_line_does_not_hang(tmp_path):
     result = _run_hook(_post_tool_use_payload(journal_path), timeout=20)
     assert result.returncode == 0
     # Строка валидна (все обязательные поля есть) -> тишина, несмотря на размер.
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+
+# =======================================================================
+# TIER ECHO при записи (расширение этой задачи) -- pure logic
+# =======================================================================
+
+
+# ---------------------------------------------------------------------
+# _extract_declared_word -- pure logic
+# ---------------------------------------------------------------------
+
+
+def test_extract_declared_word_direct_match():
+    assert journal_echo._extract_declared_word("sonnet") == "sonnet"
+
+
+def test_extract_declared_word_substring_in_full_model_id():
+    assert journal_echo._extract_declared_word("claude-opus-4-8") == "opus"
+
+
+def test_extract_declared_word_case_insensitive():
+    assert journal_echo._extract_declared_word("Claude-FABLE-5") == "fable"
+
+
+def test_extract_declared_word_not_a_string():
+    assert journal_echo._extract_declared_word(None) is None
+    assert journal_echo._extract_declared_word(42) is None
+
+
+def test_extract_declared_word_empty_string():
+    assert journal_echo._extract_declared_word("") is None
+
+
+def test_extract_declared_word_no_known_word():
+    assert journal_echo._extract_declared_word("gpt-4") is None
+
+
+def test_extract_declared_word_picks_first_known_tier_words_order():
+    # "opus-sonnet-hybrid" содержит ОБА слова подстрокой -- порядок выбора
+    # -- порядок tier_echo.KNOWN_TIER_WORDS (haiku, sonnet, opus, fable),
+    # НЕ порядок появления в самой строке ("opus" физически раньше в
+    # строке, но "sonnet" раньше в KNOWN_TIER_WORDS).
+    assert journal_echo._extract_declared_word("opus-sonnet-hybrid") == "sonnet"
+
+
+# ---------------------------------------------------------------------
+# _projects_root / _find_agent_transcript -- pure logic (monkeypatched)
+# ---------------------------------------------------------------------
+
+
+def test_find_agent_transcript_match(tmp_path, monkeypatch):
+    path = _write_agent_transcript(tmp_path, "abc123", [_assistant_line("claude-opus-4-8")])
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    assert journal_echo._find_agent_transcript("abc123") == str(path)
+
+
+def test_find_agent_transcript_id_with_dashes(tmp_path, monkeypatch):
+    path = _write_agent_transcript(tmp_path, "abc-123-xyz", [_assistant_line("claude-opus-4-8")])
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    assert journal_echo._find_agent_transcript("abc-123-xyz") == str(path)
+
+
+def test_find_agent_transcript_not_found(tmp_path, monkeypatch):
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    assert journal_echo._find_agent_transcript("no-such-id") is None
+
+
+def test_find_agent_transcript_glob_error_returns_none(monkeypatch):
+    class _BoomRoot:
+        def glob(self, pattern):
+            raise OSError("boom")
+
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: _BoomRoot())
+    assert journal_echo._find_agent_transcript("x") is None
+
+
+# ---------------------------------------------------------------------
+# _collect_tier_events -- pure logic (monkeypatched _projects_root)
+# ---------------------------------------------------------------------
+
+
+def _delegated_obj(**kw):
+    obj = {"ts": "2026-07-10T08:10:00", "event": "delegated", "agent": "builder",
+            "category": "implementation", "notes": "note", "task_id": "t-002",
+            "model": "sonnet", "worker_ref": "agent:abc123"}
+    obj.update(kw)
+    return json.dumps(obj, ensure_ascii=False)
+
+
+def test_collect_tier_events_full_match_silent(tmp_path, monkeypatch):
+    _write_agent_transcript(tmp_path, "abc123", [_assistant_line("claude-sonnet-5")])
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    events = journal_echo._collect_tier_events([_delegated_obj(model="sonnet")], [])
+    assert events == []
+
+
+def test_collect_tier_events_mismatch(tmp_path, monkeypatch):
+    _write_agent_transcript(tmp_path, "abc123", [_assistant_line("claude-opus-4-8")])
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    events = journal_echo._collect_tier_events([_delegated_obj(model="fable")], [])
+    assert len(events) == 1
+    line_no, kind, declared_word, counts = events[0]
+    assert (line_no, kind, declared_word) == (1, "mismatch", "fable")
+    assert counts == {"claude-opus-4-8": 1}
+
+
+def test_collect_tier_events_partial_match_informational(tmp_path, monkeypatch):
+    _write_agent_transcript(
+        tmp_path, "abc123",
+        [_assistant_line("claude-fable-1"), _assistant_line("claude-sonnet-5")],
+    )
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    events = journal_echo._collect_tier_events([_delegated_obj(model="fable")], [])
+    assert len(events) == 1
+    assert events[0][1] == "info"
+
+
+def test_collect_tier_events_synthetic_excluded_stays_silent(tmp_path, monkeypatch):
+    # Транскрипт несёт РЕАЛЬНУЮ модель (совпадающую с заявленным ярусом) +
+    # synthetic-строку -- фильтр tier_echo.iter_transcript_models должен
+    # исключить synthetic, иначе она сломала бы "полное совпадение".
+    _write_agent_transcript(
+        tmp_path, "abc123",
+        [_assistant_line("claude-sonnet-5"), {"type": "assistant", "message": {"model": "<synthetic>"}}],
+    )
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    events = journal_echo._collect_tier_events([_delegated_obj(model="sonnet")], [])
+    assert events == []
+
+
+def test_collect_tier_events_transcript_not_found_silent(tmp_path, monkeypatch):
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    events = journal_echo._collect_tier_events([_delegated_obj()], [])
+    assert events == []
+
+
+def test_collect_tier_events_no_declared_word_skips(tmp_path, monkeypatch):
+    _write_agent_transcript(tmp_path, "abc123", [_assistant_line("claude-opus-4-8")])
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    events = journal_echo._collect_tier_events([_delegated_obj(model="gpt-4")], [])
+    assert events == []
+
+
+def test_collect_tier_events_event_outside_trigger_set_skipped(tmp_path, monkeypatch):
+    _write_agent_transcript(tmp_path, "abc123", [_assistant_line("claude-opus-4-8")])
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    events = journal_echo._collect_tier_events([_delegated_obj(event="decomposable", model="fable")], [])
+    assert events == []
+
+
+def test_collect_tier_events_worker_ref_cli_skipped(tmp_path, monkeypatch):
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    events = journal_echo._collect_tier_events(
+        [_delegated_obj(worker_ref="cli:2026-07-10T08:00:00", model="fable")], [])
+    assert events == []
+
+
+def test_collect_tier_events_worker_ref_retro_skipped(tmp_path, monkeypatch):
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    events = journal_echo._collect_tier_events(
+        [_delegated_obj(worker_ref="retro:2026-07-10T08:00:00", model="fable")], [])
+    assert events == []
+
+
+def test_collect_tier_events_worker_ref_missing_skipped(tmp_path, monkeypatch):
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    obj = json.loads(_delegated_obj())
+    del obj["worker_ref"]
+    events = journal_echo._collect_tier_events([json.dumps(obj)], [])
+    assert events == []
+
+
+def test_collect_tier_events_agent_empty_id_boundary_skipped(tmp_path, monkeypatch):
+    # Граница: worker_ref == "agent:" (id пуст) -- regex требует 1+ символ,
+    # не матчит -- пропуск, не краш.
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    events = journal_echo._collect_tier_events([_delegated_obj(worker_ref="agent:", model="fable")], [])
+    assert events == []
+
+
+def test_collect_tier_events_agent_id_with_dashes_boundary_matches(tmp_path, monkeypatch):
+    _write_agent_transcript(tmp_path, "ab-12-cd", [_assistant_line("claude-opus-4-8")])
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    events = journal_echo._collect_tier_events(
+        [_delegated_obj(worker_ref="agent:ab-12-cd", model="fable")], [])
+    assert len(events) == 1
+    assert events[0][1] == "mismatch"
+
+
+def test_collect_tier_events_malformed_json_line_skipped_not_raised(tmp_path, monkeypatch):
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    events = journal_echo._collect_tier_events(["{not valid json"], [])
+    assert events == []
+
+
+def test_collect_tier_events_line_numbering_accounts_for_head_lines(tmp_path, monkeypatch):
+    _write_agent_transcript(tmp_path, "abc123", [_assistant_line("claude-opus-4-8")])
+    monkeypatch.setattr(journal_echo, "_projects_root", lambda: tmp_path / ".claude" / "projects")
+    head_lines = ["dummy head line 1", "dummy head line 2"]
+    events = journal_echo._collect_tier_events([_delegated_obj(model="fable")], head_lines)
+    assert events[0][0] == 3  # len(head_lines) + idx(0) + 1
+
+
+# ---------------------------------------------------------------------
+# build_tier_segment -- pure logic, включая границы MAX_TIER_LINES
+# ---------------------------------------------------------------------
+
+
+def test_build_tier_segment_empty_list():
+    assert journal_echo.build_tier_segment([]) == ""
+
+
+def test_build_tier_segment_mismatch_exact_format():
+    ev = (2, "mismatch", "fable", {"claude-opus-4-8": 1})
+    seg = journal_echo.build_tier_segment([ev])
+    assert seg == "TIER ECHO: строка 2 model='fable' vs measured claude-opus-4-8=1 MISMATCH"
+
+
+def test_build_tier_segment_info_exact_format_no_mismatch_word():
+    ev = (2, "info", "fable", {"claude-fable-1": 1, "claude-sonnet-5": 1})
+    seg = journal_echo.build_tier_segment([ev])
+    assert seg == "TIER ECHO: строка 2 measured claude-fable-1=1, claude-sonnet-5=1"
+    assert "MISMATCH" not in seg
+
+
+def test_build_tier_segment_exactly_five_boundary_no_more_suffix():
+    events = [(i, "mismatch", "fable", {"claude-opus-4-8": 1}) for i in range(1, 6)]
+    seg = journal_echo.build_tier_segment(events)
+    assert "more" not in seg
+    assert seg.count("TIER ECHO") == 5
+
+
+def test_build_tier_segment_beyond_boundary_six_adds_one_more():
+    events = [(i, "mismatch", "fable", {"claude-opus-4-8": 1}) for i in range(1, 7)]
+    seg = journal_echo.build_tier_segment(events)
+    assert seg.count("TIER ECHO") == 5
+    assert seg.endswith("; +1 more")
+
+
+def test_build_tier_segment_ascii_only_true_sanitizes_model_name():
+    # Статический литерал "TIER ECHO: строка N ..." -- кириллица, остаётся
+    # как есть даже в ascii_only-режиме (тот же принцип, что build_context
+    # -- см. test_build_tier_segment_static_literal_stays_cyrillic_in_both_modes
+    # ниже), поэтому строка ЦЕЛИКОМ не обязана быть чистым ASCII -- только
+    # ДИНАМИКА (имя модели) обязана быть ascii-sanitize'на.
+    ev = (2, "mismatch", "fable", {"клод-опус": 1})
+    seg = journal_echo.build_tier_segment([ev], ascii_only=True)
+    assert "клод-опус" not in seg
+    assert "?" in seg
+
+
+def test_build_tier_segment_ascii_only_false_keeps_model_name_readable():
+    ev = (2, "mismatch", "fable", {"клод-опус": 1})
+    seg = journal_echo.build_tier_segment([ev], ascii_only=False)
+    assert "клод-опус" in seg
+
+
+def test_build_tier_segment_static_literal_stays_cyrillic_in_both_modes():
+    # "TIER ECHO: СТРОКА N ..." -- статический литерал спеки, тот же
+    # принцип, что build_context: никогда не проходит через санитайзер,
+    # ни в одном режиме (даже ascii_only=True).
+    ev = (2, "mismatch", "fable", {"claude-opus-4-8": 1})
+    seg_raw = journal_echo.build_tier_segment([ev], ascii_only=False)
+    seg_ascii = journal_echo.build_tier_segment([ev], ascii_only=True)
+    assert seg_raw.startswith("TIER ECHO: строка 2 model=")
+    assert seg_ascii.startswith("TIER ECHO: строка 2 model=")
+
+
+# ---------------------------------------------------------------------
+# combine_context -- pure logic
+# ---------------------------------------------------------------------
+
+
+def test_combine_context_only_violations_matches_build_context_output():
+    violations = ["line 2: msg one"]
+    assert journal_echo.combine_context(violations, []) == journal_echo.build_context(violations)
+
+
+def test_combine_context_only_tier_events_no_violations_still_prints():
+    ev = (2, "mismatch", "fable", {"claude-opus-4-8": 1})
+    ctx = journal_echo.combine_context([], [ev])
+    assert ctx == journal_echo.build_tier_segment([ev])
+    assert "JOURNAL ECHO" not in ctx
+
+
+def test_combine_context_both_joined_with_semicolon():
+    violations = ["line 2: msg one"]
+    ev = (3, "mismatch", "fable", {"claude-opus-4-8": 1})
+    ctx = journal_echo.combine_context(violations, [ev])
+    assert ctx == journal_echo.build_context(violations) + "; " + journal_echo.build_tier_segment([ev])
+
+
+def test_combine_context_both_empty_yields_empty_string():
+    assert journal_echo.combine_context([], []) == ""
+
+
+# =======================================================================
+# TIER ECHO при записи -- subprocess end-to-end (DoD а-з + границы)
+# =======================================================================
+
+
+def test_echo_tier_dod_a_full_match_silent(tmp_path):
+    # DoD (а): delegated с agent:<id>, транскрипт с одной моделью того же
+    # яруса -> тишина.
+    journal_path = _seed_committed_journal(tmp_path)
+    home = tmp_path / "home"
+    _write_agent_transcript(home, "abc123", [_assistant_line("claude-sonnet-5")])
+    new_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+                      model="sonnet", worker_ref="agent:abc123", notes="clean tier match")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_echo_tier_dod_b_mismatch_fable_declared_opus_measured(tmp_path):
+    # DoD (б): заявлен fable, транскрипт opus -> MISMATCH-строка.
+    journal_path = _seed_committed_journal(tmp_path)
+    home = tmp_path / "home"
+    _write_agent_transcript(home, "fbl001", [_assistant_line("claude-opus-4-8")])
+    new_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+                      model="fable", worker_ref="agent:fbl001", notes="mismatch case")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
+    assert result.returncode == 0
+    hook_output = _parse_stdout_json(result.stdout)
+    ctx = hook_output["additionalContext"]
+    assert ctx == "TIER ECHO: строка 2 model='fable' vs measured claude-opus-4-8=1 MISMATCH"
+    assert ctx in result.stderr
+
+
+def test_echo_tier_dod_v_mid_worker_informational_no_mismatch(tmp_path):
+    # DoD (в): mid-worker -- транскрипт fable+sonnet при заявленном fable
+    # -> informational-строка без MISMATCH.
+    journal_path = _seed_committed_journal(tmp_path)
+    home = tmp_path / "home"
+    _write_agent_transcript(
+        home, "mid001",
+        [_assistant_line("claude-fable-1"), _assistant_line("claude-sonnet-5")],
+    )
+    new_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+                      model="fable", worker_ref="agent:mid001", notes="mid-worker case")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
+    assert result.returncode == 0
+    hook_output = _parse_stdout_json(result.stdout)
+    ctx = hook_output["additionalContext"]
+    assert ctx == "TIER ECHO: строка 2 measured claude-fable-1=1, claude-sonnet-5=1"
+    assert "MISMATCH" not in ctx
+
+
+def test_echo_tier_dod_g_worker_ref_cli_skipped_silent(tmp_path):
+    # DoD (г), часть 1: worker_ref cli:xxx -> пропуск без warn (тишина).
+    journal_path = _seed_committed_journal(tmp_path)
+    new_line = _line(event="accepted", ts="2026-07-10T08:10:00", task_id="t-001",
+                      agent="builder", by="opus", witness="tests pass", model="sonnet",
+                      worker_ref="cli:2026-07-10T08:10:00", notes="accepted via cli ref")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path))
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_echo_tier_dod_g_worker_ref_retro_skipped_silent(tmp_path):
+    # DoD (г), часть 2: worker_ref retro:xxx -> пропуск без warn.
+    journal_path = _seed_committed_journal(tmp_path)
+    new_line = _line(event="accepted", ts="2026-07-10T08:10:00", task_id="t-001",
+                      agent="builder", by="opus", witness="tests pass", model="sonnet",
+                      worker_ref="retro:2026-07-10T08:10:00", notes="accepted via retro ref")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path))
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_echo_tier_dod_g_worker_ref_absent_skipped_silent(tmp_path):
+    # DoD (г), часть 3: worker_ref отсутствует вовсе -> пропуск без warn.
+    journal_path = _seed_committed_journal(tmp_path)
+    obj = {"ts": "2026-07-10T08:10:00", "event": "accepted", "agent": "builder",
+           "category": "implementation", "notes": "accepted, no worker_ref field",
+           "task_id": "t-001", "by": "opus", "witness": "tests pass", "model": "sonnet"}
+    new_line = json.dumps(obj, ensure_ascii=False)
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path))
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_echo_tier_dod_d_transcript_not_found_silent(tmp_path):
+    # DoD (д): транскрипт не найден -> тишина.
+    journal_path = _seed_committed_journal(tmp_path)
+    home = tmp_path / "home"  # НЕ создаём никакого транскрипта здесь.
+    new_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+                      model="sonnet", worker_ref="agent:doesnotexist123", notes="clean")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_echo_tier_dod_e_form_defect_and_mismatch_together(tmp_path):
+    # DoD (е): дефект формы + MISMATCH вместе -> оба в одном additionalContext.
+    journal_path = _seed_committed_journal(tmp_path)
+    home = tmp_path / "home"
+    _write_agent_transcript(home, "fbl002", [_assistant_line("claude-opus-4-8")])
+    bad_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+                      model="fable", category="", worker_ref="agent:fbl002",
+                      notes="defect and mismatch together")
+    journal_path.write_text(HEAD_TEXT + bad_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
+    assert result.returncode == 0
+    hook_output = _parse_stdout_json(result.stdout)
+    ctx = hook_output["additionalContext"]
+    assert "JOURNAL ECHO: 1 дефект(ов)" in ctx
+    assert "'category'" in ctx
+    assert "TIER ECHO: строка 2 model='fable' vs measured claude-opus-4-8=1 MISMATCH" in ctx
+    # Оба сегмента склеены через "; " (спека п.3).
+    assert "; TIER ECHO" in ctx
+
+
+def test_echo_tier_dod_zh_synthetic_lines_not_counted(tmp_path):
+    # DoD (ж): synthetic-строки в транскрипте не считаются -- реальная
+    # модель, совпадающая с заявленным ярусом, даёт полную тишину, а не
+    # ложный mismatch/informational от учтённой synthetic-строки.
+    journal_path = _seed_committed_journal(tmp_path)
+    home = tmp_path / "home"
+    _write_agent_transcript(
+        home, "syn001",
+        [_assistant_line("claude-sonnet-5"), {"type": "assistant", "message": {"model": "<synthetic>"}}],
+    )
+    new_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+                      model="sonnet", worker_ref="agent:syn001", notes="synthetic filtered")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_echo_tier_dod_z_more_than_five_tier_lines_shows_more_suffix(tmp_path):
+    # DoD (з): >5 tier-строк -> "+K more".
+    journal_path = _seed_committed_journal(tmp_path)
+    home = tmp_path / "home"
+    n = 6
+    for i in range(n):
+        _write_agent_transcript(home, f"agentid{i}", [_assistant_line("claude-opus-4-8")],
+                                 proj=f"proj{i}", sess=f"sess{i}")
+    new_lines = [
+        _line(event="delegated", ts=f"2026-07-10T08:1{i}:00", task_id=f"t-00{2 + i}",
+              model="fable", worker_ref=f"agent:agentid{i}", notes=f"mismatch #{i}")
+        for i in range(n)
+    ]
+    journal_path.write_text(HEAD_TEXT + "".join(l + "\n" for l in new_lines), encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
+    assert result.returncode == 0
+    hook_output = _parse_stdout_json(result.stdout)
+    ctx = hook_output["additionalContext"]
+    assert ctx.count("TIER ECHO") == 5
+    assert "+1 more" in ctx
+
+
+def test_echo_tier_exactly_five_tier_lines_no_more_suffix(tmp_path):
+    # Граница (правило 6а): РОВНО 5 tier-строк -> без "+more".
+    journal_path = _seed_committed_journal(tmp_path)
+    home = tmp_path / "home"
+    n = 5
+    for i in range(n):
+        _write_agent_transcript(home, f"agentid{i}", [_assistant_line("claude-opus-4-8")],
+                                 proj=f"proj{i}", sess=f"sess{i}")
+    new_lines = [
+        _line(event="delegated", ts=f"2026-07-10T08:1{i}:00", task_id=f"t-00{2 + i}",
+              model="fable", worker_ref=f"agent:agentid{i}", notes=f"mismatch #{i}")
+        for i in range(n)
+    ]
+    journal_path.write_text(HEAD_TEXT + "".join(l + "\n" for l in new_lines), encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
+    assert result.returncode == 0
+    hook_output = _parse_stdout_json(result.stdout)
+    ctx = hook_output["additionalContext"]
+    assert ctx.count("TIER ECHO") == 5
+    assert "more" not in ctx
+
+
+def test_echo_tier_worker_ref_agent_id_with_dashes_boundary(tmp_path):
+    # Граница: id с дефисами -- полный проход по всему пайплайну (не
+    # только _collect_tier_events напрямую).
+    journal_path = _seed_committed_journal(tmp_path)
+    home = tmp_path / "home"
+    _write_agent_transcript(home, "ab-12-cd", [_assistant_line("claude-opus-4-8")])
+    new_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+                      model="fable", worker_ref="agent:ab-12-cd", notes="dashed id")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
+    assert result.returncode == 0
+    hook_output = _parse_stdout_json(result.stdout)
+    assert "MISMATCH" in hook_output["additionalContext"]
+
+
+def test_echo_tier_worker_ref_agent_empty_id_boundary_silent(tmp_path):
+    # Граница: worker_ref == "agent:" (id пуст) -- полный пайплайн, тишина.
+    journal_path = _seed_committed_journal(tmp_path)
+    new_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+                      model="fable", worker_ref="agent:", notes="empty agent id")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path))
+    assert result.returncode == 0
     assert result.stdout == ""
     assert result.stderr == ""
 

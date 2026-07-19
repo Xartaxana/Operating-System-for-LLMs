@@ -139,11 +139,33 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import journal_validator  # noqa: E402  -- явный импорт по спеке, см. докстринг выше
+import tier_echo  # noqa: E402  -- TIER ECHO при записи (расширение этой задачи):
+# импорт iter_transcript_models/count_models (замер, с их synthetic-фильтром)
+# И KNOWN_TIER_WORDS (общий словарь ярусных слов) -- спека явно называет
+# оба источника ("KNOWN_TIER_WORDS tier_echo"), переиспользование ИМПОРТОМ,
+# не копипаст, тот же принцип, что journal_validator выше. journal_echo.py
+# и tier_echo.py -- РАЗНЫЕ хуки (PostToolUse vs SubagentStop), но эта
+# задача явно санкционирует межхуковый импорт (манифест: "импортируй, не
+# копируй") -- единственное исключение из общей самодостаточности хуков
+# кита, наравне с journal_validator.
 
 JOURNAL_TAIL = ("logs", "routing-log.jsonl")
 GIT_TIMEOUT_SECONDS = 5
 MAX_MESSAGE_LEN = 500
 MAX_HEAD_MESSAGES = 3
+
+# --- TIER ECHO при записи (расширение этой задачи) ---------------------
+# Триггер: НОВАЯ строка журнала с event из TIER_TRIGGER_EVENTS И worker_ref
+# ВИДА "agent:<id>" (id = [a-z0-9-]+, ЦЕЛИКОМ -- fullmatch, не префикс) --
+# только тогда есть смысл искать транскрипт субагента (worker_ref вида
+# cli:.../retro:... не ссылается на файл субагента вовсе -- пропуск без
+# предупреждения, см. _collect_tier_events).
+TIER_TRIGGER_EVENTS = {"delegated", "accepted", "rejected", "escalated"}
+AGENT_WORKER_REF_RE = re.compile(r"^agent:([a-z0-9-]+)$")
+# Потолок TIER ECHO-строк на один вызов хука (спека п.4) -- отдельный от
+# MAX_HEAD_MESSAGES (тот -- потолок дефектов формы, 3; этот -- потолок
+# tier-строк, 5, независимая ось, спека называет число явно).
+MAX_TIER_LINES = 5
 
 
 def _raw_sanitize(s: str, max_len: int = MAX_MESSAGE_LEN) -> str:
@@ -220,6 +242,164 @@ def _get_head_text(root: Path):
     return proc.stdout
 
 
+def _projects_root() -> Path:
+    """C:\\Users\\<user>\\.claude\\projects -- корень поиска транскриптов
+    завершившихся субагентов (спека п.1, expanduser). Отдельная функция
+    (не инлайн Path.home()) -- ИСКЛЮЧИТЕЛЬНО для monkeypatch в тестах,
+    тот же паттерн тестируемости, что _get_head_text/subprocess.run выше:
+    подменяется модульная функция, реальный Path.home() этой машины в
+    тестах не участвует."""
+    return Path.home() / ".claude" / "projects"
+
+
+def _find_agent_transcript(agent_id: str):
+    """Глоб <projects_root>/*/*/subagents/agent-<id>.jsonl (спека п.1,
+    буквально -- ДВА уровня wildcard: project-slug, session-id --
+    эмпирически подтверждено на этой машине живым `find` по
+    ~/.claude/projects перед реализацией: реальная структура именно
+    <project-slug>/<session-id>/subagents/agent-<id>.jsonl). ПЕРВОЕ
+    совпадение (id уникален по машине -- спека явно это утверждает,
+    порядок глоба не важен). Не найден / любая ошибка глоба (права
+    доступа, битый путь) -- None -- вызывающий код тогда молча
+    пропускает строку (спека п.1: "нет замера -- нет вердикта; НЕ
+    warn"), НЕ единственная предполагаемая (плоская) вложенность --
+    известный сосед usage_report.py документирует ЕЩЁ более глубокий
+    вариант (subagents/workflows/wf_*/agent-*.jsonl, инструмент workflow,
+    не Task/Agent-диспатч) -- эта задача его не покрывает (спека даёт
+    ровно плоский паттерн; см. отчёт builder'а)."""
+    try:
+        matches = list(_projects_root().glob(f"*/*/subagents/agent-{agent_id}.jsonl"))
+    except Exception:
+        return None
+    return str(matches[0]) if matches else None
+
+
+def _extract_declared_word(model):
+    """Первое (в порядке tier_echo.KNOWN_TIER_WORDS -- haiku/sonnet/opus/
+    fable) ярусное слово, встречающееся ПОДСТРОКОЙ (регистронезависимо) в
+    поле model журнальной строки (спека п.2). Это НЕ то же самое, что
+    tier_echo._extract_declared_tier (тот требует строгого префикса
+    "слово:" в description) -- здесь источник -- свободнотекстовое поле
+    model (самодекларация яруса, D-0042/D-0053: "свободная форма"), сравнение
+    -- substring, тот же принцип, что и сравнение в tier_echo.build_line
+    (`declared_tier in model.lower()`).
+
+    None, если model не строка/пусто, либо НИ ОДНО известное слово не
+    встречается подстрокой -- логическое продолжение fail-open принципа
+    спеки п.1 ("нет замера -- нет вердикта"): без опознанного заявленного
+    яруса ни MISMATCH, ни informational-ветка спеки п.2 не применимы
+    (обе явно завязаны на "ярусное слово из model-поля") -- строка
+    тихо пропускается, тем же способом, что "транскрипт не найден".
+    Практически безопасно: 'model' -- REQUIRED-поле для всех событий
+    TIER_TRIGGER_EVENTS уже в journal_validator (MODEL_REQUIRED_EVENTS) --
+    его отсутствие/невалидность УЖЕ ловится отдельным дефектом формы
+    независимо от этой ветки."""
+    if not isinstance(model, str) or not model:
+        return None
+    model_lower = model.lower()
+    for word in tier_echo.KNOWN_TIER_WORDS:
+        if word in model_lower:
+            return word
+    return None
+
+
+def _collect_tier_events(new_lines: list, head_lines: list) -> list:
+    """Для каждой НОВОЙ строки (те же new_lines, что уже вычисляет main()
+    для decide(), см. докстринг модуля/спеку п.1/п.5) с event из
+    TIER_TRIGGER_EVENTS и worker_ref вида "agent:<id>" -- ищет транскрипт
+    субагента, меряет модели (tier_echo.iter_transcript_models +
+    count_models, их synthetic-фильтр уже встроен там), сравнивает с
+    заявленным ярусным словом поля model. Возвращает список кортежей
+    (line_no, kind, declared_word, counts) -- kind in ("mismatch", "info");
+    "полное совпадение" (все measured несут слово) не добавляет ничего
+    (спека п.2: "тишина по этой строке"). line_no -- ТА ЖЕ формула, что
+    journal_validator.validate_new_lines (len(head_lines)+idx+1) -- те же
+    номера строк, что дефекты формы используют в своих сообщениях.
+
+    Fail-open построчно (спека п.4): любой сбой (битый JSON строки, глоб,
+    чтение транскрипта, что угодно) -- try/except вокруг ТЕЛА одной
+    итерации, `continue` -- не прерывает разбор остальных новых строк,
+    не роняет хук (внешняя граница main() -- вторая, более грубая сетка)."""
+    events = []
+    for idx, line in enumerate(new_lines):
+        line_no = len(head_lines) + idx + 1
+        try:
+            obj = json.loads(line)
+            if not isinstance(obj, dict):
+                continue
+            event = obj.get("event")
+            if event not in TIER_TRIGGER_EVENTS:
+                continue
+            worker_ref = obj.get("worker_ref")
+            if not isinstance(worker_ref, str):
+                continue
+            m = AGENT_WORKER_REF_RE.match(worker_ref)
+            if not m:
+                continue
+            agent_id = m.group(1)
+            transcript_path = _find_agent_transcript(agent_id)
+            if not transcript_path:
+                continue
+            models = list(tier_echo.iter_transcript_models(transcript_path))
+            counts = tier_echo.count_models(models)
+            if not counts:
+                continue
+            declared_word = _extract_declared_word(obj.get("model"))
+            if declared_word is None:
+                continue
+            matched = [declared_word in mdl.lower() for mdl in counts]
+            if not any(matched):
+                events.append((line_no, "mismatch", declared_word, counts))
+            elif not all(matched):
+                events.append((line_no, "info", declared_word, counts))
+            # else: все measured несут слово -- полная тишина по строке.
+        except Exception:
+            continue
+    return events
+
+
+def _format_measured(counts: dict, ascii_only: bool) -> str:
+    """"<model>=<счёт>[, ...]" -- та же форма, что tier_echo.build_line,
+    но санитайз выбирается по каналу (raw для stdout, ascii для stderr),
+    тот же принцип, что build_context ниже."""
+    sanitize = _ascii_sanitize if ascii_only else _raw_sanitize
+    return ", ".join(f"{sanitize(model)}={count}" for model, count in counts.items())
+
+
+def _format_tier_line(event: tuple, ascii_only: bool) -> str:
+    """Спека п.2, буквально:
+      MISMATCH: "TIER ECHO: строка N model='<заявлено>' vs measured
+                 <model>=<счёт>[, ...] MISMATCH"
+      informational: "TIER ECHO: строка N measured <model>=<счёт>[, ...]"
+    Статические части литерала -- НЕ санитайзятся (тот же принцип, что
+    build_context); санитайзу подвергается только динамика (declared_word
+    -- всегда одно из 4 ascii-слов, санитайз здесь no-op, но применяется
+    для единообразия; measured-модели -- реальный текст транскрипта,
+    санитайз обязателен, тот же риск, что в tier_echo.build_line)."""
+    line_no, kind, declared_word, counts = event
+    sanitize = _ascii_sanitize if ascii_only else _raw_sanitize
+    measured = _format_measured(counts, ascii_only)
+    if kind == "mismatch":
+        return f"TIER ECHO: строка {line_no} model='{sanitize(declared_word)}' vs measured {measured} MISMATCH"
+    return f"TIER ECHO: строка {line_no} measured {measured}"
+
+
+def build_tier_segment(tier_events: list, ascii_only: bool = False) -> str:
+    """Собирает TIER ECHO-часть additionalContext из tier_events (спека
+    п.4: не более MAX_TIER_LINES=5 строк на вызов, "+K more" сверху --
+    тот же паттерн, что build_context для дефектов формы, независимый
+    потолок). Пустой tier_events -> "" (пустая строка, не None -- вызывающий
+    код проверяет её истинность так же, как список violations)."""
+    if not tier_events:
+        return ""
+    head = tier_events[:MAX_TIER_LINES]
+    rest = len(tier_events) - len(head)
+    body = "; ".join(_format_tier_line(ev, ascii_only) for ev in head)
+    if rest > 0:
+        body += f"; +{rest} more"
+    return body
+
+
 def build_context(violations: list, ascii_only: bool = False) -> str:
     """"JOURNAL ECHO: N дефект(ов) в новых строках: <первые 3
     сообщения>[; +K more]" (спека п.3, буквально). Статический русский
@@ -246,6 +426,26 @@ def build_context(violations: list, ascii_only: bool = False) -> str:
     if rest > 0:
         body += f"; +{rest} more"
     return f"JOURNAL ECHO: {n} дефект(ов) в новых строках: {body}"
+
+
+def combine_context(violations: list, tier_events: list, ascii_only: bool = False) -> str:
+    """Спека п.3: "один JSON additionalContext может нести и дефекты
+    формы, и TIER ECHO-строки (раздели '; ')". Два НЕЗАВИСИМЫХ сегмента
+    -- build_context(violations) (ЦЕЛИКОМ, свой заголовок "JOURNAL ECHO:
+    N дефект(ов)..." не меняется -- существующие тесты завязаны на этот
+    формат буквально) и build_tier_segment(tier_events) -- склеиваются
+    через "; ", только если непусты. Дефектов формы нет, но tier-строки
+    есть -> итог = только tier-сегмент, JSON всё равно печатается (спека
+    п.3). Оба пусты -> "" -- вызывающий код (main()) трактует пустую
+    строку как полную тишину (та же проверка истинности, что раньше
+    была `if not violations`)."""
+    parts = []
+    if violations:
+        parts.append(build_context(violations, ascii_only))
+    tier_segment = build_tier_segment(tier_events, ascii_only)
+    if tier_segment:
+        parts.append(tier_segment)
+    return "; ".join(parts)
 
 
 def _reconfigure_streams_utf8():
@@ -290,13 +490,31 @@ def main() -> int:
         head_text = _get_head_text(root)
 
         _, violations = journal_validator.decide(disk_text, head_text, now)
-        if not violations:
+
+        # TIER ECHO при записи (расширение этой задачи, спека п.1/п.5):
+        # те же "новые строки", что decide() валидирует внутри себя --
+        # вычисляем НЕЗАВИСИМО через те же публичные split_lines/
+        # check_append_only (decide() не отдаёт new_lines наружу).
+        # append-only НЕ держится -- staged не начинается с HEAD как
+        # префикс -- "новые строки" неопределимы срезом (staged может
+        # содержать изменённые/удалённые старые строки вперемешку) --
+        # tier-события не считаем вовсе в этом случае (new_lines = []),
+        # тот же дефект (append-only) уже покрыт отдельно через violations.
+        staged_lines = journal_validator.split_lines(disk_text)
+        head_lines = journal_validator.split_lines(head_text)
+        append_ok, _ = journal_validator.check_append_only(staged_lines, head_lines)
+        new_lines = staged_lines[len(head_lines):] if append_ok else []
+        tier_events = _collect_tier_events(new_lines, head_lines)
+
+        if not violations and not tier_events:
             return 0
 
         # Lead-правка (критик-приёмка + Lead-смок): два разных канала,
         # два разных варианта санитайза (см. докстринг build_context).
-        context_for_stdout = build_context(violations, ascii_only=False)
-        context_for_stderr = build_context(violations, ascii_only=True)
+        # combine_context склеивает дефекты формы и TIER ECHO-строки
+        # (спека п.3) -- см. докстринг combine_context.
+        context_for_stdout = combine_context(violations, tier_events, ascii_only=False)
+        context_for_stderr = combine_context(violations, tier_events, ascii_only=True)
 
         sys.stderr.write(context_for_stderr + "\n")
         output = {
