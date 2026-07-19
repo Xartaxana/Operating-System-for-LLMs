@@ -105,7 +105,33 @@ justified.
   from THIS state — the pair (kernel vs full) is clean only against
   kit main e1ccd50; if the scalar lands below band, the control is a
   B-full arm on e1ccd50, not a verdict against the kernel.
-- **N3 — cut decision** [QUEUED; Lead+Architect, D-0068]. If GO, the
+- **N2b — run №16: second kernel point with the D-0083 hook in cells**
+  [RUNNING 2026-07-19; operator word «добавь в экзаменационный набор
+  … и прогони экзамен с ядром ещё раз; если результат
+  удовлетворительный — режем»]. Kit branch exp-16-kernel @ 0526ca6 =
+  kit main 2cbc84d (= штаб 1a11b80, v5.4: tier_echo in cells,
+  hardened proxy protez) + CLAUDE.md := kernel v2 (R7 D-0083 line,
+  20659 B); manifest docs/tasks/2026-07-19_exam-run16-manifest.json,
+  arm Bkn2, same set/model/parallel/suffix as №15. PRE-REGISTERED
+  keys: k1–k5 unchanged from №15 (band vs №13/№14/№15; validator
+  defects; Role≠tier; DoD; mechanism-recognition out of
+  denominator) plus:
+  (k6) TIER ECHO visibility and effect — cell transcripts contain
+  the hook's line after subagent stops (grader greps cell transcript
+  jsonl for "TIER ECHO"); every claimed fable-proxy escalation is
+  cross-checked against measured fable turns in cc_usage AND against
+  the echo lines; a repeat of the №15-t3 substitution now must be
+  VISIBLE in-cell — invisible echo (0 lines while dispatches
+  happened) = the stderr+exit0 channel failed, switch to
+  hookSpecificOutput before the cut (critic's flag).
+  Satisfaction bar for the operator's conditional GO: №16 scalar in
+  band (≥0.93 after any Lead adjustments) with no NEW kernel-caused
+  failure class → N3 cut proceeds on the operator's already-given
+  word; below band or a new kernel-caused class → stop and report.
+- **N3 — cut decision** [CONDITIONALLY AUTHORIZED by the operator's
+  word 2026-07-19 («если результат удовлетворительный, то режем
+  CLAUDE.md и переносим все правки в основную ветку»), gate = №16
+  bar above; Lead+Architect, D-0068]. If GO, the
   cut commit (full rule-10 mechanism): CLAUDE.md := kernel;
   docs/POLICY_FULL.md created with VERBATIM relocation of removed
   rationale/precedents; SIBLING_MAP axis 4 gains the kernel↔FULL pair;
