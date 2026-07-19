@@ -2,7 +2,35 @@
 
 Every request passing through the gateway is recorded in a SQLite log.
 The schema already contains what the Ledger (Phase 1 step 3) needs,
-including raw prompt text for the context-repetition ratio.
+including raw prompt/response text for the context-repetition ratio.
+Writing that raw text is controlled by GATEWAY_LOG_RAW_TEXT (ported
+from the toolkit's safe-telemetry flag, port-queue item 2,
+docs/tasks/2026-07-20_toolkit-release-v040.md): by default the
+`prompt`/`response` columns hold the actual conversation text, while
+every accounting/ledger field (model, tokens, cost, ts, category,
+traffic_kind) is written unconditionally regardless of the flag.
+
+HQ'S DEFAULT DIVERGES FROM THE KIT ON PURPOSE (deployment decision,
+operator word, port-queue item 2): the kit ships GATEWAY_LOG_RAW_TEXT
+default FALSE (privacy-first for an arbitrary downstream deployment);
+this deployment's own pipelines -- Shadow Evaluation replay
+(shadow_eval.py needs the real prompt text to replay it), metrics.py's
+context-repetition ratio (C1), and categorize()'s keyword fallback for
+untagged rows -- all READ raw prompt/response text and degrade to a
+meaningless (not crashing) signal without it. Flipping the default to
+false here would silently starve those pipelines, so HQ's default is
+TRUE: behavior is UNCHANGED from before this flag existed, and what is
+newly gained is the honest startup banner plus the switch itself.
+Turning it off (e.g. for a privacy window) is a decision made by
+explicit operator word, not a silent default here.
+
+Set GATEWAY_LOG_RAW_TEXT=false to mask the real prompt/response text.
+Truthy values keep it enabled: "1", "true", "yes", "on"
+(case-insensitive); anything else disables it. Masking writes a marker
+STRING (not NULL) into the two raw-text columns, chosen over NULL so a
+masked row is visibly distinct from a legitimate NULL (e.g. a failure
+row with no response, or a call with no messages) when inspecting
+requests.db directly.
 
 The database path is taken from the GATEWAY_DB_PATH environment variable,
 defaulting to requests.db next to this file.
@@ -11,9 +39,57 @@ defaulting to requests.db next to this file.
 import json
 import os
 import sqlite3
+import sys
 from pathlib import Path
 
 from litellm.integrations.custom_logger import CustomLogger
+
+# Marker written to the `prompt`/`response` columns when raw text
+# logging is disabled. See module docstring.
+RAW_TEXT_DISABLED_MARKER = "[raw text logging disabled]"
+
+# Truncation applied to the `error` column when raw text logging is off
+# (operator decision, docs/tasks/2026-07-20_toolkit-release-v040.md,
+# "Next batch queue" item 3, option "b"; ported alongside the raw-text
+# flag itself, item 2): provider exceptions can echo fragments of the
+# prompt/response (content-policy errors especially), so `error` is not
+# exempt from the masking the raw-text flag applies to the other two
+# text columns. Truncating to the first ~200 chars of the first line
+# keeps the error useful for diagnosis while bounding what can leak
+# through it. Full error text is still recorded when raw text logging
+# is on.
+ERROR_TRUNCATE_LENGTH = 200
+ERROR_TRUNCATE_SUFFIX = "...[truncated]"
+
+
+def raw_text_logging_enabled() -> bool:
+    """GATEWAY_LOG_RAW_TEXT env flag -- HQ default ENABLED (true), unlike
+    the kit's default-disabled (see module docstring for why)."""
+    return os.environ.get("GATEWAY_LOG_RAW_TEXT", "true").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _truncate_error(error_text: str) -> str:
+    """Bound the `error` column at raw-off: first line, first
+    ERROR_TRUNCATE_LENGTH chars of it, with ERROR_TRUNCATE_SUFFIX
+    appended whenever anything was actually cut -- a later line
+    dropped, or the first line itself over the limit. A single-line
+    error at or under the limit passes through unchanged, no suffix."""
+    truncated = False
+    if "\n" in error_text:
+        first_line, _ = error_text.split("\n", 1)
+        truncated = True
+    else:
+        first_line = error_text
+    if len(first_line) > ERROR_TRUNCATE_LENGTH:
+        first_line = first_line[:ERROR_TRUNCATE_LENGTH]
+        truncated = True
+    return first_line + ERROR_TRUNCATE_SUFFIX if truncated else first_line
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS requests (
@@ -107,6 +183,7 @@ def _base_row(kwargs, start_time, end_time) -> dict:
     metadata = litellm_params.get("metadata") or {}
     # Through the proxy, kwargs["model"] is the resolved provider model;
     # the gateway alias the client asked for is metadata["model_group"].
+    prompt_text = json.dumps(messages, ensure_ascii=False) if messages else None
     return {
         "ts": start_time.isoformat() if start_time else None,
         "model": metadata.get("model_group") or kwargs.get("model"),
@@ -114,7 +191,7 @@ def _base_row(kwargs, start_time, end_time) -> dict:
         "latency_ms": (end_time - start_time).total_seconds() * 1000
         if start_time and end_time
         else None,
-        "prompt": json.dumps(messages, ensure_ascii=False) if messages else None,
+        "prompt": prompt_text if raw_text_logging_enabled() else RAW_TEXT_DISABLED_MARKER,
         "traffic_kind": metadata.get("traffic_kind") or "real",
         "category": metadata.get("category"),
     }
@@ -156,6 +233,7 @@ def _success_row(kwargs, response_obj, start_time, end_time) -> dict:
     usage = getattr(response_obj, "usage", None)
     choices = getattr(response_obj, "choices", None)
     cache_creation, cache_read = _cache_tokens(usage)
+    response_text = choices[0].message.content if choices else None
     row.update(
         {
             "status": "success",
@@ -163,7 +241,7 @@ def _success_row(kwargs, response_obj, start_time, end_time) -> dict:
             "completion_tokens": getattr(usage, "completion_tokens", None),
             "total_tokens": getattr(usage, "total_tokens", None),
             "cost_usd": kwargs.get("response_cost"),
-            "response": choices[0].message.content if choices else None,
+            "response": response_text if raw_text_logging_enabled() else RAW_TEXT_DISABLED_MARKER,
             "cache_creation_input_tokens": cache_creation,
             "cache_read_input_tokens": cache_read,
         }
@@ -173,16 +251,31 @@ def _success_row(kwargs, response_obj, start_time, end_time) -> dict:
 
 def _failure_row(kwargs, start_time, end_time) -> dict:
     row = _base_row(kwargs, start_time, end_time)
+    error_text = str(kwargs.get("exception") or "")
     row.update(
         {
             "status": "failure",
-            "error": str(kwargs.get("exception") or ""),
+            "error": error_text if raw_text_logging_enabled() else _truncate_error(error_text),
         }
     )
     return row
 
 
 class SQLiteLogger(CustomLogger):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Self-declaration of the raw-text-logging posture (ported
+        # alongside the flag, port-queue item 2): one honest line to
+        # stderr at logger start-up, so an operator staring at the
+        # proxy's boot output sees which mode is live without having to
+        # go read this file or requests.db. Printed per-instance (not
+        # once at import) so it always reflects the GATEWAY_LOG_RAW_TEXT
+        # value in effect when THIS logger starts -- relevant for
+        # tests, which construct fresh instances under monkeypatched
+        # env rather than reloading the module.
+        state = "ENABLED" if raw_text_logging_enabled() else "disabled"
+        print(f"raw text logging: {state}", file=sys.stderr)
+
     def log_success_event(self, kwargs, response_obj, start_time, end_time):
         _insert(_success_row(kwargs, response_obj, start_time, end_time))
 

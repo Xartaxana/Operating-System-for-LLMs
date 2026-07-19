@@ -41,7 +41,21 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 PROJECT_KEY = "D--Improving-AI-Operating-System-for-LLMs"
-CLAUDE_PROJECTS = Path(os.path.expanduser("~")) / ".claude" / "projects" / PROJECT_KEY
+
+
+def _resolve_claude_projects() -> Path:
+    """Каталог транскриптов для скана. CLAUDE_PROJECTS, если задан в
+    окружении, — ПОЛНЫЙ путь-переопределение для этого проекта; он
+    перекрывает захардкоженный PROJECT_KEY выше. Использовать на любой
+    установке, где PROJECT_KEY этого файла не совпадает с реальным
+    ~/.claude/projects/<slug> на данной машине."""
+    override = os.environ.get("CLAUDE_PROJECTS")
+    if override:
+        return Path(override)
+    return Path(os.path.expanduser("~")) / ".claude" / "projects" / PROJECT_KEY
+
+
+CLAUDE_PROJECTS = _resolve_claude_projects()
 
 # --- команды, которые харнесс авто-разрешает без allowlist (усечённый практичный список) ---
 AUTO_ALLOW_ANY_ARGS = {
@@ -190,6 +204,27 @@ def scan_broad_wildcards() -> list[tuple[str, str, str, str]]:
     return out
 
 
+def check_transcripts_present(claude_projects: Path | None = None) -> bool:
+    """Громко предупредить в stderr (не исключение — скан продолжается с
+    нулём), если каталог транскриптов не существует, либо существует, но
+    глоб не находит ни одного файла. Класс «тихий ноль»: установка, чей
+    PROJECT_KEY не совпадает с реальным ~/.claude/projects/<slug> на этой
+    машине, иначе молча печатает «Просканировано: 0» без намёка на причину.
+    Возвращает True, если предупреждение было напечатано."""
+    cp = claude_projects if claude_projects is not None else CLAUDE_PROJECTS
+    n = 0
+    if cp.exists():
+        n = len(list(cp.glob("*.jsonl"))) + len(list(cp.glob("*/subagents/agent-*.jsonl")))
+    if not cp.exists() or n == 0:
+        print(
+            f"ВНИМАНИЕ: 0 транскриптов найдено в {cp} — вероятно неверный слаг проекта; "
+            "установите CLAUDE_PROJECTS в правильный каталог '~/.claude/projects/<slug>'",
+            file=sys.stderr,
+        )
+        return True
+    return False
+
+
 def snapshot_transcripts(session: str | None = None) -> list[tuple[Path, str, int]]:
     """[(path, agent_type, size_at_snapshot), ...] — зафиксировать список
     транскриптов и их размеры ДО скана (доработка a пилота): прогон в живой сессии
@@ -306,6 +341,7 @@ def collect_suspects(minutes: float | None, session: str | None = None,
 def main(argv=None):
     if os.name == "nt":  # консоль Windows в cp866 душит кириллицу — форсим utf-8
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # тот же класс: [warn]-строки и WARNING-строка ниже тоже кириллица
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=float, default=180)
     ap.add_argument("--all", action="store_true")
@@ -313,6 +349,8 @@ def main(argv=None):
     ap.add_argument("--summary", action="store_true", help="сводка по группам вместо полного списка")
     args = ap.parse_args(argv)
     minutes = None if getattr(args, "all") else args.minutes
+
+    check_transcripts_present()
 
     # доработка (b): предупреждение о широких allowlist-паттернах — перед сводкой
     broad = scan_broad_wildcards()

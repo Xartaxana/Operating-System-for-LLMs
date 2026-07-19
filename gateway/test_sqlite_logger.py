@@ -409,3 +409,246 @@ def test_metadata_category_null_when_not_provided(db):
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM requests WHERE status = 'success'").fetchone()
     assert row["category"] is None
+
+
+# --- GATEWAY_LOG_RAW_TEXT (ported from the toolkit, port-queue item 2) ---
+# HQ's default is TRUE (opposite of the kit's default-false): our own
+# pipelines (Shadow Evaluation replay, metrics.py C1, categorize())
+# read raw prompt/response text, so the unset-env case below asserts
+# REAL content, not the marker -- the mirror image of the kit's
+# disabled-by-default test.
+
+
+def test_raw_text_logging_enabled_by_default(db, monkeypatch):
+    """HQ default (GATEWAY_LOG_RAW_TEXT unset): prompt/response columns
+    hold the real conversation text, same as before this flag existed."""
+    monkeypatch.delenv("GATEWAY_LOG_RAW_TEXT", raising=False)
+    import litellm
+    from sqlite_logger import logger_instance
+
+    litellm.callbacks = [logger_instance]
+    litellm.completion(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": "not a secret prompt"}],
+        mock_response="not a secret response",
+    )
+
+    wait_for_row(db, "success")
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM requests WHERE status = 'success'").fetchone()
+    assert row["response"] == "not a secret response"
+    assert json.loads(row["prompt"]) == [{"role": "user", "content": "not a secret prompt"}]
+
+
+@pytest.mark.parametrize("flag_value", ["false", "0", "no", "off", "garbage", ""])
+def test_raw_text_logging_disabled_for_falsy_and_unrecognized_values(db, monkeypatch, flag_value):
+    """Anything other than a recognized truthy value disables raw text
+    logging -- fail closed, not fail open, on a malformed flag (same
+    contract as the kit)."""
+    monkeypatch.setenv("GATEWAY_LOG_RAW_TEXT", flag_value)
+    from sqlite_logger import RAW_TEXT_DISABLED_MARKER, logger_instance
+    import litellm
+
+    litellm.callbacks = [logger_instance]
+    litellm.completion(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": "secret prompt"}],
+        mock_response="secret response",
+    )
+
+    wait_for_row(db, "success")
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM requests WHERE status = 'success'").fetchone()
+    assert row["prompt"] == RAW_TEXT_DISABLED_MARKER
+    assert row["response"] == RAW_TEXT_DISABLED_MARKER
+    # accounting/ledger fields are unaffected by the flag
+    assert row["model"] == "gpt-3.5-turbo"
+    assert row["total_tokens"] is not None
+
+
+@pytest.mark.parametrize("flag_value", ["true", "1", "yes", "on", "TRUE", "True"])
+def test_raw_text_logging_enabled_stores_real_content(db, monkeypatch, flag_value):
+    """GATEWAY_LOG_RAW_TEXT truthy (any case/spelling variant) stores the
+    real prompt/response text."""
+    monkeypatch.setenv("GATEWAY_LOG_RAW_TEXT", flag_value)
+    from sqlite_logger import logger_instance
+    import litellm
+
+    litellm.callbacks = [logger_instance]
+    litellm.completion(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": "real prompt text"}],
+        mock_response="real response text",
+    )
+
+    wait_for_row(db, "success")
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM requests WHERE status = 'success'").fetchone()
+    assert row["response"] == "real response text"
+    assert json.loads(row["prompt"]) == [{"role": "user", "content": "real prompt text"}]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "",  # empty text
+        "Привет, мир! éè \U0001F600",  # non-ASCII incl. surrogate-pair emoji
+        "x" * 200_000,  # very long text
+    ],
+    ids=["empty", "non-ascii", "very-long"],
+)
+def test_raw_text_logging_enabled_handles_boundary_inputs(db, monkeypatch, content):
+    """With logging enabled (the HQ default), boundary-sized/encoded
+    content round-trips through the DB without the logger raising."""
+    monkeypatch.setenv("GATEWAY_LOG_RAW_TEXT", "true")
+    from sqlite_logger import logger_instance
+    import litellm
+
+    litellm.callbacks = [logger_instance]
+    litellm.completion(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": content}],
+        mock_response=content or "(empty)",
+    )
+
+    wait_for_row(db, "success")
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM requests WHERE status = 'success'").fetchone()
+    assert json.loads(row["prompt"]) == [{"role": "user", "content": content}]
+    assert row["response"] == (content or "(empty)")
+
+
+def test_startup_banner_reports_enabled_by_default(capsys, monkeypatch):
+    """One honest stderr line at logger start-up naming the active mode
+    -- HQ default is ENABLED (mirror image of the kit's disabled-by-
+    default banner test)."""
+    monkeypatch.delenv("GATEWAY_LOG_RAW_TEXT", raising=False)
+    import sqlite_logger
+
+    sqlite_logger.SQLiteLogger()
+    captured = capsys.readouterr()
+    assert "raw text logging" in captured.err.lower()
+    assert "enabled" in captured.err.lower()
+
+
+def test_startup_banner_reports_disabled_when_flag_false(capsys, monkeypatch):
+    monkeypatch.setenv("GATEWAY_LOG_RAW_TEXT", "false")
+    import sqlite_logger
+
+    sqlite_logger.SQLiteLogger()
+    captured = capsys.readouterr()
+    assert "raw text logging" in captured.err.lower()
+    assert "disabled" in captured.err.lower()
+
+
+# --- error column truncation at raw-off (port-queue item 3, option "b") ---
+# Ported into HQ alongside the flag itself; same contract as the kit's.
+# Calls log_failure_event directly rather than routing a string through
+# litellm's mock_response: litellm only raises a real exception for a
+# handful of exact-match strings (RateLimitError,
+# ContextWindowExceededError, InternalServerError, a
+# content_filter_policy prefix) -- verified empirically against
+# litellm.main._handle_mock_potential_exceptions -- any other string is
+# returned as a successful mock completion instead of failing.
+
+
+def test_failure_error_truncated_when_raw_text_logging_disabled(db, monkeypatch):
+    """At raw-off, a long multi-line error is cut to the first 200 chars
+    of its first line, with the truncation suffix appended."""
+    monkeypatch.setenv("GATEWAY_LOG_RAW_TEXT", "false")
+    from sqlite_logger import logger_instance
+
+    long_first_line = "boom: " + "x" * 300
+    error_text = long_first_line + "\nsecret prompt fragment on line two"
+    kwargs = {
+        "model": "gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": "ping"}],
+        "litellm_params": {"metadata": {}},
+        "exception": Exception(error_text),
+    }
+    import datetime
+
+    now = datetime.datetime.now()
+    logger_instance.log_failure_event(kwargs, None, now, now)
+
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM requests WHERE status = 'failure'").fetchone()
+    assert row["error"].endswith("...[truncated]")
+    assert "\n" not in row["error"]
+    assert len(row["error"]) == 200 + len("...[truncated]")
+    assert "secret prompt fragment" not in row["error"]
+
+
+def test_failure_error_full_when_raw_text_logging_enabled(db, monkeypatch):
+    """At raw-on (the HQ default), the error column keeps the full,
+    untruncated text."""
+    monkeypatch.delenv("GATEWAY_LOG_RAW_TEXT", raising=False)
+    from sqlite_logger import logger_instance
+
+    long_first_line = "boom: " + "x" * 300
+    error_text = long_first_line + "\nsecond line detail"
+    kwargs = {
+        "model": "gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": "ping"}],
+        "litellm_params": {"metadata": {}},
+        "exception": Exception(error_text),
+    }
+    import datetime
+
+    now = datetime.datetime.now()
+    logger_instance.log_failure_event(kwargs, None, now, now)
+
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM requests WHERE status = 'failure'").fetchone()
+    assert "second line detail" in row["error"]
+    assert not row["error"].endswith("...[truncated]")
+
+
+def test_failure_error_short_single_line_not_suffixed_when_disabled(db, monkeypatch):
+    """At raw-off, a short single-line error passes through unchanged --
+    no suffix when nothing was actually cut."""
+    monkeypatch.setenv("GATEWAY_LOG_RAW_TEXT", "false")
+    from sqlite_logger import logger_instance
+    import litellm
+
+    litellm.callbacks = [logger_instance]
+    with pytest.raises(Exception):
+        litellm.completion(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": "ping"}],
+            mock_response="litellm.InternalServerError",
+        )
+
+    wait_for_row(db, "failure")
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM requests WHERE status = 'failure'").fetchone()
+    assert "InternalServerError" in row["error"]
+    assert not row["error"].endswith("...[truncated]")
+
+
+@pytest.mark.parametrize(
+    "length, expect_suffix",
+    [(200, False), (201, True)],
+    ids=["at-limit", "one-over-limit"],
+)
+def test_truncate_error_boundary(length, expect_suffix):
+    """ERROR_TRUNCATE_LENGTH boundary: exactly 200 chars on a single line
+    passes through unchanged; 201 chars gets cut to 200 plus the
+    suffix (rule 6a: a test at the limit and one past it)."""
+    from sqlite_logger import ERROR_TRUNCATE_LENGTH, _truncate_error
+
+    assert ERROR_TRUNCATE_LENGTH == 200
+    text = "e" * length
+    result = _truncate_error(text)
+    if expect_suffix:
+        assert result == "e" * 200 + "...[truncated]"
+    else:
+        assert result == text
+        assert not result.endswith("...[truncated]")

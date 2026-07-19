@@ -9,6 +9,7 @@ sandbox-эвристики (многострочность, $(...), цикл for
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import permission_audit as pa
 
@@ -196,3 +197,72 @@ def test_collect_suspects_flags_missing_allowlist_match(tmp_path, monkeypatch):
     assert total == 1
     assert len(suspects) == 1
     assert "нет совпадения с allowlist" in suspects[0][4]
+
+
+# --- _resolve_claude_projects / CLAUDE_PROJECTS env override (очередь п.1) ---
+
+
+def test_resolve_claude_projects_env_override_takes_full_path(tmp_path, monkeypatch):
+    override_dir = tmp_path / "custom_projects_dir"
+    monkeypatch.setenv("CLAUDE_PROJECTS", str(override_dir))
+    resolved = pa._resolve_claude_projects()
+    assert resolved == override_dir
+
+
+def test_resolve_claude_projects_no_env_falls_back_to_hardcoded_key(monkeypatch):
+    monkeypatch.delenv("CLAUDE_PROJECTS", raising=False)
+    resolved = pa._resolve_claude_projects()
+    expected = Path.home() / ".claude" / "projects" / pa.PROJECT_KEY
+    assert resolved == expected
+
+
+def test_claude_projects_env_override_works_end_to_end(tmp_path, monkeypatch):
+    # Оверрайд — полный путь, вступающий в силу до самого скана
+    # транскриптов; тот же паттерн, что и остальные тесты этого файла
+    # используют для указания CLAUDE_PROJECTS на фикстурный каталог —
+    # но здесь путь получен через env-переменную, а не напрямую.
+    override_dir = tmp_path / "custom_projects_dir"
+    override_dir.mkdir()
+    transcript = override_dir / "session.jsonl"
+    _write_tool_use(transcript, "echo overridden-transcript")
+    monkeypatch.setenv("CLAUDE_PROJECTS", str(override_dir))
+
+    resolved = pa._resolve_claude_projects()
+    assert resolved == override_dir
+    monkeypatch.setattr(pa, "CLAUDE_PROJECTS", resolved)
+
+    calls = list(pa.iter_tool_calls(None))
+    cmds = [c[4] for c in calls]
+    assert "echo overridden-transcript" in " ".join(cmds)
+
+
+# --- check_transcripts_present: предупреждение при пустом каталоге (очередь п.1) ---
+
+
+def test_check_transcripts_present_warns_when_dir_missing(tmp_path, capsys):
+    missing = tmp_path / "does_not_exist"
+    warned = pa.check_transcripts_present(missing)
+    assert warned is True
+    err = capsys.readouterr().err
+    assert "ВНИМАНИЕ" in err
+    assert str(missing) in err
+    assert "CLAUDE_PROJECTS" in err
+
+
+def test_check_transcripts_present_warns_when_dir_empty(tmp_path, capsys):
+    empty = tmp_path / "empty_projects"
+    empty.mkdir()
+    warned = pa.check_transcripts_present(empty)
+    assert warned is True
+    err = capsys.readouterr().err
+    assert "ВНИМАНИЕ" in err
+
+
+def test_check_transcripts_present_no_warn_when_populated(tmp_path, capsys):
+    populated = tmp_path / "populated_projects"
+    populated.mkdir()
+    _write_tool_use(populated / "session.jsonl", "echo something")
+    warned = pa.check_transcripts_present(populated)
+    assert warned is False
+    err = capsys.readouterr().err
+    assert err == ""
