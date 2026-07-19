@@ -206,10 +206,9 @@ BOOT-БЮДЖЕТ: история — коммиты диет; мелкие ра
 - Evidence-gated residuals — 9 пунктов, каждый на своём триггере:
   полный список VERBATIM —
   docs/task_reports/2026-07-16_evidence-gated-residuals.md.
-- Eval plan stage 2 — цикл №1 07-13 (d90cd03). Остаток:
-  minimum-n/pass^k + numeric agreement (пороги с калибровки);
-  Batch API — TRIGGER «реплеи регулярны», учёт requests.db тем же
-  ходом; NOT taken: per-PR CI, bench-harness.
+- Eval plan stage 2 — цикл №1 07-13 (d90cd03); остаток:
+  minimum-n/pass^k + numeric agreement; Batch API по триггеру
+  «реплеи регулярны»; NOT taken: per-PR CI, bench-harness.
 - NOT adopted (чтобы не пересуживать): GSD-координатор, auto-mode
   SQLite/crash recovery, supply-chain tags, WXP; OpenClaw: channels,
   delegate identity, compaction/memory, utilityModel. Обоснования —
