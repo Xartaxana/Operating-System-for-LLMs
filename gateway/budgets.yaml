@@ -9,6 +9,11 @@ warn_ratio: 0.8
 daily_usd:
   default: 5.00
   lead: 10.00
+  # Evidence-run aliases (operator word 2026-07-20 «делай все 4» —
+  # R1 top-up without waiting for calibration; the night's series hit
+  # the default $5 wall on lead-sonnet, Guard refused correctly):
+  lead-sonnet: 20.00
+  judge-sonnet: 20.00
   # Passthrough aliases (t-075, API-window prep): caps proposed by Lead
   # for the 2-3 day Claude Code / ANTHROPIC_API_KEY window; operator to
   # adjust. warn_ratio above fires at 80% of each as usual.
