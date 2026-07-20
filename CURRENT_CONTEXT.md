@@ -210,9 +210,13 @@ BOOT-БЮДЖЕТ: история — коммиты диет; мелкие ра
   большей цене -> rejected ценовой веткой; эскалационный корпус
   (gateway/escalation_corpus.jsonl, 4 кандидата): прямое сравнение —
   ничья t-201 + победа Sonnet t-132, превосходства Opus нет нигде.
-  РЕКОМЕНДАЦИЯ ГЕЙТУ: вариант A (scout=Haiku, builder=Sonnet,
-  critic=Opus, Lead=Fable — зеркало подписки) для дефолт-привязок
-  тулкита; статусные движения — калибровке №4 (Update Rule 1).
+  УТВЕРЖДЕНО D-0085 (слово оператора «утверждаем вариант полной
+  кальки с подписки»): вариант A (scout=Haiku, builder=Sonnet,
+  critic=Opus, Lead=Fable) — привязки API-контура и дефолт тулкита;
+  статусные движения — калибровке №4 (Update Rule 1). ПОРТ-ОЧЕРЕДЬ
+  ТУЛКИТА (мораторий до слова): дефолт-привязки A + judge-sonnet
+  алиас (drop_params) в кит-онбординг + строка API-дефолта в мост
+  «Two Vocabularies» (ось 4/7 D-0085).
   judge-sonnet калиброван 13/13 (alias c drop_params). Каверат-блоки
   обеих серий — в SHADOW_EVALUATION_LOG. Хвосты №4: кросс-аудит
   gemini worse-вердиктов judge-sonnet по opus-целям (self-judging
