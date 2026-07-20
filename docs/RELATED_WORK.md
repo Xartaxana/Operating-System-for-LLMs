@@ -110,6 +110,26 @@ Take: per D-0030, evaluate RouteLLM as the Phase 2 Router implementation
 before writing our own. Its routers need preference data — our Ledger +
 Shadow Evaluation can produce exactly that.
 
+Survey 2026-07-20 (D-0066 two-pass; scout web digest + Lead's targeted
+second pass over github issue #62 and huggingface.co/routellm):
+- Liveness: last GitHub commit 2024-08, BUT HF model weights refreshed
+  2025-04-01 (9 models), community issues into 2026-02; no successor
+  fork. Risk: near-dormant upstream — adoption would mean owning the
+  upkeep.
+- License Apache-2.0 (verified).
+- LOAD-BEARING for us: the recommended `mf` and `sw_ranking` routers
+  need OPENAI_API_KEY for prompt embeddings at inference (issue #62,
+  Lead-verified: author patched matrix_factorization/controller/routers
+  to use open-source embeddings; no built-in support). We have no
+  OpenAI key in the stack — the evaluable candidates are `bert` (0.3B,
+  offline via transformers) and `causal_llm` (8B, heavy for the local
+  GPU). Evaluation plan step 1 targets `bert` accordingly.
+- Threshold calibration ships as CLI
+  (`routellm.calibrate_threshold --strong-model-pct`), defaults to
+  Arena data; our pairs can feed it.
+Evaluation plan: docs/tasks/2026-07-20_routellm-evaluation-plan.md
+(pre-registered pass keys; baseline = policy-as-router).
+
 ## Cost telemetry / budget enforcement (overlaps Guard + Ledger)
 
 ### LiteLLM proxy (already our Gateway)
