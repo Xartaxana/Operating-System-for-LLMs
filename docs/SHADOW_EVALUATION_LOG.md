@@ -346,3 +346,176 @@ Lead-самоисполнений по качеству» НЕ равен «по
 класс-урок корпусов: replay-промпт обязан нести ВСЮ спецификацию
 задачи (2/8 промптов недоопределены — оба «worse/оспорен»
 артефактно).
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=lead-sonnet, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=1 commit=3243e0e353eae45e7d89d195d5a0f3293b001887 kind=script  source=git-lead target=lead-sonnet  verdict=error  judge=judge-groq cost_target=$0.0824 judge_cost=$unknown  truncated=1
+- 2026-07-20  shadow-replay  task=2 commit=c5c360612009b492441dd2d1694a48b721d60d14 kind=feature  source=git-lead target=lead-sonnet  verdict=error  judge=judge-groq cost_target=$0.0824 judge_cost=$unknown  truncated=1
+- 2026-07-20  shadow-replay  task=4 commit=9f31cda72d103a598b427fa8eacb353ae2b71d94 kind=docs-edit  source=git-lead target=lead-sonnet  verdict=equivalent  judge=judge-groq cost_target=$0.0099 judge_cost=$0.0004  truncated=0
+- 2026-07-20  shadow-replay  task=5 commit=8fa8d65146b69c11177424f2c8c4e44b1365c9e2 kind=feature  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-groq cost_target=$0.1201 judge_cost=$0.0006  truncated=1
+- 2026-07-20  shadow-replay  task=7 commit=d91ec9bf83cc009c05f0ec46d509274849cff344 kind=config  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-groq cost_target=$0.0469 judge_cost=$0.0006  truncated=0
+- 2026-07-20  shadow-replay  task=11 commit=e9f7f270d41a2373e1e973fa87c267c64cfcad6f kind=bugfix  source=git-lead target=lead-sonnet  verdict=equivalent  judge=judge-groq cost_target=$0.1042 judge_cost=$0.0009  truncated=1
+- 2026-07-20  shadow-replay  task=12 commit=478c3959bd3453247cd8716ab8e5b178e5563ab0 kind=bugfix  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-groq cost_target=$0.1210 judge_cost=$0.0010  truncated=1
+- 2026-07-20  shadow-replay  task=15 commit=f1f4f18e129f569cab421c062a9f52dd38e2c93d kind=mechanism-fix  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-groq cost_target=$0.1168 judge_cost=$0.0009  truncated=1
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=lead-sonnet  n=8  equivalent=2/8  judge=judge-groq  cost_target_total=$0.6836 judge_cost_total=$0.0043  errors=2 truncated=6
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=lead-sonnet, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=1 commit=3243e0e353eae45e7d89d195d5a0f3293b001887 kind=script  source=git-lead target=lead-sonnet  verdict=error  judge=judge-groq cost_target=$0.1441 judge_cost=$unknown  truncated=0
+- 2026-07-20  shadow-replay  task=2 commit=c5c360612009b492441dd2d1694a48b721d60d14 kind=feature  source=git-lead target=lead-sonnet  verdict=error  judge=judge-groq cost_target=$0.1353 judge_cost=$unknown  truncated=0
+- 2026-07-20  shadow-replay  task=5 commit=8fa8d65146b69c11177424f2c8c4e44b1365c9e2 kind=feature  source=git-lead target=lead-sonnet  verdict=error  judge=judge-groq cost_target=$0.2737 judge_cost=$unknown  truncated=0
+- 2026-07-20  shadow-replay  task=11 commit=e9f7f270d41a2373e1e973fa87c267c64cfcad6f kind=bugfix  source=git-lead target=lead-sonnet  verdict=error  judge=judge-groq cost_target=$0.1824 judge_cost=$unknown  truncated=0
+- 2026-07-20  shadow-replay  task=12 commit=478c3959bd3453247cd8716ab8e5b178e5563ab0 kind=bugfix  source=git-lead target=lead-sonnet  verdict=error  judge=judge-groq cost_target=$0.2906 judge_cost=$unknown  truncated=0
+- 2026-07-20  shadow-replay  task=15 commit=f1f4f18e129f569cab421c062a9f52dd38e2c93d kind=mechanism-fix  source=git-lead target=lead-sonnet  verdict=error  judge=judge-groq cost_target=$unknown judge_cost=$unknown  truncated=0
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=lead-sonnet  n=6  equivalent=0/6  judge=judge-groq  cost_target_total=$1.0261 judge_cost_total=$0.0000  errors=6 truncated=0
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=lead-sonnet, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=1 commit=3243e0e353eae45e7d89d195d5a0f3293b001887 kind=script  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-gemini cost_target=$0.1283 judge_cost=$0.0457  truncated=0
+- 2026-07-20  shadow-replay  task=2 commit=c5c360612009b492441dd2d1694a48b721d60d14 kind=feature  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-gemini cost_target=$0.1837 judge_cost=$0.0277  truncated=0
+- 2026-07-20  shadow-replay  task=5 commit=8fa8d65146b69c11177424f2c8c4e44b1365c9e2 kind=feature  source=git-lead target=lead-sonnet  verdict=equivalent  judge=judge-gemini cost_target=$0.2982 judge_cost=$0.0392  truncated=0
+- 2026-07-20  shadow-replay  task=11 commit=e9f7f270d41a2373e1e973fa87c267c64cfcad6f kind=bugfix  source=git-lead target=lead-sonnet  verdict=equivalent  judge=judge-gemini cost_target=$0.1648 judge_cost=$0.0196  truncated=0
+- 2026-07-20  shadow-replay  task=12 commit=478c3959bd3453247cd8716ab8e5b178e5563ab0 kind=bugfix  source=git-lead target=lead-sonnet  verdict=equivalent  judge=judge-gemini cost_target=$0.2935 judge_cost=$0.0303  truncated=0
+- 2026-07-20  shadow-replay  task=15 commit=f1f4f18e129f569cab421c062a9f52dd38e2c93d kind=mechanism-fix  source=git-lead target=lead-sonnet  verdict=equivalent  judge=judge-gemini cost_target=$0.2582 judge_cost=$0.0331  truncated=0
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=lead-sonnet  n=6  equivalent=4/6  judge=judge-gemini  cost_target_total=$1.3266 judge_cost_total=$0.1957  errors=0 truncated=0
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=claude-opus-4-8, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=1 commit=3243e0e353eae45e7d89d195d5a0f3293b001887 kind=script  source=git-lead target=claude-opus-4-8  verdict=worse  judge=judge-gemini cost_target=$0.1892 judge_cost=$0.0428  truncated=0
+- 2026-07-20  shadow-replay  task=2 commit=c5c360612009b492441dd2d1694a48b721d60d14 kind=feature  source=git-lead target=claude-opus-4-8  verdict=equivalent  judge=judge-gemini cost_target=$0.1905 judge_cost=$0.0244  truncated=0
+- 2026-07-20  shadow-replay  task=4 commit=9f31cda72d103a598b427fa8eacb353ae2b71d94 kind=docs-edit  source=git-lead target=claude-opus-4-8  verdict=equivalent  judge=judge-gemini cost_target=$0.0246 judge_cost=$0.0044  truncated=0
+- 2026-07-20  shadow-replay  task=5 commit=8fa8d65146b69c11177424f2c8c4e44b1365c9e2 kind=feature  source=git-lead target=claude-opus-4-8  verdict=equivalent  judge=judge-gemini cost_target=$0.5770 judge_cost=$0.0339  truncated=0
+- 2026-07-20  shadow-replay  task=7 commit=d91ec9bf83cc009c05f0ec46d509274849cff344 kind=config  source=git-lead target=claude-opus-4-8  verdict=worse  judge=judge-gemini cost_target=$0.0959 judge_cost=$0.0077  truncated=0
+- 2026-07-20  shadow-replay  task=11 commit=e9f7f270d41a2373e1e973fa87c267c64cfcad6f kind=bugfix  source=git-lead target=claude-opus-4-8  verdict=equivalent  judge=judge-gemini cost_target=$0.4745 judge_cost=$0.0244  truncated=0
+- 2026-07-20  shadow-replay  task=12 commit=478c3959bd3453247cd8716ab8e5b178e5563ab0 kind=bugfix  source=git-lead target=claude-opus-4-8  verdict=equivalent  judge=judge-gemini cost_target=$0.6639 judge_cost=$0.0323  truncated=0
+- 2026-07-20  shadow-replay  task=15 commit=f1f4f18e129f569cab421c062a9f52dd38e2c93d kind=mechanism-fix  source=git-lead target=claude-opus-4-8  verdict=worse  judge=judge-gemini cost_target=$0.6035 judge_cost=$0.0323  truncated=0
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=claude-opus-4-8  n=8  equivalent=5/8  judge=judge-gemini  cost_target_total=$2.8191 judge_cost_total=$0.2023  errors=0 truncated=0
+
+КАВЕРАТ СЕРИИ 2026-07-20 (Lead, chief-judge, при приёмке t-221).
+(1) ДВЕ АРТЕФАКТНЫЕ СЕКЦИИ выше невалидны как сигнал качества: секция
+03:41 (n=8, judge=judge-groq) — класс F-39, дефолт max_tokens=8192
+резал «файлы целиком» (truncated=6), плюс 2 error = перелив судьи;
+секция n=6 errors=6 (judge-groq, 32000) — НОВЫЙ класс: judge-groq
+(free tier) держит TPM 8000 НА ЗАПРОС, суд-промпт с длинным ответом
+цели не помещается; рост потолка цели УХУДШАЕТ судимость. Вывод
+класса: judge-groq непригоден для длинных пар (кандидат правила в
+судейский протокол). Оба дефекта — спека диспетчера (Lead), не
+исполнителя.
+(2) ВАЛИДНАЯ КАРТИНА Sonnet-цели 2026-07-20: чистые пары секции 03:41
+(task=4 equivalent, task=7 worse) + перепрогон judge-gemini (eq:
+5,11,12,15; worse: 1,2) = 5/8 equivalent — воспроизводит волну-2
+07-18 (тоже 5/8). Кросс-дневная согласованность судьи по тем же
+задачам 5/6 (флип только task=2 eq-&gt;worse; объясним вариативностью
+генерации цели между прогонами). Устойчиво worse у ОБЕИХ целей —
+task=1 и task=7 (класс недоопределённых промптов корпуса, каверат
+07-18).
+(3) Итог сравнения целей: Sonnet 5/8 = Opus 5/8 (расхождение
+составом: Opus прошёл task=2, провалил task=15 — у Sonnet наоборот).
+Прирост способности Opus на корпусе принятых работ НЕ измерен;
+инструмент имеет потолок по построению (эталон = принятая работа,
+лучших вердиктов нет) — дискриминация верха ушла в эскалационный
+корпус (gateway/escalation_corpus.jsonl, прогоны ниже).
+(4) Свежий source-прогон regression-набора: 9/15 ok; 6 провалов —
+из них минимум 3 (ConnectionRefused хвоста) вызваны РЕСТАРТОМ прокси
+Lead'ом при живом прогоне (дефект координатора: рестарт без сверки
+активных прогонов; правило себе — перед рестартом проверять
+процессы), 1 ConnectionReset смежен, 2 Timeout — под нагрузкой.
+Следствие: shadow_eval по свежим source-строкам имеет n~9, не 15.
+(5) Хвосты в очередь (батч мелочей): (а) дубль метки source_task=
+t-027 в regression_set_coding.jsonl; (б) shadow_eval.calibrate()
+отбрасывает judge_cost (класс judge_cost=unknown, чинённый в
+record_evidence, тут не покрыт).
+- 2026-07-20  category=coding  source=lead-sonnet target=claude-opus-4-8  n=10  sim=0.12  judge=judge-sonnet pass_rate=0.90 judge_cost=$0.0996  cost_source=$0.0996 cost_target=$0.1003  errors=0 truncated=0  -> rejected
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=lead-sonnet, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=t-094 commit=1e2a5eac1f78ca36b7bad1460f7ac18dff3143b9 kind=bugfix  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-sonnet cost_target=$0.3724 judge_cost=$0.0778  truncated=1
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=lead-sonnet  n=1  equivalent=0/1  judge=judge-sonnet  cost_target_total=$0.3724 judge_cost_total=$0.0778  errors=0 truncated=1
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=lead-sonnet, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=t-097 commit=0ef0aabca6d57ca19e8158fa47b2b2408820cb8a kind=mechanism-fix  source=git-lead target=lead-sonnet  verdict=worse  judge=judge-sonnet cost_target=$0.3886 judge_cost=$0.0251  truncated=1
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=lead-sonnet  n=1  equivalent=0/1  judge=judge-sonnet  cost_target_total=$0.3886 judge_cost_total=$0.0251  errors=0 truncated=1
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=lead-sonnet, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=t-201 commit=1a11b80c2f4ade166ffe97a63f7660da7a34a6aa kind=feature  source=git-lead target=lead-sonnet  verdict=equivalent  judge=judge-sonnet cost_target=$0.0943 judge_cost=$0.1349  truncated=0
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=lead-sonnet  n=1  equivalent=1/1  judge=judge-sonnet  cost_target_total=$0.0943 judge_cost_total=$0.1349  errors=0 truncated=0
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=lead-sonnet, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=t-132 commit=761d4f605e2a94ef495eb3b27d6a54190683e473 kind=feature  source=git-lead target=lead-sonnet  verdict=equivalent  judge=judge-sonnet cost_target=$0.5563 judge_cost=$0.2600  truncated=0
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=lead-sonnet  n=1  equivalent=1/1  judge=judge-sonnet  cost_target_total=$0.5563 judge_cost_total=$0.2600  errors=0 truncated=0
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=lead-sonnet, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=t-094 commit=1e2a5eac1f78ca36b7bad1460f7ac18dff3143b9 kind=bugfix  source=git-lead target=lead-sonnet  verdict=error  judge=judge-sonnet cost_target=$unknown judge_cost=$unknown  truncated=0
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=lead-sonnet  n=1  equivalent=0/1  judge=judge-sonnet  cost_target_total=$0.0000 judge_cost_total=$0.0000  errors=1 truncated=0
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=lead-sonnet, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=t-094 commit=1e2a5eac1f78ca36b7bad1460f7ac18dff3143b9 kind=bugfix  source=git-lead target=lead-sonnet  verdict=error  judge=judge-sonnet cost_target=$unknown judge_cost=$unknown  truncated=0
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=lead-sonnet  n=1  equivalent=0/1  judge=judge-sonnet  cost_target_total=$0.0000 judge_cost_total=$0.0000  errors=1 truncated=0
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=lead-sonnet, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=t-097 commit=0ef0aabca6d57ca19e8158fa47b2b2408820cb8a kind=mechanism-fix  source=git-lead target=lead-sonnet  verdict=error  judge=judge-sonnet cost_target=$unknown judge_cost=$unknown  truncated=0
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=lead-sonnet  n=1  equivalent=0/1  judge=judge-sonnet  cost_target_total=$0.0000 judge_cost_total=$0.0000  errors=1 truncated=0
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=lead-sonnet, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=t-097 commit=0ef0aabca6d57ca19e8158fa47b2b2408820cb8a kind=mechanism-fix  source=git-lead target=lead-sonnet  verdict=error  judge=judge-sonnet cost_target=$unknown judge_cost=$unknown  truncated=0
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=lead-sonnet  n=1  equivalent=0/1  judge=judge-sonnet  cost_target_total=$0.0000 judge_cost_total=$0.0000  errors=1 truncated=0
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=claude-opus-4-8, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=t-094 commit=1e2a5eac1f78ca36b7bad1460f7ac18dff3143b9 kind=bugfix  source=git-lead target=claude-opus-4-8  verdict=equivalent  judge=judge-sonnet cost_target=$0.8634 judge_cost=$0.3142  truncated=0
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=claude-opus-4-8  n=1  equivalent=1/1  judge=judge-sonnet  cost_target_total=$0.8634 judge_cost_total=$0.3142  errors=0 truncated=0
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=claude-opus-4-8, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=t-097 commit=0ef0aabca6d57ca19e8158fa47b2b2408820cb8a kind=mechanism-fix  source=git-lead target=claude-opus-4-8  verdict=worse  judge=judge-sonnet cost_target=$1.2240 judge_cost=$0.3079  truncated=0
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=claude-opus-4-8  n=1  equivalent=0/1  judge=judge-sonnet  cost_target_total=$1.2240 judge_cost_total=$0.3079  errors=0 truncated=0
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=claude-opus-4-8, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=t-201 commit=1a11b80c2f4ade166ffe97a63f7660da7a34a6aa kind=feature  source=git-lead target=claude-opus-4-8  verdict=equivalent  judge=judge-sonnet cost_target=$0.1481 judge_cost=$0.1927  truncated=0
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=claude-opus-4-8  n=1  equivalent=1/1  judge=judge-sonnet  cost_target_total=$0.1481 judge_cost_total=$0.1927  errors=0 truncated=0
+
+### SHADOW-REPLAY D-0080 п.3 (2026-07-20, target=claude-opus-4-8, ground truth = git-дифф Lead)
+
+- 2026-07-20  shadow-replay  task=t-132 commit=761d4f605e2a94ef495eb3b27d6a54190683e473 kind=feature  source=git-lead target=claude-opus-4-8  verdict=worse  judge=judge-sonnet cost_target=$1.0303 judge_cost=$0.1902  truncated=0
+- 2026-07-20  shadow-replay SUMMARY  source=git-lead target=claude-opus-4-8  n=1  equivalent=0/1  judge=judge-sonnet  cost_target_total=$1.0303 judge_cost_total=$0.1902  errors=0 truncated=0
+
+КАВЕРАТ СЕРИИ-2 2026-07-20 (Lead, chief-judge, при приёмке t-224).
+Судья серии: judge-sonnet (claude-sonnet-5, drop_params), калибровка
+13/13 — лучший результат среди судей; предшествовавшие 2 краха
+калибровки — класс «Sonnet 5 отвергает temperature=0», закрыт
+drop_params на алиасе.
+(1) ЭСКАЛАЦИОННЫЙ КОРПУС (gateway/escalation_corpus.jsonl, 4 задачи
+с провальной первой попыткой в истории; вопрос — первый выстрел при
+ПОЛНОЙ спеке). АРТЕФАКТНЫЕ строки: t-094/t-097 target=lead-sonnet с
+truncated=1 (кап 32000 мал для «файлы целиком», класс F-39) и 4
+error-пары 64K — это НЕ таймауты: Guard dайли-бюджет lead-sonnet
+(default $5.00, budgets.yaml) исчерпан $5.51 — enforcement-слой
+сработал по проекту, отказ $0. Следствие: у t-094/t-097 НЕТ валидного
+Sonnet-вердикта (недоизмерено, добор после сброса/поднятия бюджета —
+решение оператора).
+(2) ВАЛИДНАЯ МАТРИЦА: t-201 Sonnet eq $0.09 / Opus eq $0.15; t-132
+Sonnet eq $0.56 / Opus WORSE $1.03; t-094 Opus eq $0.86; t-097 Opus
+worse $1.22. Прямое сравнение (обе судимы): ничья + победа Sonnet.
+Превосходство Opus НЕ обнаружено и на корпусе с headroom.
+(3) СОВЕЩАТЕЛЬНОСТЬ: worse-вердикты judge-sonnet по opus-целям —
+советные до кросс-аудита judge-gemini (калибровка №4): self-judging
+риск (судья = модель sonnet-цели), пары «дифф vs файлы целиком» вне
+калибровочного набора.
+(4) Также подтверждено «первый выстрел при полной спеке»: t-201 и
+t-132 (исторически provalившие первую попытку у builder=Sonnet)
+пройдены Sonnet'ом с первого раза — граница ярусов проходила по
+качеству спеки, не по способности модели (согласуется с журнальной
+эмпирикой: все эскалации окна закрыты тем же ярусом со 2-й попытки).
+(5) Дефект печати: cost_target_total/judge_cost_total в строках
+shadow_eval при n>1 — СРЕДНЕЕ, не сумма (реальная стоимость шага
+coding = $2.00, не $0.20; сверено requests.db). Хвост в батч мелочей
+вместе с calibrate()-дропом judge_cost. Реальная стоимость серии-2
+$8.22; суммарно обе серии ~ $14.5.

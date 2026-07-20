@@ -121,6 +121,19 @@ model_list:
       model: anthropic/claude-haiku-4-5-20251001
       api_key: os.environ/ANTHROPIC_API_KEY
 
+  # Judge candidate by operator's word 2026-07-20 («возьми сонет»):
+  # dedicated alias so judge spend stays separable from lead-sonnet
+  # source/target rows in requests.db (protocol rule 6 hygiene).
+  # Calibration required before first use (protocol rule 7, bar >=12/13).
+  - model_name: judge-sonnet
+    litellm_params:
+      model: anthropic/claude-sonnet-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+      # sonnet-5 rejects non-default sampling params; judge_pair sends
+      # temperature=0 (determinism for judges that support it) -- drop
+      # it here instead of forking judge code (2026-07-20, series-2 stop)
+      drop_params: true
+
   # Shadow Evaluation judge (shadow_eval.py --judge-model). gpt-oss-120b
   # reasoning model via Groq free tier: 11/11 on judge_calibration.json
   # where middle-groq stuck at 10/11 (mis-traces correct code). Named by
