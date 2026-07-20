@@ -55,23 +55,38 @@ rationale, not silent editing.
 - R1. Evidence volume: ≥30 judged Shadow Evaluation pairs per
   candidate category, across ≥2 independent runs (n=2 is a signal,
   not a basis for routing).
-- R2. Money on the table: validated-delegable categories together
-  account for ≥25% of the Lead's accounted spend (D-0032 prices)
-  over the G1 window.
+- R2 (revised 2026-07-20, D-0086; original wording preserved in
+  DECISIONS_FULL). Money on the table = COORDINATION OVERHEAD: the
+  Lead-tier spend on allocate/dispatch/acceptance machinery accounts
+  for ≥25% of the construction's accounted spend over the G1 window,
+  measured by the check-11 method (main-session vs sidechain split,
+  both accounting contours). Rationale: the original
+  validated-category criterion measured a prize the policy had
+  already taken (measured 0.01%); the honest prize is the
+  coordinator itself (measured 2026-07-20: ~85% — met).
 - R3. Stability: category shares shift by <10 percentage points
   between the two halves of the G1 window (routing rules learned
   today must still apply tomorrow).
-- R4. Economics (Rule #1 with margin): projected monthly savings from
-  routing the validated categories ≥3x the router's own projected
-  monthly cost (inference overhead + evaluation effort amortized).
+- R4 (revised 2026-07-20, D-0086; original wording preserved in
+  DECISIONS_FULL). Economics by PRE-REGISTERED EXPERIMENT: the
+  router construction (D-arm of DEPLOYMENT_ECONOMY_EXAM — automatic
+  allocate + judge acceptance, Lead out of the dispatch loop) beats
+  the pre-registered keys on the exam battery: median of ≥3 runs
+  with $/accepted ≤ arm C, quality ≥ arm B − 0.05, wall-clock ≤
+  arm B. Quality is non-negotiable: a cheaper-but-worse construction
+  fails the gate regardless of savings.
 - R5. A paid Lead is in production, OR the Architect explicitly
   accepts an accounted-price justification (routing free-tier traffic
   saves cash $0; the architecture must not be built on hypothetical
   savings without sign-off).
 
-First Router task when the gate opens: evaluate RouteLLM (D-0030),
-fed with the preference pairs Shadow Evaluation has accumulated —
-NOT build a router.
+First Router task when the gate opens (revised, D-0086): run the
+D-arm under the pre-registered keys — NOT adopt a router. The
+original first task (evaluate RouteLLM, D-0030) was DELIVERED
+2026-07-20 ahead of the gate: bert rejected on our ground truth
+(AUC 0.60 on the exam slice), remaining candidates (causal_llm,
+haiku-classifier) queued; evaluation plan and verdicts —
+docs/tasks/2026-07-20_routellm-evaluation-plan.md.
 
 ### Context management gate (the cost driver is confirmed locally)
 
