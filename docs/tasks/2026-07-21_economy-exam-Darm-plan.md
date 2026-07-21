@@ -38,9 +38,9 @@
 
 | узел | статус |
 |---|---|
-| fix-launcher (t-249, параллель Dsn‖Dhk) | in_progress |
-| runs D№4–№6 (D-only, judge-приёмка) | pending |
-| замер wall-clock + вердикт (в) | pending | Рамка: R4' ROADMAP — гейт открывается взятыми D-ключами;
+| fix-launcher (t-249, параллель Dsn‖Dhk + --d-only) | DONE (принят, 55 passed) |
+| runs D№4–№6 (D-only, judge-приёмка) | №4 DONE: wall 17.1 мин < 18 (параллель подтверждена перекрытием окон), 3/3, $1.65/прин, t2 принят haiku с ретрая; №5 in_progress; №6 pending |
+| замер wall-clock + вердикт (в) | pending (медиана трёх) | Рамка: R4' ROADMAP — гейт открывается взятыми D-ключами;
 дизайн — docs/tasks/2026-07-20_routellm-evaluation-plan.md (раздел
 «Дизайн эксперимента»); батарея и планки —
 PROCESS/DEPLOYMENT_ECONOMY_EXAM.md (набор №1, табель 6б).
