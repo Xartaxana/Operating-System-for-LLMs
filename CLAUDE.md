@@ -206,18 +206,24 @@ R13. **Leaf routing (D-0087).** Intake classifies every task: a LEAF
 closes under one performer of one allocate-category with no
 dependencies; doubt = graph. A leaf MAY run through the
 D-construction: category→tier by the ladder, worker executes,
-acceptance by a CALIBRATED JUDGE through the gateway (verdict
-recorded; `basis: "judge"`), deterministic R6 mirror on reject (one
-retry same tier → one-step escalation → failed back to the
-coordinator); the coordinator stays out of the leaf loop. Judge
+acceptance by a CALIBRATED JUDGE (verdict recorded; `basis:
+"judge"`), deterministic R6 mirror on reject (one retry same tier →
+one-step escalation → failed back to the coordinator); the
+coordinator stays out of the leaf loop. TWO legal judge forms: the
+gateway alias (judge-sonnet, needs a live proxy; the only form for
+script-driven constructions) and a SUBSCRIPTION judge-subagent
+carrying the pinned JUDGE_SYSTEM_PROMPT (gateway/shadow_eval.py)
+VERBATIM — equivalence point 13/13 on the D-0031 set (t-254,
+2026-07-21); a drifted subagent-judge prompt is a finding, not a
+judge. Judge
 acceptance is legal ONLY for leaf-class dispatches (recon /
 implementation to a written spec); it never accepts mechanisms,
 policy edits or integration wholes — those keep the D-0058 matrix.
 Graph tasks keep the standard Lead loop; the H-mode (Lead-authored
 DAG + per-node intent keys incl. adversarial probes + D-machinery on
 leaves) is available on the operator's word for quality-critical
-tasks. Requires a live gateway judge; with the proxy down the
-standard acceptance path applies. Misclassification is recoverable
+tasks. With no judge available in either form the standard
+acceptance path applies. Misclassification is recoverable
 by construction: a leaf that was really a graph comes back via judge
 reject / `decomposable` (R5); a graph-classified simple task only
 pays the Lead-layer tax.
