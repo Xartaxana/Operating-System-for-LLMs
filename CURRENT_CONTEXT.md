@@ -142,10 +142,11 @@ BOOT-БЮДЖЕТ: история — коммиты диет; мелкие ра
 
 ## Remaining Lead-tier Queue (live only; закрытые блоки — evening-closures)
 
-- WORKSTREAM 3 — ЗАКРЫТ ЦИКЛ: оценка носителей 07-13, пилот N1–N5
-  done 07-18, adoption = D-0080 (правило 4а CLAUDE.md). Дальше по
-  D-0059: код/автоматизация — только по evidence ценности артефакта.
-  Архив блока: 2026-07-18_calibration2-closures.md.
+- WORKSTREAM 3 закрыт (adoption D-0080; дальше по evidence, D-0059;
+  архив: 2026-07-18_calibration2-closures.md).
+- ВАЛИДАЦИОННЫЙ СЛОЙ: DAG docs/tasks/2026-07-21_validation-import.md
+  (№2 wiring → №1 witness×dod_track → №4 схем-критик; вход после N0
+  critic-on-plan + D-0066-проход).
 - Упрочнение tier-гейта (WHEN: первый инцидент):
   find_tier_declaration матчит первую tier:-строку, фикс — любую
   (критик t-068).
