@@ -259,8 +259,9 @@ BOOT-БЮДЖЕТ: история — коммиты диет; мелкие ра
   SQLite/crash recovery, supply-chain tags, WXP; OpenClaw: channels,
   delegate identity, compaction/memory, utilityModel. Обоснования —
   RELATED_WORK «OpenClaw survey» + evening-closures.
-- Habr/LinkedIn (t-036): готово; публикация — слово оператора
-  (ARTICLE_BRIEF + drafts A/B/C).
+- Habr/LinkedIn (t-036) ЗАКРЫТО 2026-07-22 словом оператора: статья
+  давно опубликована (факт вне сессий, оператор-источник). Материалы
+  остаются в docs/ARTICLE_BRIEF_2026-07-10.md.
 - White Paper — В РЕЖИМЕ ПОПОЛНЕНИЯ (слово оператора 07-20: ревью
   Архитектора — когда достроим, статус ожидания снят). Дописан §6.4
   «Driving the Price Down»; очередь пополнения: policy-as-code,
