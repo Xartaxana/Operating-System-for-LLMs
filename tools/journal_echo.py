@@ -167,6 +167,34 @@ AGENT_WORKER_REF_RE = re.compile(r"^agent:([a-z0-9-]+)$")
 # tier-строк, 5, независимая ось, спека называет число явно).
 MAX_TIER_LINES = 5
 
+# --- WITNESS ECHO при записи (расширение этой задачи, узел N2 волны
+# «валидационный импорт», docs/tasks/2026-07-21_validation-import.md) ---
+# Перекрёстная сверка witness (поле НОВОГО accepted-события) с РЕАЛЬНО
+# наблюдавшимися прогонами ТЕКУЩЕЙ сессии -- .claude/dod_track/<session_id>.json,
+# пишет tools/dod_track.py (PostToolUse-хук этого же кита; здесь ТОЛЬКО
+# читается локальной формулой, не импортируется -- та же самодостаточность
+# хуков кита, что уже объясняет докстринг этого файла для локальных копий
+# _raw_sanitize/_ascii_sanitize; journal_validator и tier_echo -- ЕДИНСТВЕННЫЕ
+# заявленные исключения из этого принципа). Триггер (спека B-N2, п.1): в
+# НОВЫХ строках (ТЕ ЖЕ new_lines, что main() уже вычисляет для TIER ECHO
+# выше) событие event=="accepted" agent=="builder" с непустым witness.
+WITNESS_TRIGGER_EVENT = "accepted"
+WITNESS_TRIGGER_AGENT = "builder"
+# Потолок ВИДИМЫХ WITNESS ECHO-строк на один вызов хука -- независимая ось
+# от MAX_HEAD_MESSAGES (потолок дефектов формы, 3) и MAX_TIER_LINES
+# (потолок tier-строк, 5) -- то же по духу СОБСТВЕННОЕ инженерное решение,
+# что MAX_TIER_LINES уже задокументировал этот файл (спека числа не
+# называет): выбрано ТО ЖЕ число 5 -- тот же класс "предупреждение на новую
+# запись", тот же порядок величины ожидаемых accepted-строк за один
+# PostToolUse-вызов. Правило 6а (CLAUDE.md): граничные тесты на 5 и 6 --
+# см. tools/test_witness_echo.py.
+MAX_WITNESS_LINES = 5
+# Литералы тихих note (спека B-N2-2, по смыслу, буквально процитированы
+# спекой с «—»; здесь дефис вместо тире -- спека п.4 требует ASCII-
+# сообщения, «—» не входит в ASCII).
+NOTE_RETRO = "retro accepted - track incomparable"
+NOTE_TRACK_EMPTY = "track empty/unreadable - witness incomparable"
+
 
 def _raw_sanitize(s: str, max_len: int = MAX_MESSAGE_LEN) -> str:
     """Lead-правка (критик-приёмка, Lead-смок): control-chars вырезаны и
@@ -428,24 +456,287 @@ def build_context(violations: list, ascii_only: bool = False) -> str:
     return f"JOURNAL ECHO: {n} дефект(ов) в новых строках: {body}"
 
 
-def combine_context(violations: list, tier_events: list, ascii_only: bool = False) -> str:
+def combine_context(violations: list, tier_events: list, witness_events: list = None,
+                     ascii_only: bool = False) -> str:
     """Спека п.3: "один JSON additionalContext может нести и дефекты
-    формы, и TIER ECHO-строки (раздели '; ')". Два НЕЗАВИСИМЫХ сегмента
+    формы, и TIER ECHO-строки (раздели '; ')". ТРИ НЕЗАВИСИМЫХ сегмента
     -- build_context(violations) (ЦЕЛИКОМ, свой заголовок "JOURNAL ECHO:
     N дефект(ов)..." не меняется -- существующие тесты завязаны на этот
-    формат буквально) и build_tier_segment(tier_events) -- склеиваются
-    через "; ", только если непусты. Дефектов формы нет, но tier-строки
-    есть -> итог = только tier-сегмент, JSON всё равно печатается (спека
-    п.3). Оба пусты -> "" -- вызывающий код (main()) трактует пустую
-    строку как полную тишину (та же проверка истинности, что раньше
-    была `if not violations`)."""
+    формат буквально), build_tier_segment(tier_events) и (расширение N2,
+    узел «валидационный импорт») build_witness_segment(witness_events)
+    -- склеиваются через "; ", только если непусты. Любое подмножество
+    сегментов пусто -> итог = склейка ОСТАВШИХСЯ непустых, JSON всё равно
+    печатается, пока хоть один сегмент непуст. Все пусты -> "" --
+    вызывающий код (main()) трактует пустую строку как полную тишину (та
+    же проверка истинности, что раньше была `if not violations`).
+
+    witness_events=None (значение по умолчанию, НЕ [] -- сохраняет
+    старую 2-позиционную форму вызова combine_context(violations,
+    tier_events) БЕЗ изменения поведения: witness_segment для None ->
+    build_witness_segment([]) -> "", итог идентичен дотиерной сигнатуре
+    -- существующие вызовы/тесты, завязанные на 2-арг форму, продолжают
+    работать буквально как раньше, см. tools/test_journal_echo.py)."""
     parts = []
     if violations:
         parts.append(build_context(violations, ascii_only))
     tier_segment = build_tier_segment(tier_events, ascii_only)
     if tier_segment:
         parts.append(tier_segment)
+    witness_segment = build_witness_segment(witness_events or [], ascii_only)
+    if witness_segment:
+        parts.append(witness_segment)
     return "; ".join(parts)
+
+
+# ---------------------------------------------------------------------
+# WITNESS ECHO при записи (расширение N2) -- pure logic
+# ---------------------------------------------------------------------
+
+
+def _normalize_ws(s) -> str:
+    """Схлопывает ЛЮБЫЕ пробельные символы (пробел/таб/перевод строки) в
+    один пробел + strip -- та же нормализация применяется И к command из
+    трека, И к тексту witness ПЕРЕД substring-сравнением (спека B-N2-1:
+    "команда трека (после нормализации пробелов) входит подстрокой в
+    текст witness (та же нормализация)"). Не-строка -> "" (пустая строка
+    -- безопасный дефолт, никогда не матчит ничего подстрокой)."""
+    if not isinstance(s, str):
+        return ""
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _witness_track_path(cwd, session_id) -> Path:
+    """.claude/dod_track/<session_id>.json в cwd вызывающей сессии --
+    ТА ЖЕ формула, что tools/dod_track.py._track_path (Path(cwd or ".") /
+    ".claude" / "dod_track" / f"{session_id}.json"), ЛОКАЛЬНАЯ копия (не
+    импорт dod_track -- та же самодостаточность хуков кита, что уже
+    объясняет докстринг модуля для _raw_sanitize/_ascii_sanitize; спека
+    N2 п.6 явно запрещает трогать dod_track.py НА ЗАПИСЬ -- воспроизвести
+    формулу его хранилища для ЧТЕНИЯ не нарушает это: формат файла --
+    публичный контракт между хуками этого кита, задокументированный в
+    докстринге dod_track.py, данном этой задаче контекстом)."""
+    return Path(cwd or ".") / ".claude" / "dod_track" / f"{session_id}.json"
+
+
+def _load_witness_runs(cwd, session_id):
+    """Читает runs-список трека текущей сессии. Возвращает list (может
+    быть ПУСТЫМ) при успешном чтении валидного JSON-объекта с полем
+    "runs"-списком; None на ЛЮБОЙ отказ -- session_id не строка/пусто,
+    файла нет, файл пуст/из одних пробелов, JSON битый, JSON не dict,
+    "runs" отсутствует/не список. Вызывающий код (_collect_witness_events)
+    трактует И None, И ПУСТОЙ список ОДИНАКОВО -- "трек пуст/нечитаем"
+    (спека п.3, последний пункт: "трек-файл отсутствует / пуст / битый
+    JSON" покрывает файл целиком; пустой runs-список -- то же самое по
+    факту, сравнивать witness буквально не с чем)."""
+    if not isinstance(session_id, str) or not session_id:
+        return None
+    path = _witness_track_path(cwd, session_id)
+    try:
+        if not path.exists():
+            return None
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if not text.strip():
+            return None
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            return None
+        runs = data.get("runs")
+        if not isinstance(runs, list):
+            return None
+        return runs
+    except Exception:
+        return None
+
+
+def _group_runs_by_normalized_command(runs: list) -> dict:
+    """{normalized_command: [(ts, outcome), ...]} по ВСЕМ прогонам трека,
+    ЛЮБОГО agent_id (спека: "Поиск по ВСЕМ agent_id -- прогон
+    builder-субагента лежит в том же <session_id>.json", эмпирика
+    t-159) -- agent_id НЕ фильтруется вовсе. Прогоны без командной
+    строки (не строка/пустая после нормализации) пропускаются -- нечего
+    сравнивать. Не dict-элементы runs (битый трек) пропускаются тихо.
+    Группировка по РАЗЛИЧНЫМ командам (не по каждому прогону в
+    отдельности) -- производительность (см. _match_witness докстринг)."""
+    groups: dict = {}
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        norm = _normalize_ws(run.get("command"))
+        if not norm:
+            continue
+        groups.setdefault(norm, []).append((run.get("ts"), run.get("outcome")))
+    return groups
+
+
+def _last_by_ts(entries: list):
+    """(ts, outcome) записи с МАКСИМАЛЬНЫМ ts среди entries (entries сами
+    -- список (ts, outcome)-пар, та же форма, что кладёт
+    _group_runs_by_normalized_command) -- ts треков
+    dod_track.py -- ISO с микросекундами фиксированной ширины
+    (dod_track._now_iso), поэтому обычная строковая сортировка
+    эквивалентна хронологической -- дешевле честного datetime-парсинга,
+    достаточно для этой цели. Не-строковый/отсутствующий ts сортируется
+    как "" -- минимальный ключ, не ломает сортировку остальных, просто
+    не выиграет место "последнего" (защитный дефолт на битую запись)."""
+    def key(e):
+        ts = e[0]
+        return ts if isinstance(ts, str) else ""
+    return sorted(entries, key=key)[-1]
+
+
+def _match_witness(witness: str, runs: list):
+    """Спека B-N2-1/решётка B-N2-2: для КАЖДОЙ различной нормализованной
+    команды трека, встречающейся подстрокой в нормализованном witness,
+    берёт ПОСЛЕДНИЙ по ts прогон ЭТОЙ команды -- red -> кандидат на
+    громкий WARN ("outcome -- вторичный сигнал противоречия", спека:
+    determine_outcome дефолтит red на неоднозначный тихий вывод, поэтому
+    сама разница red/green ещё не значит "witness лжёт", формулировка
+    WARN ниже -- "recorded RED", не "is a lie"). Возвращает (matched_any:
+    bool, loud: list[(cmd, ts)]). matched_any=False -> ни одна команда
+    трека не найдена в witness (спека: "трек непуст, но ни одна команда
+    не входит" -- мягкий WARN, см. _collect_witness_events).
+
+    Производительность (спека DoD: "10К+ witness и трек в сотни runs --
+    без квадратичного взрыва"): substring-проверок ровно столько,
+    сколько РАЗЛИЧНЫХ команд в треке (после группировки), НЕ столько,
+    сколько прогонов -- сотни повторов одной и той же verification-
+    команды (частый случай реальных треков, см. живые .claude/dod_track/
+    *.json) схлопываются в одну проверку "in", а не N."""
+    norm_witness = _normalize_ws(witness)
+    groups = _group_runs_by_normalized_command(runs)
+    matched_any = False
+    loud = []
+    for cmd, entries in groups.items():
+        if cmd in norm_witness:
+            matched_any = True
+            ts, outcome = _last_by_ts(entries)
+            if outcome == "red":
+                loud.append((cmd, ts))
+    return matched_any, loud
+
+
+def _collect_witness_events(new_lines: list, head_lines: list, payload: dict) -> list:
+    """Для каждой НОВОЙ строки (ТЕ ЖЕ new_lines, что TIER ECHO использует
+    выше в main()) с event=="accepted", agent=="builder" и непустым
+    witness -- решётка исходов B-N2-2:
+
+      1. notes содержит "retroactive" -> ("note", line_no, NOTE_RETRO) --
+         retro-приёмка несопоставима с треком ТЕКУЩЕЙ сессии по
+         определению (D-0056b), тихо, БЕЗ WARN.
+      2. трек текущей сессии пуст/нечитаем (см. _load_witness_runs) ->
+         ("note", line_no, NOTE_TRACK_EMPTY) -- тихо, НЕ warn, НЕ
+         исключение (спека п.3, последний пункт).
+      3. ни одна команда трека не входит в witness (matched_any=False) ->
+         ("warn_soft", line_no) -- легитимно для батч-/кросс-сессионной/
+         retro-приёмки (D-0079/D-0056b), проверь руками.
+      4. совпавшая команда с ПОСЛЕДНИМ по ts red-прогоном -> ("warn_loud",
+         line_no, command, ts), ПО КАЖДОЙ такой команде отдельно.
+      5. иначе (совпало, последний прогон green) -> ничего не
+         добавляется -- полная тишина по строке (тот же принцип, что
+         TIER ECHO "все measured несут слово -- тишина").
+
+    "note"-события НИКОГДА не печатаются (см. build_witness_segment) --
+    возвращаются наравне с warn-событиями исключительно для тестируемости
+    решётки (см. tools/test_witness_echo.py).
+
+    Fail-open построчно (спека п.4, тот же паттерн, что
+    _collect_tier_events): любой сбой (битый JSON строки, что угодно) --
+    try/except вокруг тела ОДНОЙ итерации, `continue` -- не прерывает
+    разбор остальных новых строк.
+
+    Трек читается ЛЕНИВО и НЕ БОЛЕЕ ОДНОГО РАЗА за вызов хука (session_id
+    общий для всех строк одного PostToolUse-события) -- та же "прочитан
+    один раз" производительность, что докстринг модуля декларирует для
+    disk_text/git в main()."""
+    events = []
+    session_id = payload.get("session_id") if isinstance(payload, dict) else None
+    cwd = payload.get("cwd") if isinstance(payload, dict) else None
+    runs_loaded = False
+    runs_cache = None
+    for idx, line in enumerate(new_lines):
+        line_no = len(head_lines) + idx + 1
+        try:
+            obj = json.loads(line)
+            if not isinstance(obj, dict):
+                continue
+            if obj.get("event") != WITNESS_TRIGGER_EVENT:
+                continue
+            if obj.get("agent") != WITNESS_TRIGGER_AGENT:
+                continue
+            witness = obj.get("witness")
+            if not isinstance(witness, str) or not witness.strip():
+                continue
+
+            notes = obj.get("notes")
+            if isinstance(notes, str) and "retroactive" in notes:
+                events.append(("note", line_no, NOTE_RETRO))
+                continue
+
+            if not runs_loaded:
+                runs_cache = _load_witness_runs(cwd, session_id)
+                runs_loaded = True
+            if not runs_cache:
+                events.append(("note", line_no, NOTE_TRACK_EMPTY))
+                continue
+
+            matched_any, loud = _match_witness(witness, runs_cache)
+            if not matched_any:
+                events.append(("warn_soft", line_no))
+            else:
+                for cmd, ts in loud:
+                    events.append(("warn_loud", line_no, cmd, ts))
+        except Exception:
+            continue
+    return events
+
+
+def _format_witness_line(event: tuple, ascii_only: bool) -> str:
+    """Статический ASCII-префикс "WITNESS ECHO: line N ..." (спека п.4:
+    сообщения ASCII) + динамика (имя команды, ts) через санитайзер по
+    каналу -- тот же принцип, что _format_tier_line. Формулировки --
+    смысл спеки B-N2-2 (спека даёт СМЫСЛ этих двух WARN-форм, не точный
+    текст -- в отличие от NOTE_RETRO/NOTE_TRACK_EMPTY, которые спека
+    цитирует буквально, см. их определение выше).
+
+    Критик-хардининг (постановочный проход): ts из трека -- ТОЖЕ
+    динамика (значение поля стороннего JSON-файла, не литерал этого
+    модуля), симметрично с cmd обязана проходить через тот же
+    sanitize -- инвариант "санитайзится КАЖДАЯ динамика" (см. и
+    _format_tier_line/_format_measured выше, где то же правило уже
+    применено ко всем частям measured). На практике ts из
+    dod_track._now_iso всегда чистый ASCII без control-chars (см.
+    tools/test_witness_echo.py за формат-тест) -- sanitize здесь no-op
+    в штатном случае, но закрывает адверсариальный край (битый/
+    сторонний трек с control-chars или гигантским значением в поле ts)."""
+    sanitize = _ascii_sanitize if ascii_only else _raw_sanitize
+    kind = event[0]
+    line_no = event[1]
+    if kind == "warn_loud":
+        _, _, cmd, ts = event
+        return (f"WITNESS ECHO: line {line_no} contradiction - command "
+                f"'{sanitize(cmd)}' recorded RED in session track (last red at {sanitize(str(ts))})")
+    # warn_soft
+    return (f"WITNESS ECHO: line {line_no} witness command(s) not observed in "
+            "session track (batch/cross-session/retro acceptance legitimate - verify manually)")
+
+
+def build_witness_segment(witness_events: list, ascii_only: bool = False) -> str:
+    """Собирает WITNESS ECHO-часть additionalContext -- ТОЛЬКО из
+    "warn_loud"/"warn_soft" событий ("note" -- тихие по определению,
+    НИКОГДА не печатаются, см. _collect_witness_events); потолок
+    MAX_WITNESS_LINES=5 (правило 6а -- граничные тесты на 5/6), тот же
+    "+K more"-паттерн, что build_tier_segment. Пустой список видимых
+    событий -> "" (вызывающий код трактует пустую строку как отсутствие
+    сегмента, тот же принцип, что build_tier_segment)."""
+    warn_events = [e for e in witness_events if e[0] in ("warn_loud", "warn_soft")]
+    if not warn_events:
+        return ""
+    head = warn_events[:MAX_WITNESS_LINES]
+    rest = len(warn_events) - len(head)
+    body = "; ".join(_format_witness_line(e, ascii_only) for e in head)
+    if rest > 0:
+        body += f"; +{rest} more"
+    return body
 
 
 def _reconfigure_streams_utf8():
@@ -506,15 +797,34 @@ def main() -> int:
         new_lines = staged_lines[len(head_lines):] if append_ok else []
         tier_events = _collect_tier_events(new_lines, head_lines)
 
-        if not violations and not tier_events:
+        # WITNESS ECHO при записи (расширение N2, узел «валидационный
+        # импорт» -- см. докстринг _collect_witness_events выше): ТЕ ЖЕ
+        # new_lines/head_lines, что TIER ECHO -- append-only-неопределимость
+        # (append_ok False) уже даёт new_lines=[] выше, witness-события
+        # тогда тоже пусты без отдельной проверки. Fail-open ВТОРЫМ слоем
+        # поверх построчного try/except внутри _collect_witness_events
+        # самой (спека п.4: "весь блок в try/except" -- ни один сбой
+        # сверки не роняет хук и не ломает существующие JOURNAL ECHO/
+        # TIER ECHO функции).
+        try:
+            witness_events = _collect_witness_events(new_lines, head_lines, payload)
+        except Exception:
+            witness_events = []
+        # "note"-события (retro/трек-пуст) НИКОГДА не делают строку
+        # видимой -- только warn_loud/warn_soft триггерят печать (спека:
+        # решётка B-N2-2 -- "всё warn-only", note -- тихая по определению).
+        witness_visible = any(e[0] != "note" for e in witness_events)
+
+        if not violations and not tier_events and not witness_visible:
             return 0
 
         # Lead-правка (критик-приёмка + Lead-смок): два разных канала,
         # два разных варианта санитайза (см. докстринг build_context).
-        # combine_context склеивает дефекты формы и TIER ECHO-строки
-        # (спека п.3) -- см. докстринг combine_context.
-        context_for_stdout = combine_context(violations, tier_events, ascii_only=False)
-        context_for_stderr = combine_context(violations, tier_events, ascii_only=True)
+        # combine_context склеивает дефекты формы, TIER ECHO-строки и
+        # (расширение N2) WITNESS ECHO-строки (спека п.3) -- см.
+        # докстринг combine_context.
+        context_for_stdout = combine_context(violations, tier_events, witness_events, ascii_only=False)
+        context_for_stderr = combine_context(violations, tier_events, witness_events, ascii_only=True)
 
         sys.stderr.write(context_for_stderr + "\n")
         output = {

@@ -145,8 +145,8 @@ BOOT-БЮДЖЕТ: история — коммиты диет; мелкие ра
 - WORKSTREAM 3 закрыт (adoption D-0080; дальше по evidence, D-0059;
   архив: 2026-07-18_calibration2-closures.md).
 - ВАЛИДАЦИОННЫЙ СЛОЙ: DAG docs/tasks/2026-07-21_validation-import.md
-  (№2 wiring → №1 witness×dod_track → №4 схем-критик; вход после N0
-  critic-on-plan + D-0066-проход).
+  (N1 wiring, N2 witness×dod_track — done 07-21; N3 схем-критик в
+  ходу).
 - Упрочнение tier-гейта (WHEN: первый инцидент):
   find_tier_declaration матчит первую tier:-строку, фикс — любую
   (критик t-068).
@@ -155,8 +155,8 @@ BOOT-БЮДЖЕТ: история — коммиты диет; мелкие ра
   closes-phantom-форма — признанное отличие) — VERBATIM:
   docs/task_reports/2026-07-20_router-day.md. Штабной логгер
   вступит при следующем старте прокси. Порт-очередь: пункты D-0085
-  (блок «ПРИВЯЗКИ» ниже) + session_context wiring (t-257, ось 7);
-  мораторий до слова.
+  (блок «ПРИВЯЗКИ» ниже) + session_context wiring (t-257) +
+  journal_echo witness (t-258); мораторий до слова.
 - РУТИНГ-ДЕНЬ 07-21 ЗАКРЫТ ЦЕЛИКОМ (гейт-отчёт → серии D№1–№6 →
   ROUTER-ГЕЙТ ОТКРЫТ подписью → гибрид H+C → D-0087 leaf routing
   (+вторая форма судьи 13/13 t-254) → D-0088 однопутная архитектура
