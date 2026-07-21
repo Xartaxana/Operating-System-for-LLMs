@@ -43,9 +43,9 @@ fail-closed (Rule #1 может сказать «не чинить»); (2) doc-o
 consecutive_blocks session-global при per-agent решении + kit-сиблинг
 dod_gate; на kit-касание также staging_hq/ не в песочницы + red-run
 t2 флаг. Парсер OPEN DISPATCH починен 07-19 (closes:-токен, t-197).
-HYGIENE_GATE активен с 07-18 (t-177, warn): не-блокеры при касании
-— литеральные ложняки (git-команды с путём журнала — частые WARN),
-python3 -c, doc-note; toolkit-сиблинг — порт-очередь.
+HYGIENE_GATE активен с 07-18 (t-177, warn; v2 07-21 убил
+git-FP-класс, t-255): не-блокеры — python3 -c, doc-note;
+toolkit-сиблинг v1 — порт-очередь.
 
 ДЕНЬ 07-18 ЗАКРЫТ ЦЕЛИКОМ (калибровка №2 + D-0080/D-0081 + экзамены
 №12–№14 + порты; VERBATIM — 2026-07-18_calibration2-closures.md +
