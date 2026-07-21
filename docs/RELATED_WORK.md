@@ -600,6 +600,37 @@ KNN/SVM, обученные на наших судимых парах; (в) Arch
 через Ollama (сигнал самый близкий к нашей категорийной политике;
 лицензионная оговорка выше). Запуск скамейки — слово оператора.
 
+## Agentic-валидация / enforcement-харнесы
+
+### vibe-engineer (github.com/ismailsaleekh/vibe-engineer)
+
+Первый проход: внешняя исследовательская сессия
+(docs/research/2026-07-21_validation-research.md). Второй точечный
+проход Lead 2026-07-21 (D-0066), свежий shallow-клон HEAD в
+scratchpad; trail:
+
+- scripts/quality/run-quality.mjs — wiring-integrity гейт:
+  fail-closed, запускается ПЕРВЫМ, его собственный evidence
+  валидируется схемой; verdict != pass → блок всего прогона с
+  diagnostic + evidence-файлом (без частичного агрегата).
+- packages/verification/src/evidence-v2.js (шапка + коды ошибок) —
+  принцип дословно в заголовке модуля: «never accepts a caller
+  summary in place of a packet … every load-bearing byte is re-read
+  from a contained regular file, re-digested, and rebound to
+  runner/task/scope»; коды TRUST_RELABEL_FORBIDDEN,
+  PROOF_BOUNDARY_ESCALATION, REFERENCE_REPLACED подтверждены.
+- packages/adapters/pi/src/capabilities/harness-adapter.ts — раннер
+  LLM-ревьюера: `claude -p --output-format json --json-schema
+  --permission-mode plan` + явные --allowedTools/--disallowedTools,
+  strategy native-json-schema.
+
+Take: волна docs/tasks/2026-07-21_validation-import.md — N1
+(wiring-чек хуков в session_context: «сначала целостность
+enforcement, потом всё»), N2 (сверка witness с dod_track-треком —
+принцип evidence-v2: пересказ не принимается), N3 (схемный read-only
+запуск критика). Не тащим: p0/AST-подписи, Node preload-песочница,
+release-цепочка (обоснование — отчёт, Часть 3).
+
 ## Implications recorded
 
 1. Router (Phase 2): evaluate RouteLLM before building (D-0030).
