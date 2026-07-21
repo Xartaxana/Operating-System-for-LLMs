@@ -41,25 +41,30 @@ must not live on AI attention (it drifts and it costs, Rule #1).
 Discipline-held mechanisms are promoted to gates on journal evidence
 of leaks, never for symmetry.
 
-## Two Contours (D-0034), one discipline
+## One Architecture: Two Task Paths, Two Supply Channels (D-0034 → D-0088)
 
-- **Subscription contour — the real Lead.** Claude Code session
-  (Fable) + tiered subagents (scout=Haiku, builder=Sonnet,
-  critic=Opus). Replay is impossible here, so delegation is
-  validated IN PRODUCTION: the routing journal (`rejected` with a
-  failure class, `escalated`, `defect_found`, acceptance by
-  trail/witness — D-0045..D-0053) is the evidence stream; the weekly
-  calibration aggregates it (D-0047).
-- **API contour — the lab.** LiteLLM gateway + model aliases, SQLite
-  request log; Shadow Evaluation + a supervised judge (D-0031)
-  validate delegation by offline replay.
-- Identical on both: Rule #1; accounting prices (D-0032 —
-  subscription usage accounted at API list prices, free tiers are
-  cash discounts, not zero cost); evidence-gated statuses in
+- **The task's path is single and chosen by SIZE at intake, not by
+  contour** (D-0087/D-0088): LEAF (one performer, one
+  allocate-category, no dependencies; doubt = graph) → allocate
+  ladder → worker → calibrated-judge acceptance (`basis: "judge"`) →
+  R6 mirror. GRAPH → Lead DAG + per-node keys → each leaf node runs
+  the same leaf machinery → Lead integration + critic gate; questions
+  go UP (D-0077).
+- **"Contours" are supply-and-measurement CHANNELS, not
+  architectures** (deployment bindings, D-0062): subscription channel
+  (subagents + subscription judge, 13/13 equivalence t-254) and API
+  channel (gateway aliases + gateway judge — the only channel for
+  script-driven constructions and replay). What did not collapse:
+  replay/Shadow Evaluation exists only on the API channel; accounting
+  stays two-source (cc_usage vs requests.db, one Ledger); judge
+  calibration (D-0031) lives on the gateway.
+- Identical everywhere: Rule #1; accounting prices (D-0032 —
+  subscription usage at API list prices, free tiers are cash
+  discounts, not zero cost); evidence-gated statuses in
   DELEGATION_TABLE.md (4-state, D-0035); judge supervision.
-- Delegation is FLAT on both (D-0037): workers never spawn workers;
-  decomposition, specs and acceptance stay with the coordinator.
-  Workers run in the background by default (D-0040).
+- Delegation is FLAT (D-0037): workers never spawn workers;
+  decomposition, specs and graph-acceptance stay with the
+  coordinator. Workers run in the background by default (D-0040).
 - Nothing in the running system is a routing component: the
   auto-loaded policy (CLAUDE.md) IS the router; porting the system
   means porting a POLICY, not software (D-0005, D-0062).

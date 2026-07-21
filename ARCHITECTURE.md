@@ -51,50 +51,48 @@ of leaks, never for symmetry. This refines mechanisms 1–3 above:
 enforcement is code, judgment is tiered AI, and weekly calibration
 audits both layers.
 
-## Two Contours (D-0034)
+## One Architecture: Two Task Paths, Two Supply Channels (D-0034 → D-0088)
 
-The operator's real Lead is a Claude Code subscription; it cannot be
-routed through a proxy. The system therefore runs on two substrates
-with one discipline:
+Since D-0087 (leaf routing) the EXECUTION architecture is single:
+every task takes one path, chosen by SIZE/COMPLEXITY at intake — not
+by contour. What used to be "two contours" (D-0034) survives as two
+MODEL-SUPPLY-AND-MEASUREMENT channels underneath the one path — a
+deployment binding in the D-0062 sense, not a second architecture.
 
 ```mermaid
 flowchart TB
-    subgraph SUB["Subscription contour — the real Lead"]
-        CC["Claude Code Lead session (Fable)"]
-        AGENTS["Subagents: scout=Haiku ·<br/>builder=Sonnet · critic=Opus"]
-        TRANS[("Transcripts<br/>~/.claude/projects/**.jsonl")]
-        EJ["Escalation journal +<br/>acceptance verdicts"]
-        CC -->|"delegates (flat, D-0037)"| AGENTS
-        CC --> TRANS
-        AGENTS --> EJ
-    end
+    TASK["User task"] --> INTAKE["Intake (Lead, one judgment):<br/>LEAF = one performer, one<br/>allocate-category, no dependencies;<br/>doubt = graph"]
+    INTAKE -->|leaf| LEAF["LEAF PATH (R13):<br/>allocate ladder → worker →<br/>calibrated-judge acceptance<br/>(basis: judge) → R6 mirror<br/>(retry → one-step escalation →<br/>failed back to coordinator)"]
+    INTAKE -->|graph| GRAPH["GRAPH PATH:<br/>Lead DAG + per-node intent keys →<br/>each leaf node runs the leaf<br/>machinery → Lead integration +<br/>critic gate (R3); questions go UP<br/>(D-0077)"]
+    GRAPH -->|"each leaf node"| LEAF
+    LEAF --> DONE["Accepted deliverable +<br/>journal evidence"]
+    GRAPH --> DONE
 
-    subgraph APIC["API contour — the lab"]
-        GW2["Gateway (LiteLLM)"]
-        ALIASES["intern · analyst · middle ·<br/>judge aliases"]
-        DB2[("requests.db —<br/>traffic_kind tagging")]
-        SE2["Shadow Evaluation + judge"]
-        GW2 --> ALIASES
-        GW2 --> DB2
-        DB2 --> SE2
+    subgraph SUPPLY["Model supply — deployment bindings (D-0062), not architectures"]
+        SUB2["SUBSCRIPTION channel:<br/>subagents scout/builder/critic,<br/>subscription judge (13/13, t-254)"]
+        API2["API channel:<br/>gateway aliases + gateway judge;<br/>the ONLY channel for script-driven<br/>constructions and replay"]
     end
+    LEAF -.->|"workers + judge<br/>from either channel"| SUPPLY
 
-    TRANS --> LEDGER1["One Ledger — SQLite + reports<br/>(metrics.py, usage_report.py)"]
-    DB2 --> LEDGER1
-    EJ -->|evidence| TABLE1["DELEGATION_TABLE.md<br/>(4-state, D-0035)"]
-    SE2 -->|evidence| TABLE1
-    LEDGER1 --> TABLE1
-    TABLE1 --> ARCH1["Architect signs gates (D-0033)"]
+    SUB2 --> M1[("cc_usage — transcripts,<br/>accounted at list prices D-0032")]
+    API2 --> M2[("requests.db — traffic_kind;<br/>Shadow Evaluation lives here")]
+    M1 --> TABLE1["DELEGATION_TABLE.md (4-state)<br/>+ gates, Architect signs (D-0033)"]
+    M2 --> TABLE1
 ```
 
-Rule #1, accounting prices (D-0032), evidence-gated statuses and
-judge supervision are identical on both contours; only the
-measurement mechanism differs. On the API contour delegation is
-validated by replay (Shadow Evaluation + judge); on the subscription
-contour replay is impossible, so acceptance verdicts and the
-escalation journal are the evidence stream. Subscription usage is
-accounted at API list prices (a subscription is a cash discount, not
-a cost of zero). Plan of record for the merged workstream:
+What collapsed: the task's route, the acceptance discipline (witness /
+judge / critic), the escalation ladder and the journal are now
+contour-independent — the same construction runs whether workers and
+the judge are subscription subagents or gateway aliases (judge
+equivalence point 13/13, t-254). What did NOT collapse — the
+measurement substrate (SIBLING_MAP axis 2 stays): replay / Shadow
+Evaluation is physically possible only on the API channel;
+accounting remains two-source (cc_usage vs requests.db, one Ledger
+on top); judge CALIBRATION (D-0031) lives on the gateway;
+deterministic script-driven constructions (exam orchestrators,
+future automation) can only call API-supplied models. Rule #1,
+accounting prices (D-0032), evidence-gated statuses and judge
+supervision are identical everywhere. Plan of record:
 docs/UNIFIED_PLAN_2026-07-07.md.
 
 **Delegation is flat on both contours (D-0037): workers never spawn
