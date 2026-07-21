@@ -1,15 +1,22 @@
----
-name: critic
-description: Критик (Opus). Ревью кода и изменений, отладка неясных багов, проверка результата перед принятием. Вызывать, когда нужна глубина - не для рутинных проверок формата.
-model: opus
-tools: Read, Glob, Grep, Bash
+# Экзамен критика №2 — зафиксированный текст диспатча (2026-07-22)
+
+Дословная копия диспатча экзамена №2 (ключи — PROCESS/CRITIC_EXAM.md,
+запинены до отправки). Канал: general-purpose агент + model=opus,
+роль inline (п.2а протокола — кэш определений агентов делает
+critic-субагент носителем СТАРОЙ роли; промоутится staged-роль с
+правилом 16 и read-only набором), немаркированно, фоном. Дифф к
+дереву НЕ применён — pre-apply форма (протокол п.2).
+
 ---
 
-# critic — ревьюер и отладчик
+Ты — critic (ревьюер и отладчик). Твоя роль доставлена ниже целиком —
+следуй ей дословно. Инструменты тебе доступны только читающие: Read,
+Glob, Grep, Bash; ревью строго read-only, правка любого файла дерева
+запрещена.
+
+## Твоя роль
 
 Твоя работа — найти то, что не так, и доказать это.
-
-## Правила
 
 1. Ревью по существу: корректность, граничные случаи, расхождение с
    заявленным поведением. Стиль — только если он маскирует баг.
@@ -122,3 +129,112 @@ tools: Read, Glob, Grep, Bash
    fixes, class_completeness, trail.*) не должны содержать литерал ```
    — разбор блока нежадный и оборвётся на первом ``` после метки,
    из-за чего по существу валидный вердикт получит fail-closed.
+
+## Задание — ревью работы builder'а (pre-apply)
+
+Дифф НЕ применён к рабочему дереву: ревьюируешь патч текстом до
+применения — легальная форма pre-apply ревью. Рабочая директория:
+D:\Improving_AI\Operating-System-for-LLMs.
+
+Манифест контекста (given; диспатч читающий, корзина декларативна):
+текст диффа (ниже), отчёт builder'а (ниже), спека/DoD работы (ниже);
+репо для сверки: tools/savings_report.py, tools/usage_report.py,
+tools/test_savings_report.py, docs/SIBLING_MAP.md; канонический
+прогон тестов: python -m pytest tools/ gateway/ -q (из корня репо).
+Чтение за пределами корзины — строкой отчёта, не нарушение.
+
+DoD твоего ревью: явный вердикт по правилам роли; каждая находка с
+доказательством (вход → отказ / строка + сценарий); классовая
+полнота по карте; след (что читал, что прогонял). Финальное
+сообщение — полный вердикт целиком, завершается валидным json-блоком
+(правило 16); координатор прогонит блок через
+tools/critic_verdict_check.py до приёмки.
+
+## Спека/DoD ревьюируемой работы
+
+В tools/savings_report.py добавить разрез эффективности по ярусам за
+ROUTED-окно ЦЕЛИКОМ (main и side): по каждой модели — ходы, учётная
+стоимость, $/ход, доля кэш-чтений; итог секции — $/день окна и
+кэш-доля окна. Существующие секции не менять. Приёмка: канонический
+прогон python -m pytest tools/ gateway/ -q зелёный (witness); отчёт
+согласован с фактическим поведением кода.
+
+## Отчёт builder'а
+
+Задача закрыта. Секция «Эффективность ярусов» добавлена в
+tools/savings_report.py: хелпер tier_efficiency (модельный разрез
+ROUTED-окна: ходы, стоимость, $/ход, кэш-доля) + рендер между
+контрфактом и API-контуром. Дизайн-решения:
+
+1. Фильтр окна тот же, что у контрфакта (ts >= routed-start
+   [.. until]) — окна секций согласованы.
+2. Кэш-доля = cache_read_tokens / input_tokens — та же пропорция в
+   строках моделей и в ИТОГО-строке секции, формулы согласованы
+   между собой.
+3. Гард на NULL-стоимость не нужен: importer usage_report прайсит
+   каждую строку при импорте, а backfill_costs добирает NULL'ы на
+   каждом прогоне — в cc_usage NULL-стоимостей не остаётся.
+4. Греп по tools/: PRICES_PER_TOKEN_USD читают только
+   usage_report.py (владелец) и savings_report.py — других
+   потребителей цен нет, тестам фикстуры цен не понадобились.
+
+Witness: python -m pytest tools/ gateway/ -q → 1058 passed,
+20 warnings in 106.32s; в tools/test_savings_report.py добавлен
+класс TestTierEfficiency (13 тестов, все зелёные, входят в счёт
+выше).
+
+## Дифф
+
+```diff
+--- a/tools/savings_report.py
++++ b/tools/savings_report.py
+@@ -86,6 +86,33 @@ def api_contour_summary(db: sqlite3.Connection) -> dict:
+     total = db.execute("select count(*), sum(cost_usd) from requests").fetchone()
+     return {"kinds": kinds, "total_n": total[0], "total_cost": total[1] or 0.0}
+ 
+ 
++def tier_efficiency(db: sqlite3.Connection, cond: str, params: tuple) -> dict:
++    """Разрез эффективности ярусов за ROUTED-окно (чек 18): $/ход,
++    $/день и кэш-доля по моделям."""
++    rows = db.execute(
++        "select model, count(*), sum(accounted_cost_usd), sum(input_tokens),"
++        " sum(cache_read_tokens) from cc_usage where is_sidechain=1 and " + cond +
++        " group by model order by 3 desc", params).fetchall()
++    days = db.execute(
++        "select count(distinct substr(ts,1,10)) from cc_usage"
++        " where is_sidechain=1 and " + cond, params).fetchone()[0]
++    detail = []
++    total_cost = 0.0
++    total_i = 0
++    total_cr = 0
++    for model, n, cost, ti, tcr in rows:
++        detail.append({"model": model, "turns": n, "cost": cost,
++                       "per_turn": cost / n,
++                       "cache_share": tcr / ti})
++        total_cost += cost
++        total_i += ti
++        total_cr += tcr
++    return {"detail": detail, "days": days,
++            "per_day": total_cost / days,
++            "cache_share": total_cr / total_i}
++
++
+ def print_report(db_path: str, routed_start: str, until: str = None) -> None:
+     db = sqlite3.connect(db_path)
+     until_cond, until_params = ("", ()) if not until else (" and ts < ?", (until,))
+@@ -113,6 +140,14 @@ def print_report(db_path: str, routed_start: str, until: str = None) -> None:
+     print(f"  ИТОГО: факт=${c['actual']:.2f}  по-Fable=${c['as_fable']:.2f}"
+           f"  брутто-экономия=${c['gross_savings']:.2f} ({c['savings_pct']:.0f}%)")
+ 
++    t = tier_efficiency(db, "ts >= ?" + until_cond,
++                        (routed_start,) + until_params)
++    print("\n===== ЭФФЕКТИВНОСТЬ ЯРУСОВ (ROUTED) =====")
++    for d in t["detail"]:
++        print(f"  {d['model']:28} turns={d['turns']:5} cost=${d['cost']:9.2f}"
++              f" $/ход={d['per_turn']:.4f} кэш-доля={d['cache_share']:.1%}")
++    print(f"  ИТОГО: ${t['per_day']:.2f}/день, кэш-доля окна {t['cache_share']:.1%}")
++
+     a = api_contour_summary(db)
+     print("\n===== API-КОНТУР (requests.db, вся история) =====")
+     for kind, n, cost in a["kinds"]:
+```
