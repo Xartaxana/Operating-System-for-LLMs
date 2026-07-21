@@ -95,18 +95,23 @@ accounting prices (D-0032), evidence-gated statuses and judge
 supervision are identical everywhere. Plan of record:
 docs/UNIFIED_PLAN_2026-07-07.md.
 
-**Delegation is flat on both contours (D-0037): workers never spawn
-workers.** Decomposition, spec writing and acceptance stay with the
-coordinator; parallelism means the coordinator dispatches several
-workers with independent specs. A worker that finds its task
-decomposable escalates ("decomposable" is an escalation-journal
-category). Dispatch of an already-scoped task is cheap (static rules;
-the future Router); decomposition defaults to the strongest available
-tier and moves down only via delegation-table evidence.
+**Delegation is flat everywhere (D-0037): workers never spawn
+workers.** Decomposition, spec writing and graph-level acceptance
+stay with the coordinator; LEAF acceptance goes to the calibrated
+judge (R13/D-0087) — the one recorded carve-out from
+coordinator-side acceptance. Parallelism means the coordinator
+dispatches several workers with independent specs. A worker that
+finds its task decomposable escalates ("decomposable" is an
+escalation-journal category). Dispatch of an already-scoped task is
+cheap by construction: the static allocate ladder decides it — the
+Router gate opened 2026-07-21 and resolved into exactly this
+(learned routers evaluated and rejected, see Components below);
+decomposition defaults to the strongest available tier and moves
+down only via delegation-table evidence.
 
 **Workers run in the background by default (D-0040).** A coordinator
 blocked waiting on a worker wastes Lead availability — the scarcest
-subscription-contour resource: while a long worker runs, the Lead
+resource: while a long worker runs, the Lead
 plans, reviews other results, talks to the operator, or dispatches
 parallel workers. Blocking waits are reserved for strictly sequential
 steps where the next action depends on the result and nothing else is
@@ -114,13 +119,17 @@ pending. Acceptance on completion stays mandatory (D-0037).
 
 ## Portability (the policy is the router)
 
-Nothing in the running system is a routing component: routing
-decisions are made by the Lead session itself, reading an auto-loaded
-policy (CLAUDE.md). Claude Code supplies only the dispatch mechanism
-(subagents with a model bound per tier); the deferred Router (D-0029)
-would replace the Lead's judgment for already-scoped dispatch only if
-its gate ever opens. Porting the system to a different model family
-or harness therefore means porting a POLICY, not software.
+Nothing in the running system is a LEARNED routing component: routing
+decisions are made by the auto-loaded policy (CLAUDE.md) — the Lead's
+intake judgment for leaf-vs-graph plus the static allocate ladder for
+tiers (R13/D-0087). The Router gate (D-0029→D-0086) opened 2026-07-21
+and resolved WITHOUT adopting a router model: six learned candidates
+across two survey waves were rejected on our ground truth (the tier
+boundary lives in supervision reflexes, which difficulty-trained
+routers do not see). Claude Code supplies only the dispatch mechanism
+(subagents with a model bound per tier). Porting the system to a
+different model family or harness therefore means porting a POLICY,
+not software.
 
 Substrate-independent by design (D-0005):
 
@@ -145,7 +154,12 @@ A new deployment must supply four things:
    (subagents, tool calls into other models, gateway aliases);
 3. the policy AUTO-LOADED into the coordinator's context — delegation
    is opt-in and silently dies without this (D-0041, finding F-1);
-4. a telemetry source for calibration (transcripts or a request log).
+4. a telemetry source for calibration (transcripts or a request log);
+5. (for leaf routing, R13/D-0087 — optional) a CALIBRATED judge
+   binding: any model instance that passes the shipped D-0031
+   calibration set with its pinned prompt (subscription subagent or
+   gateway alias — both proven equivalent, t-254); without a judge
+   the standard coordinator-acceptance path applies.
 
 Evidence does NOT port with the policy: table statuses bind a task
 type to a CONCRETE model, not to a tier label (classification→intern
@@ -194,12 +208,13 @@ The two contours name their tiers differently, and the difference is
 load-bearing. The POLICY speaks only the FUNCTION vocabulary; the
 GRADE vocabulary belongs to models and accounting.
 
-| Function (canonical policy name) | Duty | Subscription binding (this repo) | API-contour service today |
+| Function (canonical policy name) | Duty | Subscription binding (this repo) | API-channel binding |
 |---|---|---|---|
-| **scout** — recon | search/read, digest with a trail (D-0046) | Haiku subagent | — (no repository access on this contour; recorded difference) |
-| **builder** — implementation to a written spec | code/tests, witness (D-0052) | Sonnet subagent | `middle` alias for routine-coding task categories |
-| **critic** — review | verdict with a trail | Opus subagent | judge + chief-judge (D-0031) — empirically Senior-tier work (White Paper §6) |
-| **Lead** — decomposition, specs, acceptance | coordinator; full authority only on the Lead tier (D-0058) | Fable session | harness + human driving Shadow Evaluation; no autonomous coordinator |
+| **scout** — recon | search/read, digest with a trail (D-0046) | Haiku subagent | Haiku alias (D-0085 reference ladder); no repo access in pure prompt→text lab use — recorded difference |
+| **builder** — implementation to a written spec | code/tests, witness (D-0052) | Sonnet subagent | Sonnet alias (D-0085; Opus-as-builder REJECTED by Rule #1 evidence) |
+| **critic** — review | verdict with a trail | Opus subagent | Opus alias (D-0085) |
+| **judge** — leaf acceptance (R13/D-0087) + equivalence verdicts | verdict vs pinned intent keys; calibrated instance only (D-0031 set) | judge-subagent, pinned prompt (13/13, t-254) | `judge-sonnet` alias (calibration home) |
+| **Lead** — decomposition, specs, graph acceptance | coordinator; full authority only on the Lead tier (D-0058) | Fable session | Fable alias (D-0085); no autonomous API-side coordinator yet — script constructions run leaf machinery only |
 | **analyst** — telemetry narration | reads Ledger output only | folded into the Lead session | `analyst` alias (Qwen3-4B) |
 
 Grades — intern (4B) / junior (8B) / middle (70B) / senior
@@ -222,20 +237,20 @@ Consequences:
   A grade word inside a routing rule is a smell — it would bind a
   duty to a price rung.
 
-## Components (API contour)
+## Components (API supply channel — the gateway lab)
 
-The full scheme, including the evidence loop (judge) and the deferred
-Router. Solid edges are operational today; dashed edges are gated
-future behavior.
+The gateway-side components: request path, evidence loop (judge) and
+the RESOLVED Router gate. All solid edges are operational; the old
+deferred-Router node is replaced by its 2026-07-21 resolution.
 
 ```mermaid
 flowchart TB
-    USER([User])
+    USER([User / leaf machinery])
 
     subgraph path["Request path — synchronous, deterministic"]
         GW["Gateway — LiteLLM proxy<br/>single interception point"]
         GUARD["Guard — budget counters, no LLM<br/>80% warn / 100% cutoff"]
-        MODELS["Lead / worker models<br/>Intern 4B · Junior 8B · Middle 70B · Lead frontier"]
+        MODELS["Model aliases:<br/>D-0085 reference ladder<br/>(haiku · sonnet · opus · fable)<br/>+ lab tiers (intern 4B · middle 70B)<br/>+ judge-sonnet"]
         GW --> GUARD --> MODELS
     end
 
@@ -247,7 +262,7 @@ flowchart TB
         LEDGER["Ledger — metrics.py<br/>deterministic analytics, no LLM"]
         ANALYST["Analyst — small local model,<br/>narrates telemetry on demand"]
         SHADOW["Shadow Evaluation —<br/>offline replay on cheaper tiers"]
-        JUDGE["Judge — supervised LLM worker<br/>calibration set, temperature 0,<br/>own accounting alias (D-0031)"]
+        JUDGE["Judge — supervised LLM worker<br/>(D-0031): calibration home of BOTH<br/>judge forms; also serves leaf<br/>acceptance (R13/D-0087)"]
         CHIEF["Chief-judge review (Lead / human),<br/>mandatory for table status changes"]
         LEDGER --> ANALYST
         SHADOW --> JUDGE --> CHIEF
@@ -257,8 +272,7 @@ flowchart TB
     LOG --> SHADOW
     SHADOW --> TABLE["DELEGATION_TABLE.md —<br/>4-state evidence log (D-0035)"]
     CHIEF --> TABLE
-    TABLE -.-> ROUTER["Router — DEFERRED (D-0029):<br/>built only if the R-gate opens;<br/>first task = evaluate RouteLLM"]
-    ROUTER -.->|"would route scoped tasks"| GW
+    TABLE --> RESOLVED["Router gate RESOLVED 2026-07-21<br/>(D-0086 criteria, Architect-signed):<br/>allocate = STATIC ladder + judge<br/>acceptance (R13/D-0087);<br/>learned routers rejected — 6<br/>candidates / 2 survey waves<br/>(reopen: labeled corpus ≥100)"]
     ARCHITECT([Architect — human]) -->|"policies, gate signatures"| TABLE
 ```
 
@@ -299,10 +313,13 @@ The model hierarchy:
 | Level | Role | Example |
 |---|---|---|
 | Intern | formatting, extraction, JSON | 4B local |
-| Junior | classification, summarization, routing (future) | 8B local |
+| Junior | classification, summarization | 8B local |
 | Middle | routine coding | coding model |
 | Senior (Lead) | architecture, planning, research | frontier API model |
 | Architect | defines policies | human |
+
+(Routing is not a model duty at any grade: allocate is the static
+ladder, R13/D-0087.)
 
 On the subscription contour the same tiers materialize as Claude Code
 subagents: scout=Haiku (context gathering), builder=Sonnet
@@ -324,9 +341,10 @@ measurement phase.
 
 ### Contour asymmetry and the regression bridge
 
-Shadow Evaluation exists only on the API contour, by design (D-0034):
-replay needs an interception point and a prompt→text task shape, and
-the subscription contour has neither — the subscription Lead cannot
+Shadow Evaluation exists only on the API channel, by design (D-0034;
+the D-0088 grain that did NOT collapse): replay needs an interception
+point and a prompt→text task shape, and the subscription channel has
+neither — the subscription Lead cannot
 be proxied, and interactive agentic work (tools, repository state,
 multi-turn sessions) does not reduce to a replayable prompt. The
 subscription contour therefore validates delegation in production
@@ -353,9 +371,14 @@ This is also why the API contour needs no working project of its own
 to do its lab job: it validates quality and prices; the money-on-the-
 table questions are measured where the real work happens.
 
-## Deliberately Deferred
+## Deliberately Deferred / Resolved
 
-- **Router** — built only after telemetry shows what is worth routing (D-0029).
+- **Router** — RESOLVED 2026-07-21 (gate D-0029→D-0086 opened and
+  answered by evidence): no learned router is built — six candidates
+  across two survey waves rejected on our ground truth; the gate's
+  prize (removing the frontier coordinator from routine dispatch) is
+  taken by leaf routing (R13/D-0087: static allocate ladder + judge
+  acceptance). Reopen trigger: labeled corpus ≥100 judged pairs.
 - LangGraph, Redis, PostgreSQL, vLLM, Langfuse — added only when the
   MVP stack measurably fails to cope.
 - Multi-agent orchestration of any other kind.

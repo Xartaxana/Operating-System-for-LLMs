@@ -77,8 +77,9 @@ of leaks, never for symmetry.
 - **Two Vocabularies: Functions and Grades** — the D-0062 bridge
   table (functions scout/builder/critic/Lead vs grades
   intern/junior/middle/senior) and its consequences.
-- **Components (API contour)** — Gateway / Guard / Ledger / Analyst
-  / deferred Router details, both mermaid diagrams.
+- **Components (API supply channel — the gateway lab)** — Gateway /
+  Guard / Ledger / Analyst / Judge details, the resolved Router gate
+  (static ladder + judge, R13/D-0087), both mermaid diagrams.
 - **Shadow Evaluation** — replay mechanics; contour asymmetry and
   the regression bridge (how journal evidence feeds API-contour
   regression replays).
