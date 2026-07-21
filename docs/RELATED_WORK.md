@@ -546,6 +546,60 @@ AO3 на evidence QA-узкого места, не сейчас).
 — слой экономики поверх той же дисциплины. Ниша подтверждена от
 противного.
 
+## Router candidates survey №2 (2026-07-21, слово оператора «кандидатов не осталось — найди готовые решения»; t-240 + второй проход Lead, D-0066)
+
+Контекст: bert/causal_llm/haiku-классификатор закрыты evidence'ом
+(план оценки 2026-07-20, вердикты 07-20/07-21). Рамка поиска —
+урок скамейки: наша граница ярусов живёт в СУПЕРВИЗИОННЫХ РЕФЛЕКСАХ
+(K3/K5), Arena-обученные difficulty-роутеры к ней слепы; ценны
+policy/category-роутеры и настраиваемые на СВОИХ ярлыках.
+
+Карта scout (t-240, дайджест с URL-трейлом в транскрипте; несущие
+пункты перепроверены вторым проходом Lead — три WebFetch ниже):
+
+1. **RouteLLM остаток**: mf/sw_ranking требуют OPENAI_API_KEY на
+   инференсе (issue #62 открыта, встроенной альтернативы нет);
+   живых форков с локальными эмбеддингами не найдено (негатив со
+   следом scout); тот же Arena-сигнал, что у отклонённого bert →
+   кандидатами не являются.
+2. **Arch-Router-1.5B (katanemo)** — ВТОРОЙ ПРОХОД LEAD (HF model
+   card): policy-роутинг domain-action (маршруты = name+description,
+   вход XML, выход JSON {"route": ...}) — сигнал НЕ difficulty;
+   негейтед; локальный запуск (2B F16 transformers; gguf-вариант
+   для Ollama по данным scout). ЛИЦЕНЗИЯ: Katanemo research —
+   коммерческое использование не заявлено: для внутренней оценки
+   пригоден, для поставки в тулкит — вопрос (ось 7).
+3. **aurelio-labs/semantic-router** — ВТОРОЙ ПРОХОД LEAD (GitHub):
+   MIT; Route = name + utterances-примеры, решение по сходству в
+   векторном пространстве; локальные энкодеры без OpenAI
+   (HuggingFaceEncoder/FastEmbed, полностью оффлайн-режим); жив
+   (v0.1.15 2026-05-23, 94 релиза). Наши labeled_v2-пункты — готовые
+   utterances по ярусам: машинная версия нашей статической таблицы.
+4. **ulab-uiuc/LLMRouter** — ВТОРОЙ ПРОХОД LEAD (GitHub): MIT; 16+
+   роутеров (KNN/SVM/MLP/MF/Elo/GraphRouter/...); ОБУЧЕНИЕ НА СВОИХ
+   ДАННЫХ поддержано (JSONL: query, ground truth, ответы моделей,
+   performance scores — ровно форма наших судимых пар); эмбеддинги
+   Longformer локально, OpenAI не требуется; жив (релиз 2025-12,
+   TSRouter 2026-07, 2.1k звёзд). Самый прямой ответ на Q6
+   (few-shot KNN/SVM на десятках примеров).
+5. Прочее (по scout, без второго прохода — кандидатами не взяты):
+   vLLM Semantic Router (жив, intent+difficulty, но Rust/K8s/Envoy
+   serving-инфраструктура — не наш форм-фактор, Rule #1); NVIDIA
+   LLM Router blueprint (Triton-инфраструктура, то же); LiteLLM
+   router (балансировка/cost, не quality-сигнал); коммерческие API
+   (Not Diamond, OpenRouter auto, Martian, Unify, Requesty) — облако,
+   зависимость и приватность против Rule #1 при живой политике;
+   TinyRouter (POC 10K-параметрового роутера, не production);
+   академические GraphRouter/Router-R1/PersonalizedRouter — внутри
+   LLMRouter-библиотеки (п.4) как готовые реализации.
+
+Вердикт-кандидаты для скамейки labeled_v2 (порядок Rule #1, все
+~$0 локально; в D/E-прогоны — только по evidence-триггерам после
+скамейки): (а) semantic-router с локальным энкодером; (б) LLMRouter
+KNN/SVM, обученные на наших судимых парах; (в) Arch-Router-1.5B
+через Ollama (сигнал самый близкий к нашей категорийной политике;
+лицензионная оговорка выше). Запуск скамейки — слово оператора.
+
 ## Implications recorded
 
 1. Router (Phase 2): evaluate RouteLLM before building (D-0030).
