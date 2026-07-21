@@ -340,6 +340,11 @@ BOOT-БЮДЖЕТ: история — коммиты диет; мелкие ра
   кросс-аудит gemini worse-вердиктов judge-sonnet по opus-целям
   (self-judging риск).
 - БАТЧ МЕЛОЧЕЙ (07-20, к следующему builder-батчу, D-0081):
+  (е) штабной tools/judge_accept.py + judge_client.py — снимок из
+  D:\Improving_AI\exam_hybrid_kit\tools (операционная деталь R13:
+  координатору живой сессии нечем позвать судью; тест-минимум как в
+  ките); (ж) informational-запрос requests.db в darm_orchestrator
+  даёт 0 (окно ts, дефект известен с прогона D№1);
   (а) shadow_eval SUMMARY печатает mean вместо sum cost при n>1;
   (б) calibrate() отбрасывает judge_cost; (в) дубль source_task=
   t-027 в regression_set_coding.jsonl; (г) budgets.yaml: явная строка
