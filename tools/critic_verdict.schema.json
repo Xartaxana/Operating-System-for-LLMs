@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "critic_verdict.schema.json",
+  "title": "Critic verdict",
+  "description": "Machine-checkable structure for a critic (Opus) review verdict. Emitted as the last fenced ```json block in the critic's final message. Validated by tools/critic_verdict_check.py (rules are hardcoded there; this file is the reference schema, checked for drift by tools/test_critic_verdict_check.py).",
+  "type": "object",
+  "required": ["verdict", "blockers", "class_completeness", "trail"],
+  "additionalProperties": true,
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["fit", "fit_with_fixes", "blocker"],
+      "description": "fit = ПРИНЯТЬ, fit_with_fixes = ДОРАБОТАТЬ, blocker = ОТКЛОНИТЬ."
+    },
+    "blockers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Blocking findings. Empty when verdict is fit; non-empty when verdict is blocker."
+    },
+    "class_completeness": {
+      "type": "string",
+      "description": "Answer on class completeness of the fix per docs/SIBLING_MAP.md (D-0043)."
+    },
+    "trail": {
+      "type": "object",
+      "required": ["read", "reruns"],
+      "properties": {
+        "read": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Files/paths actually read during review."
+        },
+        "reruns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["command", "result"],
+            "properties": {
+              "command": { "type": "string" },
+              "result": { "type": "string" }
+            }
+          },
+          "description": "Control reruns of the mechanical layer (D-0046)."
+        }
+      }
+    },
+    "fixes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Required and non-empty when verdict is fit_with_fixes; optional otherwise."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "verdict": { "const": "fit" } } },
+      "then": {
+        "properties": { "blockers": { "type": "array", "maxItems": 0 } }
+      }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "blocker" } } },
+      "then": {
+        "properties": { "blockers": { "type": "array", "minItems": 1 } }
+      }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "fit_with_fixes" } } },
+      "then": {
+        "required": ["fixes"],
+        "properties": {
+          "fixes": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}
