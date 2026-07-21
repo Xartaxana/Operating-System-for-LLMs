@@ -50,7 +50,15 @@ mechanism_gate) и settings.json (harness-хуки: exists + importlib
 без side effects — top-level модулей чист, проверено критиком);
 «python в PATH» — утверждение о PATH процесса (shutil.which), PATH
 git-хуков в момент коммита — иной шелл, ограничение отражается
-комментарием.
+комментарием. Ход приёмки: отчёт builder t-257 принят по содержанию,
+НО спека Lead дефектно продиктовала кириллические строки против
+ASCII-инварианта файла (находка builder, вернул вопросом — штатно по
+R2); решение Lead — инвариант сохраняем, строки в ASCII, доработка у
+того же воркера. Находка класса в Lead-очередь: декларированный
+ASCII-инвариант vs де-факто кириллица в stdout 5 файлов tools/
+(journal_validator, permission_audit, mechanism_gate,
+calibration_counts, savings_report) — расхождение документ/факт,
+кандидат разбора на калибровке.
 
 ### N2. №1 witness × dod_track перекрёстная сверка — pending; depends N0, N1
 
