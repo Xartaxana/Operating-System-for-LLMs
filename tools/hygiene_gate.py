@@ -101,6 +101,76 @@ builder на этой задаче/non-goals манифеста) -- финаль
      Условие: substring "routing-log" (case-insensitive) ЕСТЬ в
      команде И (есть `>` ИЛИ есть токен printf/echo).
 
+     v2 (t-255, 2026-07-21) -- порт механики AO3 hygiene_gate v2
+     (scripts/hygiene_gate.py, их коммит 990615e) на живой FP-класс
+     этой сессии (git add/commit/push с путём logs/routing-log.jsonl
+     в аргументах и/или в теле commit-сообщения -- git НИЧЕГО не
+     пишет в журнал, это ложное срабатывание). У нас НЕТ АО3-шного
+     "канонического CLI-вызова" (`python scripts/log_append.py`) --
+     наша норма правило 5 CLAUDE.md кита это «журнал -- Edit/Write-
+     тулом», а не отдельная команда, поэтому АО3-шная (в)-ветка
+     ("_is_canonical_call") сюда НЕ портируется -- она про исключение
+     другого рода (специфическая CLI-форма), не применимо. Портированы
+     РОВНО два независимых механизма АО3 (спека прямо разделяет их
+     "Порт (1)"/"Порт (2)" -- НЕ один общий фикс, каждый закрывает
+     свой под-класс FP):
+
+     (1) _strip_commit_messages -- вырезание содержимого -m/--message
+         git commit ПЕРЕД проверками (а)/(б), регекс COMMIT_MESSAGE_ARG_RE
+         -- ДОСЛОВНО регекс АО3 (все формы: -m "...", -m '...',
+         --message="...", --message='...', -m @'...'@, -m @"..."@
+         PowerShell here-string), уже эмпирически проверенный их живым
+         FP2 (та же bash-герока форма `-m "$(cat <<'EOF' ... EOF)"`,
+         что в evidence этой задачи -- char-класс `[^"\\]` матчит
+         переводы строк без re.MULTILINE/DOTALL по built-in семантике
+         Python re, DOTALL в компиляции нужен только веткам с `.`
+         (here-string формы), убедился чтением семантики, не гаданием).
+         Закрывает под-класс "путь/подстрока журнала ВНУТРИ текста
+         commit-сообщения".
+
+     (2) _mask_git_statements -- НОВЫЙ механизм (у АО3 его как
+         отдельной функции нет -- их FP2 закрывался ТОЛЬКО вырезанием
+         сообщения, потому что там `>` было исключительно внутри
+         сообщения; наша evidence-форма имеет ТОТ ЖЕ паттерн, но
+         спека явно требует отдельный, более широкий механизм для
+         случая БЕЗ commit/-m вовсе -- напр. `git diff
+         logs/routing-log.jsonl > /tmp/out.txt`, где путь журнала --
+         аргумент git diff, а `>` -- редирект СОБСТВЕННОГО вывода git
+         в другой файл, не связанный с журналом; вырезание сообщения
+         тут бессильно, т.к. сообщения нет). Маскирует (заменяет
+         пробелом) statement, начинающийся с `git ` + один из
+         add/commit/push/diff/log/show/status (после начала команды
+         ИЛИ сразу после разделителя цепочки `;`/`&&`/`||`/перевода
+         строки -- регекс сохраняет САМ символ-разделитель в выводе
+         через захватывающую группу, чтобы не склеивать соседние
+         statement'ы), ДО проверок (а)/(б). Порядок: (1) сначала
+         (message ещё может содержать `;`/`&`/`|` внутри текста,
+         которые сломали бы наивный сплит по этим символам в (2), если
+         бы (2) шёл первым), затем (2) на уже вырезанном тексте.
+
+     Известная остаточная дыра (симметрично HoleA/HoleB АО3, принята
+     тем же принципом "warn-режим -- не граница безопасности", не
+     устраняется превентивно): git-statement для show/diff МАСКИРУЕТСЯ
+     ЦЕЛИКОМ, включая любой РЕАЛЬНЫЙ `>` внутри него -- значит
+     настоящий обход самим git (`git show HEAD:logs/routing-log.jsonl
+     > logs/routing-log.jsonl`, реально перезаписывающий журнал через
+     git plumbing) тоже гасится и НЕ детектится. Тот же принцип
+     распространяется и на СИНТАКСИЧЕСКИ КРИВОЙ `git commit` (напр.
+     -m с незакрытой кавычкой) -- маскирование statement'а не
+     различает валидность вложенных кавычек, поэтому даже такой
+     кривой вызов гасится наравне с валидным (см. тест
+     test_v2_unclosed_quote_in_message_not_stripped_but_git_statement_still_masked
+     в tools/test_hygiene_gate.py -- сознательное РАСХОЖДЕНИЕ с прямым
+     портом одноимённого AO3-теста, у которого такого второго слоя
+     нет). Ужесточение -- только по evidence реальной утечки этого
+     вида (правило 10г кита), не превентивно; см. также непортированную сюда AO3-специфику
+     PowerShell-токенов записи (Add-Content/Set-Content/Out-File) --
+     наш детектор класса (г) их не знает вовсе (не в спеке этой
+     задачи, non-goals прямо запрещают трогать другие детекторы;
+     ЗАМЕЧЕННЫЙ СИБЛИНГ-ПРОБЕЛ для отчёта, не фикс: наш
+     PRINTF_ECHO_RE тоже уже (не знает sed/tee/awk, которые знает
+     AO3's WRITE_TOKEN_RE) -- существовал ДО этой задачи, не тронут).
+
 Регистронезависимость -- для ВСЕХ классов (спека явно не оговаривает
 per-класс регистр; выбран единообразный case-insensitive, тот же
 подход, что MANIFEST_*_RE/LABEL_MODEL_PREFIX_RE в dispatch_gate.py).
@@ -127,6 +197,37 @@ PY_DASH_C_RE = re.compile(r"\bpython\s+-c\b", re.IGNORECASE)
 PY_HEREDOC_RE = re.compile(r"\bpython\s+-\s*<<", re.IGNORECASE)
 PRINTF_ECHO_RE = re.compile(r"\b(printf|echo)\b", re.IGNORECASE)
 
+# --- v2 (t-255): порт (1) -- вырезание -m/--message git commit ------
+# ДОСЛОВНО регекс АО3 scripts/hygiene_gate.py (коммит 990615e), см.
+# докстринг класса (г) выше -- все поддерживаемые формы значения -m/
+# --message; DOTALL нужен только веткам с `.` (here-string), простые
+# кавычковые ветки матчят переводы строк через char-класс нативно.
+GIT_COMMIT_RE = re.compile(r"\bgit\s+commit\b", re.IGNORECASE)
+
+COMMIT_MESSAGE_ARG_RE = re.compile(
+    r"-m\s+\"(?:[^\"\\]|\\.)*\""
+    r"|-m\s+'[^']*'"
+    r"|--message=\"(?:[^\"\\]|\\.)*\""
+    r"|--message='[^']*'"
+    r"|-m\s+@'.*?'@"
+    r"|-m\s+@\".*?\"@",
+    re.DOTALL,
+)
+
+# --- v2 (t-255): порт (2) -- маскирование git-statement ----------
+# statement, начинающийся с `git ` + один из перечисленных
+# подкоманд (после начала команды либо сразу после разделителя
+# цепочки `;`/`&`/`|`/перевода строки). Группа 1 -- сам разделитель
+# (или пустая строка на старте) -- сохраняется в замене НЕТРОНУТЫМ,
+# чтобы не склеивать соседние statement'ы; группа 2 (тело statement'а
+# до следующего разделителя) заменяется одним пробелом. Простой
+# негативный char-класс `[^;&|\n]*` без вложенных квантификаторов --
+# линейно по длине (та же гигиена, что и остальные регексы файла).
+GIT_STATEMENT_RE = re.compile(
+    r"(^|[;&|\n])(\s*git\s+(?:add|commit|push|diff|log|show|status)\b[^;&|\n]*)",
+    re.IGNORECASE,
+)
+
 MSG_CD_PREFIX = "не префиксуй cd, вызывай из корня (гигиена п.3)"
 MSG_REDIRECT_STDERR = "не добавляй 2>&1 (гигиена п.3)"
 MSG_PYTHON_DASH_C = "правки/скрипты — Edit/Write-тулом или именованным скриптом (гигиена п.4)"
@@ -143,11 +244,35 @@ def _is_python_dash_c(command: str) -> bool:
     return bool(PY_DASH_C_RE.search(command) or PY_HEREDOC_RE.search(command))
 
 
+def _strip_commit_messages(command: str) -> str:
+    """v2 порт (1) -- вырезает -m/--message аргументы git commit ДО
+    проверок (а)/(б): текст commit-сообщения (пути/подстроки журнала
+    в прозе, `>` в ASCII-стрелках) не должен триггерить детект.
+    Применяется, только если команда содержит `git commit`; сами
+    пути git add/commit НЕ трогаются -- вырезается только аргумент
+    сообщения. Незакрытая кавычка не матчится и остаётся как есть
+    (fail-safe в сторону детекта, см. докстринг класса (г))."""
+    if not GIT_COMMIT_RE.search(command):
+        return command
+    return COMMIT_MESSAGE_ARG_RE.sub(" ", command)
+
+
+def _mask_git_statements(command: str) -> str:
+    """v2 порт (2) -- маскирует statement'ы `git add/commit/push/
+    diff/log/show/status ...` (git НЕ писатель журнала) ДО проверок
+    (а)/(б), см. докстринг класса (г) выше про порядок относительно
+    _strip_commit_messages и известную остаточную дыру (show/diff с
+    редиректом РЕАЛЬНО перезаписывающим журнал через git plumbing --
+    принято, не устраняется превентивно)."""
+    return GIT_STATEMENT_RE.sub(lambda m: m.group(1) + " ", command)
+
+
 def _is_journal_bypass(command: str) -> bool:
-    if "routing-log" not in command.lower():
+    scrubbed = _mask_git_statements(_strip_commit_messages(command))
+    if "routing-log" not in scrubbed.lower():
         return False
-    has_redirect = ">" in command
-    has_printf_echo = bool(PRINTF_ECHO_RE.search(command))
+    has_redirect = ">" in scrubbed
+    has_printf_echo = bool(PRINTF_ECHO_RE.search(scrubbed))
     return has_redirect or has_printf_echo
 
 
