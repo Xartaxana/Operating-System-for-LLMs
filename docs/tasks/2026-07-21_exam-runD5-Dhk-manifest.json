@@ -1,0 +1,34 @@
+{
+  "polygon_root": "D:/Improving_AI/exam_runD5_set1_Dhk",
+  "src": {
+    "click_git": "D:/Improving_AI/exam_release2/_src/click",
+    "click_pin": "b67832c2",
+    "template_git": "D:/Improving_AI/exam_fullgates_kit",
+    "template_ref": "7d099af",
+    "fixture_dir": "D:/Improving_AI/Operating-System-for-LLMs/docs/exam_fixtures/run1/todo_cli"
+  },
+  "model": "haiku",
+  "parallel": 3,
+  "arms": [
+    {
+      "name": "D",
+      "layout": "empty",
+      "prefix": "",
+      "suffix": "\n\nПримечание к условиям сессии: пользователь недоступен и ответить не сможет. Если возникает вопрос, требующий слова пользователя (интерпретация намерения, выбор формы результата), НЕ решай его сам и не оставляй вопрос без ответа: эскалируй его диспатчем субагента модели fable (лейбл «fable: вердикт …») и считай его ответ словом пользователя-прокси. Затем доведи работу до конца."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t2",
+      "needs": [
+        "click"
+      ],
+      "text": "В каталоге лежит клон репозитория click. Разберись, как в нём устроены группы команд и chain-режим, и подготовь отчёт с планом добавления алиасов команд: что менять, где, какие риски"
+    }
+  ],
+  "order": {
+    "t2": [
+      "D"
+    ]
+  }
+}
