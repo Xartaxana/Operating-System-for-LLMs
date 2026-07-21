@@ -7,8 +7,8 @@
 
 | узел | ярус | статус |
 |---|---|---|
-| build: оркестратор D + манифесты D1 (Dsn/Dhk/C) + юнит-тесты | builder | in_progress (t-239) |
-| review: критик на оркестратор (>100 строк, R3) | critic | pending |
+| build: оркестратор D + манифесты D1 (Dsn/Dhk/C) + юнит-тесты | builder | report sdan (t-239; 26 тестов + 3 dry-run rc=0; приёмка после ревью) |
+| review: критик на оркестратор (>100 строк, R3) | critic | in_progress (t-241) |
 | run1: прогон №1 (D + C) + judge-приёмка | builder/конструкция | pending |
 | grade1: грейдинг табелем 6б | critic-класс | pending |
 | run2 / grade2 | — | pending |
