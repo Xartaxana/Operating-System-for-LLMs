@@ -202,6 +202,26 @@ strictly to the TAIL — the anchor is the file's actual tail, not
 memory; boot-budget squeeze batched at handoff. Target ≤15 main moves
 per task — a measured goal (exams / calibration check), not a gate.
 
+R13. **Leaf routing (D-0087).** Intake classifies every task: a LEAF
+closes under one performer of one allocate-category with no
+dependencies; doubt = graph. A leaf MAY run through the
+D-construction: category→tier by the ladder, worker executes,
+acceptance by a CALIBRATED JUDGE through the gateway (verdict
+recorded; `basis: "judge"`), deterministic R6 mirror on reject (one
+retry same tier → one-step escalation → failed back to the
+coordinator); the coordinator stays out of the leaf loop. Judge
+acceptance is legal ONLY for leaf-class dispatches (recon /
+implementation to a written spec); it never accepts mechanisms,
+policy edits or integration wholes — those keep the D-0058 matrix.
+Graph tasks keep the standard Lead loop; the H-mode (Lead-authored
+DAG + per-node intent keys incl. adversarial probes + D-machinery on
+leaves) is available on the operator's word for quality-critical
+tasks. Requires a live gateway judge; with the proxy down the
+standard acceptance path applies. Misclassification is recoverable
+by construction: a leaf that was really a graph comes back via judge
+reject / `decomposable` (R5); a graph-classified simple task only
+pays the Lead-layer tax.
+
 ## Journal — logs/routing-log.jsonl
 
 One JSON line per event, written with the Edit/Write tool:
@@ -230,7 +250,7 @@ notes). Event SHAPES — mandatory typed fields on top of the base
 | event | adds on top of base |
 |---|---|
 | delegated | task_id, model, worker_ref; a REPEAT on an open task only as: critic entry / retry with attempt≥2 after a rejected / `replaces_worker:<prev worker_ref>` bare token in notes |
-| accepted | task_id, model, by (TIER WORD: haiku/sonnet/opus/fable); + `basis`: "critic" or "queued-to-lead" when the acceptor is not strictly above; + `witness` (verbatim run output) on builder work |
+| accepted | task_id, model, by (TIER WORD: haiku/sonnet/opus/fable); + `basis`: "critic" or "queued-to-lead" when the acceptor is not strictly above, or "judge" on a leaf-class dispatch (R13/D-0087); + `witness` (verbatim run output) on builder work |
 | rejected | task_id, model, by, attempt (number), failure_class ∈ spec/capability/recon/tooling — exactly these |
 | escalated | task_id (must exist above in the file), model |
 | defect_found | task_id, ref (the source accepted's task_id) |
@@ -289,8 +309,10 @@ Three definitions that are NOT synonyms:
 
 Acceptance only FROM ABOVE: `accepted` is legal when the acceptor's
 tier is strictly above the performer's, OR the decision carries a
-higher tier's input (a critic verdict), OR acceptance is explicitly
-queued to the full Lead (note in notes). Equal/higher-tier acceptance
+higher tier's input (a critic verdict), OR it carries a
+calibrated-judge verdict on a leaf-class dispatch (basis "judge",
+R13/D-0087), OR acceptance is explicitly queued to the full Lead
+(note in notes). Equal/higher-tier acceptance
 without such input = session self-certification (F-22; class
 F-6/F-14). The matrix by the coordinator's ACTUAL tier:
 

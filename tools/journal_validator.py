@@ -130,7 +130,7 @@ TASK_ID_REQUIRED_EVENTS = {"delegated", "accepted", "rejected", "escalated", "de
 FAILURE_CLASSES = {"spec", "capability", "recon", "tooling"}
 TIER_ORDER = {"haiku": 0, "sonnet": 1, "opus": 2, "fable": 3}
 AGENT_TIER = {"scout": "haiku", "builder": "sonnet", "critic": "opus"}
-BASIS_VALUES = {"critic", "queued-to-lead"}
+BASIS_VALUES = {"critic", "queued-to-lead", "judge"}  # "judge": лист-класс, R13/D-0087
 
 TASK_ID_RE = re.compile(r"^t-(\d{3,})$")
 # Маркер замены умершего воркера (2026-07-15, правило 9в2): literal
@@ -287,7 +287,7 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
         return None
     return (
         f"D-0058: agent={agent!r} принят by={by!r} (не строго выше яруса "
-        f"исполнителя) и нет валидного basis (нужно critic/queued-to-lead)"
+        f"исполнителя) и нет валидного basis (нужно critic/queued-to-lead/judge)"
     )
 
 

@@ -494,6 +494,17 @@ def test_matrix_scout_accepted_same_tier_with_basis_passes():
     assert code == 0
 
 
+def test_matrix_builder_accepted_same_tier_with_judge_basis_passes():
+    """R13/D-0087: приёмка лист-класса судьёй — basis "judge" легален
+    и не требует принимающего строго выше исполнителя."""
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", witness="w", by="sonnet",
+                            basis="judge",
+                            notes="лист принят судьёй (R13)"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0
+
+
 def test_matrix_non_claude_by_requires_basis():
     staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
                             model="sonnet", task_id="t-001", witness="w", by="gemini-2.5-flash",
