@@ -183,6 +183,28 @@ into CURRENT_CONTEXT.md and the Architect signs the transition. The
 first task of the opened workstream is always an evaluation of an
 existing tool, never a build (D-0030).
 
+### Gate decision 2026-07-21 (Router; signature — Architect, in session: «подписываю открытие Router-гейта»)
+
+- **Router workstream: OPENED.** Criteria per D-0086 revision, all
+  green at signature: R1 (≥30 pairs / ≥2 runs: ~34 coding→Sonnet
+  pair-instances over 5 runs, F-39 caveat recorded); R2' (coordination
+  overhead ≥25%: measured ~85%, check-11 method); R3 (formally met);
+  R5 (paid Lead live + D-0032 accounted-price justification; signed
+  by operator 2026-07-21); R4' (pre-registered D-arm keys taken by
+  series D№1–№6: $/accepted median $2.08 ≤ C $2.60; quality median
+  0.975 ≥ 0.87; wall-clock median 17.1 ≤ 18 min with parallel
+  launch — evidence: DEPLOYMENT_ECONOMY_EXAM Runs log 2026-07-21 +
+  docs/tasks/2026-07-21_economy-exam-Darm-plan.md).
+- The gate's first task per D-0086 (run the D-arm under the keys,
+  NOT adopt a router) was DELIVERED by the same series that took
+  R4'. Next step of the workstream: adopt/reject decision on the
+  D-construction as a DECISIONS entry (step 4 of the evaluation
+  plan), informed by the hybrid H+C big exam
+  (docs/tasks/2026-07-21_hybrid-exam-set2H-pin.md, in flight at
+  signature). All six LLM-router candidates remain rejected by
+  evidence (two survey waves); the construction routes by the
+  static category ladder, not a learned router.
+
 ### Gate decision 2026-07-13 (report of 2026-07-12, revised 07-13; signature — Architect, in session)
 
 - **Task pipeline workstream (D-0059): OPENED.** Common gate green
