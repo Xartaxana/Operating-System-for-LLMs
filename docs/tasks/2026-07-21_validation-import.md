@@ -30,7 +30,7 @@ PostToolUse) — обе половины механизма №1 и носите
   осуществимость №1/№2/№4 архитектурным суждением, полнота класса
   по SIBLING_MAP, порядок волны.
 
-### N1. №2 wiring-integrity гейт (builder Sonnet по спеке Lead) — in-progress (builder t-257); depends N0 (done)
+### N1. №2 wiring-integrity гейт (builder Sonnet по спеке Lead) — done 07-21 (t-257: v3 принят с критик-вердиктом «годен с правками», F1 — граница 300 тремя тестами, F2 — ось 7 в порт-очередь; хардening stdout-глушения при exec_module; поставлен на живой путь Lead'ом, 113 passed пост-постановки)
 
 Дыра: хуки settings.json умирают молча (python недоступен, файл
 переименован, hooksPath не выставлен) — неотличимо от «всё прошло»

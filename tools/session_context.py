@@ -60,11 +60,41 @@ the spec this file was built from):
   hang waiting for input that will never come).
 
 Registered as the SessionStart hook via .claude/settings.json.
+
+--- staged addition: WIRING-INTEGRITY block (N1, docs/tasks/
+2026-07-21_validation-import.md; DAG node N1, t-256 verdict) ---
+Hole this closes (class F-7): the enforcement chain (git hooks +
+harness hooks in .claude/settings.json) dies SILENTLY when a hook file
+is renamed, python is missing from PATH, or core.hooksPath is unset --
+indistinguishable from "everything ran fine" because there is no
+positive signal either way. This revision adds three read-only checks
+(git-channel, harness-channel, python-channel -- see the "WIRING-
+INTEGRITY" section below, right before build_context_lines()) that emit
+either one "WIRING: OK (...)" line or one "WIRING WARNING: <fact>" line
+per discrepancy, into the SAME output stream as boot_budget_lines() and
+the rest of build_context_lines(). Per D-0069 this file is once again a
+sibling copy, not the live hook -- Lead moves it onto tools/
+session_context.py at acceptance. Fail-open discipline (spec point 3):
+the wiring block never lets an internal failure of ITS OWN (a corrupt
+settings.json, git missing, an unexpected exception in a helper) escape
+past wiring_lines() -- each channel function already turns its known
+failure modes into WARNING strings, and wiring_lines() itself adds one
+more local try/except on top so a genuinely unforeseen bug in the
+wiring code degrades to a single WARNING line instead of reaching
+main()'s outer boundary and blanking the ENTIRE context block (NOW,
+MODEL, JOURNAL, etc. would all be lost together, which is a strictly
+worse failure than losing just the wiring lines). main()'s own
+try/except is untouched.
 """
 
+import contextlib
 import datetime
+import importlib.util
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -568,6 +598,303 @@ def boot_budget_lines(root: Path) -> list:
     return lines
 
 
+# ---------------------------------------------------------------------------
+# Staged addition: WIRING-INTEGRITY block (N1, docs/tasks/
+# 2026-07-21_validation-import.md). Three independent, read-only checks:
+#
+#   (a) git-channel   -- core.hooksPath resolves to <root>/.githooks AND
+#                         both required git hook files exist under it.
+#   (b) harness-channel -- every "python tools/<file>.py" hook command in
+#                         .claude/settings.json names a file that exists
+#                         and imports cleanly.
+#   (c) python-channel -- shutil.which("python") finds an interpreter on
+#                         THIS process's PATH.
+#
+# Each channel function turns its OWN known failure modes into WARNING
+# detail strings rather than raising -- wiring_lines() below combines
+# all three and additionally wraps the whole combination in one local
+# try/except (spec point 3: a wiring-block failure must degrade to a
+# WARNING line, not blank out the rest of build_context_lines() via
+# main()'s outer boundary).
+#
+# ASCII invariant (Lead ruling, N1 spec correction): every WIRING line
+# stays plain ASCII English, same as the rest of this file -- an earlier
+# draft used the spec's illustrative Cyrillic wording verbatim, which
+# conflicted with this file's own "Every line built here is plain ASCII"
+# constraint (t-027/b3/D-0076); the Lead resolved it in favor of the
+# existing invariant. Hardcoded text below is therefore English by
+# construction, and every DYNAMIC piece that lands in a WIRING line
+# (paths, raw git config output, raw command strings, exception class
+# names) is routed through _ascii_sanitize before formatting -- same
+# helper and same rationale as MODEL/OPEN DISPATCH above: a value this
+# module does not fully control (a path containing non-ASCII characters,
+# an unexpected exception __str__) must not be able to break the ASCII
+# invariant or print a stray unbounded-length line.
+# ---------------------------------------------------------------------------
+
+_GITHOOKS_DIRNAME = ".githooks"
+_REQUIRED_GITHOOKS = ("pre-commit", "commit-msg")
+_SETTINGS_RELPATH = Path(".claude") / "settings.json"
+
+# _ascii_sanitize's own default (80) is sized for single-token MODEL/OPEN
+# DISPATCH content; a WIRING line legitimately carries a full repo path
+# plus an explanatory clause, so the final backstop pass in wiring_lines()
+# uses this wider bound instead. Per-component values (paths, commands,
+# exception class names) are already capped tighter (120-150) before
+# being interpolated into a line -- this is the outer cap on the WHOLE
+# finished line, not the only one.
+_WIRING_LINE_MAX_LEN = 300
+
+# The one command shape every hook line in .claude/settings.json actually
+# uses today (CLAUDE.md command-hygiene rule 2's canonical form): exactly
+# "python tools/<file>.py", no extra flags, forward slashes. Anything
+# else -- a different interpreter, extra arguments, a path outside
+# tools/ -- is reported as an honest "unparsed command" WARNING (spec
+# point 2б) rather than guessed at. `[^/\\]+` (not `[\w ]+`) deliberately
+# allows spaces in the filename so a path-with-spaces command is still
+# recognized and checked, not silently misparsed.
+_HOOK_COMMAND_RE = re.compile(r"^python tools/([^/\\]+\.py)$")
+
+
+def git_hooks_channel(root: Path) -> list:
+    """git-channel: core.hooksPath must resolve to <root>/.githooks, AND
+    both .githooks/pre-commit and .githooks/commit-msg must exist --
+    otherwise journal_validator/mechanism_gate never run on commits at
+    all (silent death, class F-7). Returns a list of WARNING detail
+    strings (empty = fully wired). The hooksPath comparison and the
+    required-files check are independent and BOTH always evaluated (the
+    spec's "И" is a conjunction of two separately-reportable facts, not
+    a short-circuit) -- required files are always checked under the
+    repo's OWN .githooks/, regardless of what hooksPath is misconfigured
+    to, because that is the directory this repo actually maintains.
+    Never raises: git being absent, the subprocess call failing, or any
+    other problem while reading the config is itself folded into one
+    WARNING string here (a more specific message than the generic one
+    wiring_lines()'s own try/except would produce)."""
+    root = Path(root)
+    expected = (root / _GITHOOKS_DIRNAME).resolve()
+    reason = "journal_validator/mechanism_gate do not run on commits"
+
+    try:
+        result = subprocess.run(
+            ["git", "config", "core.hooksPath"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception as e:
+        detail = _ascii_sanitize(f"git config core.hooksPath failed ({type(e).__name__})", 120)
+        return [f"{detail} -- {reason}"]
+
+    raw = (result.stdout or "").strip()
+    warnings = []
+    if result.returncode != 0 or not raw:
+        warnings.append(f"core.hooksPath not set -- {reason}")
+    else:
+        configured = Path(raw)
+        if not configured.is_absolute():
+            configured = root / configured
+        try:
+            configured_resolved = configured.resolve()
+        except OSError:
+            configured_resolved = configured
+        if configured_resolved != expected:
+            raw_safe = _ascii_sanitize(raw, 150)
+            expected_safe = _ascii_sanitize(str(expected), 150)
+            warnings.append(
+                f"core.hooksPath={raw_safe!r} does not resolve to {expected_safe} -- {reason}"
+            )
+
+    for name in _REQUIRED_GITHOOKS:
+        if not (root / _GITHOOKS_DIRNAME / name).is_file():
+            warnings.append(f"hook file missing: {_GITHOOKS_DIRNAME}/{name} -- {reason}")
+
+    return warnings
+
+
+def _parse_hook_commands(settings) -> list:
+    """Walks every hooks section of a parsed .claude/settings.json
+    (structure: {"hooks": {"<Event>": [{"hooks": [{"command": "..."}]}]}}),
+    collecting each hook's raw command string in encounter order.
+    Tolerant of any malformed shape -- a piece that isn't a dict/list
+    where expected is simply skipped, never raised on, because a
+    malformed settings.json is exactly the condition this whole check
+    exists to survive (fail-open, spec point 3)."""
+    commands = []
+    hooks_root = settings.get("hooks") if isinstance(settings, dict) else None
+    if not isinstance(hooks_root, dict):
+        return commands
+    for matchers in hooks_root.values():
+        if not isinstance(matchers, list):
+            continue
+        for matcher in matchers:
+            if not isinstance(matcher, dict):
+                continue
+            entries = matcher.get("hooks")
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                command = entry.get("command")
+                if isinstance(command, str) and command:
+                    commands.append(command)
+    return commands
+
+
+def harness_channel(root: Path):
+    """harness-channel: every hook command line in .claude/settings.json
+    of the form "python tools/<file>.py" names a file that (a) exists
+    and (b) imports cleanly via importlib (top-level of these modules is
+    side-effect-free -- verified by critic t-256). Returns
+    (warnings, importable_count) -- importable_count is the number of
+    DISTINCT tools/<file>.py names that were checked and had NO warning
+    (used by wiring_lines() for the OK line's "N files importable").
+    Never raises: a missing/unreadable/invalid settings.json, a missing
+    hook file, or an import failure all become WARNING strings.
+
+    Hardening (Lead ruling on critic-gate note, t-257 attempt 2): exec_module
+    below runs with stdout/stderr redirected to os.devnull. All 8 hook
+    files checked today are top-level-silent (verified t-256), so this
+    changes nothing for the current repo -- but a FUTURE hook file that
+    prints at import time (debug leftover, a library that logs on load)
+    would otherwise dump arbitrary, non-ASCII-sanitized text straight
+    into this hook's own stdout, bypassing _ascii_sanitize entirely
+    (nothing about that printed text would pass through git_hooks_channel/
+    harness_channel's own return values at all -- it would just appear on
+    the console, mid-context, unrouted). Redirecting during the import
+    call closes that path structurally rather than relying on every
+    future hook file staying disciplined."""
+    root = Path(root)
+    settings_path = root / _SETTINGS_RELPATH
+
+    try:
+        text = settings_path.read_text(encoding="utf-8")
+    except OSError as e:
+        path_safe = _ascii_sanitize(str(settings_path), 150)
+        return [f"{path_safe} not readable ({type(e).__name__})"], 0
+
+    try:
+        settings = json.loads(text)
+    except Exception as e:
+        path_safe = _ascii_sanitize(str(settings_path), 150)
+        return [f"{path_safe} not valid JSON ({type(e).__name__})"], 0
+
+    commands = _parse_hook_commands(settings)
+    warnings = []
+    ok_files = set()
+    seen_files = set()
+    for command in commands:
+        m = _HOOK_COMMAND_RE.match(command.strip())
+        if not m:
+            command_safe = _ascii_sanitize(command, 150)
+            warnings.append(f"unparsed hook command: {command_safe}")
+            continue
+        filename = m.group(1)
+        if filename in seen_files:
+            continue
+        seen_files.add(filename)
+
+        file_path = root / "tools" / filename
+        filename_safe = _ascii_sanitize(filename, 150)
+        if not file_path.is_file():
+            warnings.append(f"hook file not found: tools/{filename_safe}")
+            continue
+
+        module_name = f"_wiring_check_{re.sub(r'[^0-9A-Za-z_]', '_', file_path.stem)}"
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, file_path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"no loader for {file_path}")
+            module = importlib.util.module_from_spec(spec)
+            # See harness_channel()'s docstring "Hardening" note: any
+            # top-level print()/stderr write during this exec_module call
+            # is swallowed here, not leaked into this hook's own output.
+            with open(os.devnull, "w", encoding="utf-8") as _devnull, \
+                    contextlib.redirect_stdout(_devnull), \
+                    contextlib.redirect_stderr(_devnull):
+                spec.loader.exec_module(module)
+        except Exception as e:
+            warnings.append(f"import failed: tools/{filename_safe} ({type(e).__name__})")
+            continue
+
+        ok_files.add(filename)
+
+    return warnings, len(ok_files)
+
+
+def python_channel():
+    """python-channel: shutil.which("python") on THIS process's PATH.
+    LIMITATION (spec point 2в, deliberately not fixable in-hook): this is
+    a statement about the PATH of the process running this hook right
+    now -- a SessionStart hook invocation. The PATH available to a git
+    hook (pre-commit/commit-msg) at actual commit time is a SEPARATE
+    shell invocation and can differ (different shell init, different cwd
+    context); this check cannot observe that PATH from here. Returns the
+    resolved path string, or None if no "python" was found."""
+    return shutil.which("python")
+
+
+def wiring_lines(root: Path = None) -> list:
+    """Combines the three wiring-integrity channels into either a single
+    'WIRING: OK (...)' line (spec point 1, everything wired) or one
+    'WIRING WARNING: <fact>' line per discrepancy across all three
+    channels. Feeds the SAME output stream as boot_budget_lines() etc.
+    (build_context_lines() below appends this list exactly like the
+    others).
+
+    Unlike quota_lines()/open_dispatches() -- which have no local
+    try/except and rely entirely on main()'s single outer boundary --
+    this function DOES wrap its own body in a try/except (spec point 3):
+    a wiring-block failure must degrade to one WARNING line, not
+    propagate to main()'s catch-all, which would discard every OTHER
+    line already built for this session (NOW, MODEL, JOURNAL, quota,
+    boot-budget -- see main()'s docstring for why that boundary discards
+    everything gathered so far). Each channel function already turns its
+    OWN known failure modes into WARNING strings; this outer try/except
+    is strictly a backstop for anything unforeseen.
+
+    ASCII invariant (Lead ruling): every line returned here is routed
+    through _ascii_sanitize as a final backstop, on top of the
+    per-component sanitization already applied inside git_hooks_channel()/
+    harness_channel() -- belt and suspenders against a value this module
+    does not fully control (e.g. an unexpected exception's __str__, or a
+    filesystem path containing non-ASCII characters) slipping an
+    unsanitized character or an overlong line into the finished text.
+    _WIRING_LINE_MAX_LEN is wider than _ascii_sanitize's own 80-char
+    default (used for the single-token MODEL/OPEN DISPATCH lines) because
+    a WIRING line legitimately carries a full repo path plus an
+    explanatory clause."""
+    try:
+        root = Path(root) if root else repo_root()
+        git_warnings = git_hooks_channel(root)
+        harness_warnings, importable_count = harness_channel(root)
+        python_path = python_channel()
+    except Exception as e:
+        return [
+            _ascii_sanitize(
+                f"WIRING WARNING: check failed internally ({type(e).__name__})",
+                _WIRING_LINE_MAX_LEN,
+            )
+        ]
+
+    warnings = list(git_warnings) + list(harness_warnings)
+    if not python_path:
+        warnings.append("python not found on PATH")
+
+    if not warnings:
+        python_safe = _ascii_sanitize(python_path, 150)
+        line = (
+            "WIRING: OK (git hooks: pre-commit, commit-msg;"
+            f" harness hooks: {importable_count} files importable; python: {python_safe})"
+        )
+        return [_ascii_sanitize(line, _WIRING_LINE_MAX_LEN)]
+    return [
+        _ascii_sanitize(f"WIRING WARNING: {w}", _WIRING_LINE_MAX_LEN) for w in warnings
+    ]
+
+
 def build_context_lines(
     root: Path = None,
     now: datetime.datetime = None,
@@ -590,6 +917,7 @@ def build_context_lines(
     lines.append(last_calibration_line(events, now))
     lines.extend(quota_lines(gateway_root, now))
     lines.extend(boot_budget_lines(root))
+    lines.extend(wiring_lines(root))
 
     return lines[:MAX_LINES]
 
