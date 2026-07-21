@@ -9,9 +9,9 @@
 |---|---|---|
 | build: оркестратор D + манифесты D1 (Dsn/Dhk/C) + юнит-тесты | builder→opus | DONE (t-239 принят att.3: 45 passed; путь — 2×rejected, эскалация R6 на opus) |
 | review: критик на оркестратор (>100 строк, R3) | critic | done ×2 (t-241 ДОРАБОТАТЬ 4 блокера; t-243 ДОРАБОТАТЬ 1 остаточный; att.3 — critic skipped под двумя трассами) |
-| run1: прогон №1 (D + C) + judge-приёмка | конструкция | in_progress (запущен 11:51, прокси поднят; координаторная нагрузка окна — параллельный t-242, мерить cc_usage честно) |
-| grade1: грейдинг табелем 6б | critic-класс | pending |
-| run2 / grade2 | — | pending |
+| run1: прогон №1 (D + C) + judge-приёмка | конструкция | DONE rc=0 (D: $4.24 вал, 2/3 принято = $2.12/прин, t1 fixed-on-retry 2+2*2, t3 failed после эскалации; C: $5.61 вал, 8.4 мин; судья $0.1758, теги judge чисты; артефакт конструкции в разбор: нетронутый baseline невидим судье — README-эпизод t3) |
+| grade1: грейдинг табелем 6б | critic-класс | in_progress (t-244) |
+| run2 / grade2 | — | run2 in_progress (запущен 12:26, свежие полигоны runD2) |
 | run3 / grade3 | — | pending |
 | verdict: медианы против ключей R4', строка гейт-отчёта, Runs log | Lead | pending | Рамка: R4' ROADMAP — гейт открывается взятыми D-ключами;
 дизайн — docs/tasks/2026-07-20_routellm-evaluation-plan.md (раздел
