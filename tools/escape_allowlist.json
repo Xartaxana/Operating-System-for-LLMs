@@ -1,0 +1,44 @@
+{
+  "entries": [
+    {
+      "id": "critic-skipped-concession",
+      "carrier_file": "CLAUDE.md",
+      "carrier_anchor": "critic: skipped, <reason>",
+      "decision_id": "D-0058",
+      "decision_file": "docs/DECISIONS_FULL.md",
+      "section_sha256": "e30ce06c46026f8c5ad9328bf50a64f70c4e041efe5b5d088d70a56dfeac0760",
+      "affirmed": "2026-07-22",
+      "note": "small-diff critic-skip concession, acceptor-above-only"
+    },
+    {
+      "id": "batching-blocking-self-execution",
+      "carrier_file": "CLAUDE.md",
+      "carrier_anchor": "self-execution with a skip event is legal only for an edit BLOCKING the current move",
+      "decision_id": "D-0081",
+      "decision_file": "docs/DECISIONS_FULL.md",
+      "section_sha256": "9823d781aea7f76c726d2ee570b49677fdb62b7031f1d36042bcfa1825fb6990",
+      "affirmed": "2026-07-22",
+      "note": "batching exception for blocking-only self-execution"
+    },
+    {
+      "id": "judge-basis-leaf-only",
+      "carrier_file": "CLAUDE.md",
+      "carrier_anchor": "or \"judge\" on a leaf-class dispatch",
+      "decision_id": "D-0087",
+      "decision_file": "docs/DECISIONS_FULL.md",
+      "section_sha256": "c1fc682ce909a9809617339f388efb68ca31769cc540f71de4896743e90862a2",
+      "affirmed": "2026-07-22",
+      "note": "judge-basis acceptance restricted to leaf-class dispatches"
+    },
+    {
+      "id": "retro-pair-journal",
+      "carrier_file": "CLAUDE.md",
+      "carrier_anchor": "a missed event is fixed by a retro pair NOW",
+      "decision_id": "D-0089",
+      "decision_file": "docs/DECISIONS_FULL.md",
+      "section_sha256": "2a3cc8b6c8d8d0a472efc9565204d1fa6fe42cb23b02c140382321e675ab3d75",
+      "affirmed": "2026-07-22",
+      "note": "retro-pair fixup exception for a missed journal event (repinned t-259 v3: D-0056 was a spec defect -- that section covers Lead-tier verification, not retro-pairs; CLAUDE.md's D-0056b tag was a dangling label with no own section; fixed by coordinator via new D-0089)"
+    }
+  ]
+}

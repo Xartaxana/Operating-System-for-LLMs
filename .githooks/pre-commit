@@ -1,4 +1,10 @@
 #!/bin/sh
+# set -e: exit code of the hook must reflect the FIRST failing check,
+# not the last command (builder t-262 observation, Lead placement).
+set -e
 # D-0052/D-0053: журнальный валидатор -- staged logs/routing-log.jsonl
 # не ломает append-only / типизированные поля / матрицу D-0058.
 python tools/journal_validator.py
+# N4 (docs/tasks/2026-07-21_validation-import.md): escape-allowlist -- CLAUDE.md
+# permanent concessions stay hash-pinned to their authorizing D-decision.
+python tools/escape_check.py
