@@ -311,6 +311,71 @@ boundaries (D-0079) so discipline does not tax every turn, with
 questions routing strictly up (D-0077): no tier, including the
 coordinator, absorbs a decision that belongs to the user.
 
+## 4.3 Onboarding: Mapping, Not Copying
+
+If the policy is the router (§4.1), then shipping the system to a
+new project means shipping a policy — and the naive way to do that
+is to copy the reference deployment wholesale: policy file, agent
+roles, journal, gates. That works exactly once — on an empty
+project. A project that already runs its own agents has its own
+acceptance machinery, its own carriers, its own escalation habits;
+a copy either breaks them or gets rejected.
+
+We learned this from our own pilot. When the reference deployment
+shipped a batch of four mechanisms to the pilot project, the
+pilot's coordinator adopted three of them — each ADAPTED to the
+pilot's native carriers — and refused the fourth (judge-accepted
+leaf routing, D-0087) with a precise argument: the function was
+already covered by the pilot's own pipeline gates (a functional
+analog of the calibrated judge), and the mechanism's prerequisites
+— the gateway, the pinned judge prompt, the calibration set, the
+per-task cost measurement — did not exist there, so a "judge"
+acceptance basis without a calibration grid would have been a
+self-certification channel, the exact defect class the mechanism
+exists to prevent. That refusal was the correct move. But it took
+a host that had already internalized this project's culture; a
+foreign project will not reproduce it. The mapping procedure must
+therefore be part of the product, not a virtue of the receiver
+(findings F-51 and F-35; decision D-0090).
+
+Onboarding under D-0090 is an examination, not an installation:
+
+1. **Intake inventory.** The first onboarding task is an
+   evaluation, never a build (D-0030 extended from models to the
+   host's scheme): for each FUNCTION — acceptance, journaling and
+   accounting, escalation, isolation, calibration — what covers it
+   in the host today? The functions vocabulary (D-0062) is the
+   bridge: the questionnaire asks "who accepts finished work here",
+   never "where is your judge".
+2. **The adoption ledger — a delivery norm.** For every mechanism
+   in the kit the ledger records one status: adopt / native-
+   equivalent (a "recognized difference": the host's own mechanism
+   covers the function, and the correspondence is written down) /
+   deferred (prerequisites missing; the reopening trigger is named)
+   / rejected (the host's own cost-of-supervision judgment). The
+   ledger is audited by the host's calibration for drift.
+3. **Prerequisite closure.** Every kit mechanism carries a manifest
+   of its prerequisites; installing a mechanism without them is
+   forbidden by construction — either the bundle lands whole, or
+   the native form stays and the ledger says so.
+4. **Measure first, warn first.** The first installed layer is
+   accounting only, as an adapter OVER the host's carriers — their
+   journal stays their journal, nothing is migrated. Gates arrive
+   warning-only and are promoted to blocking on the host's own
+   evidence of leaks (D-0063). Improvement is demonstrated in the
+   host's numbers before enforcement is proposed.
+
+The empty project is not a separate path but the degenerate case of
+the same procedure: the intake inventory returns an empty map, every
+ledger status is "adopt", and the full default kit lands — with the
+enforcement ladder collapsed (there is nothing to break) and the
+accounting baseline accruing from the project's first day. The mode
+is decided by the inventory map, never by declaration, so mixed
+cases (no agents, but living CI and tests) resolve line by line.
+Validation of the procedure is registered on two polygons — one
+greenfield project and one living foreign project — with the intake
+inventory as the first task of each.
+
 ## 5. Evidence-Based Delegation
 
 DELEGATION_TABLE.md is the system's decision surface: task type →
