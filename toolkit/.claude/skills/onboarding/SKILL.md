@@ -274,6 +274,33 @@ CLAUDE.md wins and that's a bug report against this file.
      digest. Everything else about this system runs in the background
      without a ping.
 
+## Upgrade mode (existing deployment; D-0091)
+
+Re-running this skill over a deployment that already carries an
+adoption ledger is an UPGRADE, not a re-install. The unit of delivery
+is the REVISION DELTA, never the full kit:
+
+1. Read the kit snapshot revision recorded in the host's ledger
+   (see the template's revision field). No revision recorded =
+   pre-versioning install: record the current kit revision now and
+   treat the whole ledger as the delta, once.
+2. Build the delta: kit mechanisms new or changed since that
+   revision — including the CONTENT of role files
+   (`.claude/agents/*.md`), skills, tools and PROCESS docs, not just
+   `model:` frontmatter. Check the host ledger's row set against the
+   CURRENT template's nomenclature: a template row missing from the
+   host ledger entirely is part of the delta (completeness, not just
+   staleness — a dropped row hides forever otherwise).
+3. Every delta item gets a ledger decision (adopt /
+   native-equivalent / deferred / rejected) — at least deferred;
+   silence is not a decision. An ADOPTED role-file content edit
+   passes the host's own exam gate for that role BEFORE the commit
+   (critic — seeded-diff exam; scout — golden set run; builder —
+   witness-based acceptance by recorded kit decision).
+4. Update the ledger's recorded kit revision in the same move. The
+   cost is bounded by the delta and paid by the host (Rule #1); a
+   full re-scan is the fallback only when no revision was recorded.
+
 ## Failure detector
 
 The next Boot Report sees an unfilled `delegation.config.yaml` (blank

@@ -61,6 +61,18 @@ greenfield ledger can be written before, or independent of, the actual
 template copy landing on disk — straight from this template plus the
 toolkit's own docs.
 
+## Kit snapshot revision (D-0091)
+
+Kit snapshot revision: `<commit/tag of the toolkit snapshot this
+ledger was last reconciled against>` — written at install, updated by
+every upgrade batch in the same move. An upgrade re-inventories by
+the REVISION DELTA (role-file CONTENT included, not just `model:`
+frontmatter); ledger completeness is checked against the CURRENT
+template's row nomenclature — a template row missing from this ledger
+entirely is part of the delta. No recorded revision = pre-versioning
+install: record the current kit revision and treat the whole ledger
+as the delta, once.
+
 ## Rows
 
 One row per mechanism the onboarding skill's PREREQUISITES table lists

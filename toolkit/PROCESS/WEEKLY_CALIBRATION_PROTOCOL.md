@@ -346,6 +346,20 @@ once, rather than in every cross-reference below.
     test-cache entry, a file mtime, a process/track log) -- the same
     forensic class as the check above.
 
+22. **Ledger drift and completeness (D-0091).** Mechanism: the
+    adoption ledger records the kit snapshot revision and mirrors the
+    current template's row nomenclature. Violation: an "adopt" row
+    whose mechanism is absent or stale in the tree; a template row
+    missing from the ledger entirely (a dropped row hides forever —
+    the F-52 class); a recorded revision no upgrade batch has
+    reconciled. Window check: (a) every current template row has a
+    ledger row (completeness); (b) spot-check adopt rows against the
+    tree (mechanism present, wired); (c) the recorded kit revision
+    exists, and the last upgrade batch's delta was decided row by
+    row — at least deferred, silence is not a decision. The
+    staff-side pair of this check is the kit maintainer's port-batch
+    delta check (their calibration protocol).
+
 ## Closing out a run
 
 DELEGATION_TABLE.md statuses move only on this data (Update Rule 1;
