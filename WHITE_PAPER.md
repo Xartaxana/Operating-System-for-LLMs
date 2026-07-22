@@ -1,6 +1,6 @@
 # Supervised Delegation: an Operating System Approach to LLM Cost
 
-**White Paper — living draft v0.2.1 (2026-07-13)**
+**White Paper — living draft v0.2.2 (2026-07-22)**
 
 Status: draft. Every claim in section 7 is backed by repository
 evidence (commits, DELEGATION_TABLE.md + docs/SHADOW_EVALUATION_LOG.md,
@@ -8,7 +8,14 @@ requests.db, logs/routing-log.jsonl, docs/FINDINGS.md); numbers
 will be revised as telemetry volume grows. Deliverable #1 of
 PROJECT_CHARTER.md.
 
-Changelog: v0.2.1 (2026-07-13) — evidence update after the first
+Changelog: v0.2.2 (2026-07-22) — §4.3 extended with the delivery
+upgrade layer (D-0091: versioned ledgers, revision-delta
+re-inventory, role files as diffable delivery content — the F-52
+lesson; D-0092: an adopt row is a wiring commitment); §5 calibration
+check count refreshed (33), §10 roadmap updated (judge-acceptance
+window collected 07-22, toolkit v0.5.0 assembled and gated behind
+calibration #4), §11 limitations re-aged.
+v0.2.1 (2026-07-13) — evidence update after the first
 full production-evidence cycle. First weekly calibration moved the
 four Claude-contour rows to provisionally_validated (§5, §5.1, §7);
 Phases 1/1.5 closed; Phase 3 (toolkit, D-0070..D-0074) executed and
@@ -376,6 +383,29 @@ Validation of the procedure is registered on two polygons — one
 greenfield project and one living foreign project — with the intake
 inventory as the first task of each.
 
+Delivery does not end at install. The first upgrade of a live
+deployment exposed the second half of the problem (F-52): a batch
+refreshed the policy kernel but never revisited the role files, so a
+critic role installed before a key rule was born kept its blind spot
+for ten days — caught only by the deployment's own entrance exam,
+after the fact. The ledger, it turned out, answers "what did we
+decide?" but not "against which kit?": rows carried no revision, so
+an outdated, incomplete mirror of the current template looked
+complete. The upgrade layer (D-0091) closes this: every ledger
+records the kit snapshot revision it was last reconciled against; an
+upgrade re-inventories by the REVISION DELTA — role-file CONTENT
+included, not just model bindings — and every delta item gets a
+ledger decision (at least deferred; silence is not a decision), with
+ledger completeness checked against the current template's row
+nomenclature and adopted role edits passing the host's own exam gate
+before commit. An adopt row is also a wiring commitment (D-0092):
+the host's wiring check reads the ledger's adopt rows and warns when
+an adopted mechanism's hook has silently fallen off the execution
+path. Detectors sit on both ends of the channel: a staff-side
+calibration check on every outgoing port batch (the kit delta vs the
+target's recorded revision) and a host-side ledger
+drift-and-completeness check.
+
 ## 5. Evidence-Based Delegation
 
 DELEGATION_TABLE.md is the system's decision surface: task type →
@@ -390,7 +420,9 @@ cost — the only status that may justify routing real traffic), or to
 `rejected` (delegation attempted and found harmful). On the
 subscription contour status moves happen only at the weekly
 calibration (D-0047), never mid-stream. The first such calibration
-ran 2026-07-11 (18 checks, a journaled `calibrated` event) and moved
+ran 2026-07-11 (18 checks at the time — the checklist has since
+grown to 33 as new mechanisms registered their detectors; a
+journaled `calibrated` event) and moved
 the four Claude-contour rows — recon, implementation-to-spec,
 review, coordination — to provisionally_validated on 3.4 days of
 routed production traffic: the first status movements backed by a
@@ -1144,7 +1176,9 @@ docs/RELATED_WORK.md to stop re-litigating).
   (§6.5): the pre-registered leaf-routing experiment took its keys,
   the adopt decision landed as D-0087/D-0088, and the workstream's
   remaining path to closure (and with it Phase 2's) is the first
-  live window of judge-based acceptances audited at calibration #4.
+  live window of judge-based acceptances audited at calibration #4;
+  the window itself is already collected (07-22: four judge-basis
+  acceptances and five reject verdicts in the journal).
 - **Phase 3 (toolkit, D-0070) — CLOSED 2026-07-12:** the system
   packaged as a public installable template (Supervised-Delegation
   v0.1.0), validated by two installs (§4.1); template changes ship
@@ -1152,7 +1186,8 @@ docs/RELATED_WORK.md to stop re-litigating).
   Batches since: releases v0.4.0–v0.4.2 (2026-07-20) brought the kit
   to parity with the dogfooding deployment — policy kernel, gate
   suite, judge onboarding — with a port queue accumulating between
-  operator-opened syncs.
+  operator-opened syncs. The v0.5.0 snapshot is assembled and gated
+  behind calibration #4 (operator's word, 2026-07-22).
 - **Continuous:** the delegation table and this paper's §7 are living
   documents; Shadow Evaluation runs append to
   docs/SHADOW_EVALUATION_LOG.md; the weekly calibration aggregates
@@ -1180,11 +1215,14 @@ threshold); single machine (6 GB VRAM constrains local tiers to 4B);
 the judge calibration set is young (13 pairs) and grows only as
 fast as chief-judge reviews happen; retry-loop cost is designed into
 the method (the `attempt` field exists) but the trend is not yet
-measured. The mechanism discipline of §6.2 is under two weeks old;
-its detectors have now fired in production beyond their motivating
-incidents (F-34, F-37, F-38) — evidence both that the net catches
-and that leaks keep arriving. The task-pipeline pilot has completed
-zero cycles; its first verdict is due at the ~07-18 calibration.
+measured. The mechanism discipline of §6.2 is ten days old at this
+update (2026-07-22); its detectors have fired in production beyond
+their motivating incidents (F-34, F-37, F-38) — evidence both that
+the net catches and that leaks keep arriving — and the validation
+layer above the gates (§6.6) has since been added. The task-pipeline
+pilot (the QA conveyor) is live and cycling; its incidents feed the
+method back as findings (e.g. the AT-BUG-022 deliverable-drift
+incident → F-50 and calibration check 31).
 
 ---
 
