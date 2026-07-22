@@ -356,7 +356,14 @@ once, rather than in every cross-reference below.
     ledger row (completeness); (b) spot-check adopt rows against the
     tree (mechanism present, wired); (c) the recorded kit revision
     exists, and the last upgrade batch's delta was decided row by
-    row — at least deferred, silence is not a decision. The
+    row — at least deferred, silence is not a decision. For (b),
+    "wired" is explicit (D-0092, wiring drift): the row's mechanism
+    is not just present on disk but actually wired — its hooksPath
+    entry / settings hook / invocation path exists; an adopt row
+    whose wiring silently fell off is a finding even when the file
+    itself is still in the tree. Continuous pair of (b): the
+    deployment's SessionStart wiring check reads this ledger's adopt
+    rows, not only the configured hooks. The
     staff-side pair of this check is the kit maintainer's port-batch
     delta check (their calibration protocol).
 

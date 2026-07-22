@@ -87,6 +87,7 @@ add rows freely, never remove the standard ones without recording why):
 | Routing journal + validator (`logs/routing-log.jsonl`, `tools/journal_validator.py` pre-commit, `tools/journal_echo.py` PostToolUse) | | |
 | Mechanism gate + symmetry map (`tools/mechanism_gate.py`, `.githooks/commit-msg`, `docs/SIBLING_MAP.md`) | | |
 | Tier verification / SessionStart (`tools/session_context.py`, `tools/tier_echo.py`) | | |
+| Wiring integrity check (SessionStart wiring check reconciling this ledger's adopt rows against actual hooksPath/settings — D-0092) | | |
 | Dispatch gate / critic snapshot (`tools/dispatch_gate.py`, `tools/critic_snapshot.py`) | | |
 | Hygiene gate (`tools/hygiene_gate.py`) | | |
 | DoD track / gate (`tools/dod_track.py`, `tools/dod_gate.py`) | | |
