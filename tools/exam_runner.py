@@ -520,7 +520,13 @@ def _run_one_session(cmd, cwd, text, polygon_root, arm, task_id, filename_suffix
     path and the t-132 multi-session path are built from. Returns the
     same {start_ts, end_ts, rc, stdout_tail, stdout_file} shape either
     way; the caller attaches order_index/task_id/arm/cwd (classic) or
-    session_index (multi)."""
+    session_index (multi). When the persisted stdout is empty after
+    .strip() (empty string or whitespace-only), independent of rc, the
+    record ALSO carries "empty_stdout": true -- a marker that lost
+    output is indistinguishable from a session that silently did
+    nothing (2026-07-15 finding 3); the key is omitted entirely when
+    stdout is non-empty, so classic run_log shape (spec point 2) is
+    unaffected."""
     start_ts = datetime.utcnow().isoformat() + "Z"
     proc = subprocess.run(
         cmd, cwd=cwd, input=text,
@@ -534,13 +540,16 @@ def _run_one_session(cmd, cwd, text, polygon_root, arm, task_id, filename_suffix
     stdout_file = stdout_dir / f"{arm}-{task_id}{filename_suffix}.txt"
     stdout_file.write_text(stdout, encoding="utf-8")
 
-    return {
+    result = {
         "start_ts": start_ts,
         "end_ts": end_ts,
         "rc": proc.returncode,
         "stdout_tail": stdout[-2000:],
         "stdout_file": str(stdout_file),
     }
+    if not stdout.strip():
+        result["empty_stdout"] = True
+    return result
 
 
 def _execute_launch(launch, polygon_root):
@@ -612,10 +621,13 @@ def run(manifest, dry_run=False):
     'sessions' list of that same per-session shape (stdout at
     <polygon_root>/stdout/<arm>-<task>-s<N>.txt) plus the aggregate
     'rc'/'sessions_total'/'stopped_early' -- see _execute_launch's
-    docstring. Concurrency is bounded across LAUNCHES (distinct
-    (task, arm) sandboxes); the sessions WITHIN one multi-session
-    launch always run sequentially in the same cwd regardless of
-    manifest['parallel']."""
+    docstring. Any per-session record (classic or within a 'sessions'
+    list) whose persisted stdout is empty after .strip() additionally
+    carries "empty_stdout": true, regardless of rc (2026-07-15 finding
+    3); the key is absent when stdout is non-empty. Concurrency is
+    bounded across LAUNCHES (distinct (task, arm) sandboxes); the
+    sessions WITHIN one multi-session launch always run sequentially
+    in the same cwd regardless of manifest['parallel']."""
     plan = build_launch_plan(manifest)
     if dry_run:
         _print_plan(plan)

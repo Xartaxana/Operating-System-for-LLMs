@@ -767,6 +767,118 @@ def test_run_persists_full_stdout_and_truncates_run_log_tail(tmp_path, monkeypat
     assert run_log[0]["stdout_tail"] == long_stdout[-2000:]
     assert len(run_log[0]["stdout_tail"]) == 2000
     assert results[0]["stdout_file"] == str(stdout_file)
+    # Non-empty stdout -> the marker key must be ABSENT, not False
+    # (backward-compat run_log shape, spec point 2).
+    assert "empty_stdout" not in run_log[0]
+    assert "empty_stdout" not in results[0]
+
+
+# ---------------------------------------------------------------------------
+# 6a. empty_stdout marker (2026-07-15 finding 3): a persisted stdout that
+#     is empty (or whitespace-only) after .strip() gets flagged in the
+#     run_log record so a silently-idle session is distinguishable from
+#     lost output; the flag is set independent of rc, and the key is
+#     omitted entirely when stdout is non-empty.
+# ---------------------------------------------------------------------------
+
+
+def test_run_empty_stdout_flag_set_for_empty_string(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda cmd, **kw: FakeProc())
+
+    manifest = _minimal_run_manifest(tmp_path)
+    results = run(manifest, dry_run=False)
+
+    polygon_root = Path(manifest["polygon_root"])
+    run_log = json.loads((polygon_root / "run_log.json").read_text(encoding="utf-8"))
+    assert run_log[0]["empty_stdout"] is True
+    assert results[0]["empty_stdout"] is True
+
+
+def test_run_empty_stdout_flag_set_for_whitespace_only(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    class FakeProc:
+        returncode = 0
+        stdout = "\n \t"
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda cmd, **kw: FakeProc())
+
+    manifest = _minimal_run_manifest(tmp_path)
+    results = run(manifest, dry_run=False)
+
+    polygon_root = Path(manifest["polygon_root"])
+    run_log = json.loads((polygon_root / "run_log.json").read_text(encoding="utf-8"))
+    assert run_log[0]["empty_stdout"] is True
+    assert results[0]["empty_stdout"] is True
+
+
+def test_run_empty_stdout_flag_absent_for_nonempty_stdout(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    class FakeProc:
+        returncode = 0
+        stdout = "hello"
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda cmd, **kw: FakeProc())
+
+    manifest = _minimal_run_manifest(tmp_path)
+    results = run(manifest, dry_run=False)
+
+    polygon_root = Path(manifest["polygon_root"])
+    run_log = json.loads((polygon_root / "run_log.json").read_text(encoding="utf-8"))
+    # Key must be ABSENT, not present-and-False.
+    assert "empty_stdout" not in run_log[0]
+    assert "empty_stdout" not in results[0]
+
+
+def test_run_empty_stdout_flag_set_even_when_rc_nonzero(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    class FakeProc:
+        returncode = 1
+        stdout = ""
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda cmd, **kw: FakeProc())
+
+    manifest = _minimal_run_manifest(tmp_path)
+    results = run(manifest, dry_run=False)
+
+    polygon_root = Path(manifest["polygon_root"])
+    run_log = json.loads((polygon_root / "run_log.json").read_text(encoding="utf-8"))
+    assert run_log[0]["rc"] == 1
+    assert run_log[0]["empty_stdout"] is True
+    assert results[0]["empty_stdout"] is True
+
+
+def test_run_multi_session_empty_stdout_flag_on_affected_session_only(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    def fake_subprocess_run(cmd, **kwargs):
+        idx = fake_subprocess_run.calls
+        fake_subprocess_run.calls += 1
+
+        class FakeProc:
+            returncode = 0
+            stdout = "" if idx == 1 else f"session {idx} ok"
+        return FakeProc()
+    fake_subprocess_run.calls = 0
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", fake_subprocess_run)
+
+    manifest = _multi_session_manifest(tmp_path, ["s1 ok", "s2 empty", "s3 ok"])
+    results = run(manifest, dry_run=False)
+
+    entry = results[0]
+    assert len(entry["sessions"]) == 3
+    assert "empty_stdout" not in entry["sessions"][0]
+    assert entry["sessions"][1]["empty_stdout"] is True
+    assert "empty_stdout" not in entry["sessions"][2]
 
 
 # ---------------------------------------------------------------------------
