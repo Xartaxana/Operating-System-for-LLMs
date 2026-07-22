@@ -128,7 +128,29 @@ def parse_ts(ts: str) -> datetime.datetime:
 
 
 def load_config(root: Path) -> dict:
+    """t-275 (CURRENT_CONTEXT batch item б, class D-0043 alongside
+    load_budgets below): missing config.yaml used to raise
+    FileNotFoundError from the bare open() -- harmless for the CLI
+    (main() below already has a targeted try/except around ITS call),
+    but a real hole for a caller with no config.yaml-shaped fallback of
+    its own, such as session_context.py's quota_lines(), which has NO
+    local try/except by design (it relies on main()'s single fail-open
+    boundary there) -- a missing config.yaml made THAT SessionStart hook
+    lose its ENTIRE context output (NOW/MODEL/JOURNAL/etc, not just the
+    quota lines), not just the quota_lines() piece. Same exists-guard
+    shape as load_budgets() right below: absence of the file is a valid,
+    expected state (e.g. a fresh subscription-contour checkout that
+    never generated config.yaml -- Finding B, docs/tasks validation
+    t-270) and gets an honest empty-dict default, not an exception.
+    A config.yaml that EXISTS but is not valid YAML is a DIFFERENT
+    failure class (corrupt content, not absence) and is deliberately
+    NOT guarded here -- same asymmetry as load_budgets(), which also
+    only guards existence, not parseability; yaml.safe_load's own
+    exception (yaml.YAMLError) still propagates unchanged in that case
+    (see test_load_config_malformed_yaml_still_raises)."""
     path = Path(root) / "config.yaml"
+    if not path.exists():
+        return {}
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 

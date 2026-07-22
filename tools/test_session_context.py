@@ -239,17 +239,67 @@ def test_main_fail_open_on_broken_journal(tmp_path, capsys):
     assert out[0].startswith("session-context warning:")
 
 
-def test_main_fail_open_when_gateway_dir_missing(tmp_path, capsys):
-    # A repo root with no gateway/ directory at all (config.yaml/budgets.yaml
-    # unreachable) must still fail open, not crash the session start.
+def test_main_survives_gateway_dir_missing_with_real_context(tmp_path, capsys):
+    # t-275 (CURRENT_CONTEXT batch item б, Finding B / D-0043): a repo
+    # root with no gateway/ directory at all (config.yaml/budgets.yaml
+    # unreachable) used to make preflight_quota.load_config's bare
+    # open() raise FileNotFoundError from inside quota_lines() (which
+    # has NO local try/except by design), which propagated to THIS
+    # main()'s single fail-open boundary and blanked the ENTIRE context
+    # block (NOW/MODEL/JOURNAL/boot-budget/wiring, not just the quota
+    # line) -- exit 0, but only one bare warning line, real context lost.
+    # After load_config's exists-guard (mirrors load_budgets), a missing
+    # gateway/ dir no longer raises at all: quota_lines() returns
+    # cleanly (empty, since there is no config.yaml-declared alias to
+    # report on), and the REST of the context survives intact. This is
+    # the direct, empirically-verified consequence of the load_config
+    # fix, not a change made to this file (tools/session_context.py
+    # itself is untouched by this batch, per its owns/non-goals fence).
     root = tmp_path
     (root / "logs").mkdir()
     (root / "logs" / "routing-log.jsonl").write_text("", encoding="utf-8")
     code = main(root)
     assert code == 0
     out = capsys.readouterr().out.strip().splitlines()
-    assert len(out) == 1
-    assert out[0].startswith("session-context warning:")
+    # No longer the single fail-open warning line -- real context lines
+    # are present (NOW/MODEL/JOURNAL at least), and quota_lines()
+    # produced no exception-triggered warning.
+    assert not any(l.startswith("session-context warning:") for l in out)
+    assert any(l.startswith("NOW:") for l in out)
+    assert any(l.startswith("MODEL:") for l in out)
+    assert any(l.startswith("JOURNAL:") for l in out)
+
+
+def test_quota_lines_missing_gateway_dir_returns_empty_not_raises(tmp_path):
+    # Narrower, direct test of the same fix at the quota_lines() level
+    # (independent of main()'s outer boundary): a gateway/ root that does
+    # not exist at all must not raise out of quota_lines() -- there is
+    # simply nothing to report (no config.yaml -> no aliases -> no
+    # budgets.yaml-declared window can be resolved).
+    gateway_root = tmp_path / "gateway"
+    assert not gateway_root.exists()
+    assert sc.quota_lines(gateway_root) == []
+
+
+def test_main_survives_config_yaml_specifically_missing_budgets_present(tmp_path, capsys):
+    # Narrower absence than "whole gateway/ dir missing": the directory
+    # exists (budgets.yaml is present and readable) but config.yaml
+    # specifically is not there -- the exact scenario named in the spec
+    # ("config.yaml отсутствует"). Must degrade the same way: real
+    # context survives, no bare fail-open warning.
+    root = tmp_path
+    (root / "logs").mkdir()
+    (root / "logs" / "routing-log.jsonl").write_text("", encoding="utf-8")
+    gateway = root / "gateway"
+    gateway.mkdir()
+    with open(gateway / "budgets.yaml", "w", encoding="utf-8") as f:
+        yaml.safe_dump(BUDGETS, f)
+    # config.yaml deliberately NOT written.
+    code = main(root)
+    assert code == 0
+    out = capsys.readouterr().out.strip().splitlines()
+    assert not any(l.startswith("session-context warning:") for l in out)
+    assert any(l.startswith("NOW:") for l in out)
 
 
 def test_main_success_path_prints_lines_and_exits_zero(tmp_path, capsys):

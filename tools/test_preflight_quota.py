@@ -19,6 +19,8 @@ from preflight_quota import (
     default_root,
     discover_dbs,
     format_text,
+    load_budgets,
+    load_config,
     normalize_provider_model,
     parse_provider_429,
     parse_ts,
@@ -127,6 +129,73 @@ def test_resolve_target_unknown_alias_raises_keyerror():
 def test_default_root_points_at_gateway_dir():
     root = default_root()
     assert root.name == "gateway"
+
+
+# ---- t-275 (CURRENT_CONTEXT batch item б): load_config exists-guard,
+# mirroring load_budgets -- absence of config.yaml is a valid state
+# (empty-dict default), not an exception. ----
+
+def test_load_config_missing_file_returns_empty_dict(tmp_path):
+    root = tmp_path / "gateway"
+    root.mkdir()
+    # No config.yaml written at all -- not even the directory content,
+    # just the (empty) gateway/ dir, mirroring a fresh checkout.
+    assert load_config(root) == {}
+
+
+def test_load_config_missing_gateway_dir_entirely_returns_empty_dict(tmp_path):
+    # Stronger absence than "file missing inside an existing dir": the
+    # gateway/ directory itself does not exist (Path.exists() is False
+    # the same way for both -- this asserts the guard covers this case
+    # too, not just a present-dir/absent-file split).
+    root = tmp_path / "gateway"
+    assert not root.exists()
+    assert load_config(root) == {}
+
+
+def test_load_config_existing_file_still_parses_normally(tmp_path):
+    root = _seed_root(tmp_path)
+    assert load_config(root) == CONFIG
+
+
+def test_load_config_downstream_callers_degrade_gracefully_on_missing_file(tmp_path):
+    # The exists-guard's whole point: callers of load_config() that have
+    # no fallback of their own (alias_provider_models, gemini_aliases-
+    # style consumers) must not blow up either -- an empty config.yaml
+    # (or an absent one) just yields an empty mapping, not an exception.
+    root = tmp_path / "gateway"
+    root.mkdir()
+    config = load_config(root)
+    assert alias_provider_models(config) == {}
+
+
+def test_load_config_malformed_yaml_still_raises(tmp_path):
+    # Different failure CLASS from absence (file exists but its content
+    # cannot be parsed) -- deliberately NOT guarded here, same asymmetry
+    # as load_budgets (existence-only guard). Named and tested per spec,
+    # not silently swallowed: yaml.safe_load's own exception propagates
+    # unchanged, exactly like before this fix.
+    root = tmp_path / "gateway"
+    root.mkdir()
+    (root / "config.yaml").write_text(
+        "model_list: [this is not: valid: yaml: at all\n", encoding="utf-8"
+    )
+    with pytest.raises(yaml.YAMLError):
+        load_config(root)
+
+
+def test_load_budgets_malformed_yaml_still_raises_same_class(tmp_path):
+    # Sibling control (D-0043: same class on the neighbor this fix was
+    # modeled after) -- load_budgets never guarded parseability either;
+    # confirms the asymmetry is a documented, symmetric design choice on
+    # BOTH functions, not an oversight unique to load_config.
+    root = tmp_path / "gateway"
+    root.mkdir()
+    (root / "budgets.yaml").write_text(
+        "quota_windows: [this is not: valid: yaml: at all\n", encoding="utf-8"
+    )
+    with pytest.raises(yaml.YAMLError):
+        load_budgets(root)
 
 
 # ---- ts parsing: both formats ----

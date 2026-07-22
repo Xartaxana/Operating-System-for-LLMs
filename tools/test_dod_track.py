@@ -154,6 +154,56 @@ def test_build_fact_rc_field_overrides_text_when_present():
     assert entry2["outcome"] == "red"
 
 
+# ---------------------------------------------------------------------
+# t-275 (находка t-262 v1): determine_outcome() word-boundary fix --
+# "failed" substring inside "xfailed" (and inside any other longer word)
+# must NOT be read as a failure indicator; a bare "N xfailed" summary
+# (no other pass/fail words) must register as a genuine "green" outcome,
+# matching how a bare "N skipped" summary already behaved before this
+# fix -- not merely "not red", but actually green (spec: "честная
+# xfail-сдача" is not a block).
+# ---------------------------------------------------------------------
+
+
+def test_determine_outcome_bare_xfailed_is_green():
+    assert dod_track.determine_outcome({"stdout": "2 xfailed in 0.10s", "stderr": ""}) == "green"
+
+
+def test_determine_outcome_bare_xpassed_is_green():
+    assert dod_track.determine_outcome({"stdout": "1 xpassed in 0.05s", "stderr": ""}) == "green"
+
+
+def test_determine_outcome_bare_failed_is_red():
+    assert dod_track.determine_outcome({"stdout": "3 failed in 0.20s", "stderr": ""}) == "red"
+
+
+def test_determine_outcome_mixed_failed_and_xfailed_is_red():
+    # A REAL failure alongside xfailed entries must still block -- xfailed
+    # recognition must not mask an actual "failed" count.
+    assert dod_track.determine_outcome(
+        {"stdout": "1 failed, 2 xfailed in 0.30s", "stderr": ""}
+    ) == "red"
+
+
+def test_determine_outcome_failed_substring_inside_longer_word_not_a_failure():
+    # "scaffailed" contains the literal substring "failed" with no word
+    # boundary on either side -- must NOT be read as a failure indicator.
+    # Paired with a real "passed" indicator so the result demonstrates the
+    # fix positively (green), not just "happens to still be red" by the
+    # ambiguous-default path.
+    assert dod_track.determine_outcome(
+        {"stdout": "5 passed, scaffailed helper ran", "stderr": ""}
+    ) == "green"
+
+
+def test_determine_outcome_empty_summary_defaults_red():
+    # No failure indicator and no success indicator at all -- unopened
+    # ambiguity still defaults to the protective "red" (unchanged from
+    # before this fix; an unrecognized/empty output is not a confirmed
+    # green run).
+    assert dod_track.determine_outcome({"stdout": "", "stderr": ""}) == "red"
+
+
 def test_is_verification_command_matches_spec_forms():
     assert dod_track.is_verification_command("pytest")
     assert dod_track.is_verification_command("python -m pytest tools/ -q")

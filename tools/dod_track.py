@@ -220,8 +220,34 @@ UI_WITNESS_RE = re.compile(
 # отчёта, не блокер: recognized-но-red лучше, чем invisible (команда
 # хотя бы попадает в трек как "run", а не пропадает вовсе, как было
 # до этого пункта).
-FAILURE_INDICATORS_RE = re.compile(r"failed|error|traceback", re.IGNORECASE)
-SUCCESS_INDICATORS_RE = re.compile(r"passed|\bok\b", re.IGNORECASE)
+#
+# t-275 (находка t-262 v1): голая подстрока "failed" БЕЗ границ слова
+# ложно матчила "xfailed" ("2 xfailed" -> ошибочный "red" -- честная
+# xfail-сдача builder'а получала блок dod_gate; воспроизведено:
+# xfail -> блок, skip -> зелёно). Фикс -- вариант "границы слова" из
+# двух, предложенных спекой ("границы слова ИЛИ парсинг сводки pytest"):
+# выбран как минимальный точечный фикс, не трогающий остальную логику
+# determine_outcome() и не ломающий не-pytest witness-формы (node/UI,
+# см. выше), для которых полноценный парсер СВОДКИ pytest (вариант 2)
+# был бы бесполезен (у них нет "N passed/failed" сводки вообще -- см.
+# test_node_script_outcome_uses_same_text_heuristics: "All checks
+# passed" без числа). \bfailed\b НЕ матчит "failed" как часть более
+# длинного слова (ни "xfailed", ни "scaffailed") -- между двумя
+# буквами (word-char) нет \b-перехода. SUCCESS_INDICATORS_RE
+# дополнительно распознаёт голое "xfailed" (у "xpassed" уже было
+# постфактум, "оно" по совпадению матчилось на подстроку "passed" --
+# см. test_build_fact_bash_verification_command matrix) -- иначе
+# "N xfailed" без других слов сводки падал бы в защитный дефолт "red"
+# (см. determine_outcome), а спека т-262 явно требует, чтобы честный
+# xfail НЕ блокировал сдачу (тот же исход, что честный skip уже давал).
+# ПОСЛЕДСТВИЕ (документировано, не решено этим коммитом): "error" и
+# "traceback" ниже остаются голыми подстроками без \b -- вне
+# объявленного spec-scope этого пункта (спека называет только
+# "failed"); при появлении аналогичной жалобы на "error"/"traceback"
+# (напр. слово, содержащее "error" как подстроку) -- тот же класс,
+# отдельный фикс.
+FAILURE_INDICATORS_RE = re.compile(r"\bfailed\b|error|traceback", re.IGNORECASE)
+SUCCESS_INDICATORS_RE = re.compile(r"passed|\bok\b|xfailed", re.IGNORECASE)
 
 NUMERIC_RC_FIELDS = ("rc", "exit_code", "returnCode", "return_code")
 
