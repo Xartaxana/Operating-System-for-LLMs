@@ -64,6 +64,19 @@ last write can silently drop a fact from a parallel call.
 This hook never blocks (always exit 0) except on unrecognized/
 unrelated input, which is also exit 0 with no side effects -- the
 same fail-open principle as every other hook in this file set.
+
+SCRATCHPAD EXCLUSION: build_fact() for edit tools records no fact at
+all (returns None -- same as an irrelevant tool) when file_path is a
+harness scratchpad path (substring "scratchpad" in the path, case-
+insensitive) OR the path resolves entirely outside cwd (the repo
+root). Edits there (temp scripts, scratch working files) are excluded
+from main-edit scope ENTIRELY -- main_gate.py/dod_gate.py never see
+them, for either the doc-only exemption or the green invariant, as if
+they never happened. An unknown file_path/cwd is CONSERVATIVELY NOT
+treated as scratchpad (fail-safe, symmetric with the doc-only
+exemption's unknown-extension handling in main_gate.py/dod_gate.py):
+missing information does not earn an exemption. See
+_is_scratchpad_path().
 """
 
 import json
@@ -116,6 +129,42 @@ FAILURE_INDICATORS_RE = re.compile(r"\bfailed\b|error|traceback", re.IGNORECASE)
 SUCCESS_INDICATORS_RE = re.compile(r"passed|\bok\b|xfailed", re.IGNORECASE)
 
 NUMERIC_RC_FIELDS = ("rc", "exit_code", "returnCode", "return_code")
+
+# Harness scratchpad: a session's temp working directory OUTSIDE the
+# repo (path shape "...Temp/claude/<repo>/<session_id>/scratchpad/...").
+# Edits there are excluded from main-edit scope entirely: not counted
+# as code edits for either the doc-only exemption or the green
+# invariant (main_gate.py/dod_gate.py). Literal substring match,
+# case-insensitive: the path can arrive in any case on some platforms.
+_SCRATCHPAD_PATTERN = "scratchpad"
+
+
+def _is_scratchpad_path(file_path, cwd) -> bool:
+    """True if file_path is a harness scratchpad path ('scratchpad' in
+    the path, case-insensitive) OR the path resolves to somewhere
+    OUTSIDE the repo root (cwd) entirely. Conservative (symmetric with
+    _is_doc_only_file): an UNKNOWN file_path/cwd returns False (NOT
+    excluded, the invariant stays in force) -- missing information does
+    not earn an exemption from main-edit scope, the same fail-safe
+    principle as the doc-only exemption's unknown-extension handling."""
+    if not isinstance(file_path, str) or not file_path:
+        return False
+    if _SCRATCHPAD_PATTERN in file_path.lower():
+        return True
+    if not isinstance(cwd, str) or not cwd:
+        return False
+    try:
+        p = Path(file_path)
+        if not p.is_absolute():
+            p = Path(cwd) / p
+        resolved = p.resolve()
+        root = Path(cwd).resolve()
+    except Exception:
+        return False
+    try:
+        return not resolved.is_relative_to(root)
+    except Exception:
+        return False
 
 
 def _now_iso() -> str:
@@ -222,11 +271,18 @@ def build_fact(payload: dict):
     if is_edit_tool(tool_name):
         tool_input = payload.get("tool_input") or {}
         file_path = tool_input.get("file_path")
+        file_path = file_path if isinstance(file_path, str) else None
+        # Scratchpad/outside-repo-root edits are excluded from main-edit
+        # scope ENTIRELY -- they never enter the track at all (as if they
+        # never happened, for main_gate.py/dod_gate.py's doc-only
+        # exemption and green invariant alike).
+        if file_path is not None and _is_scratchpad_path(file_path, payload.get("cwd")):
+            return None
         return "edit", {
             "ts": _now_iso(),
             "tool_name": tool_name,
             "agent_id": agent_id,
-            "file_path": file_path if isinstance(file_path, str) else None,
+            "file_path": file_path,
         }
 
     if tool_name in ("Bash", "PowerShell"):

@@ -144,10 +144,17 @@ def load_config(root: Path) -> dict:
     t-270) and gets an honest empty-dict default, not an exception.
     A config.yaml that EXISTS but is not valid YAML is a DIFFERENT
     failure class (corrupt content, not absence) and is deliberately
-    NOT guarded here -- same asymmetry as load_budgets(), which also
-    only guards existence, not parseability; yaml.safe_load's own
-    exception (yaml.YAMLError) still propagates unchanged in that case
-    (see test_load_config_malformed_yaml_still_raises)."""
+    NOT guarded HERE; yaml.safe_load's own exception (yaml.YAMLError)
+    still propagates unchanged in that case (see
+    test_load_config_malformed_yaml_still_raises). This function's own
+    caller with no fallback of its own (tools/session_context.py's
+    quota_lines()) catches that exception at ITS OWN boundary instead
+    (t-278 п.6) -- an external guard, not an internal one. load_budgets()
+    right below used to share this exact asymmetry (guard existence
+    only, not parseability) but no longer does: t-278-дельта п.3 added
+    an INTERNAL parse-guard there, by explicit coordinator decision --
+    the two functions are deliberately guarded at DIFFERENT layers now,
+    not identically."""
     path = Path(root) / "config.yaml"
     if not path.exists():
         return {}
@@ -156,11 +163,36 @@ def load_config(root: Path) -> dict:
 
 
 def load_budgets(root: Path) -> dict:
+    """t-278-дельта п.3 (Rule #1, координатор: parse-guard симметрично
+    п.6-гарду load_config в tools/session_context.py -- битый
+    budgets.yaml не роняет вызывающего): budgets.yaml, который
+    СУЩЕСТВУЕТ, но не парсится (corrupt YAML content, НЕ отсутствие --
+    отсутствие уже честно деградирует через exists-guard выше), больше
+    НЕ пробрасывает yaml.safe_load's исключение наружу -- вместо этого
+    возвращает ТОТ ЖЕ дефолт, что и отсутствующий файл
+    ({"quota_windows": {}}), ПЛЮС честный ключ "_parse_error" (строка,
+    первая строка сообщения исключения -- многострочные ошибки yaml
+    обрезаны до одной строки для вызывающего, которому нужна
+    однострочная причина) -- вызывающий, которому важна причина
+    (tools/session_context.py.quota_lines(), см. её докстринг), может
+    её прочитать и показать; вызывающий, который её игнорирует,
+    получает РОВНО ТУ ЖЕ форму {"quota_windows": {...}}, что и раньше
+    (минимум спеки: "не исключение наружу" выполнен безусловно).
+    ЭТА асимметрия с load_config() (которая деликатно НЕ гардит
+    парсинг, см. её докстринг) -- ПРЕДНАМЕРЕННАЯ: load_config() гардится
+    СНАРУЖИ, в самом session_context.py (т-278 п.6), а не здесь --
+    load_budgets() гардится ИЗНУТРИ, этим же коммитом, по прямому
+    решению координатора."""
     path = Path(root) / "budgets.yaml"
     if not path.exists():
         return {"quota_windows": {}}
-    with open(path, encoding="utf-8") as f:
-        config = yaml.safe_load(f) or {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+    except Exception as e:
+        text = str(e).strip()
+        reason = text.splitlines()[0] if text else type(e).__name__
+        return {"quota_windows": {}, "_parse_error": reason}
     config.setdefault("quota_windows", {})
     return config
 

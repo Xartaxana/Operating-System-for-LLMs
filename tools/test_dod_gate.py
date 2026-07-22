@@ -346,6 +346,138 @@ def test_evaluate_mixed_extensions_with_green_run_after_last_edit_not_violation(
 
 
 # ---------------------------------------------------------------------
+# t-278-дельта п.1 (тот же фикс, что main_gate.py): doc-only
+# "целиком-или-никак" по edits_after_green ЭТОГО агента, не по всей
+# его истории в треке.
+# ---------------------------------------------------------------------
+
+
+def test_evaluate_doc_only_exempt_after_green_even_with_earlier_code_edit():
+    # Ранняя код-правка + зелёный + doc-only после -- БОЛЬШЕ НЕ блокирует.
+    track = {
+        "edits": [
+            {"ts": "2026-07-16T09:00:00.000000", "agent_id": "agent-1", "file_path": "tools/x.py"},
+            {"ts": "2026-07-16T10:00:10.000000", "agent_id": "agent-1", "file_path": "README.md"},
+        ],
+        "runs": [
+            {"ts": "2026-07-16T10:00:00.000000", "outcome": "green", "agent_id": "agent-1"},
+        ],
+    }
+    violation, reason = dod_gate.evaluate(track, agent_id="agent-1")
+    assert violation is False
+    assert reason == "doc-only-edits-exempt"
+
+
+def test_evaluate_code_edit_after_green_still_blocks():
+    track = {
+        "edits": [
+            {"ts": "2026-07-16T09:00:00.000000", "agent_id": "agent-1", "file_path": "README.md"},
+            {"ts": "2026-07-16T10:00:10.000000", "agent_id": "agent-1", "file_path": "tools/x.py"},
+        ],
+        "runs": [
+            {"ts": "2026-07-16T10:00:00.000000", "outcome": "green", "agent_id": "agent-1"},
+        ],
+    }
+    violation, reason = dod_gate.evaluate(track, agent_id="agent-1")
+    assert violation is True
+    assert reason == "green-before-last-edit"
+
+
+def test_evaluate_mixed_edits_after_green_blocks():
+    track = {
+        "edits": [
+            {"ts": "2026-07-16T10:00:10.000000", "agent_id": "agent-1", "file_path": "README.md"},
+            {"ts": "2026-07-16T10:00:11.000000", "agent_id": "agent-1", "file_path": "tools/x.py"},
+        ],
+        "runs": [{"ts": "2026-07-16T10:00:00.000000", "outcome": "green", "agent_id": "agent-1"}],
+    }
+    violation, reason = dod_gate.evaluate(track, agent_id="agent-1")
+    assert violation is True
+    assert reason == "green-before-last-edit"
+
+
+def test_evaluate_edit_exactly_at_green_ts_boundary_not_after_green():
+    # Граница ">" -- ts правки, равный last_green_ts, НЕ post-green.
+    track = {
+        "edits": [{"ts": "2026-07-16T10:00:00.000000", "agent_id": "agent-1", "file_path": "tools/x.py"}],
+        "runs": [{"ts": "2026-07-16T10:00:00.000000", "outcome": "green", "agent_id": "agent-1"}],
+    }
+    violation, reason = dod_gate.evaluate(track, agent_id="agent-1")
+    assert violation is False
+    assert reason == "green-after-last-edit"
+
+
+def test_evaluate_no_green_run_at_all_doc_only_over_full_history_unchanged():
+    track = {
+        "edits": [{"ts": "t1", "agent_id": "agent-1", "file_path": "README.md"}],
+        "runs": [],
+    }
+    violation, reason = dod_gate.evaluate(track, agent_id="agent-1")
+    assert violation is False
+    assert reason == "doc-only-edits-exempt"
+
+
+# ---------------------------------------------------------------------
+# t-278-дельта п.2 (Rule #1: чинить): известные бескодовые dotfiles
+# без суффикса (.gitignore/.gitattributes/.editorconfig) -- doc-only.
+# ---------------------------------------------------------------------
+
+
+def test_evaluate_gitignore_edit_no_violation():
+    track = {"edits": [{"ts": "t1", "file_path": ".gitignore", "agent_id": "agent-1"}], "runs": []}
+    violation, reason = dod_gate.evaluate(track, agent_id="agent-1")
+    assert violation is False
+    assert reason == "doc-only-edits-exempt"
+
+
+def test_evaluate_gitignore_uppercase_name_still_doc_only():
+    track = {"edits": [{"ts": "t1", "file_path": ".GITIGNORE", "agent_id": "agent-1"}], "runs": []}
+    violation, reason = dod_gate.evaluate(track, agent_id="agent-1")
+    assert violation is False
+    assert reason == "doc-only-edits-exempt"
+
+
+def test_evaluate_gitattributes_and_editorconfig_doc_only():
+    for name in (".gitattributes", ".editorconfig"):
+        track = {"edits": [{"ts": "t1", "file_path": name, "agent_id": "agent-1"}], "runs": []}
+        violation, reason = dod_gate.evaluate(track, agent_id="agent-1")
+        assert violation is False, name
+        assert reason == "doc-only-edits-exempt", name
+
+
+def test_evaluate_gitignore_edit_after_green_does_not_extinguish_exemption():
+    track = {
+        "edits": [{"ts": "2026-07-16T10:00:10.000000", "file_path": ".gitignore", "agent_id": "agent-1"}],
+        "runs": [{"ts": "2026-07-16T10:00:00.000000", "outcome": "green", "agent_id": "agent-1"}],
+    }
+    violation, reason = dod_gate.evaluate(track, agent_id="agent-1")
+    assert violation is False
+    assert reason == "doc-only-edits-exempt"
+
+
+def test_evaluate_dotfile_not_in_known_list_still_fail_closed():
+    # Граница: .env НЕ входит в точечный список -- fail-closed, не
+    # "любой dotfile".
+    track = {"edits": [{"ts": "t1", "file_path": ".env", "agent_id": "agent-1"}], "runs": []}
+    violation, reason = dod_gate.evaluate(track, agent_id="agent-1")
+    assert violation is True
+    assert reason == "no-green-run"
+
+
+def test_evaluate_mixed_gitignore_and_code_invariant_applies():
+    track = {
+        "edits": [
+            {"ts": "t1", "file_path": ".gitignore", "agent_id": "agent-1"},
+            {"ts": "t2", "file_path": "tools/x.py", "agent_id": "agent-1"},
+        ],
+        "runs": [],
+    }
+    violation, reason = dod_gate.evaluate(track, agent_id="agent-1")
+    assert violation is True
+    assert reason == "no-green-run"
+
+
+# ---------------------------------------------------------------------
 # decide() -- gate_state / предохранитель 2 блоков (перенесено из
 # кита, agent_id прокидывается явно -- та же адаптация, что evaluate()).
 # ---------------------------------------------------------------------
@@ -356,52 +488,59 @@ def test_decide_blocks_on_first_violation():
     exit_code, message, updated = dod_gate.decide(track, agent_id="agent-1")
     assert exit_code == 2
     assert "заблокирована" in message
-    assert updated["gate_state"]["consecutive_blocks"] == 1
-    assert updated["gate_log"][-1]["action"] == "blocked"
+    assert updated["gate_state"]["per_agent"]["agent-1"]["consecutive_blocks"] == 1
+    entry = updated["gate_log"][-1]
+    assert entry["action"] == "blocked"
+    # t-278 п.2: gate_log-записи несут ts/agent_id.
+    assert "ts" in entry and entry["ts"]
+    assert entry["agent_id"] == "agent-1"
 
 
 def test_decide_blocks_again_on_second_consecutive_violation():
     track = {
         "edits": [{"ts": "t1", "agent_id": "agent-1"}],
         "runs": [],
-        "gate_state": {"consecutive_blocks": 1},
+        "gate_state": {"per_agent": {"agent-1": {"consecutive_blocks": 1}}},
     }
     exit_code, message, updated = dod_gate.decide(track, agent_id="agent-1")
     assert exit_code == 2
-    assert updated["gate_state"]["consecutive_blocks"] == 2
+    assert updated["gate_state"]["per_agent"]["agent-1"]["consecutive_blocks"] == 2
 
 
 def test_decide_skips_on_third_consecutive_violation_safety_valve():
     track = {
         "edits": [{"ts": "t1", "agent_id": "agent-1"}],
         "runs": [],
-        "gate_state": {"consecutive_blocks": 2},
+        "gate_state": {"per_agent": {"agent-1": {"consecutive_blocks": 2}}},
     }
     exit_code, message, updated = dod_gate.decide(track, agent_id="agent-1")
     assert exit_code == 0
     assert "предохранитель" in message
-    assert updated["gate_state"]["consecutive_blocks"] == 0
-    assert updated["gate_log"][-1]["action"] == "skipped_after_2_blocks"
+    assert updated["gate_state"]["per_agent"]["agent-1"]["consecutive_blocks"] == 0
+    entry = updated["gate_log"][-1]
+    assert entry["action"] == "skipped_after_2_blocks"
+    assert "ts" in entry and entry["ts"]
+    assert entry["agent_id"] == "agent-1"
 
 
 def test_decide_resets_counter_on_success():
     track = {
         "edits": [{"ts": "t1", "agent_id": "agent-1"}],
         "runs": [{"ts": "t2", "outcome": "green", "agent_id": "agent-1"}],
-        "gate_state": {"consecutive_blocks": 1},
+        "gate_state": {"per_agent": {"agent-1": {"consecutive_blocks": 1}}},
     }
     exit_code, message, updated = dod_gate.decide(track, agent_id="agent-1")
     assert exit_code == 0
     assert message == ""
-    assert updated["gate_state"]["consecutive_blocks"] == 0
+    assert updated["gate_state"]["per_agent"]["agent-1"]["consecutive_blocks"] == 0
 
 
 def test_decide_no_edits_passes_without_touching_counter():
-    track = {"edits": [], "runs": [], "gate_state": {"consecutive_blocks": 0}}
+    track = {"edits": [], "runs": [], "gate_state": {"consecutive_blocks": 0, "per_agent": {}}}
     exit_code, message, updated = dod_gate.decide(track, agent_id="agent-1")
     assert exit_code == 0
     assert message == ""
-    assert updated["gate_state"]["consecutive_blocks"] == 0
+    assert updated["gate_state"]["per_agent"]["agent-1"]["consecutive_blocks"] == 0
     assert "gate_log" not in updated
 
 
@@ -411,12 +550,12 @@ def test_decide_doc_only_edits_pass_without_touching_counter():
             {"ts": "t1", "file_path": "logs/routing-log.jsonl", "agent_id": "agent-1"}
         ],
         "runs": [],
-        "gate_state": {"consecutive_blocks": 1},
+        "gate_state": {"per_agent": {"agent-1": {"consecutive_blocks": 1}}},
     }
     exit_code, message, updated = dod_gate.decide(track, agent_id="agent-1")
     assert exit_code == 0
     assert message == ""
-    assert updated["gate_state"]["consecutive_blocks"] == 0
+    assert updated["gate_state"]["per_agent"]["agent-1"]["consecutive_blocks"] == 0
 
 
 def test_decide_main_only_edits_pass_ignoring_other_agent_id():
@@ -425,7 +564,71 @@ def test_decide_main_only_edits_pass_ignoring_other_agent_id():
     track = {"edits": [{"ts": "t1", "agent_id": None}], "runs": []}
     exit_code, message, updated = dod_gate.decide(track, agent_id="agent-1")
     assert exit_code == 0
-    assert message == ""
+
+
+# ---------------------------------------------------------------------
+# t-278 п.4: consecutive_blocks изолирован PER-AGENT (не session-global).
+# ---------------------------------------------------------------------
+
+
+def test_decide_consecutive_blocks_isolated_per_agent():
+    # agent-x на пороге предохранителя (2 блока) -- его следующее
+    # нарушение пропускает (safety valve).
+    track = {
+        "edits": [{"ts": "t1", "agent_id": "agent-x"}],
+        "runs": [],
+        "gate_state": {"per_agent": {"agent-x": {"consecutive_blocks": 2}}},
+    }
+    exit_code_x, message_x, updated = dod_gate.decide(track, agent_id="agent-x")
+    assert exit_code_x == 0
+    assert "предохранитель" in message_x
+
+    # agent-y, встречающий блок ВПЕРВЫЕ в том же треке -- блокируется
+    # НОРМАЛЬНО (session-global счётчик заставил бы его тоже проскочить).
+    track_y = {
+        "edits": [{"ts": "t1", "agent_id": "agent-y"}],
+        "runs": [],
+        "gate_state": updated["gate_state"],
+    }
+    exit_code_y, message_y, updated_y = dod_gate.decide(track_y, agent_id="agent-y")
+    assert exit_code_y == 2
+    assert updated_y["gate_state"]["per_agent"]["agent-y"]["consecutive_blocks"] == 1
+    # agent-x's own counter (already reset by its own skip above) стоит
+    # нетронутым оценкой agent-y.
+    assert updated_y["gate_state"]["per_agent"]["agent-x"]["consecutive_blocks"] == 0
+
+
+def test_decide_agent_x_exhausted_valve_does_not_skip_agent_y_first_block():
+    # Граница: agent-x УЖЕ исчерпал предохранитель (per_agent counter==2,
+    # ещё НЕ сброшен -- т.е. ровно на пороге), agent-y впервые видит
+    # блок в том же вызове decide() -- должен блокироваться (не 0).
+    track = {
+        "edits": [{"ts": "t1", "agent_id": "agent-y"}],
+        "runs": [],
+        "gate_state": {"per_agent": {"agent-x": {"consecutive_blocks": 2}}},
+    }
+    exit_code, message, updated = dod_gate.decide(track, agent_id="agent-y")
+    assert exit_code == 2
+    assert updated["gate_state"]["per_agent"]["agent-y"]["consecutive_blocks"] == 1
+    assert updated["gate_state"]["per_agent"]["agent-x"]["consecutive_blocks"] == 2  # untouched
+
+
+def test_decide_fallback_no_agent_id_uses_dedicated_fallback_key():
+    track = {"edits": [{"ts": "t1", "agent_id": "agent-1"}], "runs": []}
+    exit_code, message, updated = dod_gate.decide(track, agent_id=None)
+    assert exit_code == 2
+    assert updated["gate_state"]["per_agent"]["__none__"]["consecutive_blocks"] == 1
+
+
+def test_load_track_backward_compat_old_flat_gate_state(tmp_path):
+    # Обратная совместимость: старый трек с ПЛОСКИМ gate_state (до
+    # per-agent-правки) читается без падения -- "per_agent" добавляется
+    # setdefault'ом, старое поле НЕ удаляется.
+    path = tmp_path / "track.json"
+    path.write_text(json.dumps({"edits": [], "runs": [], "gate_state": {"consecutive_blocks": 3}}))
+    track = dod_gate._load_track(path)
+    assert track["gate_state"]["consecutive_blocks"] == 3  # старое поле сохранено
+    assert track["gate_state"]["per_agent"] == {}
 
 
 # ---------------------------------------------------------------------
@@ -486,7 +689,7 @@ def test_echo_json_blocks_when_own_edit_without_run(tmp_path):
     assert "заблокирована" in result.stderr
 
     track = json.loads((tmp_path / ".claude" / "dod_track" / f"{session_id}.json").read_text())
-    assert track["gate_state"]["consecutive_blocks"] == 1
+    assert track["gate_state"]["per_agent"]["agent-1"]["consecutive_blocks"] == 1
 
 
 def test_echo_json_worker_not_blocked_by_other_workers_unrun_edit(tmp_path):
@@ -584,7 +787,7 @@ def test_echo_json_safety_valve_after_two_consecutive_blocks(tmp_path):
     assert "предохранитель" in r3.stderr
 
     track = json.loads((tmp_path / ".claude" / "dod_track" / f"{session_id}.json").read_text())
-    assert track["gate_state"]["consecutive_blocks"] == 0
+    assert track["gate_state"]["per_agent"]["agent-1"]["consecutive_blocks"] == 0
     actions = [g["action"] for g in track["gate_log"]]
     assert actions == ["blocked", "blocked", "skipped_after_2_blocks"]
 
@@ -592,6 +795,93 @@ def test_echo_json_safety_valve_after_two_consecutive_blocks(tmp_path):
     # заново (блок #1 нового цикла), а не продолжает пропускать.
     r4 = _run_hook(_stop_payload(str(tmp_path), session_id, agent_id="agent-1"), cwd=tmp_path)
     assert r4.returncode == 2
+
+
+def test_echo_json_agent_y_not_skipped_by_agent_x_exhausted_valve(tmp_path):
+    # t-278 п.4, subprocess-уровень: agent-x уже исчерпал предохранитель
+    # (2 блока накоплено), agent-y стопится ВПЕРВЫЕ в том же треке --
+    # должен блокироваться нормально, а не проскакивать чужим счётчиком.
+    session_id = "sess-cross-agent-valve"
+    _write_track(
+        tmp_path,
+        session_id,
+        {
+            "edits": [
+                {"ts": "t1", "agent_id": "agent-x"},
+                {"ts": "t2", "agent_id": "agent-y"},
+            ],
+            "runs": [],
+            "gate_state": {"per_agent": {"agent-x": {"consecutive_blocks": 2}}},
+        },
+    )
+    result = _run_hook(
+        _stop_payload(str(tmp_path), session_id, agent_id="agent-y"), cwd=tmp_path
+    )
+    assert result.returncode == 2
+    assert "заблокирована" in result.stderr
+
+    track = json.loads((tmp_path / ".claude" / "dod_track" / f"{session_id}.json").read_text())
+    assert track["gate_state"]["per_agent"]["agent-y"]["consecutive_blocks"] == 1
+    assert track["gate_state"]["per_agent"]["agent-x"]["consecutive_blocks"] == 2  # untouched
+
+
+def test_echo_json_doc_only_exempt_after_green_with_earlier_code_edit(tmp_path):
+    # t-278-дельта п.1, subprocess-уровень: ранняя код-правка воркера +
+    # зелёный прогон + doc-only правка ПОСЛЕ зелёного -- SubagentStop НЕ
+    # блокируется.
+    session_id = "sess-t265-dod-gate"
+    _write_track(
+        tmp_path,
+        session_id,
+        {
+            "edits": [
+                {"ts": "2026-07-16T09:00:00.000000", "tool_name": "Edit", "agent_id": "agent-1", "file_path": "tools/x.py"},
+                {"ts": "2026-07-16T10:00:10.000000", "tool_name": "Edit", "agent_id": "agent-1", "file_path": "README.md"},
+            ],
+            "runs": [
+                {
+                    "ts": "2026-07-16T10:00:00.000000",
+                    "tool_name": "Bash",
+                    "command": "python -m pytest tools/ -q",
+                    "outcome": "green",
+                    "agent_id": "agent-1",
+                }
+            ],
+        },
+    )
+    result = _run_hook(
+        _stop_payload(str(tmp_path), session_id, agent_id="agent-1"), cwd=tmp_path
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
+def test_echo_json_gitignore_edit_after_green_does_not_extinguish_exemption(tmp_path):
+    # Обязательный кейс спеки (t-278-дельта п.2), subprocess-уровень.
+    session_id = "sess-gitignore-after-green"
+    _write_track(
+        tmp_path,
+        session_id,
+        {
+            "edits": [
+                {"ts": "2026-07-16T10:00:10.000000", "tool_name": "Edit", "file_path": ".gitignore", "agent_id": "agent-1"}
+            ],
+            "runs": [
+                {
+                    "ts": "2026-07-16T10:00:00.000000",
+                    "tool_name": "Bash",
+                    "command": "python -m pytest tools/ -q",
+                    "outcome": "green",
+                    "agent_id": "agent-1",
+                }
+            ],
+        },
+    )
+    result = _run_hook(
+        _stop_payload(str(tmp_path), session_id, agent_id="agent-1"), cwd=tmp_path
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
 
 
 def test_echo_json_doc_only_md_edit_passes_without_run(tmp_path):

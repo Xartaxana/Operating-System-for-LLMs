@@ -112,8 +112,12 @@ def test_load_config_existing_valid_file_still_loads(tmp_path):
 def test_load_config_malformed_yaml_still_raises(tmp_path):
     # The exists-guard covers ABSENCE only -- a config.yaml that exists
     # but is not valid YAML is a different failure class (corrupt
-    # content) and must still surface loudly, same asymmetry as
-    # load_budgets().
+    # content) and must still surface loudly here (this function's own
+    # caller with no fallback -- session_context.py's quota_lines() --
+    # catches it at ITS OWN boundary instead). load_budgets() right
+    # below used to share this exact asymmetry but no longer does (see
+    # its own tests): the two functions are guarded at different layers
+    # now, not identically.
     root = tmp_path / "gateway"
     root.mkdir()
     (root / "config.yaml").write_text("model_list: [unclosed", encoding="utf-8")
@@ -128,6 +132,38 @@ def test_load_budgets_missing_file_returns_empty_quota_windows(tmp_path):
     root = tmp_path / "gateway"
     root.mkdir()
     assert load_budgets(root) == {"quota_windows": {}}
+    assert "_parse_error" not in load_budgets(root)
+
+
+def test_load_budgets_malformed_yaml_no_longer_raises(tmp_path):
+    # load_budgets() now GUARDS parseability internally -- corrupt
+    # content degrades to the same default as absence, plus an honest
+    # "_parse_error" reason.
+    root = tmp_path / "gateway"
+    root.mkdir()
+    (root / "budgets.yaml").write_text(
+        "quota_windows: [this is not: valid: yaml: at all\n", encoding="utf-8"
+    )
+    result = load_budgets(root)
+    assert result["quota_windows"] == {}
+    assert "_parse_error" in result
+    assert result["_parse_error"]
+
+
+def test_load_budgets_malformed_yaml_reason_is_single_line(tmp_path):
+    root = tmp_path / "gateway"
+    root.mkdir()
+    (root / "budgets.yaml").write_text(
+        "quota_windows: [this is not: valid: yaml: at all\n", encoding="utf-8"
+    )
+    result = load_budgets(root)
+    assert len(result["_parse_error"].splitlines()) == 1
+
+
+def test_load_budgets_valid_yaml_no_parse_error_key(tmp_path):
+    root = _seed_root(tmp_path)
+    result = load_budgets(root)
+    assert "_parse_error" not in result
 
 
 # ---- config / provider_model normalization ----

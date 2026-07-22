@@ -111,7 +111,16 @@ t-159 КОДИРОВКА STDIN: та же правка, что tools/dispatch_ga
 
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
+
+
+def _now_iso() -> str:
+    # t-278 п.2: тот же формат, что tools/dod_track.py._now_iso() --
+    # локальные часы, микросекунды, без таймзоны -- используется ТОЛЬКО
+    # для новых полей gate_log-записей ниже (форензик-находка t-265:
+    # gate_log без ts/agent_id неразличим по времени/автору при разборе).
+    return datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
 
 BLOCK_MESSAGE = (
     "Сдача main-хода заблокирована: после последней правки координатора "
@@ -180,11 +189,31 @@ def _is_main_entry(entry: dict) -> bool:
 # журнал routing-log.jsonl гейтится своим pre-commit валидатором).
 DOC_ONLY_EXTENSIONS = {".md", ".json", ".jsonl"}
 
+# t-278-дельта п.2 (Rule #1: цена тривиальна -- чинить, докстрайпорт
+# docs/task_reports/2026-07-18_calibration2-closures.md чек 26в п.1):
+# dotfiles БЕЗ суффикса (pathlib трактует ведущую точку ".gitignore" как
+# часть stem, не как разделитель расширения -- Path(".gitignore").suffix
+# == "") раньше ПАДАЛИ в fail-closed "не doc-only" даже для заведомо
+# бескодового конфига. Финальный список -- ПО ФАКТУ репо (git ls -a
+# штаба и toolkit, t-278-дельта): ".gitignore" -- РЕАЛЬНЫЙ dotfile
+# обоих корней, правится main-тредом рутинно (живой .claude/dod_track/
+# зафиксировал такую правку). ".gitattributes"/".editorconfig" --
+# тот же класс (git/editor-конфиг, НЕ исполняемый код, universally
+# recognized) добавлены тем же самостоятельным решением, хоть
+# отсутствуют в репо СЕЙЧАС -- дешёвое расширение того же принципа, не
+# гадание. gateway/.env (реально существует) СОЗНАТЕЛЬНО НЕ включён --
+# секреты/поведенческие значения, другой класс риска, не "бескодовый
+# конфиг" в этом смысле.
+DOC_ONLY_DOTFILES = {".gitignore", ".gitattributes", ".editorconfig"}
+
 
 def _is_doc_only_file(file_path) -> bool:
     if not isinstance(file_path, str) or not file_path:
         return False
-    return Path(file_path).suffix.lower() in DOC_ONLY_EXTENSIONS
+    path = Path(file_path)
+    if path.name.lower() in DOC_ONLY_DOTFILES:
+        return True
+    return path.suffix.lower() in DOC_ONLY_EXTENSIONS
 
 
 def _all_edits_doc_only(edits) -> bool:
@@ -196,27 +225,51 @@ def _all_edits_doc_only(edits) -> bool:
 def evaluate(track: dict) -> tuple[bool, str]:
     """Проверка (а), чистая логика -- та же сигнатура/семантика, что
     dod_gate.evaluate(), но на MAIN-ONLY подмножестве edits/runs.
-    STAGING_HQ: doc-only (.md/.json) main-only правки освобождены от
-    инварианта целиком (см. DOC_ONLY_EXTENSIONS выше)."""
+
+    t-278 п.1 (фикс находки t-265, docs/task_reports/
+    2026-07-18_calibration2-closures.md чек 26в п.2): doc-only исключение
+    применяется "целиком-или-никак" К ПРАВКАМ ПОСЛЕ ПОСЛЕДНЕГО ЗЕЛЁНОГО
+    (edits_after_green), а НЕ ко всей истории main-only edits сессии.
+    ДО этого фикса _all_edits_doc_only() проверялся по ВСЕМ main-only
+    edits трека: одна ранняя код-правка (например, самого гейта) гасила
+    doc-only исключение НАВСЕГДА для остатка сессии -- даже если после
+    неё был зелёный прогон и ВСЕ последующие правки были чистым doc-only
+    (.md/.json/.jsonl). Порядок проверки теперь:
+      1. Нет зелёного прогона вообще -- анкера "после" нет, doc-only
+         проверяется по ВСЕМ main-only edits (то же поведение, что
+         раньше в этой ветке -- тест "нет зелёного вообще" сохранён).
+      2. Есть хотя бы один зелёный прогон -- last_green_ts -- граница;
+         edits_after_green = edits с ts > last_green_ts (строго после).
+         Пусто -- все main-only edits случились ДО/на последнем зелёном,
+         инвариант уже удовлетворён (то же, что раньше давало
+         "green-after-last-edit").
+         Непусто -- doc-only проверяется ТОЛЬКО по этому подмножеству:
+         все post-green edits doc-only -> исключение срабатывает; хоть
+         одна код-правка среди них -> блок ("green-before-last-edit" --
+         last_edit_ts среди post-green edits гарантированно > last_green_ts
+         по построению множества, сравнение не нужно отдельно)."""
     edits = [e for e in (track.get("edits") or []) if _is_main_entry(e)]
     if not edits:
         return False, "no-main-edits"
 
-    if _all_edits_doc_only(edits):
-        return False, "doc-only-edits-exempt"
-
     runs = [r for r in (track.get("runs") or []) if _is_main_entry(r)]
-    last_edit_ts = max(e["ts"] for e in edits)
-
     green_runs = [r for r in runs if r.get("outcome") == "green"]
+
     if not green_runs:
+        if _all_edits_doc_only(edits):
+            return False, "doc-only-edits-exempt"
         return True, "no-green-run"
 
     last_green_ts = max(r["ts"] for r in green_runs)
-    if last_green_ts < last_edit_ts:
-        return True, "green-before-last-edit"
+    edits_after_green = [e for e in edits if e["ts"] > last_green_ts]
 
-    return False, "green-after-last-edit"
+    if not edits_after_green:
+        return False, "green-after-last-edit"
+
+    if _all_edits_doc_only(edits_after_green):
+        return False, "doc-only-edits-exempt"
+
+    return True, "green-before-last-edit"
 
 
 def _journal_empty_warning_applies(cwd: str, track: dict) -> bool:
@@ -255,17 +308,38 @@ def decide(track: dict, cwd: str = ".") -> tuple[int, str, dict]:
 
     warn = _journal_empty_warning_applies(cwd, track)
 
+    # t-278 п.2: gate_log-записи несут ts (_now_iso(), тот же формат, что
+    # dod_track.py) и agent_id -- main_gate.py это Stop-хук (main-thread
+    # ТОЛЬКО), контекст хука НИКОГДА не несёт agent_id на этой ветке --
+    # честный None, не домысел (см. докстринг модуля/_is_main_entry).
+    # Обратная совместимость: старые gate_log-записи без этих полей
+    # читаются без падения -- ничто в этом файле не парсит записи gate_log
+    # обратно программно, только пишет (append); сторонний читатель
+    # обязан использовать .get() с дефолтом (документировано, не
+    # гарантировано схемой).
     if consecutive >= CONSECUTIVE_BLOCK_LIMIT:
         gate_state["consecutive_blocks"] = 0
         track.setdefault("gate_log", []).append(
-            {"action": "skipped_after_2_blocks", "reason": reason, "gate": "main"}
+            {
+                "action": "skipped_after_2_blocks",
+                "reason": reason,
+                "gate": "main",
+                "ts": _now_iso(),
+                "agent_id": None,
+            }
         )
         message = SAFETY_SKIP_MESSAGE + (EMPTY_JOURNAL_WARNING if warn else "")
         return 0, message, track
 
     gate_state["consecutive_blocks"] = consecutive + 1
     track.setdefault("gate_log", []).append(
-        {"action": "blocked", "reason": reason, "gate": "main"}
+        {
+            "action": "blocked",
+            "reason": reason,
+            "gate": "main",
+            "ts": _now_iso(),
+            "agent_id": None,
+        }
     )
     message = BLOCK_MESSAGE + (EMPTY_JOURNAL_WARNING if warn else "")
     return 2, message, track

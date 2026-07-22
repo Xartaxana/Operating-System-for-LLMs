@@ -171,9 +171,14 @@ def test_load_config_downstream_callers_degrade_gracefully_on_missing_file(tmp_p
 
 def test_load_config_malformed_yaml_still_raises(tmp_path):
     # Different failure CLASS from absence (file exists but its content
-    # cannot be parsed) -- deliberately NOT guarded here, same asymmetry
-    # as load_budgets (existence-only guard). Named and tested per spec,
-    # not silently swallowed: yaml.safe_load's own exception propagates
+    # cannot be parsed) -- deliberately NOT guarded HERE (this function's
+    # own caller with no fallback, tools/session_context.py's
+    # quota_lines(), catches it at its OWN boundary instead -- t-278
+    # п.6). load_budgets() right below used to share this exact
+    # asymmetry but no longer does (t-278-дельта п.3 gave it an internal
+    # guard) -- the two functions are deliberately guarded at DIFFERENT
+    # layers now, not identically. Named and tested per spec, not
+    # silently swallowed: yaml.safe_load's own exception propagates
     # unchanged, exactly like before this fix.
     root = tmp_path / "gateway"
     root.mkdir()
@@ -184,18 +189,54 @@ def test_load_config_malformed_yaml_still_raises(tmp_path):
         load_config(root)
 
 
-def test_load_budgets_malformed_yaml_still_raises_same_class(tmp_path):
-    # Sibling control (D-0043: same class on the neighbor this fix was
-    # modeled after) -- load_budgets never guarded parseability either;
-    # confirms the asymmetry is a documented, symmetric design choice on
-    # BOTH functions, not an oversight unique to load_config.
+def test_load_budgets_malformed_yaml_no_longer_raises(tmp_path):
+    # t-278-дельта п.3 (Rule #1, координатор): load_budgets() больше НЕ
+    # разделяет эту асимметрию с load_config() -- парсинг budgets.yaml
+    # ГАРДИТСЯ изнутри теперь; корректный, но "битый" YAML деградирует
+    # к тому же дефолту, что отсутствующий файл, ПЛЮС честный
+    # "_parse_error".
     root = tmp_path / "gateway"
     root.mkdir()
     (root / "budgets.yaml").write_text(
         "quota_windows: [this is not: valid: yaml: at all\n", encoding="utf-8"
     )
-    with pytest.raises(yaml.YAMLError):
-        load_budgets(root)
+    result = load_budgets(root)
+    assert result["quota_windows"] == {}
+    assert "_parse_error" in result
+    assert result["_parse_error"]
+
+
+def test_load_budgets_malformed_yaml_reason_is_single_line(tmp_path):
+    # yaml.YAMLError's own str() is typically MULTI-LINE (a "problem"
+    # line plus a "in <file>, line N, column N" context line) -- the
+    # captured reason must stay single-line for a caller that puts it
+    # into one console line.
+    root = tmp_path / "gateway"
+    root.mkdir()
+    (root / "budgets.yaml").write_text(
+        "quota_windows: [this is not: valid: yaml: at all\n", encoding="utf-8"
+    )
+    result = load_budgets(root)
+    assert len(result["_parse_error"].splitlines()) == 1
+
+
+def test_load_budgets_missing_file_no_parse_error_key(tmp_path):
+    # Boundary: the ABSENCE branch (existing exists-guard) must NOT
+    # carry the new "_parse_error" key -- only a genuine parse failure
+    # does; a caller checking `.get("_parse_error")` must not see a
+    # false positive for the ordinary "file simply isn't there" case.
+    root = tmp_path / "gateway"
+    root.mkdir()
+    result = load_budgets(root)
+    assert result == {"quota_windows": {}}
+    assert "_parse_error" not in result
+
+
+def test_load_budgets_valid_yaml_no_parse_error_key(tmp_path):
+    root = _seed_root(tmp_path)
+    result = load_budgets(root)
+    assert "_parse_error" not in result
+    assert result["quota_windows"] == BUDGETS["quota_windows"]
 
 
 # ---- ts parsing: both formats ----

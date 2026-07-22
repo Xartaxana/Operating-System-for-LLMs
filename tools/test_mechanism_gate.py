@@ -221,6 +221,61 @@ def test_decide_full_merge_commit_without_tier_passes():
     assert code == 0
 
 
+# --- t-278 п.5 (критик t-068): ВСЕ найденные tier-строки, не только первая ---
+
+
+def test_find_tier_declarations_returns_all_lines_in_order():
+    msg = "feat: X\n\ntier: sonnet\n\nSome other text\ntier: fable\n"
+    assert mg.find_tier_declarations(msg) == ["sonnet", "fable"]
+
+
+def test_find_tier_declaration_backward_compat_returns_first():
+    msg = "feat: X\n\ntier: sonnet\n\ntier: fable\n"
+    assert mg.find_tier_declaration(msg) == "sonnet"
+
+
+def test_decide_full_first_line_garbage_second_real_still_rejects():
+    # Критик t-068: старое поведение (.search() -- только первая строка)
+    # либо взяло бы ТОЛЬКО мусорную первую строку (и корректно отказало
+    # бы -- случайно), либо (при иной реализации "любая совпадает")
+    # пропустило бы коммит по НАСТОЯЩЕЙ второй строке, спрятав мусорную/
+    # спуфинг-строку. Выбранная семантика ("все должны пройти") ловит
+    # ОБЕ строки и отказывает по мусорной, даже если рядом есть верная.
+    msg = (
+        "feat: механизм X\n\nось 1: покрыта\n\n"
+        "Пример из докстринга (цитата, своя строка):\n"
+        "tier: sonnet\n\n"
+        "tier: fable\n"
+    )
+    code, reason = mg.decide_full(
+        msg=msg, block_extra="", staged=["CLAUDE.md"], map_text="## Ось 1 —\n",
+        config_text=None)
+    assert code == 1
+    assert "не lead" in reason
+    assert "sonnet" in reason
+
+
+def test_decide_full_real_first_garbage_second_still_rejects():
+    # Порядок строк не важен -- проверяются ВСЕ найденные независимо от
+    # позиции.
+    msg = "feat: механизм X\n\nось 1: покрыта\n\ntier: fable\ntier: sonnet\n"
+    code, reason = mg.decide_full(
+        msg=msg, block_extra="", staged=["CLAUDE.md"], map_text="## Ось 1 —\n",
+        config_text=None)
+    assert code == 1
+    assert "не lead" in reason
+
+
+def test_decide_full_multiple_matching_tier_lines_passes():
+    # Несколько механизмов в одном коммите, обе строки — настоящие и
+    # совпадающие с привязкой -- проходит.
+    msg = "feat: механизм X\n\nось 1: покрыта\n\ntier: fable\ntier: fable\n"
+    code, _ = mg.decide_full(
+        msg=msg, block_extra="", staged=["CLAUDE.md"], map_text="## Ось 1 —\n",
+        config_text=None)
+    assert code == 0
+
+
 def test_decide_full_non_claude_lead_requires_exact_match():
     code, _ = mg.decide_full(
         msg="feat: механизм X\n\nось 1: покрыта\ntier: llama-3.3-70b-versatile",

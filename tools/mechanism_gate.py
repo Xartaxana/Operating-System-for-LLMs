@@ -152,11 +152,31 @@ def lead_family(binding: str) -> str | None:
     return None
 
 
+def find_tier_declarations(msg: str) -> list[str]:
+    """t-278 п.5 (критик t-068: find_tier_declaration матчил ТОЛЬКО
+    первую строку «tier:» через .search() -- недостаточно: несколько
+    механизмов в одном коммите МОГУТ нести отдельные tier-строки, каждую
+    свою). Возвращает ЗНАЧЕНИЯ ВСЕХ строк «tier: <значение>» в сообщении
+    коммита (не из диффа) -- та же самодекларативная форма, что и
+    skip-строка. РЕШЕНИЕ ПО СЕМАНТИКЕ (задокументировано, не молча):
+    безопасная (fail-closed) семантика -- каждая найденная строка
+    ДОЛЖНА пройти проверку (см. tier_declared_ok в decide_full ниже);
+    отказ, если хоть ОДНА строка не совпадает с привязкой, даже если
+    другая (например, настоящая, более поздняя) строка совпадает.
+    Альтернатива ("проходит, если совпадает ХОТЯ БЫ ОДНА") была
+    отклонена: она позволила бы одной подставной/цитированной строке
+    "tier: fable" маскировать РЕАЛЬНОЕ несовпадающее значение где-то ещё
+    в том же сообщении -- спуфинг яруса опаснее ложного отказа на
+    случайно совпавшей по форме строке в цитате."""
+    return [m.strip() for m in TIER_LINE_RE.findall(msg)]
+
+
 def find_tier_declaration(msg: str) -> str | None:
-    """Значение строки «tier: <значение>» — только из СООБЩЕНИЯ коммита
-    (не из диффа), та же самодекларативная форма, что и skip-строка."""
-    m = TIER_LINE_RE.search(msg)
-    return m.group(1).strip() if m else None
+    """Обратная совместимость/удобство: значение ПЕРВОЙ строки «tier:
+    <значение>» (см. find_tier_declarations() за полную семантику всех
+    строк, которую использует decide_full())."""
+    declarations = find_tier_declarations(msg)
+    return declarations[0] if declarations else None
 
 
 def tier_declared_ok(declared: str, binding: str) -> bool:
@@ -218,14 +238,18 @@ def decide_full(msg: str, block_extra: str, staged: list[str],
     if not hits or merging or SKIP_RE.search(msg):
         return 0, ""
     binding = resolve_lead_binding(config_text)
-    declared = find_tier_declaration(msg)
-    if declared is None:
+    # t-278 п.5: ВСЕ найденные tier-строки должны пройти проверку —
+    # отказ, если хоть ОДНА не совпадает с привязкой (см. докстринг
+    # find_tier_declarations() за обоснование выбранной семантики).
+    declared_list = find_tier_declarations(msg)
+    if not declared_list:
         return 1, ("коммит трогает механизмные файлы:\n  " + "\n  ".join(hits)
                     + "\nНет строки «tier: <значение>» (привязка lead: "
                     + binding + ") — " + _tier_queue_note())
-    if not tier_declared_ok(declared, binding):
+    bad = [d for d in declared_list if not tier_declared_ok(d, binding)]
+    if bad:
         return 1, ("коммит трогает механизмные файлы:\n  " + "\n  ".join(hits)
-                    + "\nЯрус не lead: «tier: " + declared
+                    + "\nЯрус не lead: «tier: " + bad[0]
                     + "» не совпадает с привязкой (" + binding + ") — "
                     + _tier_queue_note())
     return 0, ""

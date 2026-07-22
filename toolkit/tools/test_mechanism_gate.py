@@ -233,6 +233,59 @@ def test_decide_full_merge_commit_without_tier_passes():
     assert code == 0
 
 
+# --- ALL found tier lines must pass, not just the first ---
+
+
+def test_find_tier_declarations_returns_all_lines_in_order():
+    msg = "feat: X\n\ntier: sonnet\n\nSome other text\ntier: fable\n"
+    assert mg.find_tier_declarations(msg) == ["sonnet", "fable"]
+
+
+def test_find_tier_declaration_backward_compat_returns_first():
+    msg = "feat: X\n\ntier: sonnet\n\ntier: fable\n"
+    assert mg.find_tier_declaration(msg) == "sonnet"
+
+
+def test_decide_full_first_line_garbage_second_real_still_rejects():
+    # A quoted example line "tier: sonnet" (its own line, as if lifted
+    # from a docstring example) followed by a REAL "tier: fable" line --
+    # chosen semantics (ALL lines must pass) catches the garbage line
+    # and rejects, even though a real matching line exists alongside it.
+    msg = (
+        "feat: mechanism X\n\naxis 1: covered\n\n"
+        "Example from the docstring (quoted, its own line):\n"
+        "tier: sonnet\n\n"
+        "tier: fable\n"
+    )
+    code, reason = mg.decide_full(
+        msg=msg, block_extra="", staged=["CLAUDE.md"], map_text="## Axis 1 --\n",
+        config_text=None)
+    assert code == 1
+    assert "Not lead tier" in reason
+    assert "sonnet" in reason
+
+
+def test_decide_full_real_first_garbage_second_still_rejects():
+    # Order does not matter -- every found line is checked regardless
+    # of position.
+    msg = "feat: mechanism X\n\naxis 1: covered\n\ntier: fable\ntier: sonnet\n"
+    code, reason = mg.decide_full(
+        msg=msg, block_extra="", staged=["CLAUDE.md"], map_text="## Axis 1 --\n",
+        config_text=None)
+    assert code == 1
+    assert "Not lead tier" in reason
+
+
+def test_decide_full_multiple_matching_tier_lines_passes():
+    # Several mechanisms in one commit, both lines real and matching
+    # the binding -- passes.
+    msg = "feat: mechanism X\n\naxis 1: covered\n\ntier: fable\ntier: fable\n"
+    code, _ = mg.decide_full(
+        msg=msg, block_extra="", staged=["CLAUDE.md"], map_text="## Axis 1 --\n",
+        config_text=None)
+    assert code == 0
+
+
 def test_decide_full_non_claude_lead_requires_exact_match():
     code, _ = mg.decide_full(
         msg="feat: mechanism X\n\naxis 1: covered\ntier: llama-3.3-70b-versatile",

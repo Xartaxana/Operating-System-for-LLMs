@@ -335,6 +335,78 @@ def test_build_fact_edit_file_path_for_each_edit_tool_name():
 
 
 # ---------------------------------------------------------------------
+# Scratchpad-path exclusion from main-edit scope entirely.
+# ---------------------------------------------------------------------
+
+
+def test_build_fact_scratchpad_path_excluded_from_edit_scope():
+    payload = {
+        "tool_name": "Write",
+        "cwd": "D:/Improving_AI/Operating-System-for-LLMs",
+        "tool_input": {
+            "file_path": (
+                "C:/Users/user/AppData/Local/Temp/claude/repo/"
+                "some-session-id/scratchpad/script.py"
+            )
+        },
+    }
+    assert dod_track.build_fact(payload) is None
+
+
+def test_build_fact_scratchpad_uppercase_path_still_excluded():
+    payload = {
+        "tool_name": "Edit",
+        "cwd": "D:/repo",
+        "tool_input": {"file_path": "C:/Temp/Claude/Scratchpad/tmp.py"},
+    }
+    assert dod_track.build_fact(payload) is None
+
+
+def test_build_fact_path_outside_repo_root_excluded_even_without_scratchpad_word():
+    payload = {
+        "tool_name": "Edit",
+        "cwd": "D:/repo",
+        "tool_input": {"file_path": "C:/Windows/Temp/other/file.py"},
+    }
+    assert dod_track.build_fact(payload) is None
+
+
+def test_build_fact_normal_repo_relative_path_not_excluded():
+    payload = {"tool_name": "Edit", "cwd": "D:/repo", "tool_input": {"file_path": "tools/x.py"}}
+    kind, entry = dod_track.build_fact(payload)
+    assert kind == "edit"
+    assert entry["file_path"] == "tools/x.py"
+
+
+def test_build_fact_normal_repo_absolute_path_not_excluded(tmp_path):
+    inner = tmp_path / "tools" / "x.py"
+    payload = {"tool_name": "Edit", "cwd": str(tmp_path), "tool_input": {"file_path": str(inner)}}
+    kind, entry = dod_track.build_fact(payload)
+    assert kind == "edit"
+    assert entry["file_path"] == str(inner)
+
+
+def test_build_fact_scratchpad_excluded_without_cwd_present():
+    payload = {"tool_name": "Write", "tool_input": {"file_path": "/tmp/scratchpad/x.py"}}
+    assert dod_track.build_fact(payload) is None
+
+
+def test_build_fact_no_cwd_and_no_scratchpad_word_not_excluded():
+    payload = {"tool_name": "Edit", "tool_input": {"file_path": "some/relative/path.py"}}
+    kind, entry = dod_track.build_fact(payload)
+    assert kind == "edit"
+    assert entry["file_path"] == "some/relative/path.py"
+
+
+def test_is_scratchpad_path_direct_boundary_cases():
+    assert dod_track._is_scratchpad_path("C:/x/scratchpad/y.py", None) is True
+    assert dod_track._is_scratchpad_path("C:/x/SCRATCHPAD/y.py", None) is True
+    assert dod_track._is_scratchpad_path(None, "D:/repo") is False
+    assert dod_track._is_scratchpad_path("", "D:/repo") is False
+    assert dod_track._is_scratchpad_path("tools/x.py", "D:/repo") is False
+
+
+# ---------------------------------------------------------------------
 # echo-JSON subprocess smoke tests.
 # ---------------------------------------------------------------------
 
@@ -448,6 +520,38 @@ def test_echo_json_preserves_unknown_keys_written_by_other_hook(tmp_path):
     assert len(data["edits"]) == 1
     assert data["gate_state"] == {"consecutive_blocks": 1}
     assert data["gate_log"] == [{"action": "blocked", "reason": "no-green-run"}]
+
+
+def test_echo_json_scratchpad_edit_not_recorded_and_does_not_break_doc_only(tmp_path):
+    """A coordinator writing a scratchpad temp script AFTER a doc-only
+    edit must NOT be recorded to the track at all -- so main_gate.py's
+    doc-only "whole-or-nothing" fix still fires on what remains: only
+    the genuine doc-only edit."""
+    session_id = "sess-scratch"
+    cwd = str(tmp_path)
+
+    doc_payload = {
+        "session_id": session_id,
+        "cwd": cwd,
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "README.md"},
+    }
+    r1 = _run_hook(doc_payload, cwd=tmp_path)
+    assert r1.returncode == 0, r1.stderr
+
+    scratch_payload = {
+        "session_id": session_id,
+        "cwd": cwd,
+        "tool_name": "Write",
+        "tool_input": {"file_path": "C:/Users/user/AppData/Local/Temp/claude/xyz/some-session/scratchpad/tmp.py"},
+    }
+    r2 = _run_hook(scratch_payload, cwd=tmp_path)
+    assert r2.returncode == 0, r2.stderr
+
+    track_path = tmp_path / ".claude" / "dod_track" / f"{session_id}.json"
+    data = json.loads(track_path.read_text(encoding="utf-8"))
+    assert len(data["edits"]) == 1
+    assert data["edits"][0]["file_path"] == "README.md"
 
 
 # ---------------------------------------------------------------------

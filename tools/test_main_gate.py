@@ -198,6 +198,163 @@ def test_evaluate_mixed_extensions_main_invariant_applies():
 
 
 # ---------------------------------------------------------------------
+# t-278 п.1 (фикс t-265): doc-only "целиком-или-никак" по
+# edits_after_green, не по всей истории main-only edits сессии.
+# ---------------------------------------------------------------------
+
+
+def test_evaluate_doc_only_exempt_after_green_even_with_earlier_code_edit():
+    # t-265 сценарий: РАННЯЯ код-правка + зелёный прогон + doc-only
+    # правки ПОСЛЕ зелёного -- БОЛЬШЕ НЕ блокирует (раньше
+    # _all_edits_doc_only смотрел на ВСЮ историю и ранняя код-правка
+    # гасила исключение навсегда).
+    track = {
+        "edits": [
+            {"ts": "2026-07-16T09:00:00.000000", "agent_id": None, "file_path": "tools/x.py"},
+            {"ts": "2026-07-16T10:00:10.000000", "agent_id": None, "file_path": "README.md"},
+        ],
+        "runs": [
+            {"ts": "2026-07-16T10:00:00.000000", "outcome": "green", "agent_id": None},
+        ],
+    }
+    violation, reason = main_gate.evaluate(track)
+    assert violation is False
+    assert reason == "doc-only-edits-exempt"
+
+
+def test_evaluate_code_edit_after_green_still_blocks():
+    # Код-правка ПОСЛЕ зелёного -- блокирует, даже если раньше в истории
+    # были только doc-only правки.
+    track = {
+        "edits": [
+            {"ts": "2026-07-16T09:00:00.000000", "agent_id": None, "file_path": "README.md"},
+            {"ts": "2026-07-16T10:00:10.000000", "agent_id": None, "file_path": "tools/x.py"},
+        ],
+        "runs": [
+            {"ts": "2026-07-16T10:00:00.000000", "outcome": "green", "agent_id": None},
+        ],
+    }
+    violation, reason = main_gate.evaluate(track)
+    assert violation is True
+    assert reason == "green-before-last-edit"
+
+
+def test_evaluate_mixed_edits_after_green_blocks():
+    # Смешанные post-green правки (doc + код) -- исключение НЕ
+    # применяется, "целиком-или-никак" по подмножеству.
+    track = {
+        "edits": [
+            {"ts": "2026-07-16T10:00:10.000000", "agent_id": None, "file_path": "README.md"},
+            {"ts": "2026-07-16T10:00:11.000000", "agent_id": None, "file_path": "tools/x.py"},
+        ],
+        "runs": [{"ts": "2026-07-16T10:00:00.000000", "outcome": "green", "agent_id": None}],
+    }
+    violation, reason = main_gate.evaluate(track)
+    assert violation is True
+    assert reason == "green-before-last-edit"
+
+
+def test_evaluate_empty_after_green_not_violation():
+    # Все main-only правки случились ДО последнего зелёного -- нет
+    # post-green edits вовсе -- инвариант уже удовлетворён.
+    track = {
+        "edits": [{"ts": "2026-07-16T10:00:00.000000", "agent_id": None, "file_path": "tools/x.py"}],
+        "runs": [{"ts": "2026-07-16T10:00:05.000000", "outcome": "green", "agent_id": None}],
+    }
+    violation, reason = main_gate.evaluate(track)
+    assert violation is False
+    assert reason == "green-after-last-edit"
+
+
+def test_evaluate_edit_exactly_at_green_ts_boundary_not_after_green():
+    # Граница ">" (строго после): правка с ts, РАВНЫМ last_green_ts, НЕ
+    # считается post-green -- сравнение строгое (>), не (>=).
+    track = {
+        "edits": [{"ts": "2026-07-16T10:00:00.000000", "agent_id": None, "file_path": "tools/x.py"}],
+        "runs": [{"ts": "2026-07-16T10:00:00.000000", "outcome": "green", "agent_id": None}],
+    }
+    violation, reason = main_gate.evaluate(track)
+    assert violation is False
+    assert reason == "green-after-last-edit"
+
+
+def test_evaluate_no_green_run_at_all_doc_only_over_full_history_unchanged():
+    # Нет зелёного прогона вообще -- нет анкера "после"; doc-only
+    # проверяется по ВСЕЙ main-only истории (поведение сохранено).
+    track = {
+        "edits": [{"ts": "t1", "agent_id": None, "file_path": "README.md"}],
+        "runs": [],
+    }
+    violation, reason = main_gate.evaluate(track)
+    assert violation is False
+    assert reason == "doc-only-edits-exempt"
+
+
+# ---------------------------------------------------------------------
+# t-278-дельта п.2 (Rule #1: чинить): известные бескодовые dotfiles
+# без суффикса (.gitignore/.gitattributes/.editorconfig) считаются
+# doc-only.
+# ---------------------------------------------------------------------
+
+
+def test_evaluate_gitignore_main_edit_no_violation():
+    track = {"edits": [{"ts": "t1", "agent_id": None, "file_path": ".gitignore"}], "runs": []}
+    violation, reason = main_gate.evaluate(track)
+    assert violation is False
+    assert reason == "doc-only-edits-exempt"
+
+
+def test_evaluate_gitignore_uppercase_name_still_doc_only():
+    track = {"edits": [{"ts": "t1", "agent_id": None, "file_path": ".GITIGNORE"}], "runs": []}
+    violation, reason = main_gate.evaluate(track)
+    assert violation is False
+    assert reason == "doc-only-edits-exempt"
+
+
+def test_evaluate_gitattributes_and_editorconfig_doc_only():
+    for name in (".gitattributes", ".editorconfig"):
+        track = {"edits": [{"ts": "t1", "agent_id": None, "file_path": name}], "runs": []}
+        violation, reason = main_gate.evaluate(track)
+        assert violation is False, name
+        assert reason == "doc-only-edits-exempt", name
+
+
+def test_evaluate_gitignore_edit_after_green_does_not_extinguish_exemption():
+    # Обязательный кейс спеки: .gitignore-правка ПОСЛЕ зелёного не
+    # гасит doc-only-исключение (t-278 п.1 edits_after_green + п.2
+    # dotfile-фикс работают вместе).
+    track = {
+        "edits": [{"ts": "2026-07-16T10:00:10.000000", "agent_id": None, "file_path": ".gitignore"}],
+        "runs": [{"ts": "2026-07-16T10:00:00.000000", "outcome": "green", "agent_id": None}],
+    }
+    violation, reason = main_gate.evaluate(track)
+    assert violation is False
+    assert reason == "doc-only-edits-exempt"
+
+
+def test_evaluate_dotfile_not_in_known_list_still_fail_closed():
+    # Граница: НЕ входящий в список бескодовый на вид dotfile (напр.
+    # .env) остаётся fail-closed -- список ТОЧЕЧНЫЙ, не "любой dotfile".
+    track = {"edits": [{"ts": "t1", "agent_id": None, "file_path": ".env"}], "runs": []}
+    violation, reason = main_gate.evaluate(track)
+    assert violation is True
+    assert reason == "no-green-run"
+
+
+def test_evaluate_mixed_gitignore_and_code_invariant_applies():
+    track = {
+        "edits": [
+            {"ts": "t1", "agent_id": None, "file_path": ".gitignore"},
+            {"ts": "t2", "agent_id": None, "file_path": "tools/x.py"},
+        ],
+        "runs": [],
+    }
+    violation, reason = main_gate.evaluate(track)
+    assert violation is True
+    assert reason == "no-green-run"
+
+
+# ---------------------------------------------------------------------
 # _journal_empty_warning_applies() -- проверка (б) (перенесено из кита).
 # ---------------------------------------------------------------------
 
@@ -253,7 +410,14 @@ def test_decide_blocks_on_first_violation(tmp_path):
     assert exit_code == 2
     assert "заблокирована" in message
     assert updated["main_gate_state"]["consecutive_blocks"] == 1
-    assert updated["gate_log"][-1] == {"action": "blocked", "reason": "no-green-run", "gate": "main"}
+    entry = updated["gate_log"][-1]
+    assert entry["action"] == "blocked"
+    assert entry["reason"] == "no-green-run"
+    assert entry["gate"] == "main"
+    # t-278 п.2: gate_log-записи main_gate.py несут ts (_now_iso) и
+    # agent_id -- честный None (Stop-хук всегда main-thread).
+    assert "ts" in entry and entry["ts"]
+    assert entry["agent_id"] is None
 
 
 def test_decide_block_message_includes_journal_warning_when_applicable(tmp_path):
@@ -314,7 +478,10 @@ def test_decide_skips_on_third_consecutive_violation_safety_valve(tmp_path):
     assert exit_code == 0
     assert "предохранитель" in message
     assert updated["main_gate_state"]["consecutive_blocks"] == 0
-    assert updated["gate_log"][-1]["action"] == "skipped_after_2_blocks"
+    entry = updated["gate_log"][-1]
+    assert entry["action"] == "skipped_after_2_blocks"
+    assert "ts" in entry and entry["ts"]
+    assert entry["agent_id"] is None
 
 
 def test_decide_resets_counter_on_success(tmp_path):
@@ -502,6 +669,86 @@ def test_echo_json_doc_only_md_main_edit_passes(tmp_path):
     result = _run_hook(_stop_payload(str(tmp_path), session_id), cwd=tmp_path)
     assert result.returncode == 0, result.stderr
     assert result.stderr == ""
+
+
+def test_echo_json_gitignore_edit_after_green_does_not_extinguish_exemption(tmp_path):
+    # Обязательный кейс спеки (t-278-дельта п.2), subprocess-уровень:
+    # .gitignore-правка ПОСЛЕ зелёного НЕ гасит doc-only-исключение.
+    session_id = "sess-gitignore-after-green"
+    _write_track(
+        tmp_path,
+        session_id,
+        {
+            "edits": [
+                {"ts": "2026-07-16T10:00:10.000000", "tool_name": "Edit", "agent_id": None, "file_path": ".gitignore"}
+            ],
+            "runs": [
+                {
+                    "ts": "2026-07-16T10:00:00.000000",
+                    "tool_name": "Bash",
+                    "command": "python -m pytest tools/ -q",
+                    "outcome": "green",
+                    "agent_id": None,
+                }
+            ],
+        },
+    )
+    result = _run_hook(_stop_payload(str(tmp_path), session_id), cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
+def test_echo_json_doc_only_exempt_after_green_with_earlier_code_edit(tmp_path):
+    # t-265 сценарий, subprocess-уровень: ранняя код-правка + зелёный
+    # прогон + doc-only правка ПОСЛЕ зелёного -- Stop НЕ блокируется.
+    session_id = "sess-t265"
+    _write_track(
+        tmp_path,
+        session_id,
+        {
+            "edits": [
+                {"ts": "2026-07-16T09:00:00.000000", "tool_name": "Edit", "agent_id": None, "file_path": "tools/x.py"},
+                {"ts": "2026-07-16T10:00:10.000000", "tool_name": "Edit", "agent_id": None, "file_path": "README.md"},
+            ],
+            "runs": [
+                {
+                    "ts": "2026-07-16T10:00:00.000000",
+                    "tool_name": "Bash",
+                    "command": "python -m pytest tools/ -q",
+                    "outcome": "green",
+                    "agent_id": None,
+                }
+            ],
+        },
+    )
+    result = _run_hook(_stop_payload(str(tmp_path), session_id), cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
+def test_echo_json_gate_log_backward_compat_reads_old_entries_without_ts_agent_id(tmp_path):
+    # t-278 п.2: старые gate_log-записи (до этой правки) не несут ts/
+    # agent_id -- чтение/дозапись треков с такими записями не должна
+    # падать; новая запись рядом несёт оба поля.
+    session_id = "sess-gatelog-back-compat"
+    _write_track(
+        tmp_path,
+        session_id,
+        {
+            "edits": [{"ts": "t1", "agent_id": None}],
+            "runs": [],
+            "main_gate_state": {"consecutive_blocks": 0},
+            "gate_log": [{"action": "blocked", "reason": "no-green-run", "gate": "main"}],
+        },
+    )
+    result = _run_hook(_stop_payload(str(tmp_path), session_id), cwd=tmp_path)
+    assert result.returncode == 2, result.stderr
+
+    track = json.loads((tmp_path / ".claude" / "dod_track" / f"{session_id}.json").read_text())
+    assert len(track["gate_log"]) == 2
+    assert "ts" not in track["gate_log"][0]  # старая запись не тронута
+    assert "ts" in track["gate_log"][1] and track["gate_log"][1]["ts"]
+    assert track["gate_log"][1]["agent_id"] is None
 
 
 def test_echo_json_unknown_file_path_main_still_blocks(tmp_path):
