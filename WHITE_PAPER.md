@@ -708,7 +708,149 @@ measured, recorded verdict that the next calibration can re-check,
 which is the difference between a cost-reduction campaign and a
 cost-reduction anecdote.
 
-## 7. Empirical Status (2026-07-13)
+## 6.5 One Path: Leaf Routing and the Judge-Accepted Leaf
+
+The cost campaign of §6.4 ended with an uncomfortable diagnosis:
+after the policy had already taken the easy routing prize, the
+remaining money was not IN the routed work at all. The original
+Router-gate criterion ("validated delegable categories account for
+≥25% of spend") measured 0.01% — a prize the static policy had
+already collected. Re-measured by the main-vs-sidechain method, the
+coordinator's own loop — allocate, dispatch, accept, journal —
+accounted for roughly 85% of the construction's spend. The gate was
+re-registered around the honest prize (D-0086): the question is not
+"which category to route" but "can the coordinator leave the loop
+without quality following it out".
+
+**The pre-registered experiment.** The D-construction: intake
+classifies a task as a LEAF (one performer, one allocate-category,
+no dependencies; any doubt makes it a graph) or a GRAPH; a leaf runs
+an automatic path — static category ladder picks the tier, the
+worker executes, and a CALIBRATED JUDGE accepts or rejects against
+the dispatch's acceptance keys, with a deterministic escalation
+mirror (one retry on the same tier, one one-step escalation, then
+failed back to the coordinator). The Lead never enters the leaf
+loop. Keys were pre-registered before any run: cost per accepted
+task ≤ the classic arm, quality within 0.05 of the Lead-accepted
+band, wall-clock no worse. Six series runs delivered the keys —
+median $2.08 per accepted task against the $2.60 bar, quality
+median 0.975 against a 0.87 floor, wall-clock 17.1 minutes against
+18 with parallel launch — and the gate was signed open on that
+evidence (2026-07-21), the first task of the workstream having
+already been delivered by the same series.
+
+**What did NOT win: a learned router.** Six router candidates from
+the literature and the ecosystem were evaluated across two survey
+waves against our own labeled ground truth; all six were rejected
+(the strongest, a BERT-class classifier, scored AUC 0.60 on the
+exam slice — a coin with a limp). The adopted construction routes
+by a STATIC category ladder plus a judge at acceptance; the learned
+router stays rejected until a pre-registered reopen trigger
+(≥100 labeled examples) fires. This is worth stating plainly
+because it inverts the field's default: the interesting decision
+automation was never "which model answers" — it was "who accepts
+the answer".
+
+**The judge exists on both supply channels.** The gateway judge is
+calibrated 13/13 (§6); the subscription channel gained an
+equivalent form — a subagent carrying the pinned judge system
+prompt VERBATIM scored 13/13 on the same calibration set the same
+day (t-254). A drifted judge prompt is a finding, not a judge. With
+both forms live, the leaf path is a property of the POLICY, not of
+any particular API contract.
+
+**The architectural consequence (D-0087/D-0088).** Leaf routing
+became kernel rule R13, and the two "contours" that had organized
+the project since D-0034 were demoted to what they empirically are:
+model SUPPLY-AND-MEASUREMENT channels. The task path is single and
+forks by SIZE at intake — leaf or graph — not by billing contour.
+Execution, acceptance discipline, the escalation ladder and the
+journal are contour-independent; what stays channel-specific is
+replay (API only), judge calibration (gateway), and two-source
+accounting. The journal carries the new acceptance basis as a typed
+field (`basis: "judge"`), the validator enforces it, and a
+calibration check audits every judge-accepted event for class
+violations — a mechanism/policy/integration change accepted under a
+judge basis is self-certification and is flagged by construction.
+
+## 6.6 Making Acceptance Machine-Checkable: the Validation Layer
+
+Two-layer enforcement (D-0063) says code guarantees the ENCOUNTER
+with a rule while a higher tier judges MEANING. Through mid-July the
+meaning layer was well-guarded and the encounter layer was thinner
+than it looked: a witness was a non-empty string, a reviewer verdict
+was free text, a hook could die silently, and a standing policy
+concession could outlive the decision that justified it with nobody
+noticing. A two-pass survey (D-0066) of an outside evidence-first
+harness supplied the missing patterns; four mechanisms were imported
+in one wave, each passing the four-questions discipline and a
+critic gate before landing:
+
+1. **Wiring integrity.** The session-start hook now verifies that
+the git hooks path is set, that every configured harness hook file
+exists and imports, and that the interpreter is reachable — loudly,
+as data lines in the boot report. A silently dead hook is otherwise
+indistinguishable from "all checks passed" (the same class as the
+silent-$0 accounting failure).
+
+2. **Witness cross-check (evidence-v2).** The journal write-moment
+hook cross-checks every builder acceptance's witness against the
+deterministic run track that a post-tool hook already records:
+the witnessed command must have actually run in-session, and a
+witness whose command ran red is a contradiction worth a warning.
+Absence alone never blocks — batch, cross-session and retroactive
+acceptance are legitimate — but a narrated witness that contradicts
+the observed track is caught at the moment it is written, not at
+the weekly audit.
+
+3. **Schema verdicts from a write-free reviewer.** The reviewer's
+final message must now END with a fenced JSON verdict — verdict
+class, blockers, class-completeness answer, and a trail of files
+read and reruns performed — validated by a fail-closed checker
+BEFORE acceptance; the reviewer's toolset itself is read-only by
+definition file. The role edit was exam-gated (§6.3 discipline): a
+freshly generated seeded-defect exam, keys pre-registered, two
+unmarked runs — with one trap ANNULLED as a key defect when two
+independent strong runs failed it identically for a structural
+reason, a ruling recorded openly and queued for the next
+calibration's audit rather than absorbed silently. The mechanism
+paid for itself on day one: the checker's first live use rejected a
+real verdict (trail reruns submitted as strings instead of typed
+objects), the resubmission passed, and the acceptance proceeded on
+a machine-valid verdict.
+
+4. **The escape-allowlist: concessions pinned to their reasons.**
+Every standing concession in the policy — the small-diff review
+skip, the batching exception, the judge acceptance basis, the
+retro-pair rule — is now a machine-readable entry binding a text
+anchor in the policy to the SHA-256 of the decision section that
+authorizes it, checked fail-closed on every commit. A rule whose
+justification drifts — or quietly disappears — breaks the commit
+loudly. The mechanism validated itself in the strongest way
+available: on its own seed data it exposed that the kernel had been
+citing "D-0056b" as the authority for the journal retro-pair norm —
+a sub-label that had never existed as a decision section. The
+missing decision was minted (D-0089) the same night, and the seed
+re-pinned. A validation mechanism that catches a hole in its own
+constitution within hours of being built is the class of evidence
+no synthetic benchmark provides.
+
+The same wave codified an adjacent class found by the pilot
+deployment's forensics: **deliverable drift** — work accepted
+against a REAL witness whose diff is then washed out of the working
+tree by a broad checkout before it is ever committed. Witness
+discipline proves the work ran; nothing proved the work SURVIVED.
+Acceptance and persistence are different events with a window
+between them, and the window now has two checks: the evening
+session-handoff verifies each accepted witness's load-bearing
+entity exists in committed HEAD, and a weekly calibration check
+sweeps the same property across the window's acceptances. The
+forensic technique that proved the class (runtime caches — test-id
+caches, bytecode timestamps — as witnesses that survive a git
+checkout) is recorded as method, since git cannot rewind what git
+never owned.
+
+## 7. Empirical Status (2026-07-13; updated 2026-07-22)
 
 What the evidence currently supports — with honest caveats: Shadow
 Evaluation volume is honest only for coding (31 judged pairs across
@@ -725,7 +867,7 @@ docs/SHADOW_EVALUATION_LOG.md):
 | Claim | Evidence |
 |---|---|
 | Extraction, formatting, summarization delegate to a 4B local model | Shadow Evaluation, judge-verified, pass_rate 1.00 — FREE-tier source; first paid-source counter-datapoint recorded (see micro-task row) |
-| Routine code generation does NOT delegate to Middle (70B) from a paid source | four consecutive reject runs 2026-07-11..13, 31 judged pairs, pass rates 0.00–0.05, chief-judge audits upheld; the earlier free-tier-source pass (n=2) stands as the overturned prior; status movement is the ~07-18 calibration's call |
+| Routine code generation does NOT delegate to Middle (70B) from a paid source | four consecutive reject runs 2026-07-11..13, 31 judged pairs, pass rates 0.00–0.05, chief-judge audits upheld; the earlier free-tier-source pass (n=2) stands as the overturned prior; status MOVED to rejected-on-current-bindings at calibration #2 (2026-07-18, Update Rule 1) |
 | On micro-tasks a paid frontier source can be CHEAPER than delegation | replay accounting: short paid-Sonnet answers cost less end-to-end than a verbose local intern at synthetic accounting prices — free ≠ $0 (D-0032), and delegation economics are a property of the SOURCE, not only the target |
 | Paid uncached input is 0.11% of the input side; the local compression lever is dead | direct cache-aware measurement of the API window (requests.db, F-38-correct formula); provider caching works through the proxy; context-management workstream closed by Architect signature |
 | Classification does NOT delegate to 4B | judge + manual review agree: flawed reasoning on a mixed-sentiment case |
@@ -768,6 +910,21 @@ Evaluation reads proxy-accounted costs for replay targets and judge
 calls (never a silent $0; historical `cost_target=$0.0000` lines are
 accounting artifacts), and all traffic is tagged
 real/synthetic/replay/judge — Phase 2 gates count only `real`.
+
+Routing construction and validation layer (updates through
+2026-07-22; evidence homes: DEPLOYMENT_ECONOMY_EXAM Runs log,
+ROADMAP gate decisions, PROCESS/CRITIC_EXAM.md Runs log,
+logs/routing-log.jsonl):
+
+| Claim | Evidence |
+|---|---|
+| The honest routing prize is the coordinator loop, not category choice | R2 re-measured by the main-vs-sidechain method: validated-category spend 0.01% (prize already taken by static policy) vs coordination overhead ~85% (D-0086 re-registration) |
+| A judge-accepted leaf path beats the classic loop on pre-registered keys | six D-arm series runs: median $2.08/accepted ≤ $2.60 bar, quality 0.975 ≥ 0.87 floor, wall-clock 17.1 ≤ 18 min; Router gate signed open 2026-07-21 |
+| Learned routers lose to a static ladder + judge on our ground truth | six candidates rejected across two survey waves (best: BERT-class AUC 0.60 on the exam slice); reopen trigger pre-registered at ≥100 labeled examples |
+| The judge is channel-independent | subscription-channel subagent judge carrying the pinned gateway prompt verbatim: 13/13 on the calibration set, same day (t-254) |
+| Savings hold under routing at scale | calibration #2 (07-18): ~65% gross counterfactual savings, $3.77/accepted delegated unit; calibration #3 (07-19): 65% stable |
+| Reviewer exam discipline survives role evolution | six seeded-diff exam runs across five role revisions (t-060..t-260): PASS band held; exam #2 recorded a two-run trap annulment as a key defect (openly, queued for calibration audit) rather than silently re-scoring |
+| The validation layer catches real defects on day one | rule-16 checker's first live use rejected a real verdict (untyped trail), resubmission passed; escape-allowlist's own seeds exposed a dangling authority label ("D-0056b"), minted as D-0089 the same night |
 
 External priors the local telemetry must confirm or refute (sources
 in docs/RELATED_WORK.md): 50–62% of spend is re-sent history; 30–40%
