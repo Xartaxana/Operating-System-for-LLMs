@@ -293,6 +293,15 @@ reject-вердиктов; трактовка R3-порога «>~100 строк
   находка (ж): +2ч разрыв ts-клоков — подкласс оси 2) — VERBATIM:
   docs/task_reports/2026-07-22_night-validation-closures.md.
 - БАТЧ МЕЛОЧЕЙ (07-22, к следующему builder-батчу, D-0081):
+  (б) preflight_quota.py::load_config БЕЗ exists-гарда — соседний
+  load_budgets гард несёт (асимметрия, класс D-0043): у штаба
+  маскирован наличием gateway/config.yaml (grep-подтверждено
+  13:38), в КИТЕ — Finding B валидации t-270: для дефолтного
+  subscription-контура config.yaml не генерится → FileNotFoundError
+  → try/except main() session_context глотает всё → SessionStart-хук
+  НЕМ (эмпирика двумя прогонами полигона). Фикс: exists-гард по
+  образцу load_budgets + тест на границе + сужение try/except
+  main(); кит-сиблинг — тем же батчем/порт-очередью (ось 4/7);
   (а) tools/dod_track.py determine_outcome() ложно краснит на
   «xfailed» (текстовый поиск подстроки «failed» без границ слова —
   честная xfail-сдача любого билдера получает ложный блок dod_gate;
