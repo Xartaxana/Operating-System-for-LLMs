@@ -171,3 +171,122 @@ session, recorded by the Lead the same turn.**
 Phase 3 ran alongside Phase 1.5/2 telemetry loops (weekly calibration
 continues; its evidence feeds the toolkit's default policy shipped to
 users).
+
+---
+
+## Phase 2 — решённые гейты: критерии, перенесённые VERBATIM из ROADMAP (диет 2026-07-22, слово оператора «обнови роадмап и почисти закрытые пункты»)
+
+Все три гейта Phase 2 решены (Context закрыт 07-13; Task pipeline
+открыт 07-13, workstream закрыт адопцией D-0080 07-18; Router открыт
+07-21); тексты критериев ниже — дословный перенос из ROADMAP.md, в
+котором остаются статус-указатели и живые блоки решений.
+
+### Common gate (both workstreams)
+
+- G1. >=14 consecutive days of REAL traffic: the operator's actual
+  working traffic, measured at the gateway (traffic_kind='real') or
+  from Claude Code transcripts (D-0034). Synthetic working sets and
+  replay/judge calls never count. Transcript history may satisfy G1
+  retroactively once usage_report.py can compute it.
+- G2. The judge is calibrated per PROCESS/JUDGE_CALIBRATION_PROTOCOL.md
+  at the moment of the gate check (currently met: 13/13).
+
+### Router gate ("what is worth routing" is now known)
+
+- R1. Evidence volume: >=30 judged Shadow Evaluation pairs per
+  candidate category, across >=2 independent runs (n=2 is a signal,
+  not a basis for routing).
+- R2 (revised 2026-07-20, D-0086; original wording preserved in
+  DECISIONS_FULL). Money on the table = COORDINATION OVERHEAD: the
+  Lead-tier spend on allocate/dispatch/acceptance machinery accounts
+  for >=25% of the construction's accounted spend over the G1 window,
+  measured by the check-11 method (main-session vs sidechain split,
+  both accounting contours). Rationale: the original
+  validated-category criterion measured a prize the policy had
+  already taken (measured 0.01%); the honest prize is the
+  coordinator itself (measured 2026-07-20: ~85% — met).
+- R3. Stability: category shares shift by <10 percentage points
+  between the two halves of the G1 window (routing rules learned
+  today must still apply tomorrow).
+- R4 (revised 2026-07-20, D-0086; original wording preserved in
+  DECISIONS_FULL). Economics by PRE-REGISTERED EXPERIMENT: the
+  router construction (D-arm of DEPLOYMENT_ECONOMY_EXAM — automatic
+  allocate + judge acceptance, Lead out of the dispatch loop) beats
+  the pre-registered keys on the exam battery: median of >=3 runs
+  with $/accepted <= arm C, quality >= arm B - 0.05, wall-clock <=
+  arm B. Quality is non-negotiable: a cheaper-but-worse construction
+  fails the gate regardless of savings.
+- R5. A paid Lead is in production, OR the Architect explicitly
+  accepts an accounted-price justification (routing free-tier traffic
+  saves cash $0; the architecture must not be built on hypothetical
+  savings without sign-off).
+
+First Router task when the gate opens (revised, D-0086): run the
+D-arm under the pre-registered keys — NOT adopt a router. The
+original first task (evaluate RouteLLM, D-0030) was DELIVERED
+2026-07-20 ahead of the gate: bert rejected on our ground truth
+(AUC 0.60 on the exam slice), remaining candidates (causal_llm,
+haiku-classifier) queued; evaluation plan and verdicts —
+docs/tasks/2026-07-20_routellm-evaluation-plan.md.
+
+### Context management gate (the cost driver is confirmed locally)
+
+Reframed per D-0036: the workstream is Context Management Evaluation
+(provider caching, compaction, retrieval/memory, semantic caching),
+not compression alone. All C-criteria are measured CACHE-AWARE: what
+matters is paid uncached re-sent input, not raw repetition.
+
+- C1. Driver confirmed: context-repetition ratio >=40% measured on
+  real multi-turn traffic (external prior 50–62%; if local traffic
+  shows materially less, this lever is not ours).
+- C2. Substance: >=20 real sessions of >=5 turns in the G1 window
+  (compression of single-shot traffic is meaningless).
+- C3. Money on the table: PAID UNCACHED re-sent context accounts for
+  >=25% of total accounted input spend over the G1 window (context
+  already served from provider cache is not on the table).
+
+First task when the gate opens (evaluation order fixed by D-0036):
+provider prompt caching measurement first; only if C3 stays green
+net of caching, evaluate LLMLingua-2 / PCToolkit (token level) and
+Letta-style recursive summarization (architectural) — validated by
+the existing Shadow Evaluation harness (compressed vs. full context,
+judge rules equivalence); never perplexity-compress code context
+without validation (docs/RELATED_WORK.md).
+
+### Task pipeline gate (externalize intake/scope/DAG/allocate, D-0059)
+
+The four stages a big task passes through — intake (formalize the
+request), scope (boundaries + task-level DoD), DAG generate
+(decompose into a dependency graph), allocate (assign a tier to each
+node) — currently run manually inside the Lead session per CLAUDE.md
+policy; recon t-008 confirmed no code components of this class
+exist, and per-dispatch DoD (D-0054) externalizes scope at dispatch
+granularity only. The task-level DAG lives nowhere but the Lead
+session's context and dies at the session boundary. Why this is
+worth externalizing, and what exactly is missing: docs/TASK_PIPELINE.md
+(rationale preserved per the operator's instruction, D-0059).
+
+- P1. Scale: >=3 tasks in the G1 window each spanning >=5 routing-log
+  events (delegated/rejected/escalated chains under one task_id or
+  an explicit task family) or crossing >=2 sessions — the size where
+  an in-head DAG starts dropping edges.
+- P2. Driver confirmed: >=1 `defect_found` or finding in the window
+  attributing a defect to a dependency/scope lost across a dispatch
+  or session boundary (the failure mode these artifacts prevent),
+  OR >=2 `decomposable` returns showing decomposition arriving too
+  late.
+- P3. Economics (Rule #1): projected artifact upkeep (Lead minutes
+  per task) <= projected rework avoided over the window.
+
+First task when the gate opens: evaluate existing task-graph
+carriers (Claude Code native task tools, a plain markdown template
+in PROCESS/) against one real multi-session task — NOT build
+pipeline code (D-0030). Build-out order is fixed by D-0059: task
+brief (intake+scope) → explicit DAG artifact with node statuses →
+allocate column per node derived from the routing rules → code /
+automation last, and only if artifact discipline proves value.
+Distinct from the Router gate above: the Router dispatches an
+already-scoped subtask; the allocate stage is its manual precursor,
+and the gates are independent. Decomposition authority stays with
+the Lead (D-0037) — the artifacts externalize the stages' OUTPUT,
+not the right to perform them.
