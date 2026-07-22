@@ -267,7 +267,7 @@ writing the delegated — max(t-NNN)+1; never reuse a remembered id.
 A repeat `delegated` on a CLOSED task is forbidden (D-0060). The past is never rewritten: a later-noticed collision or
 wrong ts gets a note in the NEXT event's notes; a missed event is
 fixed by a retro pair NOW — current ts, "retroactive" mark, actual
-bounds in notes (D-0056b); inserting lines into the past is
+bounds in notes (D-0089); inserting lines into the past is
 forbidden. CLOSING an open dispatch: bare token `closes:t-NNN`
 (several allowed) in the notes of any LATER event — the SessionStart
 hook reads ONLY this token; prose closures are invisible to it; never
