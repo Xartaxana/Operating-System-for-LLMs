@@ -471,15 +471,31 @@ def calibrate(pairs: list, judge_model: str, gateway: str,
     and reports agreement with the human labels. The judge must
     reproduce them before its verdicts are trusted in --record-evidence.
     pace: seconds to sleep between pairs (free-tier RPM ceilings, e.g.
-    Gemini free tier is 5 req/min)."""
+    Gemini free tier is 5 req/min).
+
+    Rule #1 (supervision cost must be visible where the delegation
+    decision is recorded): each pair's own judge_pair() call already
+    returns its cost, but a prior version of this function discarded it
+    (bound to `_judge_cost` and never accumulated) -- a calibration run's
+    total judge spend never reached the returned dict or the CLI report.
+    Fixed to sum every pair's cost into `judge_cost_usd_total` (None,
+    never a silent 0, only when NONE of the pairs' costs were
+    determinable -- same "explicit unknown" convention as
+    record_evidence's judge_cost=unknown line); `judge_cost_unknown`
+    counts pairs whose own cost came back None (_extract_cost
+    fallback failure), so a partial-unknown run is still visible as
+    partial, not silently folded into the total."""
     agreements, mismatches = 0, []
+    judge_costs = []
     for i, pair in enumerate(pairs):
         if i and pace:
             time.sleep(pace)
-        verdict, _judge_cost = judge_pair(
+        verdict, judge_cost = judge_pair(
             pair["prompt"], pair["source_response"], pair["target_response"],
             judge_model, gateway, **kwargs,
         )
+        if judge_cost is not None:
+            judge_costs.append(judge_cost)
         if verdict == pair["verdict"]:
             agreements += 1
         else:
@@ -488,7 +504,13 @@ def calibrate(pairs: list, judge_model: str, gateway: str,
                  "expected": pair["verdict"], "got": verdict,
                  "prompt": pair["prompt"][:80]}
             )
-    return {"n": len(pairs), "agreements": agreements, "mismatches": mismatches}
+    return {
+        "n": len(pairs),
+        "agreements": agreements,
+        "mismatches": mismatches,
+        "judge_cost_usd_total": round(sum(judge_costs), 6) if judge_costs else None,
+        "judge_cost_unknown": len(pairs) - len(judge_costs),
+    }
 
 
 def format_report(source_model, target_model, aggregated, statuses) -> str:
@@ -567,6 +589,12 @@ def main():
         report = calibrate(pairs, args.judge_model, args.gateway, pace=args.pace)
         print(f"JUDGE CALIBRATION: {args.judge_model} on {report['n']} labeled pairs")
         print(f"  agreement: {report['agreements']}/{report['n']}")
+        if report.get("judge_cost_usd_total") is not None:
+            unknown = report.get("judge_cost_unknown", 0)
+            unknown_note = f" ({unknown} unknown)" if unknown else ""
+            print(f"  judge_cost_total: ${report['judge_cost_usd_total']:.4f}{unknown_note}")
+        else:
+            print("  judge_cost_total: unknown")
         for m in report["mismatches"]:
             print(
                 f"  MISMATCH #{m['index']} [{m['category']}]"

@@ -575,6 +575,82 @@ def test_calibrate_reports_agreement_and_mismatches():
     assert report["mismatches"][0]["got"] == "equivalent"
 
 
+def test_calibrate_sums_judge_cost_across_pairs_n_greater_than_1(monkeypatch):
+    # D-0081 batch item (б): calibrate() must SUM judge_cost across every
+    # pair into judge_cost_usd_total -- not discard it as the old
+    # `_judge_cost` throwaway binding did.
+    import shadow_eval
+
+    pairs = [
+        {"prompt": "task1", "source_response": "a", "target_response": "b",
+         "category": "coding", "verdict": "equivalent"},
+        {"prompt": "task2", "source_response": "a", "target_response": "b",
+         "category": "coding", "verdict": "equivalent"},
+        {"prompt": "task3", "source_response": "a", "target_response": "b",
+         "category": "coding", "verdict": "equivalent"},
+    ]
+    costs = iter([0.001, 0.002, 0.003])
+    monkeypatch.setattr(
+        shadow_eval, "judge_pair",
+        lambda *a, **k: ("equivalent", next(costs)),
+    )
+
+    report = calibrate(pairs, "judge-alias", "http://localhost:4000")
+
+    assert report["n"] == 3
+    assert report["judge_cost_usd_total"] == pytest.approx(0.006)
+    assert report["judge_cost_unknown"] == 0
+
+
+def test_calibrate_judge_cost_total_none_when_all_unknown(monkeypatch):
+    # Boundary at the other end: every pair's judge_pair cost is
+    # undeterminable (_extract_cost fallback failure) -- the total must
+    # be an explicit None, never a silent $0.0000 (Rule #1), and every
+    # pair counts as unknown.
+    import shadow_eval
+
+    pairs = [
+        {"prompt": "task1", "source_response": "a", "target_response": "b",
+         "category": "coding", "verdict": "equivalent"},
+        {"prompt": "task2", "source_response": "a", "target_response": "b",
+         "category": "coding", "verdict": "target_worse"},
+    ]
+    monkeypatch.setattr(
+        shadow_eval, "judge_pair",
+        lambda *a, **k: ("equivalent", None),
+    )
+
+    report = calibrate(pairs, "judge-alias", "http://localhost:4000")
+
+    assert report["judge_cost_usd_total"] is None
+    assert report["judge_cost_unknown"] == 2
+
+
+def test_calibrate_judge_cost_unknown_counts_partial_misses(monkeypatch):
+    # Boundary: a MIX of known/unknown costs across pairs -- the total
+    # sums only the known ones and judge_cost_unknown reports exactly
+    # how many were missing, so a partial-unknown run is never folded
+    # silently into a false-complete total.
+    import shadow_eval
+
+    pairs = [
+        {"prompt": "task1", "source_response": "a", "target_response": "b",
+         "category": "coding", "verdict": "equivalent"},
+        {"prompt": "task2", "source_response": "a", "target_response": "b",
+         "category": "coding", "verdict": "equivalent"},
+    ]
+    costs = iter([0.005, None])
+    monkeypatch.setattr(
+        shadow_eval, "judge_pair",
+        lambda *a, **k: ("equivalent", next(costs)),
+    )
+
+    report = calibrate(pairs, "judge-alias", "http://localhost:4000")
+
+    assert report["judge_cost_usd_total"] == pytest.approx(0.005)
+    assert report["judge_cost_unknown"] == 1
+
+
 def test_record_evidence_writes_evidence_line_includes_judge_cost(tmp_path):
     # D-0067 split: Status cells stay in DELEGATION_TABLE.md (moved only
     # by weekly calibration, Update Rule 1), evidence lines go to a

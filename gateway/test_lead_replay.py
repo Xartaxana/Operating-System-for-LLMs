@@ -211,6 +211,36 @@ def _sample_result():
             "target_cost_usd": 0.01, "judge_cost_usd": 0.002, "truncated": False, "error": None}
 
 
+def test_format_summary_line_sums_cost_across_results_n_greater_than_1():
+    # D-0081 batch item (а) investigation: the described defect ("SUMMARY
+    # prints MEAN cost instead of SUM at n>1") does not reproduce in
+    # gateway/shadow_eval.py (no "SUMMARY" output there at all; its
+    # per-category mean_*_cost_usd fields are the documented, tested
+    # design -- see test_shadow_eval.py's test_aggregate_by_category).
+    # The only literal "SUMMARY" text in this codebase is this function's
+    # "shadow-replay SUMMARY" line, and reading it shows cost_target_total/
+    # judge_cost_total are already sum(...), never divided by n -- but
+    # no prior test exercised n>1 to lock that in. This test closes that
+    # gap: 3 results with distinct costs must add up, not average.
+    results = [
+        {"task": "1", "commit": "a", "kind": "script", "verdict": "equivalent",
+         "target_cost_usd": 0.01, "judge_cost_usd": 0.002, "truncated": False, "error": None},
+        {"task": "2", "commit": "b", "kind": "script", "verdict": "equivalent",
+         "target_cost_usd": 0.02, "judge_cost_usd": 0.003, "truncated": False, "error": None},
+        {"task": "3", "commit": "c", "kind": "script", "verdict": "worse",
+         "target_cost_usd": 0.03, "judge_cost_usd": 0.004, "truncated": True, "error": None},
+    ]
+    summary = format_summary_line("2026-07-22", "lead-sonnet", "judge-gemini", results)
+
+    assert "n=3" in summary
+    assert "equivalent=2/3" in summary
+    # SUM (0.01+0.02+0.03=0.06), not mean (0.02) -- the assertion that
+    # would fail if a future edit reintroduced a /n division.
+    assert "cost_target_total=$0.0600" in summary
+    assert "judge_cost_total=$0.0090" in summary
+    assert "truncated=1" in summary
+
+
 def test_evidence_lines_never_match_shadow_eval_line_regex():
     result = _sample_result()
     line = format_candidate_line("2026-07-18", result, "lead-sonnet", "judge-gemini")
