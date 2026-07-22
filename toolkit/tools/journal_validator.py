@@ -79,14 +79,15 @@ log" section):
     accepted, not rejected -- rejected just carries "by" with no
     further check.
 
-    NOTE (empirical finding, not invented behavior): the reference
-    validator this port was modeled on (this repo's own tools/
-    journal_validator.py) accepts basis=="judge" UNCONDITIONALLY --
-    it does not itself gate "judge" to a leaf-class category, despite
-    its own CLAUDE.md documenting exactly that restriction. The
-    category-gated form here follows this toolkit's OWN CLAUDE.md text
-    (quoted above), which is unambiguous about the restriction, rather
-    than mirroring the reference file's un-gated behavior.
+    NOTE (history): at the time of this port the reference validator
+    (the staff repo's own tools/journal_validator.py) accepted
+    basis=="judge" UNCONDITIONALLY, despite its own CLAUDE.md
+    documenting the leaf-class restriction -- this port implemented
+    the restriction first, from the toolkit's OWN CLAUDE.md text
+    (quoted above). The staff validator was then brought to the same
+    leaf-gated form the same day (staff fix t-276: LEAF_CATEGORIES,
+    a dedicated R13 message) -- both siblings of the pair are now
+    converged; this note stays as provenance, not as a live delta.
 12. Every NEW delegated line carries worker_ref -- a non-empty handle
     by which the next session finds the worker/result; catches a
     phantom delegated whose worker was never launched.

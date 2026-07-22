@@ -66,9 +66,18 @@
     ТОЛЬКО accepted дополнительно легален, если tier(by) > tier(agent)
     (haiku<sonnet<opus<fable по agent: scout=haiku, builder=sonnet,
     critic=opus), либо typed-поле "basis" из {"critic",
-    "queued-to-lead"}. Спека буквально требует tier/basis-проверку
-    только для accepted, не rejected -- rejected несёт "by" без
-    дальнейшей проверки (см. отчёт: буквальное чтение, не домысел).
+    "queued-to-lead"}, либо basis=="judge" -- НО ТОЛЬКО когда
+    СОБСТВЕННОЕ поле "category" этой же строки ∈ {"recon",
+    "implementation"} (лист-классы R13/D-0087, CLAUDE.md «Leaf
+    routing»: "Judge acceptance is legitimate ONLY for leaf-class
+    dispatches (recon, or implementation to a written spec)"). basis
+    "judge" на любой другой category -- НЕ валидный basis, проваливается
+    в tier-проверку наравне с любой другой парой agent/by (t-276:
+    штабной раньше принимал "judge" безусловно, без проверки
+    лист-класса -- расхождение с уже записанной нормой, устранено этой
+    правкой). Спека буквально требует tier/basis-проверку только для
+    accepted, не rejected -- rejected несёт "by" без дальнейшей
+    проверки (см. отчёт: буквальное чтение, не домысел).
 
 12. Любой FAIL -> exit 1, по каждой нарушившей строке -- номер строки,
     event/task_id, какая проверка упала. Крэш валидатора (исключение,
@@ -130,7 +139,12 @@ TASK_ID_REQUIRED_EVENTS = {"delegated", "accepted", "rejected", "escalated", "de
 FAILURE_CLASSES = {"spec", "capability", "recon", "tooling"}
 TIER_ORDER = {"haiku": 0, "sonnet": 1, "opus": 2, "fable": 3}
 AGENT_TIER = {"scout": "haiku", "builder": "sonnet", "critic": "opus"}
-BASIS_VALUES = {"critic", "queued-to-lead", "judge"}  # "judge": лист-класс, R13/D-0087
+BASIS_VALUES = {"critic", "queued-to-lead"}
+JUDGE_BASIS_VALUE = "judge"
+# Лист-классы, для которых basis "judge" легален (правило 11 / CLAUDE.md
+# «Leaf routing», R13/D-0087-эквивалент): "recon, or implementation to a
+# written spec".
+LEAF_CATEGORIES = {"recon", "implementation"}
 
 TASK_ID_RE = re.compile(r"^t-(\d{3,})$")
 # Маркер замены умершего воркера (2026-07-15, правило 9в2): literal
@@ -271,7 +285,13 @@ def check_append_only(staged_lines: list[str], head_lines: list[str]):
 def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None:
     """Правило 11. Возвращает текст нарушения или None. Применяется ТОЛЬКО
     к accepted (буквальное чтение спеки: "accepted легален, если...";
-    rejected несёт "by" без дальнейшей tier/basis-проверки)."""
+    rejected несёт "by" без дальнейшей tier/basis-проверки).
+
+    basis=="judge" валиден ТОЛЬКО когда собственное поле "category" этой
+    же строки -- лист-класс (LEAF_CATEGORIES); любой другой basis
+    по-прежнему сверяется с BASIS_VALUES безусловно (t-276: до этой
+    правки "judge" принимался безусловно, без проверки лист-класса --
+    расхождение со штатной нормой R13/D-0087, устранено здесь)."""
     if event != "accepted":
         return None
     if agent == "lead":
@@ -282,12 +302,27 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
     by_tier = TIER_ORDER.get(by)
     ok_tier = by_tier is not None and by_tier > TIER_ORDER[agent_tier]
     basis = obj.get("basis")
-    ok_basis = basis in BASIS_VALUES
+    if basis == JUDGE_BASIS_VALUE:
+        ok_basis = obj.get("category") in LEAF_CATEGORIES
+    else:
+        ok_basis = basis in BASIS_VALUES
     if ok_tier or ok_basis:
         return None
+    if basis == JUDGE_BASIS_VALUE:
+        # Отдельное сообщение именно для судейского basis на нелистовую
+        # (или отсутствующую/пустую) category -- называет и category, и
+        # правило (R13/D-0087), не смешивается с общим D-0058-сообщением
+        # ниже (t-276 DoD: "внятное сообщение -- назови категорию и
+        # правило").
+        return (
+            f"R13/D-0087: basis \"judge\" is legal only for leaf-class "
+            f"dispatches (recon/implementation), got category={obj.get('category')!r}"
+        )
     return (
         f"D-0058: agent={agent!r} принят by={by!r} (не строго выше яруса "
-        f"исполнителя) и нет валидного basis (нужно critic/queued-to-lead/judge)"
+        f"исполнителя) и нет валидного basis (нужно critic/queued-to-lead, "
+        f"либо judge на лист-класс -- category ∈ recon/implementation, "
+        f"R13/D-0087)"
     )
 
 

@@ -496,13 +496,104 @@ def test_matrix_scout_accepted_same_tier_with_basis_passes():
 
 def test_matrix_builder_accepted_same_tier_with_judge_basis_passes():
     """R13/D-0087: приёмка лист-класса судьёй — basis "judge" легален
-    и не требует принимающего строго выше исполнителя."""
+    и не требует принимающего строго выше исполнителя. category по
+    умолчанию у _line() -- "implementation" (лист-класс), см. также
+    test_matrix_judge_basis_category_implementation_passes /
+    test_matrix_judge_basis_category_recon_passes ниже за явную
+    расшифровку обеих лист-категорий."""
     staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
                             model="sonnet", task_id="t-001", witness="w", by="sonnet",
                             basis="judge",
                             notes="лист принят судьёй (R13)"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 0
+
+
+# ---- t-276: basis "judge" легален ТОЛЬКО при category ∈ {recon, implementation}
+# (R13/D-0087) -- до этой правки штабной валидатор принимал "judge" безусловно ----
+
+def test_matrix_judge_basis_category_implementation_passes():
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", witness="w", by="sonnet",
+                            basis="judge", category="implementation",
+                            notes="judge на implementation -- легально"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_matrix_judge_basis_category_recon_passes():
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="scout",
+                            model="haiku", task_id="t-001", by="haiku",
+                            basis="judge", category="recon",
+                            notes="judge на recon -- легально"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_matrix_judge_basis_category_review_fails_with_message():
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="critic",
+                            model="opus", task_id="t-001", by="opus",
+                            basis="judge", category="review",
+                            notes="judge на review -- НЕ лист-класс, запрещено"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("leaf-class dispatches" in v and "category='review'" in v for v in violations)
+
+
+def test_matrix_judge_basis_category_verification_fails_with_message():
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", witness="w", by="sonnet",
+                            basis="judge", category="verification",
+                            notes="judge на verification -- НЕ лист-класс, запрещено"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("leaf-class dispatches" in v and "category='verification'" in v for v in violations)
+
+
+def test_matrix_judge_basis_missing_category_fails_with_message():
+    # category ОТСУТСТВУЕТ у самого accepted-события (не путать с
+    # required-field-check правила 2, который тоже провалится отдельно --
+    # здесь проверяем ИМЕННО ветку матрицы правила 11: obj.get("category")
+    # даёт None, None not in LEAF_CATEGORIES).
+    obj = json.loads(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", witness="w", by="sonnet",
+                            basis="judge", notes="judge, category отсутствует вовсе"))
+    del obj["category"]
+    staged = _staged(json.dumps(obj, ensure_ascii=False))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("leaf-class dispatches" in v and "category=None" in v for v in violations)
+
+
+def test_matrix_judge_basis_empty_category_fails_with_message():
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", witness="w", by="sonnet",
+                            basis="judge", category="", notes="judge, category пустая строка"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("leaf-class dispatches" in v for v in violations)
+
+
+def test_matrix_non_judge_basis_unaffected_by_category_gate():
+    # контроль: НЕ-judge basis (queued-to-lead) остаётся легальным даже
+    # на нелистовой category -- гейт правила 11 затрагивает ТОЛЬКО
+    # ветку basis=="judge", остальные basis-значения и пути матрицы не
+    # тронуты (DoD п. "прочие basis-значения и пути матрицы не трогать").
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="scout",
+                            model="haiku", task_id="t-001", by="haiku",
+                            basis="queued-to-lead", category="review",
+                            notes="queued-to-lead на нелистовую category -- по-прежнему легально"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_matrix_non_judge_basis_critic_unaffected_by_category_gate():
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", witness="w", by="sonnet",
+                            basis="critic", category="verification",
+                            notes="critic-basis на нелистовую category -- по-прежнему легально"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
 
 
 def test_matrix_non_claude_by_requires_basis():
