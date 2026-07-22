@@ -264,6 +264,53 @@ published template are kept as an explicit synchronized pair:
 experiments live in the dogfooding repos, and the template changes
 only in verified batches opened by the operator's word (D-0074).
 
+## 4.2 Policy as Code: the Gates on the Execution Path
+
+A policy that lives only as loaded text has exactly the reliability
+of the model's attention on a given turn — the project's own journal
+proves this repeatedly (F-9: the freshly strengthened rule was
+silently skipped within hours). So the policy grew a code skeleton,
+under one strict division of labor (D-0063): **code guarantees the
+ENCOUNTER with a rule and decides only the deterministically
+decidable; the verdict on meaning stays with a tier above the
+performer.** Promotion from text to gate is evidence-driven — a norm
+becomes code when the journal records it leaking, not for symmetry.
+
+The gates, in the order a working session meets them: at session
+start a WIRING check verifies the enforcement chain itself is alive
+(git hooks path set, every configured hook file present and
+importable — a dead hook is otherwise indistinguishable from "all
+passed"). During work, dispatch-time hooks snapshot reviewer
+context and record every verification run deterministically; the
+journal write-moment hook validates each new event's shape, echoes
+tier declarations, cross-checks builder witnesses against the
+recorded run track, and compares event timestamps against the
+system clock (a narrated timestamp is caught as it lands, not at
+the weekly audit). A stop-gate refuses to end a coordinator's turn
+whose edits lack a green verification run; a hygiene hook warns on
+command forms that break allowlists or bypass the write tools. At
+commit time, a pre-commit validator enforces the journal's
+append-only prefix, typed fields and acceptance matrix; the
+escape-allowlist checker verifies every standing policy concession
+still hash-matches the decision that authorizes it; and a
+commit-msg gate rejects a mechanism commit that lacks the
+four-questions axis block and a tier declaration.
+
+Three properties keep this honest. **Warn and block are chosen per
+channel** — write-moment checks warn (batch and retroactive writes
+are legitimate; the coordinator judges), commit-path checks block
+(nothing legitimate needs a malformed journal line in history).
+**The chain protects itself**: a self-activating enforcement file
+is never placed on the execution path by the worker who built it —
+the coordinator places it at acceptance (D-0069) — and editing a
+gate is itself gated. And **the journal the gates defend is typed
+for machines** (D-0053, D-0076): events record accomplished facts,
+never intentions — a dispatch line exists only after the dispatch
+call returns and carries the worker's handle — batched to stage
+boundaries (D-0079) so discipline does not tax every turn, with
+questions routing strictly up (D-0077): no tier, including the
+coordinator, absorbs a decision that belongs to the user.
+
 ## 5. Evidence-Based Delegation
 
 DELEGATION_TABLE.md is the system's decision surface: task type →
@@ -1019,35 +1066,34 @@ docs/RELATED_WORK.md to stop re-litigating).
   D-0029/D-0033/D-0036/D-0059; thresholds in ROADMAP.md; a green
   gate produces a written report and a human signature, never an
   automatic transition):
-  the TASK-PIPELINE workstream is OPEN — common gate green (16
-  consecutive real days, judge 13/13), all P-criteria met on journal
-  evidence (10 tasks spanning ≥5 events; boundary-loss defects as
-  the confirmed driver). Its first task — an evaluation of existing
-  task-graph carriers, never a build (D-0030) — is done: the
-  harness's native task tools were REJECTED as a primary carrier
-  (their store lives outside the repository, hence outside the
-  project's only memory; reopen trigger recorded), and a minimal
-  markdown DAG artifact in the repository is being piloted on a real
-  multi-session task. The CONTEXT-MANAGEMENT workstream is CLOSED by
+  the TASK-PIPELINE workstream OPENED 07-13 and CLOSED 07-18 by
+  adoption: the harness's native task tools were REJECTED as a
+  primary carrier (their store lives outside the repository, hence
+  outside the project's only memory), and the piloted markdown DAG
+  artifact became the standard carrier for tasks of ≥5 events or ≥2
+  sessions (D-0080). The CONTEXT-MANAGEMENT workstream is CLOSED by
   direct measurement (C3 = 0.11% vs ≥25%): provider caching already
   took the money off the table; reopening requires an explicit
-  Architect decision. The ROUTER gate stays red: R1 volume arrived
-  (31 pairs) but points AGAINST the one candidate category, and
-  R2/R3 become computable for the first time at the next
-  calibration — the current evidence direction is "nothing worth
-  routing yet", which the architecture treats as a valid,
-  money-saving answer (the Router exists to be built only on
-  receipts).
+  Architect decision. The ROUTER gate — red at the 07-13 decision —
+  OPENED 2026-07-21 on the re-registered coordination framing
+  (§6.5): the pre-registered leaf-routing experiment took its keys,
+  the adopt decision landed as D-0087/D-0088, and the workstream's
+  remaining path to closure (and with it Phase 2's) is the first
+  live window of judge-based acceptances audited at calibration #4.
 - **Phase 3 (toolkit, D-0070) — CLOSED 2026-07-12:** the system
   packaged as a public installable template (Supervised-Delegation
   v0.1.0), validated by two installs (§4.1); template changes ship
   only as verified batches from the dogfooding deployments (D-0074).
+  Batches since: releases v0.4.0–v0.4.2 (2026-07-20) brought the kit
+  to parity with the dogfooding deployment — policy kernel, gate
+  suite, judge onboarding — with a port queue accumulating between
+  operator-opened syncs.
 - **Continuous:** the delegation table and this paper's §7 are living
   documents; Shadow Evaluation runs append to
-  docs/SHADOW_EVALUATION_LOG.md; the weekly calibration (next
-  ~2026-07-18) aggregates the journal and owns every status
-  movement — including the pending coding→Middle rejection call and
-  the task-pipeline pilot verdict.
+  docs/SHADOW_EVALUATION_LOG.md; the weekly calibration aggregates
+  the journal and owns every status movement (runs #1–#3 done, #2
+  moved coding→Middle to rejected; #4 due ~2026-07-25 carries the
+  first leaf-routing window audit).
 
 ## 11. Limitations
 
@@ -1079,11 +1125,11 @@ zero cycles; its first verdict is due at the ~07-18 calibration.
 
 *Canonical sources: ARCHITECTURE.md (specification; boot core
 ARCHITECTURE_BOOT.md), DECISIONS.md index + docs/DECISIONS_FULL.md
-(D-0001…D-0075), DELEGATION_TABLE.md + docs/SHADOW_EVALUATION_LOG.md
+(D-0001…D-0089), DELEGATION_TABLE.md + docs/SHADOW_EVALUATION_LOG.md
 (evidence), logs/routing-log.jsonl (routing journal),
-docs/FINDINGS.md (F-1…F-38), PROCESS/JUDGE_CALIBRATION_PROTOCOL.md,
-PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md, docs/RELATED_WORK.md,
-docs/TASK_CARRIER_EVAL_2026-07-13.md + docs/tasks/ (task-pipeline
-workstream), toolkit/ + github.com/Xartaxana/Supervised-Delegation
-(the published template), gateway/ + tools/ (reference
-implementation).*
+docs/FINDINGS.md (F-1…F-50), PROCESS/JUDGE_CALIBRATION_PROTOCOL.md,
+PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md, PROCESS/CRITIC_EXAM.md,
+docs/RELATED_WORK.md, docs/TASK_CARRIER_EVAL_2026-07-13.md +
+docs/tasks/ (task-pipeline workstream), toolkit/ +
+github.com/Xartaxana/Supervised-Delegation (the published
+template), gateway/ + tools/ (reference implementation).*
