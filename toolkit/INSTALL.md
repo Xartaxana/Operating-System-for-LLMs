@@ -18,12 +18,29 @@ contour question and takes it from there.
    template into a temporary folder (or a subfolder) instead of
    directly into your project root, move its files into the root, and
    leave your existing `.git` alone (skip `git init`).
-3. Retitle README.md for your own project if you want to — there's no
+
+   #### Source is a subdirectory with no `.git` of its own?
+
+   The template you're copying from may itself be a subdirectory of a
+   larger repository (e.g. a `toolkit/` folder inside a monorepo,
+   carrying no `.git` of its own) rather than a standalone clonable
+   repo. In that case there is nothing to clone — copy the
+   subdirectory's files directly into your project root (a plain file
+   copy, same file set as step 1's list for Path B) and continue from
+   here exactly as if you had cloned and stripped history.
+3. Point git's hooks path at the installed hooks BEFORE your first
+   commit: `git config core.hooksPath .githooks`. This mirrors Path
+   B's own step 3 below, and for the same reason: the commit-msg gate
+   (`tools/mechanism_gate.py`) only fires once `core.hooksPath` points
+   here, so setting it after your first commit lets that commit slip
+   past the gate uninspected — see "A note on your first commit"
+   below, which applies identically to both paths.
+4. Retitle README.md for your own project if you want to — there's no
    literal placeholder token in it, just the toolkit's own name as a
    heading, so leaving it as-is is also fine. Update the copyright
    line in LICENSE if you're forking this publicly under your own
    name.
-4. Continue to Onboarding, below.
+5. Continue to Onboarding, below.
 
 ## Path B — Into an existing project
 
@@ -84,3 +101,16 @@ the entrance exam for each bound model, and produces your first Boot
 Report. A failed exam doesn't block you — swap the model, or keep it
 anyway; exam failures land in your decision log (`DECISIONS.md`), not
 the routing journal.
+
+The first Boot Report is normally emitted by the SessionStart hook the
+moment a fresh Claude Code session opens with its cwd at your project
+root — but the session actually running onboarding may not cross that
+boundary (a continuing session already open before the files landed,
+a headless/scripted install run). When that's the case, don't skip
+the report: assemble it BY HAND from the same facts a live hook run
+would use — read BOOT.md's own file list plus PROCESS/
+BOOT_REPORT_PROTOCOL.md's template, and fill it from what's actually on
+disk (git status, DECISIONS.md's entry count, CURRENT_CONTEXT.md's
+queue, and so on). Note in the report itself that it was hand-assembled
+rather than hook-emitted, so a later reader doesn't mistake it for
+evidence the hook fired.
