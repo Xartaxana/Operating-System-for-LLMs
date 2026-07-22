@@ -72,7 +72,10 @@ from pathlib import Path
 BLOCK_MESSAGE = (
     "Stop blocked: there is no green verification run after the last "
     "edit. Run your DoD check (pytest / your verification command) "
-    "and stop on green."
+    "and stop on green. Re-submission = a COMPLETE final report all "
+    "over again (only your LAST message reaches the coordinator -- "
+    "earlier text in this session is not delivered to it; a reference "
+    "back to it is not a substitute, F-49-class hazard)."
 )
 
 SAFETY_SKIP_MESSAGE = (

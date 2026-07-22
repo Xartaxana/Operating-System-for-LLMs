@@ -90,8 +90,30 @@ UI_WITNESS_RE = re.compile(
     r"screenshot|playwright|puppeteer|selenium|screencap", re.IGNORECASE
 )
 
-FAILURE_INDICATORS_RE = re.compile(r"failed|error|traceback", re.IGNORECASE)
-SUCCESS_INDICATORS_RE = re.compile(r"passed|\bok\b", re.IGNORECASE)
+# Fix (a documented finding, class D-0043): a bare substring "failed"
+# with no word boundary used to false-match "xfailed" ("2 xfailed" ->
+# a false "red" -- an honest xfail submission from builder got blocked
+# by dod_gate; reproduced: xfail -> block, skip -> green). \bfailed\b
+# does NOT match "failed" as part of a longer word (neither "xfailed"
+# nor any other word ending in "failed") -- there is no \b transition
+# between two word characters. SUCCESS_INDICATORS_RE additionally
+# recognizes a bare "xfailed" (xpassed already matched by accident, as
+# a substring of "passed") -- otherwise "N xfailed" with no other
+# summary word would fall into determine_outcome's safe "red" default,
+# and an honest xfail must NOT block a submission (the same outcome an
+# honest skip already got). Chosen as the minimal, targeted fix (word
+# boundaries) of the two options for this class of bug (word
+# boundaries, or a full pytest-summary parser) -- it does not touch
+# the rest of determine_outcome() and does not break the non-pytest
+# witness forms (node/UI scripts have no "N passed/failed" summary at
+# all, so a full pytest-summary parser would be useless for them; see
+# the node-script test in this file's own test module). "error" and
+# "traceback" below deliberately remain bare substrings, unchanged --
+# out of this fix's declared scope (only "failed" was reported); the
+# same class of fix applies there too if a similar false-positive is
+# ever reported.
+FAILURE_INDICATORS_RE = re.compile(r"\bfailed\b|error|traceback", re.IGNORECASE)
+SUCCESS_INDICATORS_RE = re.compile(r"passed|\bok\b|xfailed", re.IGNORECASE)
 
 NUMERIC_RC_FIELDS = ("rc", "exit_code", "returnCode", "return_code")
 

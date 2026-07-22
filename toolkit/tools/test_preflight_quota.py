@@ -19,6 +19,8 @@ from preflight_quota import (
     default_root,
     discover_dbs,
     format_text,
+    load_budgets,
+    load_config,
     normalize_provider_model,
     parse_provider_429,
     parse_ts,
@@ -87,6 +89,45 @@ def _seed_db(db_path: Path, rows: list):
         )
     conn.commit()
     conn.close()
+
+
+# ---- load_config exists-guard (a documented finding, class D-0043
+# alongside load_budgets, which already had this shape) ----
+
+
+def test_load_config_missing_file_returns_empty_dict(tmp_path):
+    root = tmp_path / "gateway"
+    root.mkdir()
+    # no config.yaml written at all -- this toolkit's own subscription-
+    # contour default state.
+    assert load_config(root) == {}
+
+
+def test_load_config_existing_valid_file_still_loads(tmp_path):
+    root = _seed_root(tmp_path)
+    config = load_config(root)
+    assert config["model_list"][0]["model_name"] == "middle-groq"
+
+
+def test_load_config_malformed_yaml_still_raises(tmp_path):
+    # The exists-guard covers ABSENCE only -- a config.yaml that exists
+    # but is not valid YAML is a different failure class (corrupt
+    # content) and must still surface loudly, same asymmetry as
+    # load_budgets().
+    root = tmp_path / "gateway"
+    root.mkdir()
+    (root / "config.yaml").write_text("model_list: [unclosed", encoding="utf-8")
+    with pytest.raises(yaml.YAMLError):
+        load_config(root)
+
+
+def test_load_budgets_missing_file_returns_empty_quota_windows(tmp_path):
+    # Sibling check (rule 9): load_budgets already had this exists-guard
+    # shape before this task -- confirms load_config now matches it,
+    # not a new asymmetry.
+    root = tmp_path / "gateway"
+    root.mkdir()
+    assert load_budgets(root) == {"quota_windows": {}}
 
 
 # ---- config / provider_model normalization ----

@@ -241,17 +241,42 @@ def test_main_fail_open_on_broken_journal(tmp_path, capsys):
     assert out[0].startswith("session-context warning:")
 
 
-def test_main_fail_open_when_gateway_dir_missing(tmp_path, capsys):
-    # A repo root with no gateway/ directory at all (config.yaml/budgets.yaml
-    # unreachable) must still fail open, not crash the session start.
+def test_main_full_output_when_gateway_dir_missing(tmp_path, capsys):
+    # preflight_quota.load_config's exists-guard (a documented finding,
+    # class D-0043 alongside load_budgets, which already had this
+    # shape): a repo root with no gateway/ directory at all (config.yaml
+    # unreachable) is this toolkit's own subscription-contour DEFAULT
+    # state, not a crash condition -- the SessionStart output must stay
+    # FULL (NOW/LAST EVENT/BOOT BUDGET/etc still print), not collapse
+    # to a single fail-open warning line the way a missing config.yaml
+    # used to make it do before that guard existed (see
+    # test_preflight_quota.py::test_load_config_missing_file_returns_empty_dict
+    # for the underlying unit-level fix).
     root = tmp_path
     (root / "logs").mkdir()
     (root / "logs" / "routing-log.jsonl").write_text("", encoding="utf-8")
     code = main(root)
     assert code == 0
     out = capsys.readouterr().out.strip().splitlines()
-    assert len(out) == 1
-    assert out[0].startswith("session-context warning:")
+    assert not any(l.startswith("session-context warning:") for l in out)
+    assert any(l.startswith("NOW:") for l in out)
+    assert any(l.startswith("Last calibration:") for l in out)
+    assert any(l.startswith("BOOT BUDGET:") for l in out)
+
+
+def test_main_full_output_when_config_yaml_missing_but_gateway_dir_exists(tmp_path, capsys):
+    # Narrower sibling of the above: gateway/ EXISTS (e.g. holds only a
+    # requests.db) but config.yaml specifically was never generated --
+    # same exists-guard, same expected full output.
+    root = tmp_path
+    (root / "logs").mkdir()
+    (root / "logs" / "routing-log.jsonl").write_text("", encoding="utf-8")
+    (root / "gateway").mkdir()
+    code = main(root)
+    assert code == 0
+    out = capsys.readouterr().out.strip().splitlines()
+    assert not any(l.startswith("session-context warning:") for l in out)
+    assert any(l.startswith("NOW:") for l in out)
 
 
 def test_main_success_path_prints_lines_and_exits_zero(tmp_path, capsys):

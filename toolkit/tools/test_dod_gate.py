@@ -734,3 +734,19 @@ def test_echo_json_malformed_json_fails_open():
     )
     assert result.returncode == 0
     assert result.stderr == ""
+
+
+# ---- BLOCK_MESSAGE carries an F-49-class re-submission hint ----
+
+
+def test_block_message_names_resubmission_is_a_full_report():
+    # F-49 class: only the LAST message reaches the coordinator -- a
+    # re-submission after this block must redeliver the whole report,
+    # not point back at an earlier one. The exact wording is this
+    # toolkit's own (not a byte-for-byte copy of any other repo's
+    # phrasing) -- this test checks the SUBSTANCE survives, not a
+    # specific sentence.
+    msg = dod_gate.BLOCK_MESSAGE
+    assert "complete" in msg.lower() or "whole" in msg.lower() or "all over again" in msg.lower()
+    assert "last" in msg.lower()
+    assert "coordinator" in msg.lower()

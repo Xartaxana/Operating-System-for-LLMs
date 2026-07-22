@@ -120,6 +120,53 @@ def test_build_fact_bash_verification_command_red_on_ambiguous_output():
     assert entry["outcome"] == "red"
 
 
+def test_determine_outcome_bare_xfailed_is_green_not_red():
+    # The bug this fix closes: a bare substring "failed" (no word
+    # boundary) used to false-match inside "xfailed", turning an honest
+    # xfail submission into a "red" outcome and blocking a clean
+    # dod_gate stop. "2 xfailed" carries no OTHER summary word (no
+    # "passed", no "error", no "Traceback") -- must resolve to green.
+    assert dod_track.determine_outcome({"stdout": "2 xfailed", "stderr": ""}) == "green"
+
+
+def test_determine_outcome_xfailed_alongside_passed_still_green():
+    assert dod_track.determine_outcome(
+        {"stdout": "10 passed, 2 xfailed in 1.23s", "stderr": ""}
+    ) == "green"
+
+
+def test_determine_outcome_word_boundary_does_not_match_failed_as_prefix_of_longer_word():
+    # \bfailed\b must not match "failed" as a PREFIX of a longer token
+    # either (not just as a suffix like "xfailed") -- boundary test on
+    # both sides of the word-boundary fix.
+    assert dod_track.determine_outcome({"stdout": "10 passed, 0 scaffailed", "stderr": ""}) == "green"
+
+
+def test_determine_outcome_real_failed_word_still_red():
+    # The word-boundary fix must not blind the detector to a REAL
+    # standalone "failed" -- the boundary case just beyond xfailed's
+    # false-positive.
+    assert dod_track.determine_outcome({"stdout": "1 failed, 9 passed", "stderr": ""}) == "red"
+
+
+def test_determine_outcome_bare_xpassed_still_green_incidental_substring():
+    # Documented incidental behavior (unchanged by this fix): "xpassed"
+    # matches SUCCESS_INDICATORS_RE only because "passed" occurs inside
+    # it as a substring, same as before.
+    assert dod_track.determine_outcome({"stdout": "1 xpassed", "stderr": ""}) == "green"
+
+
+def test_build_fact_bash_verification_command_xfailed_green():
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": "pytest tools/"},
+        "tool_response": {"stdout": "1 xfailed in 0.5s", "stderr": ""},
+    }
+    kind, entry = dod_track.build_fact(payload)
+    assert kind == "run"
+    assert entry["outcome"] == "green"
+
+
 def test_build_fact_rc_field_overrides_text_when_present():
     payload = {
         "tool_name": "Bash",
