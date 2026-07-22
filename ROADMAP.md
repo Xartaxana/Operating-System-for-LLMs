@@ -124,7 +124,12 @@ existing tool, never a build (D-0030).
   judge-hallucination spot-checks, Rule #1 economics); on a clean
   audit the closure block lands here with the Architect's signature,
   and the closing commit moves the Phase 2 narrative to the archive
-  home per D-0078.
+  home per D-0078. CLOSING-COMMIT DUTY (operator word 2026-07-22,
+  F-48/D-0082 class): the reopen TRIGGERS of the deferred
+  parallelism/isolation section below do not evaporate with the
+  archived narrative — the same commit moves them into a LIVE
+  carrier (CURRENT_CONTEXT evidence-gated queue) as standing items;
+  a trigger living only in an archive file is not handed over.
 
 ### Gate decision 2026-07-13 (report of 2026-07-12, revised 07-13; signature — Architect, in session)
 
