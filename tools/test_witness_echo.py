@@ -84,6 +84,14 @@ HEAD_LINE = _delegated_head_line()
 HEAD_TEXT = HEAD_LINE + "\n"
 
 
+def _fresh_ts(offset_seconds=0):
+    """Свежий ts для НОВЫХ строк e2e-тестов тишины (миграция при
+    постановке ts-drift слоя t-263: историческая дата в новой строке
+    даёт легитимный TS DRIFT STALE и ломает assert полной тишины;
+    head-строки остаются историческими -- они не «новые»)."""
+    return (dt.datetime.now() + dt.timedelta(seconds=offset_seconds)).isoformat(timespec="seconds")
+
+
 def _accepted_line(ts="2026-07-10T08:10:00", witness="tests pass", notes="accepted",
                     task_id="t-001", by="fable", agent="builder", **kw):
     obj = {"ts": ts, "event": "accepted", "agent": agent, "category": "implementation",
@@ -799,7 +807,8 @@ def test_e2e_green_witness_silent(tmp_path):
     _write_track(tmp_path, "sess-1", [
         _run_entry("2026-07-10T08:05:00.000000", "python -m pytest tools/ gateway/ -q", "green"),
     ])
-    new_line = _accepted_line(witness="python -m pytest tools/ gateway/ -q -> 930 passed")
+    new_line = _accepted_line(ts=_fresh_ts(),
+                               witness="python -m pytest tools/ gateway/ -q -> 930 passed")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
     assert result.returncode == 0
@@ -829,7 +838,8 @@ def test_e2e_retro_no_warn_even_with_red_track(tmp_path):
     _write_track(tmp_path, "sess-1", [
         _run_entry("2026-07-10T08:05:00.000000", "python -m pytest tools/ gateway/ -q", "red"),
     ])
-    new_line = _accepted_line(witness="python -m pytest tools/ gateway/ -q -> 3 failed",
+    new_line = _accepted_line(ts=_fresh_ts(),
+                               witness="python -m pytest tools/ gateway/ -q -> 3 failed",
                                notes="retroactive fix of missed accepted event")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
@@ -841,7 +851,8 @@ def test_e2e_retro_no_warn_even_with_red_track(tmp_path):
 def test_e2e_missing_track_silent_note_not_exception(tmp_path):
     journal_path = _seed_committed_journal(tmp_path)
     # НЕТ .claude/dod_track вовсе.
-    new_line = _accepted_line(witness="python -m pytest tools/ gateway/ -q -> 930 passed")
+    new_line = _accepted_line(ts=_fresh_ts(),
+                               witness="python -m pytest tools/ gateway/ -q -> 930 passed")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
     assert result.returncode == 0
@@ -854,7 +865,8 @@ def test_e2e_malformed_track_silent_note_not_exception(tmp_path):
     track_dir = tmp_path / ".claude" / "dod_track"
     track_dir.mkdir(parents=True)
     (track_dir / "sess-1.json").write_text("{not valid json at all", encoding="utf-8")
-    new_line = _accepted_line(witness="python -m pytest tools/ gateway/ -q -> 930 passed")
+    new_line = _accepted_line(ts=_fresh_ts(),
+                               witness="python -m pytest tools/ gateway/ -q -> 930 passed")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
     assert result.returncode == 0
@@ -891,7 +903,7 @@ def test_e2e_old_line_witness_not_retriggered(tmp_path):
     _write_track(tmp_path, "sess-1", [
         _run_entry("2026-07-10T08:04:00.000000", "python -m pytest tools/ gateway/ -q", "red"),
     ])
-    new_clean_line = _delegated_line(ts="2026-07-10T08:10:00", task_id="t-002",
+    new_clean_line = _delegated_line(ts=_fresh_ts(), task_id="t-002",
                                       notes="unrelated new clean line")
     journal_path.write_text(head_text + new_clean_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
@@ -905,7 +917,8 @@ def test_e2e_non_builder_accepted_no_witness_check(tmp_path):
     _write_track(tmp_path, "sess-1", [
         _run_entry("2026-07-10T08:05:00.000000", "python -m pytest tools/ gateway/ -q", "red"),
     ])
-    new_line = _accepted_line(witness="python -m pytest tools/ gateway/ -q -> 3 failed",
+    new_line = _accepted_line(ts=_fresh_ts(),
+                               witness="python -m pytest tools/ gateway/ -q -> 3 failed",
                                agent="critic")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))

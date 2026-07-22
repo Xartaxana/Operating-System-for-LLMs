@@ -25,6 +25,7 @@ subprocess.run и обрабатывается как "нет HEAD").
 Run from the repo root: python -m pytest tools/test_journal_echo.py -q
 """
 
+import datetime
 import json
 import os
 import subprocess
@@ -36,6 +37,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import journal_echo  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parent / "journal_echo.py"
+
+
+def _fresh_ts(offset_seconds: int = 0) -> str:
+    """Свежий (относительно РЕАЛЬНЫХ часов, момент вызова) ts -- критик-
+    правка t-263 (BLOCKER 2): постановка ts-drift-слоя (tools/
+    journal_echo_staged.py) на живой journal_echo.py сделает СТАРЫЕ
+    фиксированные ts-фикстуры ("2026-07-10T08:1x:00") в НОВЫХ строках
+    журнала (за пределами HEAD) ловимыми как TS DRIFT STALE -- это
+    ломает тесты, ожидающие ПОЛНУЮ тишину (stdout=="") или ТОЧНОЕ
+    равенство additionalContext (лишний "; TS DRIFT: ..."-хвост меняет
+    строку). Используется ТОЛЬКО в тех тестах, где это действительно
+    ломает assert (см. правки ниже) -- тесты, сверяющие подстроку (`in
+    ctx`), не migrated: семантика теста (TIER/WITNESS-логика, не даты)
+    не меняется, лишний сегмент такой assert не портит. Миграция
+    НЕ зависит от нового кода -- этот файл проверяется против ЖИВОГО
+    journal_echo.py (без ts-drift слоя вовсе), поэтому текущее
+    поведение не меняется, только форма фикстуры."""
+    return (datetime.datetime.now() + datetime.timedelta(seconds=offset_seconds)).isoformat(timespec="seconds")
 
 
 # ---------------------------------------------------------------------
@@ -436,7 +455,7 @@ def test_echo_non_journal_path_silent(tmp_path):
 def test_echo_git_mode_clean_new_line_silent(tmp_path):
     # DoD 2: журнал с чистой новой строкой (git-репо с HEAD) -> тишина.
     journal_path = _seed_committed_journal(tmp_path)
-    new_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+    new_line = _line(event="delegated", ts=_fresh_ts(), task_id="t-002",
                       model="sonnet", notes="second task, clean")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path))
@@ -506,8 +525,14 @@ def test_echo_standalone_fallback_non_git_dir_catches_defect(tmp_path):
 def test_echo_standalone_fallback_non_git_dir_clean_silent(tmp_path):
     # Симметричный позитивный случай standalone-фолбэка: чистый файл в
     # не-git каталоге -> тишина (не просто "фолбэк ловит дефект", но и
-    # "фолбэк не ложно-срабатывает на чистом входе").
-    _write_journal(tmp_path, HEAD_TEXT)
+    # "фолбэк не ложно-срабатывает на чистом входе"). НЕ переиспользует
+    # общий HEAD_TEXT (его ts зафиксирован в прошлом нарочно -- многие
+    # ДРУГИЕ тесты файла полагаются на то, что их собственные "новые"
+    # фиксированные ts позже HEAD_TEXT's; менять сам HEAD_TEXT сломало бы
+    # монотонность в них) -- локальная СВЕЖАЯ строка, семантика теста
+    # (standalone-фолбэк на чистом входе -> тишина) не меняется.
+    fresh_line = _line(event="delegated", ts=_fresh_ts(), task_id="t-001", model="sonnet")
+    _write_journal(tmp_path, fresh_line + "\n")
     journal_path = tmp_path / "logs" / "routing-log.jsonl"
     result = _run_hook(_post_tool_use_payload(journal_path))
     assert result.returncode == 0
@@ -600,7 +625,7 @@ def test_echo_giant_line_does_not_hang(tmp_path):
     # код виснет, вместо того чтобы тест сам завис навечно.
     journal_path = _seed_committed_journal(tmp_path)
     giant_notes = "x" * (2 * 1024 * 1024)  # 2MB single-line payload
-    giant_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+    giant_line = _line(event="delegated", ts=_fresh_ts(), task_id="t-002",
                         model="sonnet", notes=giant_notes)
     journal_path.write_text(HEAD_TEXT + giant_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path), timeout=20)
@@ -916,7 +941,7 @@ def test_echo_tier_dod_a_full_match_silent(tmp_path):
     journal_path = _seed_committed_journal(tmp_path)
     home = tmp_path / "home"
     _write_agent_transcript(home, "abc123", [_assistant_line("claude-sonnet-5")])
-    new_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+    new_line = _line(event="delegated", ts=_fresh_ts(), task_id="t-002",
                       model="sonnet", worker_ref="agent:abc123", notes="clean tier match")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
@@ -930,7 +955,7 @@ def test_echo_tier_dod_b_mismatch_fable_declared_opus_measured(tmp_path):
     journal_path = _seed_committed_journal(tmp_path)
     home = tmp_path / "home"
     _write_agent_transcript(home, "fbl001", [_assistant_line("claude-opus-4-8")])
-    new_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+    new_line = _line(event="delegated", ts=_fresh_ts(), task_id="t-002",
                       model="fable", worker_ref="agent:fbl001", notes="mismatch case")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
@@ -950,7 +975,7 @@ def test_echo_tier_dod_v_mid_worker_informational_no_mismatch(tmp_path):
         home, "mid001",
         [_assistant_line("claude-fable-1"), _assistant_line("claude-sonnet-5")],
     )
-    new_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+    new_line = _line(event="delegated", ts=_fresh_ts(), task_id="t-002",
                       model="fable", worker_ref="agent:mid001", notes="mid-worker case")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
@@ -964,7 +989,7 @@ def test_echo_tier_dod_v_mid_worker_informational_no_mismatch(tmp_path):
 def test_echo_tier_dod_g_worker_ref_cli_skipped_silent(tmp_path):
     # DoD (г), часть 1: worker_ref cli:xxx -> пропуск без warn (тишина).
     journal_path = _seed_committed_journal(tmp_path)
-    new_line = _line(event="accepted", ts="2026-07-10T08:10:00", task_id="t-001",
+    new_line = _line(event="accepted", ts=_fresh_ts(), task_id="t-001",
                       agent="builder", by="opus", witness="tests pass", model="sonnet",
                       worker_ref="cli:2026-07-10T08:10:00", notes="accepted via cli ref")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
@@ -977,7 +1002,7 @@ def test_echo_tier_dod_g_worker_ref_cli_skipped_silent(tmp_path):
 def test_echo_tier_dod_g_worker_ref_retro_skipped_silent(tmp_path):
     # DoD (г), часть 2: worker_ref retro:xxx -> пропуск без warn.
     journal_path = _seed_committed_journal(tmp_path)
-    new_line = _line(event="accepted", ts="2026-07-10T08:10:00", task_id="t-001",
+    new_line = _line(event="accepted", ts=_fresh_ts(), task_id="t-001",
                       agent="builder", by="opus", witness="tests pass", model="sonnet",
                       worker_ref="retro:2026-07-10T08:10:00", notes="accepted via retro ref")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
@@ -990,7 +1015,7 @@ def test_echo_tier_dod_g_worker_ref_retro_skipped_silent(tmp_path):
 def test_echo_tier_dod_g_worker_ref_absent_skipped_silent(tmp_path):
     # DoD (г), часть 3: worker_ref отсутствует вовсе -> пропуск без warn.
     journal_path = _seed_committed_journal(tmp_path)
-    obj = {"ts": "2026-07-10T08:10:00", "event": "accepted", "agent": "builder",
+    obj = {"ts": _fresh_ts(), "event": "accepted", "agent": "builder",
            "category": "implementation", "notes": "accepted, no worker_ref field",
            "task_id": "t-001", "by": "opus", "witness": "tests pass", "model": "sonnet"}
     new_line = json.dumps(obj, ensure_ascii=False)
@@ -1005,7 +1030,7 @@ def test_echo_tier_dod_d_transcript_not_found_silent(tmp_path):
     # DoD (д): транскрипт не найден -> тишина.
     journal_path = _seed_committed_journal(tmp_path)
     home = tmp_path / "home"  # НЕ создаём никакого транскрипта здесь.
-    new_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+    new_line = _line(event="delegated", ts=_fresh_ts(), task_id="t-002",
                       model="sonnet", worker_ref="agent:doesnotexist123", notes="clean")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
@@ -1044,7 +1069,7 @@ def test_echo_tier_dod_zh_synthetic_lines_not_counted(tmp_path):
         home, "syn001",
         [_assistant_line("claude-sonnet-5"), {"type": "assistant", "message": {"model": "<synthetic>"}}],
     )
-    new_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+    new_line = _line(event="delegated", ts=_fresh_ts(), task_id="t-002",
                       model="sonnet", worker_ref="agent:syn001", notes="synthetic filtered")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
@@ -1115,7 +1140,7 @@ def test_echo_tier_worker_ref_agent_id_with_dashes_boundary(tmp_path):
 def test_echo_tier_worker_ref_agent_empty_id_boundary_silent(tmp_path):
     # Граница: worker_ref == "agent:" (id пуст) -- полный пайплайн, тишина.
     journal_path = _seed_committed_journal(tmp_path)
-    new_line = _line(event="delegated", ts="2026-07-10T08:10:00", task_id="t-002",
+    new_line = _line(event="delegated", ts=_fresh_ts(), task_id="t-002",
                       model="fable", worker_ref="agent:", notes="empty agent id")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path))

@@ -1,3 +1,12 @@
+# STAGED COPY (D-0069, тот же приём, что tools/test_witness_echo.py уже
+# документировал для узла N2): tools/journal_echo.py -- ЖИВОЙ hook-путь,
+# НЕ ТРОНУТ этой правкой. Этот файл = живой journal_echo.py (байт в байт,
+# на момент копирования) + аддитивный TS DRIFT-слой ниже (константы
+# TS_FUTURE_TOLERANCE_SECONDS/TS_STALE_TOLERANCE_SECONDS, функции
+# _detect_ts_drift/_collect_ts_drift_events/_format_ts_drift_line/
+# build_ts_drift_segment, точки вставки в combine_context() и main()).
+# Lead ретаргетит вызывающий hook на этот путь при постановке и удаляет
+# staged-копию (см. tools/test_journal_echo_tsdrift.py за парный тест-файл).
 """journal_echo.py -- PostToolUse-хук Claude Code, эхом валидирующий
 СВЕЖЕЕ (только что записанное на диск) состояние logs/routing-log.jsonl
 СРАЗУ после любого tool-вызова, чей tool_input несёт путь на этот файл --
@@ -194,6 +203,178 @@ MAX_WITNESS_LINES = 5
 # сообщения, «—» не входит в ASCII).
 NOTE_RETRO = "retro accepted - track incomparable"
 NOTE_TRACK_EMPTY = "track empty/unreadable - witness incomparable"
+
+
+# --- TS DRIFT ECHO при записи (расширение этой задачи, слово оператора
+# 2026-07-22 «делай сразу с защитой в journal_echo») ---------------------
+# ДЫРА (F-29): "ts события читается с системных часов НЕПОСРЕДСТВЕННО
+# перед записью, не из повествования" держится дисциплиной -- выдуманный
+# или несвежий ts на МОМЕНТЕ ЗАПИСИ никто не ловит. journal_validator
+# проверяет ts на COMMIT-пути (правило 10: монотонность + "не позже
+# now+10мин") -- но на коммите события УЖЕ легитимно старые (batch-
+# каденция D-0079: события накапливаются в памяти сессии и пишутся на
+# диск одним блоком в конце стадии, коммит может случиться часы спустя)
+# -- дрейф-от-текущих-часов на коммите принципиально НЕ измерим этим
+# инструментом: "старый ts на коммите" -- норма, не дефект. Единственный
+# момент, где "ts свежий относительно часов ПРЯМО СЕЙЧАС" осмыслен --
+# МОМЕНТ ЗАПИСИ строки на диск (этот PostToolUse-хук), не момент коммита.
+# Отсюда: этот чек живёт ЗДЕСЬ (journal_echo), не в journal_validator.
+#
+# Два независимых порога (оба -- собственное инженерное решение, спека
+# числа не называет, тот же класс, что MAX_TIER_LINES/MAX_WITNESS_LINES
+# выше в этом файле):
+TS_FUTURE_TOLERANCE_SECONDS = 120  # 2 минуты -- запас на обычный
+# процессный джиттер (часы читаются, событие сериализуется, летит через
+# хук) без ложных срабатываний на честный "только что записанный" ts;
+# заметно меньше 10-минутного лимита journal_validator (правило 10) --
+# этот слой предупреждает РАНЬШЕ и на МЕНЬШЕМ дрейфе, чем жёсткий gate.
+TS_STALE_TOLERANCE_SECONDS = 1800  # 30 минут -- запас на ЛЕГИТИМНЫЙ
+# batch (D-0079): ts читается один раз "непосредственно перед записью
+# БАТЧА" -- сама пачка событий может копиться в памяти сессии некоторое
+# время до дисковой записи, и разница между ts самого раннего события
+# батча и моментом фактической записи на диск заведомо не нулевая.
+# Полчаса -- порядок величины одной рабочей стадии (см. R12 "коарс
+# каденция"); дрейф БОЛЬШЕ получаса означает: ts не был взят с часов
+# непосредственно перед записью (F-29), это уже подозрительно даже под
+# batch-дисциплиной, а не просто "пачка чуть задержалась".
+
+# Критик-правка (BLOCKER 1, постановочный проход t-263): потолок ВИДИМЫХ
+# TS DRIFT-строк на один вызов хука -- СИММЕТРИЧНО MAX_TIER_LINES/
+# MAX_WITNESS_LINES выше в этом файле (та же классовая симметрия: три
+# "echo-при-записи"-расширения этого файла, три построчных детектора --
+# отсутствие потолка у одного из трёх было архитектурной асимметрией без
+# обоснования, а не "спека не просила" -- признано на приёмке).
+# Мотивация числа (то же само собственное инженерное решение, что и у
+# соседей, спека числа не называет): при head_text=None (standalone-режим
+# -- git недоступен, ЛИБО это самая первая, никогда не коммиченная запись
+# журнала) _get_head_text() отдаёт None -> append_ok тривиально True на
+# пустом HEAD -> new_lines = ВЕСЬ файл диска целиком (см. main(): "новые
+# строки" -- срез staged_lines[len(head_lines):], head_lines=[] здесь).
+# Журнал в сотни строк (реальный живой routing-log.jsonl уже такого
+# порядка) БЕЗ потолка означало бы: одна пропущенная git-инициализация
+# -- и additionalContext раздувается на сотни TS DRIFT-строк за один
+# PostToolUse-вызов -- тот же риск, что MAX_TIER_LINES/MAX_WITNESS_LINES
+# уже закрывают для своих детекторов (оба тоже построчно проходят те же
+# new_lines и подвержены тому же head_text=None сценарию).
+MAX_TS_DRIFT_LINES = 5
+
+
+def _detect_ts_drift(ts, now: "datetime.datetime"):
+    """Возвращает ("future", delta_seconds) | ("stale", delta_seconds) | None
+    для одного значения поля ts. Парсинг -- ПЕРЕИСПОЛЬЗОВАН
+    (journal_validator.parse_ts), не продублирован: тот же ISO-без-
+    таймзоны формат, что уже разбирает валидатор для правила 10 (спека
+    этой задачи п.1: "формат уже разбирается существующим кодом/
+    валидатором -- переиспользуй"). Непарсибельный/отсутствующий ts ->
+    None -- fail-open (спека п.3): формат ts уже отдельно ловится
+    journal_validator/декодом JOURNAL ECHO как дефект формы, дублировать
+    эту диагностику здесь не нужно и не должно.
+
+    now -- то же наивное локальное datetime.datetime.now(), что журнал
+    ts (та же конвенция, спека п.1/CLAUDE.md "ts ISO, локальное время,
+    без таймзоны") -- обе стороны сравнения naive, конфликт aware/naive
+    невозможен.
+
+    Пороги СТРОГО (>), не (>=) -- граница сама по себе тиха (спека DoD:
+    "future ровно на пороге -- тихо; порог+1с -- warn", симметрично для
+    stale)."""
+    parsed = journal_validator.parse_ts(ts) if isinstance(ts, str) else None
+    if parsed is None:
+        return None
+    delta = (parsed - now).total_seconds()
+    if delta > TS_FUTURE_TOLERANCE_SECONDS:
+        return ("future", delta)
+    stale_delta = -delta
+    if stale_delta > TS_STALE_TOLERANCE_SECONDS:
+        return ("stale", stale_delta)
+    return None
+
+
+def _collect_ts_drift_events(new_lines: list, head_lines: list, now: "datetime.datetime") -> list:
+    """Для КАЖДОЙ новой строки (те же new_lines/head_lines, что TIER ECHO/
+    WITNESS ECHO уже используют в main()) с парсибельным полем ts --
+    _detect_ts_drift. Построчно (спека п.6: "несколько строк батча с
+    одним ts -- по-событийно") -- каждая строка даёт СВОЙ независимый
+    результат, даже если несколько строк несут идентичный ts (не
+    дедуплицируется по значению ts). Возвращает список (line_no, kind,
+    delta_seconds).
+
+    Fail-open построчно (спека п.3, тот же паттерн, что
+    _collect_tier_events/_collect_witness_events): битый JSON одной
+    строки -- try/except с `continue`, не роняет разбор остальных строк
+    и не роняет хук."""
+    events = []
+    for idx, line in enumerate(new_lines):
+        line_no = len(head_lines) + idx + 1
+        try:
+            obj = json.loads(line)
+            if not isinstance(obj, dict):
+                continue
+            result = _detect_ts_drift(obj.get("ts"), now)
+            if result is None:
+                continue
+            kind, delta = result
+            events.append((line_no, kind, delta))
+        except Exception:
+            continue
+    return events
+
+
+def _format_ts_drift_line(event: tuple) -> str:
+    """Спека п.2, буквально для FUTURE ("warn-строка вида"); STALE --
+    тот же шаблон (спека обрывает цитату многоточием после "STALE" --
+    буквальный текст после него на усмотрение реализации, см. отчёт
+    билдера) -- симметричная параллель F-29/D-0079, тот же принцип
+    "статический ASCII-литерал + минимум динамики", что уже применяют
+    _format_tier_line/_format_witness_line в этом же файле.
+
+    "line {N}" -- добавлено ПОВЕРХ буквальной цитаты спеки (которая сама
+    не называет line N) по аналогии с TIER ECHO/WITNESS ECHO -- спека
+    п.6 явно требует "по-событийно" (несколько строк одного батча с
+    одинаковым ts различимы КАК СОБЫТИЯ) -- различить строки без номера
+    было бы невозможно при склейке через "; " -- тот же локальный
+    паттерн, что уже несёт весь остальной файл (TIER ECHO "строка N",
+    WITNESS ECHO "line N").
+
+    Динамика здесь -- ТОЛЬКО целые числа (line_no, округлённые секунды
+    дрейфа), никогда не пользовательский текст -- ASCII по построению,
+    без риска инъекции не-ASCII (спека п.4) -- сравнимо с этим санитайз
+    не требуется (нет строкового значения стороннего JSON-поля для
+    вставки, в отличие от _format_witness_line, где ts/cmd -- реальный
+    текст трека)."""
+    line_no, kind, delta = event
+    seconds = int(round(abs(delta)))
+    if kind == "future":
+        return (f"TS DRIFT: line {line_no} event ts is {seconds}s in the FUTURE "
+                 "(F-29: ts must be read from the system clock immediately before writing)")
+    return (f"TS DRIFT: line {line_no} event ts is {seconds}s STALE "
+            "(D-0079: batch ts must still be read from the system clock right "
+            "before writing the batch, not carried over from an earlier check)")
+
+
+def build_ts_drift_segment(ts_drift_events: list, ascii_only: bool = False) -> str:
+    """Собирает TS DRIFT-часть additionalContext -- склейка через "; ",
+    потолок MAX_TS_DRIFT_LINES=5 строк на вызов хука с хвостом "+K more"
+    сверху (критик-правка BLOCKER 1, t-263) -- ТОТ ЖЕ паттерн, что
+    build_tier_segment/build_witness_segment (см. их докстринги и
+    MAX_TS_DRIFT_LINES выше за мотивацию: head_text=None делает ВЕСЬ файл
+    "новым", без потолка это неограниченный additionalContext). ascii_only
+    принят для единообразия сигнатуры с build_tier_segment/
+    build_witness_segment/build_context, но фактически no-op:
+    _format_ts_drift_line не вставляет ничего, кроме целых чисел (см. её
+    докстринг) -- нет не-ASCII, которое нужно было бы санитайзить ни в
+    одном режиме.
+
+    Пустой ts_drift_events -> "" (вызывающий код трактует пустую строку
+    как отсутствие сегмента, тот же принцип, что остальные build_*)."""
+    if not ts_drift_events:
+        return ""
+    head = ts_drift_events[:MAX_TS_DRIFT_LINES]
+    rest = len(ts_drift_events) - len(head)
+    body = "; ".join(_format_ts_drift_line(ev) for ev in head)
+    if rest > 0:
+        body += f"; +{rest} more"
+    return body
 
 
 def _raw_sanitize(s: str, max_len: int = MAX_MESSAGE_LEN) -> str:
@@ -457,25 +638,28 @@ def build_context(violations: list, ascii_only: bool = False) -> str:
 
 
 def combine_context(violations: list, tier_events: list, witness_events: list = None,
-                     ascii_only: bool = False) -> str:
+                     ts_drift_events: list = None, ascii_only: bool = False) -> str:
     """Спека п.3: "один JSON additionalContext может нести и дефекты
-    формы, и TIER ECHO-строки (раздели '; ')". ТРИ НЕЗАВИСИМЫХ сегмента
-    -- build_context(violations) (ЦЕЛИКОМ, свой заголовок "JOURNAL ECHO:
-    N дефект(ов)..." не меняется -- существующие тесты завязаны на этот
-    формат буквально), build_tier_segment(tier_events) и (расширение N2,
-    узел «валидационный импорт») build_witness_segment(witness_events)
-    -- склеиваются через "; ", только если непусты. Любое подмножество
-    сегментов пусто -> итог = склейка ОСТАВШИХСЯ непустых, JSON всё равно
-    печатается, пока хоть один сегмент непуст. Все пусты -> "" --
-    вызывающий код (main()) трактует пустую строку как полную тишину (та
-    же проверка истинности, что раньше была `if not violations`).
+    формы, и TIER ECHO-строки (раздели '; ')". ЧЕТЫРЕ НЕЗАВИСИМЫХ
+    сегмента -- build_context(violations) (ЦЕЛИКОМ, свой заголовок
+    "JOURNAL ECHO: N дефект(ов)..." не меняется -- существующие тесты
+    завязаны на этот формат буквально), build_tier_segment(tier_events),
+    (расширение N2, узел «валидационный импорт»)
+    build_witness_segment(witness_events) и (расширение этой задачи, TS
+    DRIFT) build_ts_drift_segment(ts_drift_events) -- склеиваются через
+    "; ", только если непусты. Любое подмножество сегментов пусто ->
+    итог = склейка ОСТАВШИХСЯ непустых, JSON всё равно печатается, пока
+    хоть один сегмент непуст. Все пусты -> "" -- вызывающий код (main())
+    трактует пустую строку как полную тишину (та же проверка истинности,
+    что раньше была `if not violations`).
 
-    witness_events=None (значение по умолчанию, НЕ [] -- сохраняет
-    старую 2-позиционную форму вызова combine_context(violations,
-    tier_events) БЕЗ изменения поведения: witness_segment для None ->
-    build_witness_segment([]) -> "", итог идентичен дотиерной сигнатуре
-    -- существующие вызовы/тесты, завязанные на 2-арг форму, продолжают
-    работать буквально как раньше, см. tools/test_journal_echo.py)."""
+    witness_events=None / ts_drift_events=None (значения по умолчанию,
+    НЕ [] -- сохраняет старые 2- и 3-позиционные формы вызова
+    combine_context(violations, tier_events[, witness_events]) БЕЗ
+    изменения поведения: сегмент для None -> build_*([]) -> "", итог
+    идентичен дотиерной/довитнесовой сигнатуре -- существующие вызовы/
+    тесты, завязанные на короткую форму, продолжают работать буквально
+    как раньше, см. tools/test_journal_echo.py)."""
     parts = []
     if violations:
         parts.append(build_context(violations, ascii_only))
@@ -485,6 +669,9 @@ def combine_context(violations: list, tier_events: list, witness_events: list = 
     witness_segment = build_witness_segment(witness_events or [], ascii_only)
     if witness_segment:
         parts.append(witness_segment)
+    ts_drift_segment = build_ts_drift_segment(ts_drift_events or [], ascii_only)
+    if ts_drift_segment:
+        parts.append(ts_drift_segment)
     return "; ".join(parts)
 
 
@@ -815,16 +1002,31 @@ def main() -> int:
         # решётка B-N2-2 -- "всё warn-only", note -- тихая по определению).
         witness_visible = any(e[0] != "note" for e in witness_events)
 
-        if not violations and not tier_events and not witness_visible:
+        # TS DRIFT ECHO при записи (расширение этой задачи, слово
+        # оператора 2026-07-22): ТЕ ЖЕ new_lines/head_lines, что TIER
+        # ECHO/WITNESS ECHO -- append-only-неопределимость (append_ok
+        # False) уже даёт new_lines=[] выше, ts-drift-события тогда тоже
+        # пусты без отдельной проверки. `now` -- ТА ЖЕ переменная, уже
+        # вычисленная выше для decide()/_get_head_text (спека п.1: "now =
+        # datetime.now() -- та же конвенция, что ts журнала") -- не
+        # вычисляется повторно. Warn-only, ВСЕГДА видимые (нет "note"-
+        # варианта, в отличие от WITNESS ECHO -- спека п.3: канал
+        # предупреждения, не блок, но и не имеет легитимно-тихой ветки).
+        try:
+            ts_drift_events = _collect_ts_drift_events(new_lines, head_lines, now)
+        except Exception:
+            ts_drift_events = []
+
+        if not violations and not tier_events and not witness_visible and not ts_drift_events:
             return 0
 
         # Lead-правка (критик-приёмка + Lead-смок): два разных канала,
         # два разных варианта санитайза (см. докстринг build_context).
-        # combine_context склеивает дефекты формы, TIER ECHO-строки и
-        # (расширение N2) WITNESS ECHO-строки (спека п.3) -- см.
-        # докстринг combine_context.
-        context_for_stdout = combine_context(violations, tier_events, witness_events, ascii_only=False)
-        context_for_stderr = combine_context(violations, tier_events, witness_events, ascii_only=True)
+        # combine_context склеивает дефекты формы, TIER ECHO-строки,
+        # (расширение N2) WITNESS ECHO-строки и (расширение этой задачи)
+        # TS DRIFT-строки (спека п.3) -- см. докстринг combine_context.
+        context_for_stdout = combine_context(violations, tier_events, witness_events, ts_drift_events, ascii_only=False)
+        context_for_stderr = combine_context(violations, tier_events, witness_events, ts_drift_events, ascii_only=True)
 
         sys.stderr.write(context_for_stderr + "\n")
         output = {
