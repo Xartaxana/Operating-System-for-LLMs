@@ -469,22 +469,33 @@ def build_context(violations: list, ascii_only: bool = False) -> str:
 
 
 def combine_context(violations: list, tier_events: list, witness_events: list = None,
-                     ascii_only: bool = False) -> str:
+                     fallback_marker: str = "", ascii_only: bool = False) -> str:
     """One JSON additionalContext can carry form defects, TIER ECHO
-    lines, and (this port's second extension) WITNESS ECHO lines,
-    joined by "; ". THREE INDEPENDENT segments -- build_context(violations)
-    (as a whole, its own "JOURNAL ECHO: N defect(s)..." header
-    unchanged), build_tier_segment(tier_events), and
-    build_witness_segment(witness_events) -- joined with "; ", only
-    when non-empty. Any subset empty -> the result is just the
-    remaining non-empty segments, the JSON is still printed as long as
-    at least one segment is non-empty. All empty -> "" -- the caller
-    (main()) treats an empty string as complete silence.
+    lines, WITNESS ECHO lines, and (t-277/t-279, ported from HQ) a
+    fallback-base marker, joined by "; ". FOUR INDEPENDENT segments --
+    build_context(violations) (as a whole, its own "JOURNAL ECHO: N
+    defect(s)..." header unchanged), build_tier_segment(tier_events),
+    build_witness_segment(witness_events), and fallback_marker -- joined
+    with "; ", only when non-empty. Any subset empty -> the result is
+    just the remaining non-empty segments, the JSON is still printed as
+    long as at least one segment is non-empty. All empty -> "" -- the
+    caller (main()) treats an empty string as complete silence.
+
+    fallback_marker -- a LITERAL (FALLBACK_MARKER_TEXT, see the
+    "PAYLOAD-SCOPED ECHO BASE" section below), never sanitized (a
+    static ASCII string, never third-party text -- same principle as
+    build_context's static prefix). main() passes it as an empty
+    string whenever TIER ECHO/WITNESS ECHO did NOT degrade to the
+    HEAD-diff fallback on this particular hook call (see
+    _resolve_echo_base) -- so its absence in the old 2-/3-positional
+    call forms changes nothing.
 
     witness_events=None (default, NOT []) preserves the old 2-positional
     call form combine_context(violations, tier_events) byte-for-byte:
     a None witness_events segment is "" exactly like an empty list, so
-    every existing call/test using the short form is unaffected."""
+    every existing call/test using the short form is unaffected.
+    fallback_marker="" (default) is the same story -- it never adds a
+    segment unless explicitly passed."""
     parts = []
     if violations:
         parts.append(build_context(violations, ascii_only))
@@ -494,7 +505,84 @@ def combine_context(violations: list, tier_events: list, witness_events: list = 
     witness_segment = build_witness_segment(witness_events or [], ascii_only)
     if witness_segment:
         parts.append(witness_segment)
+    if fallback_marker:
+        parts.append(fallback_marker)
     return "; ".join(parts)
+
+
+# --- PAYLOAD-SCOPED ECHO BASE (t-277/t-279, ported from HQ) -------------
+# ROOT CAUSE / FIX / EMPIRICAL BASIS: identical to HQ's tools/
+# journal_echo.py (same section header there) -- TIER ECHO/WITNESS ECHO
+# shared ONE base with VALIDATION (HEAD-diff, cumulative across every
+# PostToolUse call since the last commit), so a session appending lines
+# across several tool calls without committing between them re-echoed
+# the SAME already-reported event on every later call. The fix: derive
+# the "new lines" base from the CURRENT tool call's OWN payload
+# (tool_response.originalFile, empirically confirmed on BOTH Edit's and
+# Write's Zod output schemas in the installed claude-code binary -- the
+# full file content immediately BEFORE this specific tool call, string
+# or null). DEFERRAL (t-277/t-279, builder finding: the given context
+# manifest expected an existing "no ts-drift layer" deferral note
+# elsewhere in this module's docstring to preserve -- none was found on
+# inspection; this line IS that deferral note, stated here since there
+# wasn't a prior one): this port carries NO ts-drift layer and this
+# task does NOT add one -- this section only affects TIER ECHO/WITNESS
+# ECHO here, unlike HQ's tools/journal_echo.py where the identical base
+# change also fixes a TS DRIFT correctness bug.
+#
+# FAIL-OPEN: tool_name outside {"Edit", "Write"}, a missing/malformed
+# tool_response, an absent/wrongly-typed "originalFile" key, OR a
+# recovered originalFile that disk_text does NOT extend as a strict
+# append (a non-tail edit) -- ALL fall back to the SAME HEAD-diff
+# computation this file used before this port (identical logic,
+# unchanged) -- see _resolve_echo_base. The fallback is disclosed via
+# FALLBACK_MARKER_TEXT, appended as combine_context's fourth segment --
+# but ONLY when there is already something else to report (see main()):
+# an otherwise-fully-clean call stays completely silent even in
+# fallback, matching this file's pre-existing "no noise on a clean
+# write" contract.
+_ORIGINAL_FILE_UNAVAILABLE = object()
+EDIT_LIKE_TOOL_NAMES = ("Edit", "Write")
+FALLBACK_MARKER_TEXT = "echo base: HEAD-diff fallback"
+
+
+def _extract_original_file(payload, tool_name):
+    """tool_response.originalFile -- see the section docstring above.
+    Returns _ORIGINAL_FILE_UNAVAILABLE when tool_name isn't Edit/Write,
+    or tool_response isn't a dict, or the "originalFile" key is absent,
+    or present with a type that's neither str nor None; "" when
+    originalFile is None (a brand-new file); the string itself
+    otherwise."""
+    if tool_name not in EDIT_LIKE_TOOL_NAMES:
+        return _ORIGINAL_FILE_UNAVAILABLE
+    tool_response = payload.get("tool_response") if isinstance(payload, dict) else None
+    if not isinstance(tool_response, dict):
+        return _ORIGINAL_FILE_UNAVAILABLE
+    if "originalFile" not in tool_response:
+        return _ORIGINAL_FILE_UNAVAILABLE
+    original_file = tool_response["originalFile"]
+    if original_file is None:
+        return ""
+    if not isinstance(original_file, str):
+        return _ORIGINAL_FILE_UNAVAILABLE
+    return original_file
+
+
+def _resolve_echo_base(payload, tool_name, staged_lines: list, head_lines: list):
+    """Returns (echo_base_lines, echo_new_lines, used_fallback) -- the ONE
+    base shared by TIER ECHO/WITNESS ECHO in this port (VALIDATION/
+    JOURNAL ECHO stays on the separate, cumulative HEAD-diff base -- see
+    main()). See the section docstring above for the primary/fallback
+    logic (identical to HQ's tools/journal_echo.py)."""
+    original_file = _extract_original_file(payload, tool_name)
+    if original_file is not _ORIGINAL_FILE_UNAVAILABLE:
+        base_lines = journal_validator.split_lines(original_file)
+        op_ok, _ = journal_validator.check_append_only(staged_lines, base_lines)
+        if op_ok:
+            return base_lines, staged_lines[len(base_lines):], False
+    append_ok, _ = journal_validator.check_append_only(staged_lines, head_lines)
+    new_lines = staged_lines[len(head_lines):] if append_ok else []
+    return head_lines, new_lines, True
 
 
 # ---------------------------------------------------------------------
@@ -779,34 +867,35 @@ def main() -> int:
         now = datetime.datetime.now()
         head_text = _get_head_text(root)
 
+        # VALIDATION -- the cumulative HEAD-diff base, unchanged by
+        # t-277/t-279: historical uncommitted lines' FORM still needs
+        # catching before commit regardless of which specific tool call
+        # is running now.
         _, violations = journal_validator.decide(disk_text, head_text, now)
 
-        # TIER ECHO at write time (this port's extension): the same
-        # "new lines" that decide() validates internally -- computed
-        # INDEPENDENTLY via the same public split_lines/
-        # check_append_only (decide() does not expose new_lines
-        # itself). append-only NOT holding -- staged doesn't start with
-        # HEAD as a prefix -- means "new lines" can't be determined by
-        # a slice (staged may mix edited/deleted old lines) -- tier
-        # events are not counted at all in that case (new_lines = []),
-        # that defect (append-only) is already covered separately via
-        # violations.
+        # ECHO LAYERS (TIER ECHO/WITNESS ECHO, t-277/t-279): ONE
+        # payload-scoped base shared by both collectors (see
+        # _resolve_echo_base/the "PAYLOAD-SCOPED ECHO BASE" section
+        # above) -- replaces the old HEAD-diff base these two layers
+        # used to share with VALIDATION (root cause: that base is
+        # cumulative between commits, so every call re-echoed every
+        # uncommitted line, not just the one THIS call added).
         staged_lines = journal_validator.split_lines(disk_text)
         head_lines = journal_validator.split_lines(head_text)
-        append_ok, _ = journal_validator.check_append_only(staged_lines, head_lines)
-        new_lines = staged_lines[len(head_lines):] if append_ok else []
-        tier_events = _collect_tier_events(new_lines, head_lines)
+        tool_name = payload.get("tool_name")
+        echo_base_lines, echo_new_lines, used_fallback = _resolve_echo_base(
+            payload, tool_name, staged_lines, head_lines)
+
+        tier_events = _collect_tier_events(echo_new_lines, echo_base_lines)
 
         # WITNESS ECHO at write time (this port's second extension --
-        # see the module docstring): the SAME new_lines/head_lines as
-        # TIER ECHO above -- an append-only violation already forces
-        # new_lines=[] above, so witness events are empty too in that
-        # case without a separate check. A second, outer try/except
-        # here (on top of the per-line one inside
-        # _collect_witness_events itself) means a failure in this
-        # cross-check can never take down JOURNAL ECHO/TIER ECHO.
+        # see the module docstring): the SAME payload-scoped base as
+        # TIER ECHO above. A second, outer try/except here (on top of
+        # the per-line one inside _collect_witness_events itself) means
+        # a failure in this cross-check can never take down JOURNAL
+        # ECHO/TIER ECHO.
         try:
-            witness_events = _collect_witness_events(new_lines, head_lines, payload)
+            witness_events = _collect_witness_events(echo_new_lines, echo_base_lines, payload)
         except Exception:
             witness_events = []
         # "note" events (retro / empty track) never make a line visible
@@ -816,8 +905,15 @@ def main() -> int:
         if not violations and not tier_events and not witness_visible:
             return 0
 
-        context_for_stdout = combine_context(violations, tier_events, witness_events, ascii_only=False)
-        context_for_stderr = combine_context(violations, tier_events, witness_events, ascii_only=True)
+        # Fallback marker (t-277/t-279): visible ONLY when we're already
+        # printing something else -- an otherwise fully clean call stays
+        # silent even in fallback (see the section docstring above).
+        fallback_marker = FALLBACK_MARKER_TEXT if used_fallback else ""
+
+        context_for_stdout = combine_context(violations, tier_events, witness_events,
+                                              fallback_marker, ascii_only=False)
+        context_for_stderr = combine_context(violations, tier_events, witness_events,
+                                              fallback_marker, ascii_only=True)
 
         sys.stderr.write(context_for_stderr + "\n")
         output = {

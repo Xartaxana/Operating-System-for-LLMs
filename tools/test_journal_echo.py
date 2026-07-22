@@ -111,7 +111,25 @@ def _seed_committed_journal(root: Path, text: str = HEAD_TEXT) -> Path:
 # ---------------------------------------------------------------------
 
 
-def _post_tool_use_payload(file_path, tool_name="Edit") -> dict:
+_NO_ORIGINAL_FILE = object()  # sentinel -- omit tool_response.originalFile
+# entirely (exercises the payload-scoped-base FALLBACK path, t-277/t-279 --
+# see journal_echo._resolve_echo_base). The old (pre-t-279) payload shape
+# never carried this key at all -- this default preserves that shape
+# byte-for-byte, so every EXISTING call site that doesn't pass
+# original_file keeps exercising the exact same fallback logic this file
+# used before this task (identical to the old HEAD-diff computation --
+# see journal_echo.py's "PAYLOAD-SCOPED ECHO BASE" section), and stays
+# green unchanged.
+
+
+def _post_tool_use_payload(file_path, tool_name="Edit", original_file=_NO_ORIGINAL_FILE) -> dict:
+    tool_response = {"filePath": str(file_path), "success": True}
+    if original_file is not _NO_ORIGINAL_FILE:
+        # t-277/t-279: tool_response.originalFile -- the empirically
+        # confirmed field (Edit/Write Zod schemas, see journal_echo.py)
+        # carrying the full file content immediately BEFORE this call.
+        # Passing it here exercises the PRIMARY (non-fallback) base path.
+        tool_response["originalFile"] = original_file
     return {
         "session_id": "sess-1",
         "transcript_path": "/x/transcript.jsonl",
@@ -119,7 +137,7 @@ def _post_tool_use_payload(file_path, tool_name="Edit") -> dict:
         "hook_event_name": "PostToolUse",
         "tool_name": tool_name,
         "tool_input": {"file_path": str(file_path)},
-        "tool_response": {"filePath": str(file_path), "success": True},
+        "tool_response": tool_response,
         "tool_use_id": "tu-1",
     }
 
@@ -952,13 +970,17 @@ def test_echo_tier_dod_a_full_match_silent(tmp_path):
 
 def test_echo_tier_dod_b_mismatch_fable_declared_opus_measured(tmp_path):
     # DoD (б): заявлен fable, транскрипт opus -> MISMATCH-строка.
+    # original_file=HEAD_TEXT (t-277/t-279): exercises the PRIMARY
+    # payload-scoped base (not the fallback) -- exact-equality assertion
+    # below would otherwise pick up the fallback marker segment.
     journal_path = _seed_committed_journal(tmp_path)
     home = tmp_path / "home"
     _write_agent_transcript(home, "fbl001", [_assistant_line("claude-opus-4-8")])
     new_line = _line(event="delegated", ts=_fresh_ts(), task_id="t-002",
                       model="fable", worker_ref="agent:fbl001", notes="mismatch case")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
-    result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
+    result = _run_hook(_post_tool_use_payload(journal_path, original_file=HEAD_TEXT),
+                        env=_env_with_home(home))
     assert result.returncode == 0
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
@@ -969,6 +991,8 @@ def test_echo_tier_dod_b_mismatch_fable_declared_opus_measured(tmp_path):
 def test_echo_tier_dod_v_mid_worker_informational_no_mismatch(tmp_path):
     # DoD (в): mid-worker -- транскрипт fable+sonnet при заявленном fable
     # -> informational-строка без MISMATCH.
+    # original_file=HEAD_TEXT (t-277/t-279): PRIMARY payload-scoped base,
+    # same reasoning as test_echo_tier_dod_b above.
     journal_path = _seed_committed_journal(tmp_path)
     home = tmp_path / "home"
     _write_agent_transcript(
@@ -978,7 +1002,8 @@ def test_echo_tier_dod_v_mid_worker_informational_no_mismatch(tmp_path):
     new_line = _line(event="delegated", ts=_fresh_ts(), task_id="t-002",
                       model="fable", worker_ref="agent:mid001", notes="mid-worker case")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
-    result = _run_hook(_post_tool_use_payload(journal_path), env=_env_with_home(home))
+    result = _run_hook(_post_tool_use_payload(journal_path, original_file=HEAD_TEXT),
+                        env=_env_with_home(home))
     assert result.returncode == 0
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
@@ -1147,6 +1172,35 @@ def test_echo_tier_worker_ref_agent_empty_id_boundary_silent(tmp_path):
     assert result.returncode == 0
     assert result.stdout == ""
     assert result.stderr == ""
+
+
+def test_echo_tier_payload_scoped_not_reechoed_on_later_unrelated_call(tmp_path):
+    # t-277/t-279 sibling regression (D-0043: TIER ECHO shares the same
+    # base-selection fix as TS DRIFT ECHO/WITNESS ECHO): a MISMATCH
+    # reported on call #1 must NOT be re-echoed on a LATER, unrelated
+    # call #2 that appends a different clean line -- call #2's
+    # original_file already includes call #1's mismatched line, so it's
+    # out of scope for call #2 (see journal_echo._resolve_echo_base).
+    journal_path = _seed_committed_journal(tmp_path)
+    home = tmp_path / "home"
+    _write_agent_transcript(home, "fbl001", [_assistant_line("claude-opus-4-8")])
+    mismatch_line = _line(event="delegated", ts=_fresh_ts(), task_id="t-002",
+                           model="fable", worker_ref="agent:fbl001", notes="call #1: mismatch")
+    after_call_1 = HEAD_TEXT + mismatch_line + "\n"
+    journal_path.write_text(after_call_1, encoding="utf-8")
+    result1 = _run_hook(_post_tool_use_payload(journal_path, original_file=HEAD_TEXT),
+                         env=_env_with_home(home))
+    assert result1.returncode == 0
+    assert "MISMATCH" in _parse_stdout_json(result1.stdout)["additionalContext"]
+
+    clean_line = _line(event="delegated", ts=_fresh_ts(), task_id="t-003",
+                        model="sonnet", worker_ref="cli:2026-07-10T09:00:00", notes="call #2: unrelated clean line")
+    journal_path.write_text(after_call_1 + clean_line + "\n", encoding="utf-8")
+    result2 = _run_hook(_post_tool_use_payload(journal_path, original_file=after_call_1),
+                         env=_env_with_home(home))
+    assert result2.returncode == 0
+    assert result2.stdout == ""
+    assert result2.stderr == ""
 
 
 def test_echo_giant_invalid_line_does_not_hang_and_reports(tmp_path):

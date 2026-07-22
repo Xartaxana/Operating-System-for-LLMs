@@ -638,20 +638,31 @@ def build_context(violations: list, ascii_only: bool = False) -> str:
 
 
 def combine_context(violations: list, tier_events: list, witness_events: list = None,
-                     ts_drift_events: list = None, ascii_only: bool = False) -> str:
+                     ts_drift_events: list = None, fallback_marker: str = "",
+                     ascii_only: bool = False) -> str:
     """Спека п.3: "один JSON additionalContext может нести и дефекты
-    формы, и TIER ECHO-строки (раздели '; ')". ЧЕТЫРЕ НЕЗАВИСИМЫХ
-    сегмента -- build_context(violations) (ЦЕЛИКОМ, свой заголовок
+    формы, и TIER ECHO-строки (раздели '; ')". ПЯТЬ НЕЗАВИСИМЫХ
+    сегментов -- build_context(violations) (ЦЕЛИКОМ, свой заголовок
     "JOURNAL ECHO: N дефект(ов)..." не меняется -- существующие тесты
     завязаны на этот формат буквально), build_tier_segment(tier_events),
     (расширение N2, узел «валидационный импорт»)
-    build_witness_segment(witness_events) и (расширение этой задачи, TS
-    DRIFT) build_ts_drift_segment(ts_drift_events) -- склеиваются через
-    "; ", только если непусты. Любое подмножество сегментов пусто ->
-    итог = склейка ОСТАВШИХСЯ непустых, JSON всё равно печатается, пока
-    хоть один сегмент непуст. Все пусты -> "" -- вызывающий код (main())
-    трактует пустую строку как полную тишину (та же проверка истинности,
-    что раньше была `if not violations`).
+    build_witness_segment(witness_events), (расширение TS-DRIFT-задачи)
+    build_ts_drift_segment(ts_drift_events) и (эта задача, t-277/t-279)
+    fallback_marker -- склеиваются через "; ", только если непусты. Любое
+    подмножество сегментов пусто -> итог = склейка ОСТАВШИХСЯ непустых,
+    JSON всё равно печатается, пока хоть один сегмент непуст. Все пусты
+    -> "" -- вызывающий код (main()) трактует пустую строку как полную
+    тишину (та же проверка истинности, что раньше была
+    `if not violations`).
+
+    fallback_marker -- ЛИТЕРАЛ (FALLBACK_MARKER_TEXT, см. секцию
+    "PAYLOAD-SCOPED ECHO BASE" выше), НЕ проходит ни через один
+    санитайзер (статическая ASCII-строка, никогда не несёт стороннего
+    текста -- тот же принцип, что статический префикс build_context).
+    Вызывающий код (main()) передаёт его пустой строкой, если TIER/
+    WITNESS/TS-DRIFT в ЭТОМ вызове хука не деградировали до
+    HEAD-дифф-фолбэка (см. _resolve_echo_base) -- поэтому его отсутствие
+    в старых 2-/3-/4-позиционных вызовах ничего не меняет.
 
     witness_events=None / ts_drift_events=None (значения по умолчанию,
     НЕ [] -- сохраняет старые 2- и 3-позиционные формы вызова
@@ -659,7 +670,9 @@ def combine_context(violations: list, tier_events: list, witness_events: list = 
     изменения поведения: сегмент для None -> build_*([]) -> "", итог
     идентичен дотиерной/довитнесовой сигнатуре -- существующие вызовы/
     тесты, завязанные на короткую форму, продолжают работать буквально
-    как раньше, см. tools/test_journal_echo.py)."""
+    как раньше, см. tools/test_journal_echo.py). fallback_marker="" --
+    та же логика: default никогда не добавляет сегмент, старые вызовы
+    без этого аргумента не меняют поведение ни на байт."""
     parts = []
     if violations:
         parts.append(build_context(violations, ascii_only))
@@ -672,6 +685,8 @@ def combine_context(violations: list, tier_events: list, witness_events: list = 
     ts_drift_segment = build_ts_drift_segment(ts_drift_events or [], ascii_only)
     if ts_drift_segment:
         parts.append(ts_drift_segment)
+    if fallback_marker:
+        parts.append(fallback_marker)
     return "; ".join(parts)
 
 
@@ -926,6 +941,139 @@ def build_witness_segment(witness_events: list, ascii_only: bool = False) -> str
     return body
 
 
+# --- PAYLOAD-SCOPED ECHO BASE (critic diagnosis t-277, this task) ------
+# ROOT CAUSE: TIER ECHO/WITNESS ECHO/TS DRIFT ECHO above all shared ONE
+# base -- new_lines = staged_lines[len(head_lines):], head_lines from
+# `git show HEAD:...` (see main()). That base is CUMULATIVE across every
+# PostToolUse call since the last commit: a session appending N lines
+# across N separate tool calls, without committing between them,
+# re-evaluates ALL N lines on EVERY subsequent call, not just the one
+# line each call actually added. For TS DRIFT this is a correctness bug
+# (F-29/D-0079): an event's ts is checked against `now` read AT THIS
+# CALL, not at the call that originally wrote it -- so a line genuinely
+# fresh when written becomes falsely "STALE" on a LATER, unrelated call
+# simply because uncommitted time has passed (critic diagnosis t-277:
+# observed 1880s -> 2113s -> 2255s growing staleness of the SAME oldest
+# uncommitted line). TIER ECHO/WITNESS ECHO don't have a correctness bug
+# from this (mismatch/witness-contradiction don't depend on `now`), but
+# they DO re-echo the SAME already-reported event on every subsequent
+# call -- redundant noise, same root cause, same fix (Lead's decision:
+# "all three collectors move to the new base, one semantics").
+#
+# FIX: derive the "new lines" base from the CURRENT tool call's OWN
+# payload, not from git HEAD -- so each call only evaluates the lines
+# THIS call actually added, never lines an EARLIER call already
+# introduced (committed or not).
+#
+# EMPIRICAL BASIS (rule 3 -- verified, not assumed; the same string-grep
+# method tools/dod_track.py's own docstring already discloses and
+# caveats: "best available builder read of the installed binary's Zod
+# schema, NOT a live-captured real hook invocation -- Lead confirms at
+# acceptance"): grepping the installed claude-code binary
+# (...\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe) for its
+# Zod tool-response schemas found BOTH tools this task cares about carry
+# an `originalFile: string|null` field on tool_response -- the FULL file
+# content immediately BEFORE this specific tool call:
+#   Edit outputSchema:  {filePath, oldString, newString,
+#     originalFile: string().nullable().describe("The original file
+#     contents before editing"), structuredPatch, userModified,
+#     replaceAll, gitDiff?}
+#   Write outputSchema: {type: "create"|"update", filePath, content,
+#     structuredPatch, originalFile: string().nullable().describe("The
+#     original file content before the write (null for new files)"),
+#     gitDiff?, userModified?}
+# This is a STRICTLY BETTER source than manually reconstructing the
+# added suffix from tool_input.old_string/new_string (Edit) or guessing
+# at "previous disk content" for Write (spec p.1's literal proposal):
+# `originalFile` gives the exact previous-disk-state directly, for BOTH
+# tools, with no reconstruction logic of our own to get subtly wrong --
+# so it is used as the PRIMARY source. This is a deviation from the
+# spec's literal PROPOSED METHOD (old_string/new_string diffing for
+# Edit), not from its REQUIREMENT ("recover the lines this call added
+# from the payload of this call, fail open when not recoverable") --
+# documented here per rule 3, flagged in the builder report for Lead's
+# review.
+#
+# FAIL-OPEN (spec p.1): tool_name outside {"Edit", "Write"}, a missing/
+# malformed tool_response, an absent/wrongly-typed "originalFile" key,
+# OR a recovered originalFile that disk_text does NOT extend as a
+# strict append (a non-tail edit -- some line BEFORE the tail changed,
+# or the tool touched an unrelated span) -- ALL fall back to the SAME
+# HEAD-diff computation this file used before this task (identical
+# logic, unchanged) -- see _resolve_echo_base. The fallback is
+# disclosed via FALLBACK_MARKER_TEXT, appended as combine_context's
+# fifth segment -- but ONLY when there is already something else to
+# report (see main()): an otherwise-fully-clean call stays completely
+# silent even in fallback, matching this file's pre-existing "no noise
+# on a clean write" contract (see module docstring, "ВЫВОД") -- the
+# marker's purpose is to annotate output that's ALREADY being shown,
+# not to manufacture a new class of always-visible chatter on every
+# single Edit/Write to the journal. (Own engineering completion of spec
+# p.1's "so degradation is visible, not silent" -- the spec doesn't
+# state either way whether the marker fires on an otherwise-silent
+# call; resolved here in favor of the file's pre-existing "silence on
+# clean" invariant, flagged in the builder report for Lead's review.)
+_ORIGINAL_FILE_UNAVAILABLE = object()
+EDIT_LIKE_TOOL_NAMES = ("Edit", "Write")
+FALLBACK_MARKER_TEXT = "echo base: HEAD-diff fallback"
+
+
+def _extract_original_file(payload, tool_name):
+    """tool_response.originalFile -- see the section docstring above for
+    the empirical basis. Returns:
+      - _ORIGINAL_FILE_UNAVAILABLE when tool_name isn't Edit/Write, or
+        tool_response isn't a dict, or the "originalFile" key is absent,
+        or present with a type that's neither str nor None (a
+        malformed/foreign payload -- fail open, don't guess).
+      - "" when originalFile is None (Write creating a brand-new file;
+        Edit's schema is nullable too, treated identically -- an empty
+        previous file for the purposes of this hook).
+      - the string itself otherwise (the full file content immediately
+        before this specific tool call)."""
+    if tool_name not in EDIT_LIKE_TOOL_NAMES:
+        return _ORIGINAL_FILE_UNAVAILABLE
+    tool_response = payload.get("tool_response") if isinstance(payload, dict) else None
+    if not isinstance(tool_response, dict):
+        return _ORIGINAL_FILE_UNAVAILABLE
+    if "originalFile" not in tool_response:
+        return _ORIGINAL_FILE_UNAVAILABLE
+    original_file = tool_response["originalFile"]
+    if original_file is None:
+        return ""
+    if not isinstance(original_file, str):
+        return _ORIGINAL_FILE_UNAVAILABLE
+    return original_file
+
+
+def _resolve_echo_base(payload, tool_name, staged_lines: list, head_lines: list):
+    """Returns (echo_base_lines, echo_new_lines, used_fallback) -- the ONE
+    base shared by TIER ECHO/WITNESS ECHO/TS DRIFT ECHO (Lead's decision:
+    "one semantics for all three collectors"; VALIDATION/JOURNAL ECHO
+    stays on the separate, cumulative HEAD-diff base -- see main()).
+
+    Primary path: recover this call's own previous-disk-state from
+    tool_response.originalFile (_extract_original_file); if disk_text
+    (staged_lines) extends that recovered base as a STRICT append
+    (check_append_only holds), the scope is exactly the lines THIS call
+    added -- echo_new_lines = staged_lines[len(base_lines):].
+
+    Fallback (payload unrecoverable, OR the recovered base doesn't hold
+    as a strict append -- a non-tail edit): reuses this file's
+    PRE-EXISTING HEAD-diff computation unchanged (identical to the logic
+    that lived inline in main() before this task) -- so every call site
+    that used to depend on that computation keeps behaving exactly as
+    before whenever payload-scoping isn't available."""
+    original_file = _extract_original_file(payload, tool_name)
+    if original_file is not _ORIGINAL_FILE_UNAVAILABLE:
+        base_lines = journal_validator.split_lines(original_file)
+        op_ok, _ = journal_validator.check_append_only(staged_lines, base_lines)
+        if op_ok:
+            return base_lines, staged_lines[len(base_lines):], False
+    append_ok, _ = journal_validator.check_append_only(staged_lines, head_lines)
+    new_lines = staged_lines[len(head_lines):] if append_ok else []
+    return head_lines, new_lines, True
+
+
 def _reconfigure_streams_utf8():
     """Статический русский текст (см. build_context) идёт ОБОИМИ
     каналами -- без явного reconfigure default-encoding stdout/stderr
@@ -943,6 +1091,25 @@ def _reconfigure_streams_utf8():
 
 
 def main() -> int:
+    """... (см. модульный докстринг за общий контракт хука).
+
+    ДВЕ РАЗНЫЕ БАЗЫ "новых строк" (t-277/t-279, диагноз критика --
+    класс "переоценка одного и того же события на каждой последующей
+    записи"), намеренно РАЗДЕЛЬНЫЕ:
+
+     - ВАЛИДАЦИЯ (JOURNAL ECHO, decide()/violations) -- НАКОПИТЕЛЬНАЯ
+       HEAD-дифф база (staged vs `git show HEAD:...`), БЕЗ ИЗМЕНЕНИЙ
+       этой задачей: форму исторических незакоммиченных строк по-
+       прежнему надо ловить ДО коммита -- пропустить проверку строки
+       только потому, что её уже видел предыдущий вызов хука, было бы
+       регрессией валидации, не багом (в отличие от TIER/WITNESS/
+       TS-DRIFT ниже, у которых "видел раньше -- не показывай снова"
+       ИМЕННО желаемое поведение).
+     - ЭХО-СЛОИ (TIER ECHO/WITNESS ECHO/TS DRIFT ECHO) -- ПО-СОБЫТИЙНАЯ
+       payload-scoped база (_resolve_echo_base, см. секцию "PAYLOAD-
+       SCOPED ECHO BASE" выше): каждый вызов хука оценивает ТОЛЬКО
+       строки, добавленные ИМЕННО ЭТИМ tool-вызовом -- никогда те, что
+       уже были на диске (закоммичены или нет) до него."""
     _reconfigure_streams_utf8()
     try:
         raw_bytes = sys.stdin.buffer.read()
@@ -967,34 +1134,34 @@ def main() -> int:
         now = datetime.datetime.now()
         head_text = _get_head_text(root)
 
+        # ВАЛИДАЦИЯ -- накопительная HEAD-дифф база, без изменений (см.
+        # докстринг main() выше).
         _, violations = journal_validator.decide(disk_text, head_text, now)
 
-        # TIER ECHO при записи (расширение этой задачи, спека п.1/п.5):
-        # те же "новые строки", что decide() валидирует внутри себя --
-        # вычисляем НЕЗАВИСИМО через те же публичные split_lines/
-        # check_append_only (decide() не отдаёт new_lines наружу).
-        # append-only НЕ держится -- staged не начинается с HEAD как
-        # префикс -- "новые строки" неопределимы срезом (staged может
-        # содержать изменённые/удалённые старые строки вперемешку) --
-        # tier-события не считаем вовсе в этом случае (new_lines = []),
-        # тот же дефект (append-only) уже покрыт отдельно через violations.
+        # ЭХО-СЛОИ (TIER ECHO/WITNESS ECHO/TS DRIFT ECHO, эта задача
+        # t-277/t-279): ОДНА payload-scoped база для всех трёх
+        # коллекторов (см. _resolve_echo_base/секцию "PAYLOAD-SCOPED ECHO
+        # BASE" выше) -- заменяет прежнюю HEAD-дифф базу, которую эти три
+        # слоя раньше делили с валидацией (корень диагноза t-277: та
+        # база кумулятивна между коммитами, каждый вызов переоценивал
+        # ВСЕ незакоммиченные строки, а не только строки этого вызова).
         staged_lines = journal_validator.split_lines(disk_text)
         head_lines = journal_validator.split_lines(head_text)
-        append_ok, _ = journal_validator.check_append_only(staged_lines, head_lines)
-        new_lines = staged_lines[len(head_lines):] if append_ok else []
-        tier_events = _collect_tier_events(new_lines, head_lines)
+        tool_name = payload.get("tool_name")
+        echo_base_lines, echo_new_lines, used_fallback = _resolve_echo_base(
+            payload, tool_name, staged_lines, head_lines)
+
+        tier_events = _collect_tier_events(echo_new_lines, echo_base_lines)
 
         # WITNESS ECHO при записи (расширение N2, узел «валидационный
-        # импорт» -- см. докстринг _collect_witness_events выше): ТЕ ЖЕ
-        # new_lines/head_lines, что TIER ECHO -- append-only-неопределимость
-        # (append_ok False) уже даёт new_lines=[] выше, witness-события
-        # тогда тоже пусты без отдельной проверки. Fail-open ВТОРЫМ слоем
+        # импорт» -- см. докстринг _collect_witness_events выше): ТА ЖЕ
+        # payload-scoped база, что TIER ECHO выше. Fail-open ВТОРЫМ слоем
         # поверх построчного try/except внутри _collect_witness_events
         # самой (спека п.4: "весь блок в try/except" -- ни один сбой
         # сверки не роняет хук и не ломает существующие JOURNAL ECHO/
         # TIER ECHO функции).
         try:
-            witness_events = _collect_witness_events(new_lines, head_lines, payload)
+            witness_events = _collect_witness_events(echo_new_lines, echo_base_lines, payload)
         except Exception:
             witness_events = []
         # "note"-события (retro/трек-пуст) НИКОГДА не делают строку
@@ -1002,31 +1169,37 @@ def main() -> int:
         # решётка B-N2-2 -- "всё warn-only", note -- тихая по определению).
         witness_visible = any(e[0] != "note" for e in witness_events)
 
-        # TS DRIFT ECHO при записи (расширение этой задачи, слово
-        # оператора 2026-07-22): ТЕ ЖЕ new_lines/head_lines, что TIER
-        # ECHO/WITNESS ECHO -- append-only-неопределимость (append_ok
-        # False) уже даёт new_lines=[] выше, ts-drift-события тогда тоже
-        # пусты без отдельной проверки. `now` -- ТА ЖЕ переменная, уже
-        # вычисленная выше для decide()/_get_head_text (спека п.1: "now =
-        # datetime.now() -- та же конвенция, что ts журнала") -- не
-        # вычисляется повторно. Warn-only, ВСЕГДА видимые (нет "note"-
-        # варианта, в отличие от WITNESS ECHO -- спека п.3: канал
-        # предупреждения, не блок, но и не имеет легитимно-тихой ветки).
+        # TS DRIFT ECHO при записи: ТА ЖЕ payload-scoped база, что TIER
+        # ECHO/WITNESS ECHO выше -- корень диагноза t-277 ("растущая
+        # устарелость одной и той же старейшей незакоммиченной строки"
+        # снят именно здесь: строка, уже оценённая ПРЕДЫДУЩИМ вызовом,
+        # больше не входит в echo_new_lines ЭТОГО вызова). `now` -- ТА ЖЕ
+        # переменная, уже вычисленная выше для decide()/_get_head_text --
+        # не вычисляется повторно. Warn-only, ВСЕГДА видимые (нет "note"-
+        # варианта, в отличие от WITNESS ECHO).
         try:
-            ts_drift_events = _collect_ts_drift_events(new_lines, head_lines, now)
+            ts_drift_events = _collect_ts_drift_events(echo_new_lines, echo_base_lines, now)
         except Exception:
             ts_drift_events = []
 
         if not violations and not tier_events and not witness_visible and not ts_drift_events:
             return 0
 
+        # Фолбэк-пометка (эта задача): видна ТОЛЬКО когда мы всё равно
+        # что-то печатаем (см. секцию "PAYLOAD-SCOPED ECHO BASE" выше за
+        # обоснование -- полностью чистый вызов остаётся тихим даже в
+        # фолбэке, тот же принцип "без шума на чистой записи").
+        fallback_marker = FALLBACK_MARKER_TEXT if used_fallback else ""
+
         # Lead-правка (критик-приёмка + Lead-смок): два разных канала,
         # два разных варианта санитайза (см. докстринг build_context).
         # combine_context склеивает дефекты формы, TIER ECHO-строки,
-        # (расширение N2) WITNESS ECHO-строки и (расширение этой задачи)
-        # TS DRIFT-строки (спека п.3) -- см. докстринг combine_context.
-        context_for_stdout = combine_context(violations, tier_events, witness_events, ts_drift_events, ascii_only=False)
-        context_for_stderr = combine_context(violations, tier_events, witness_events, ts_drift_events, ascii_only=True)
+        # WITNESS ECHO-строки, TS DRIFT-строки и (эта задача) фолбэк-
+        # пометку (спека п.3) -- см. докстринг combine_context.
+        context_for_stdout = combine_context(violations, tier_events, witness_events, ts_drift_events,
+                                              fallback_marker, ascii_only=False)
+        context_for_stderr = combine_context(violations, tier_events, witness_events, ts_drift_events,
+                                              fallback_marker, ascii_only=True)
 
         sys.stderr.write(context_for_stderr + "\n")
         output = {

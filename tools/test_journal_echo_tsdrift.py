@@ -8,6 +8,19 @@ tools/journal_echo.py -- ЖИВОЙ, не трогается; Lead ставит 
 `import journal_echo as je`, ничего больше менять не нужно: все имена
 использованы через алиас `je`).
 
+РАСШИРЕНИЕ (t-277/t-279, диагноз критика по задаче t-263): критик нашёл
+корневую причину, разделяемую ВСЕМИ ТРЕМЯ эхо-коллекторами этого файла
+(TIER/WITNESS/TS-DRIFT) -- new_lines строился как HEAD-дифф-срез,
+КУМУЛЯТИВНЫЙ между коммитами, поэтому каждый последующий вызов хука
+переоценивал ВСЕ незакоммиченные строки заново, не только строку,
+добавленную ИМЕННО этим tool-вызовом (для TS-DRIFT это классовая
+ошибка: одна и та же старейшая строка "стареет" на каждом следующем
+вызове, хотя её ts не менялся -- см. секцию "PAYLOAD-SCOPED ECHO BASE"
+в tools/journal_echo.py за полный разбор и эмпирическую базу). Эта
+задача добавляет секцию тестов НОВОГО payload-scoped механизма
+(`je._extract_original_file`/`je._resolve_echo_base`) -- общего для всех
+трёх коллекторов, хотя исторически этот файл называется по TS-DRIFT.
+
 Стиль/самодостаточность -- по образцу tools/test_witness_echo.py (тоже
 staged-тест того же класса): файл НЕ импортирует test_journal_echo.py
 (тот -- чужой, non-goals этой задачи) -- хелперы (git-репо, запуск
@@ -37,6 +50,31 @@ TIER ECHO/WITNESS ECHO смока.
 Плюс смок: минимальный якорный набор существующего функционала
 staged-копии (JOURNAL ECHO/TIER ECHO/WITNESS ECHO/combine_context
 обратная совместимость) -- зелёный после аддитивной правки.
+
+РАСШИРЕНИЕ (t-277/t-279) -- новая секция "PAYLOAD-SCOPED ECHO BASE",
+покрывает диагноз критика буквально:
+ 10. `_extract_original_file`/`_resolve_echo_base` -- pure-logic (не
+     Edit/Write -> недоступно; tool_response не dict/без ключа/не
+     str|None -> недоступно; originalFile=None -> ""; хвостовое
+     расширение диска -> primary path; не-хвостовое -> фолбэк).
+ 11. корневая регрессия (DoD п.1/4): старая незакоммиченная строка ВНЕ
+     payload этого вызова -- ноль ts-drift событий, даже если она сама
+     по себе давно устарела по настенным часам; на неё же с ДРУГОЙ
+     новой строкой в scope -- помечена только новая.
+ 12. граница TS_STALE_TOLERANCE через payload-scoped (не фолбэк) путь
+     (DoD п.2).
+ 13. батч N строк одним tool-вызовом, payload-scoped (не фолбэк) путь
+     -- по-событийно (DoD п.3).
+ 14. Write-путь: create (originalFile=None) и update (originalFile=
+     прежний диск) -- корректный отбор; отсутствующий ключ
+     originalFile -- фолбэк (DoD п.5).
+ 15. не-хвостовая правка / no-op -- ноль (DoD п.6).
+ 16. фолбэк-пометка (FALLBACK_MARKER_TEXT) видна вместе с другим
+     выводом, но НЕ появляется на полностью чистом вызове (собственное
+     инженерное решение, задокументировано в journal_echo.py).
+ 17. (сиблинг DoD п.8, TS-DRIFT-версия) TS DRIFT, помеченный на call #1,
+     не переэхается на call #2 (TIER/WITNESS-версии -- см.
+     tools/test_journal_echo.py/tools/test_witness_echo.py).
 
 Run from the repo root: python -m pytest tools/test_journal_echo_tsdrift.py -q
 """
@@ -119,7 +157,20 @@ def _seed_committed_journal(root: Path, text: str = HEAD_TEXT) -> Path:
 # =======================================================================
 
 
-def _post_tool_use_payload(file_path, cwd=".", session_id="sess-1", tool_name="Edit") -> dict:
+_NO_ORIGINAL_FILE = object()  # sentinel -- omit tool_response.originalFile
+# entirely (t-277/t-279: exercises the FALLBACK path of
+# je._resolve_echo_base -- identical to the pre-t-279 HEAD-diff
+# computation). Default preserves every pre-existing call site's payload
+# shape byte-for-byte.
+
+
+def _post_tool_use_payload(file_path, cwd=".", session_id="sess-1", tool_name="Edit",
+                            original_file=_NO_ORIGINAL_FILE) -> dict:
+    tool_response = {"filePath": str(file_path), "success": True}
+    if original_file is not _NO_ORIGINAL_FILE:
+        # t-277/t-279: tool_response.originalFile (Edit/Write Zod
+        # schemas -- see journal_echo.py's "PAYLOAD-SCOPED ECHO BASE").
+        tool_response["originalFile"] = original_file
     return {
         "session_id": session_id,
         "transcript_path": "/x/transcript.jsonl",
@@ -127,9 +178,20 @@ def _post_tool_use_payload(file_path, cwd=".", session_id="sess-1", tool_name="E
         "hook_event_name": "PostToolUse",
         "tool_name": tool_name,
         "tool_input": {"file_path": str(file_path)},
-        "tool_response": {"filePath": str(file_path), "success": True},
+        "tool_response": tool_response,
         "tool_use_id": "tu-1",
     }
+
+
+def _write_journal_full(root: Path, text: str) -> Path:
+    """Пишет ПОЛНОЕ содержимое журнала (не через _write_journal, которая
+    предполагает наличие logs/ уже -- эта версия создаёт каталог тоже) --
+    используется Write-path тестами (DoD п.5), где main() читает диск
+    ПОСЛЕ операции, а payload несёт tool_response.originalFile ОТДЕЛЬНО."""
+    (root / "logs").mkdir(parents=True, exist_ok=True)
+    path = root / "logs" / "routing-log.jsonl"
+    path.write_text(text, encoding="utf-8")
+    return path
 
 
 def _run_hook(payload, timeout=10, env=None) -> subprocess.CompletedProcess:
@@ -193,6 +255,22 @@ def test_detect_ts_drift_stale_threshold_plus_one_warns():
 
 
 def test_detect_ts_drift_hours_old_warns_stale():
+    # DoD п.7 (диагноз t-277): этот тест остаётся ВЕРНЫМ под новой
+    # payload-scoped семантикой -- он проверяет ЧИСТУЮ функцию сравнения
+    # ts-vs-now (_detect_ts_drift), которая не знает НИЧЕГО о выборе
+    # new_lines/базы и не участвует в баге, который t-277 диагностировал
+    # (растущая устарелость СТАРОЙ уже-проверенной строки при повторных
+    # вызовах хука -- это баг СЕЛЕКЦИИ строк, не баг сравнения одного
+    # конкретного ts с одним конкретным now). Значение здесь моделирует
+    # ДРУГОЙ, ортогональный и по-прежнему легитимный случай: ts,
+    # заявленный как "5 часов назад" В МОМЕНТ ЗАПИСИ НОВОЙ строки -- это
+    # само по себе нарушение F-29 (ts должен браться с часов
+    # непосредственно перед записью), не растущая устарелость уже
+    # проверенной строки -- и должно предупреждаться независимо от
+    # версии базы. См. test_echo_tsdrift_hours_old_warns_stale ниже за
+    # тот же комментарий на уровне e2e и новую регрессионную секцию
+    # "PAYLOAD-SCOPED ECHO BASE" за тест, который ловит ИМЕННО баг
+    # t-277 (растущую устарелость).
     result = je._detect_ts_drift(_iso(-3600 * 5), NOW)
     assert result is not None
     assert result[0] == "stale"
@@ -437,7 +515,16 @@ def test_echo_tsdrift_stale_beyond_threshold_warns(tmp_path):
 
 
 def test_echo_tsdrift_hours_old_warns_stale(tmp_path):
-    # DoD 6: сильно старый ts (часы) -- warn.
+    # DoD 6, DoD п.7 (диагноз t-277): этот сценарий тоже остаётся верным
+    # под новой payload-scoped семантикой -- ОДНА строка добавляется В
+    # ЭТОМ ЖЕ вызове (single-call append, без originalFile -> фолбэк на
+    # HEAD-дифф, который здесь СОВПАДАЕТ с payload-scoped базой: и там,
+    # и там "новое" -- ровно эта одна строка). Её ts "5 часов назад" В
+    # МОМЕНТ ЗАПИСИ -- легитимный F-29-варн независимо от версии базы
+    # (см. комментарий test_detect_ts_drift_hours_old_warns_stale выше
+    # за разбор, ЧЕМ этот класс отличается от бага t-277: растущей
+    # устарелости УЖЕ проверенной строки на ПОЗДНЕЙШЕМ, другом вызове --
+    # см. регрессионный тест в секции "PAYLOAD-SCOPED ECHO BASE" ниже).
     journal_path = _seed_committed_journal(tmp_path)
     stale_ts = (dt.datetime.now() - dt.timedelta(hours=5)).isoformat()
     new_line = _line(ts=stale_ts, task_id="t-002", model="sonnet", notes="hours old")
@@ -678,3 +765,398 @@ def test_smoke_witness_echo_red_warn_still_works(tmp_path):
 
 def test_smoke_combine_context_backward_compat_two_arg():
     assert je.combine_context(["v"], []) == je.build_context(["v"])
+
+
+# =======================================================================
+# PAYLOAD-SCOPED ECHO BASE (t-277/t-279) -- _extract_original_file, pure
+# =======================================================================
+
+
+def test_extract_original_file_non_edit_write_tool_unavailable():
+    payload = {"tool_response": {"originalFile": "x"}}
+    assert je._extract_original_file(payload, "Bash") is je._ORIGINAL_FILE_UNAVAILABLE
+    assert je._extract_original_file(payload, "MultiEdit") is je._ORIGINAL_FILE_UNAVAILABLE
+    assert je._extract_original_file(payload, None) is je._ORIGINAL_FILE_UNAVAILABLE
+
+
+def test_extract_original_file_tool_response_not_dict_unavailable():
+    payload = {"tool_response": "not-a-dict"}
+    assert je._extract_original_file(payload, "Edit") is je._ORIGINAL_FILE_UNAVAILABLE
+
+
+def test_extract_original_file_tool_response_missing_unavailable():
+    assert je._extract_original_file({}, "Edit") is je._ORIGINAL_FILE_UNAVAILABLE
+
+
+def test_extract_original_file_key_absent_unavailable():
+    payload = {"tool_response": {"filePath": "x"}}
+    assert je._extract_original_file(payload, "Write") is je._ORIGINAL_FILE_UNAVAILABLE
+
+
+def test_extract_original_file_none_means_new_file_empty_string():
+    payload = {"tool_response": {"originalFile": None}}
+    assert je._extract_original_file(payload, "Write") == ""
+    assert je._extract_original_file(payload, "Edit") == ""
+
+
+def test_extract_original_file_wrong_type_unavailable():
+    payload = {"tool_response": {"originalFile": 42}}
+    assert je._extract_original_file(payload, "Edit") is je._ORIGINAL_FILE_UNAVAILABLE
+
+
+def test_extract_original_file_valid_string_returned():
+    payload = {"tool_response": {"originalFile": "line1\nline2\n"}}
+    assert je._extract_original_file(payload, "Edit") == "line1\nline2\n"
+    assert je._extract_original_file(payload, "Write") == "line1\nline2\n"
+
+
+# =======================================================================
+# PAYLOAD-SCOPED ECHO BASE (t-277/t-279) -- _resolve_echo_base, pure
+# =======================================================================
+
+
+def test_resolve_echo_base_primary_path_tail_append():
+    head_lines = ["h1"]
+    staged_lines = ["h1", "a1", "b1"]
+    payload = {"tool_response": {"originalFile": "h1\na1\n"}}
+    base, new, fallback = je._resolve_echo_base(payload, "Edit", staged_lines, head_lines)
+    assert fallback is False
+    assert base == ["h1", "a1"]
+    assert new == ["b1"]
+
+
+def test_resolve_echo_base_falls_back_when_unavailable():
+    head_lines = ["h1"]
+    staged_lines = ["h1", "a1"]
+    payload = {"tool_response": {}}  # no originalFile key at all
+    base, new, fallback = je._resolve_echo_base(payload, "Edit", staged_lines, head_lines)
+    assert fallback is True
+    assert base == head_lines
+    assert new == ["a1"]
+
+
+def test_resolve_echo_base_falls_back_on_non_tail_edit():
+    head_lines = ["h1"]
+    staged_lines = ["h1", "a1", "b1"]
+    # originalFile claims a DIFFERENT prior state -- disk doesn't extend
+    # it as a prefix (a non-tail edit).
+    payload = {"tool_response": {"originalFile": "different\n"}}
+    base, new, fallback = je._resolve_echo_base(payload, "Edit", staged_lines, head_lines)
+    assert fallback is True
+    assert base == head_lines
+    assert new == staged_lines[len(head_lines):]
+
+
+def test_resolve_echo_base_no_op_edit_yields_empty_new_lines():
+    head_lines = ["h1"]
+    staged_lines = ["h1", "a1"]
+    payload = {"tool_response": {"originalFile": "h1\na1\n"}}  # identical to disk -- nothing added
+    base, new, fallback = je._resolve_echo_base(payload, "Edit", staged_lines, head_lines)
+    assert fallback is False
+    assert new == []
+
+
+def test_resolve_echo_base_write_new_file_none_original():
+    staged_lines = ["a1", "a2"]
+    payload = {"tool_response": {"originalFile": None}}
+    base, new, fallback = je._resolve_echo_base(payload, "Write", staged_lines, [])
+    assert fallback is False
+    assert base == []
+    assert new == ["a1", "a2"]
+
+
+def test_resolve_echo_base_fallback_when_head_diff_also_non_append_only():
+    # Both bases fail -> the fallback branch itself yields [] (append_ok
+    # False against head_lines too) -- matches this file's pre-existing
+    # behavior for the old HEAD-diff append-only-violation case.
+    head_lines = ["h1", "h2"]
+    staged_lines = ["DIFFERENT"]
+    payload = {"tool_response": {}}
+    base, new, fallback = je._resolve_echo_base(payload, "Edit", staged_lines, head_lines)
+    assert fallback is True
+    assert new == []
+
+
+# =======================================================================
+# PAYLOAD-SCOPED ECHO BASE (t-277/t-279) -- e2e, root regression (DoD 1/4)
+# =======================================================================
+
+
+def test_echo_payload_scoped_earlier_uncommitted_line_outside_scope_silent(tmp_path):
+    # DoD п.1/4 (диагноз t-277): A -- строка, добавленная РАНЕЕ (не этим
+    # вызовом), её ts настолько стар, что по настенным часам она
+    # действительно STALE -- но она НЕ входит в payload ЭТОГО вызова
+    # (originalFile этого вызова УЖЕ включает её) -> ноль ts-drift
+    # событий, несмотря на то что старая HEAD-дифф-логика переоценила бы
+    # и её тоже (это и есть баг, который данная задача чинит).
+    journal_path = _seed_committed_journal(tmp_path)
+    stale_ts = (dt.datetime.now() - dt.timedelta(seconds=je.TS_STALE_TOLERANCE_SECONDS + 600)).isoformat()
+    line_a = _line(ts=stale_ts, task_id="t-002", model="sonnet",
+                   notes="A: written earlier, now stale by wall clock")
+    after_call_a = HEAD_TEXT + line_a + "\n"
+    fresh_ts = dt.datetime.now().isoformat()
+    line_b = _line(ts=fresh_ts, task_id="t-003", model="sonnet", worker_ref="cli:call-b",
+                   notes="B: this call's own new line, fresh")
+    journal_path.write_text(after_call_a + line_b + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path, original_file=after_call_a))
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_echo_payload_scoped_only_current_call_line_flagged_not_earlier_stale(tmp_path):
+    # Surgical variant: BOTH A and B are stale by wall clock -- only B
+    # (this call's own line) may be reported; A must not reappear.
+    journal_path = _seed_committed_journal(tmp_path)
+    stale_ts_a = (dt.datetime.now() - dt.timedelta(seconds=je.TS_STALE_TOLERANCE_SECONDS + 600)).isoformat()
+    line_a = _line(ts=stale_ts_a, task_id="t-002", model="sonnet", notes="A: earlier call, stale")
+    after_call_a = HEAD_TEXT + line_a + "\n"
+    stale_ts_b = (dt.datetime.now() - dt.timedelta(seconds=je.TS_STALE_TOLERANCE_SECONDS + 60)).isoformat()
+    line_b = _line(ts=stale_ts_b, task_id="t-003", model="sonnet", worker_ref="cli:call-b",
+                   notes="B: this call's own new line, also stale")
+    journal_path.write_text(after_call_a + line_b + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path, original_file=after_call_a))
+    assert result.returncode == 0
+    hook_output = _parse_stdout_json(result.stdout)
+    ctx = hook_output["additionalContext"]
+    assert ctx.count("TS DRIFT") == 1
+    assert "line 3" in ctx  # HEAD=1 line, A=line 2 (out of scope), B=line 3 (in scope)
+
+
+# =======================================================================
+# PAYLOAD-SCOPED ECHO BASE -- e2e, TS_STALE_TOLERANCE boundary via the
+# PRIMARY (not fallback) path (DoD 2). Exact-boundary precision is
+# already proven by the pure _detect_ts_drift tests above (fixed NOW,
+# no subprocess jitter) -- these e2e tests only prove the primary path
+# reaches the same detector, with a generous margin against subprocess
+# start-up jitter, the same style the rest of this file already uses.
+# =======================================================================
+
+
+def test_echo_payload_scoped_fresh_ts_silent(tmp_path):
+    journal_path = _seed_committed_journal(tmp_path)
+    fresh_ts = dt.datetime.now().isoformat()
+    new_line = _line(ts=fresh_ts, task_id="t-002", model="sonnet", notes="fresh, payload-scoped path")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path, original_file=HEAD_TEXT))
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_echo_payload_scoped_stale_beyond_threshold_warns(tmp_path):
+    journal_path = _seed_committed_journal(tmp_path)
+    stale_ts = (dt.datetime.now() - dt.timedelta(seconds=je.TS_STALE_TOLERANCE_SECONDS + 60)).isoformat()
+    new_line = _line(ts=stale_ts, task_id="t-002", model="sonnet", notes="stale, payload-scoped path")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path, original_file=HEAD_TEXT))
+    assert result.returncode == 0
+    hook_output = _parse_stdout_json(result.stdout)
+    ctx = hook_output["additionalContext"]
+    assert "TS DRIFT" in ctx
+    assert "STALE" in ctx
+
+
+# =======================================================================
+# PAYLOAD-SCOPED ECHO BASE -- e2e, batch of N lines in ONE call, PRIMARY
+# path, per-event (DoD 3)
+# =======================================================================
+
+
+def test_echo_payload_scoped_batch_lines_one_call_per_event(tmp_path):
+    journal_path = _seed_committed_journal(tmp_path)
+    future_ts = (dt.datetime.now() + dt.timedelta(seconds=je.TS_FUTURE_TOLERANCE_SECONDS + 60)).isoformat()
+    lines = [
+        _line(ts=future_ts, task_id=f"t-{i:03d}", model="sonnet", worker_ref=f"cli:batch-{i}",
+              notes=f"batch line #{i}")
+        for i in (2, 3, 4)
+    ]
+    journal_path.write_text(HEAD_TEXT + "".join(l + "\n" for l in lines), encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path, original_file=HEAD_TEXT))
+    assert result.returncode == 0
+    hook_output = _parse_stdout_json(result.stdout)
+    ctx = hook_output["additionalContext"]
+    assert ctx.count("TS DRIFT") == 3
+
+
+# =======================================================================
+# PAYLOAD-SCOPED ECHO BASE -- e2e, Write path (DoD 5)
+# =======================================================================
+
+
+def test_echo_write_new_file_originalfile_none_correct_scoping(tmp_path):
+    # DoD п.5: Write создаёт НОВЫЙ файл -- originalFile=None по
+    # Zod-схеме Write (см. journal_echo.py) -- вся content-строка стала
+    # "своей" для этого вызова; она чиста -> тишина.
+    (tmp_path / "logs").mkdir(parents=True)
+    journal_path = tmp_path / "logs" / "routing-log.jsonl"
+    fresh_ts = dt.datetime.now().isoformat()
+    line = _line(ts=fresh_ts, task_id="t-001", model="sonnet", notes="brand new journal via Write")
+    journal_path.write_text(line + "\n", encoding="utf-8")
+    payload = _post_tool_use_payload(journal_path, tool_name="Write", original_file=None)
+    result = _run_hook(payload)
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_echo_write_new_file_stale_line_flagged(tmp_path):
+    (tmp_path / "logs").mkdir(parents=True)
+    journal_path = tmp_path / "logs" / "routing-log.jsonl"
+    stale_ts = (dt.datetime.now() - dt.timedelta(seconds=je.TS_STALE_TOLERANCE_SECONDS + 60)).isoformat()
+    line = _line(ts=stale_ts, task_id="t-001", model="sonnet", notes="brand new journal, stale first line")
+    journal_path.write_text(line + "\n", encoding="utf-8")
+    payload = _post_tool_use_payload(journal_path, tool_name="Write", original_file=None)
+    result = _run_hook(payload)
+    assert result.returncode == 0
+    hook_output = _parse_stdout_json(result.stdout)
+    ctx = hook_output["additionalContext"]
+    assert "TS DRIFT" in ctx
+    assert "STALE" in ctx
+
+
+def test_echo_write_update_existing_file_correct_scoping(tmp_path):
+    # DoD п.5: Write ПЕРЕЗАПИСЫВАЕТ существующий файл целиком --
+    # originalFile = прежнее полное содержимое; только добавленный
+    # хвост попадает в scope, старые (уже бывшие на диске ДО этого
+    # конкретного вызова) строки -- нет, даже если сами по себе стары
+    # по часам.
+    journal_path = _seed_committed_journal(tmp_path)
+    stale_ts_prior = (dt.datetime.now() - dt.timedelta(seconds=je.TS_STALE_TOLERANCE_SECONDS + 600)).isoformat()
+    prior_extra = _line(ts=stale_ts_prior, task_id="t-002", model="sonnet", notes="prior extra line, stale")
+    prior_full = HEAD_TEXT + prior_extra + "\n"
+    fresh_ts = dt.datetime.now().isoformat()
+    new_line = _line(ts=fresh_ts, task_id="t-003", model="sonnet", worker_ref="cli:write-update",
+                      notes="freshly written via Write, appended to prior_full")
+    journal_path.write_text(prior_full + new_line + "\n", encoding="utf-8")
+    payload = _post_tool_use_payload(journal_path, tool_name="Write", original_file=prior_full)
+    result = _run_hook(payload)
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_echo_write_missing_originalfile_key_falls_back_with_marker(tmp_path):
+    # DoD п.5, часть "или fail-open с пометкой": Write-tool_response БЕЗ
+    # originalFile вовсе -- фолбэк на HEAD-дифф + видимая пометка
+    # (проверяем это вместе с реальным дефектом, чтобы пометка была
+    # видна -- см. секцию про фолбэк-пометку ниже за отдельный тест
+    # "чистый вызов остаётся тихим").
+    journal_path = _seed_committed_journal(tmp_path)
+    stale_ts = (dt.datetime.now() - dt.timedelta(seconds=je.TS_STALE_TOLERANCE_SECONDS + 60)).isoformat()
+    new_line = _line(ts=stale_ts, task_id="t-002", model="sonnet", notes="stale, Write without originalFile")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    payload = _post_tool_use_payload(journal_path, tool_name="Write")  # no original_file kwarg -> key absent
+    result = _run_hook(payload)
+    assert result.returncode == 0
+    hook_output = _parse_stdout_json(result.stdout)
+    ctx = hook_output["additionalContext"]
+    assert "TS DRIFT" in ctx
+    assert je.FALLBACK_MARKER_TEXT in ctx
+
+
+# =======================================================================
+# PAYLOAD-SCOPED ECHO BASE -- e2e, non-tail edit / no-op (DoD 6)
+# =======================================================================
+
+
+def test_echo_non_tail_edit_falls_back_silently_when_no_actual_drift(tmp_path):
+    # DoD п.6: originalFile присутствует, но НЕ является префиксом
+    # текущего диска (не-хвостовая правка) -- фолбэк на HEAD-дифф; в
+    # этом сценарии обе базы согласны, что единственная новая строка
+    # чиста -- ноль событий.
+    journal_path = _seed_committed_journal(tmp_path)
+    fresh_ts = dt.datetime.now().isoformat()
+    new_line = _line(ts=fresh_ts, task_id="t-002", model="sonnet", notes="clean new line")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    payload = _post_tool_use_payload(journal_path, original_file="{totally unrelated content}\n")
+    result = _run_hook(payload)
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_echo_no_op_edit_identical_original_file_zero_events(tmp_path):
+    # DoD п.6, "no-op": originalFile == текущий диск буквально -- ничего
+    # не добавлено этим вызовом -> ноль новых строк, ноль событий.
+    journal_path = _seed_committed_journal(tmp_path)
+    fresh_ts = dt.datetime.now().isoformat()
+    new_line = _line(ts=fresh_ts, task_id="t-002", model="sonnet", notes="already-committed-equivalent state")
+    full_text = HEAD_TEXT + new_line + "\n"
+    journal_path.write_text(full_text, encoding="utf-8")
+    payload = _post_tool_use_payload(journal_path, original_file=full_text)
+    result = _run_hook(payload)
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+# =======================================================================
+# PAYLOAD-SCOPED ECHO BASE -- e2e, fallback-marker visibility (own
+# engineering completion of "so degradation is visible, not silent")
+# =======================================================================
+
+
+def test_echo_fallback_marker_appears_alongside_other_output(tmp_path):
+    journal_path = _seed_committed_journal(tmp_path)
+    stale_ts = (dt.datetime.now() - dt.timedelta(seconds=je.TS_STALE_TOLERANCE_SECONDS + 60)).isoformat()
+    bad_line = _line(ts=stale_ts, task_id="t-002", model="sonnet", category="",
+                      notes="defect + stale, fallback path")
+    journal_path.write_text(HEAD_TEXT + bad_line + "\n", encoding="utf-8")
+    payload = _post_tool_use_payload(journal_path)  # no original_file -> fallback engaged
+    result = _run_hook(payload)
+    assert result.returncode == 0
+    hook_output = _parse_stdout_json(result.stdout)
+    ctx = hook_output["additionalContext"]
+    assert "JOURNAL ECHO" in ctx
+    assert "TS DRIFT" in ctx
+    assert je.FALLBACK_MARKER_TEXT in ctx
+    assert ("; " + je.FALLBACK_MARKER_TEXT) in ctx  # joined as the trailing segment
+
+
+def test_echo_fallback_marker_not_shown_on_otherwise_clean_call(tmp_path):
+    # Собственное инженерное решение (см. journal_echo.py, "PAYLOAD-
+    # SCOPED ECHO BASE"): фолбэк САМ ПО СЕБЕ не делает чистый вызов
+    # шумным -- та же гарантия "без шума на чистой записи", что этот
+    # хук несёт с самого начала.
+    journal_path = _seed_committed_journal(tmp_path)
+    fresh_ts = dt.datetime.now().isoformat()
+    clean_line = _line(ts=fresh_ts, task_id="t-002", model="sonnet", notes="clean, fallback path")
+    journal_path.write_text(HEAD_TEXT + clean_line + "\n", encoding="utf-8")
+    payload = _post_tool_use_payload(journal_path)  # no original_file -> fallback engaged
+    result = _run_hook(payload)
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+# =======================================================================
+# PAYLOAD-SCOPED ECHO BASE -- e2e, DoD 8 sibling (TS-DRIFT version of
+# the tier/witness re-echo regression -- see tools/test_journal_echo.py/
+# tools/test_witness_echo.py for the TIER/WITNESS versions)
+# =======================================================================
+
+
+def test_echo_tsdrift_payload_scoped_not_reechoed_on_later_unrelated_call(tmp_path):
+    # Диагноз t-277, корневой тест: строка A помечена STALE на call #1;
+    # call #2 добавляет ДРУГУЮ (свежую) строку B -- A НЕ должна снова
+    # появиться в выводе call #2 (она уже вне payload этого вызова).
+    journal_path = _seed_committed_journal(tmp_path)
+    stale_ts = (dt.datetime.now() - dt.timedelta(seconds=je.TS_STALE_TOLERANCE_SECONDS + 60)).isoformat()
+    line_a = _line(ts=stale_ts, task_id="t-002", model="sonnet", notes="call #1: stale")
+    after_call_1 = HEAD_TEXT + line_a + "\n"
+    journal_path.write_text(after_call_1, encoding="utf-8")
+    result1 = _run_hook(_post_tool_use_payload(journal_path, original_file=HEAD_TEXT))
+    assert result1.returncode == 0
+    ctx1 = _parse_stdout_json(result1.stdout)["additionalContext"]
+    assert "TS DRIFT" in ctx1
+    assert "STALE" in ctx1
+
+    fresh_ts = dt.datetime.now().isoformat()
+    line_b = _line(ts=fresh_ts, task_id="t-003", model="sonnet", worker_ref="cli:call-b",
+                   notes="call #2: unrelated fresh line")
+    journal_path.write_text(after_call_1 + line_b + "\n", encoding="utf-8")
+    result2 = _run_hook(_post_tool_use_payload(journal_path, original_file=after_call_1))
+    assert result2.returncode == 0
+    assert result2.stdout == ""
+    assert result2.stderr == ""

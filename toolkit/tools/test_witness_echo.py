@@ -159,7 +159,20 @@ def _write_track(root: Path, session_id: str, runs: list) -> Path:
 # =======================================================================
 
 
-def _post_tool_use_payload(file_path, cwd, session_id="sess-1", tool_name="Edit") -> dict:
+_NO_ORIGINAL_FILE = object()  # sentinel -- omit tool_response.originalFile
+# entirely (t-277/t-279: exercises the FALLBACK path of
+# journal_echo._resolve_echo_base -- identical to the pre-t-279
+# HEAD-diff computation). The default preserves every existing call
+# site's payload shape byte-for-byte.
+
+
+def _post_tool_use_payload(file_path, cwd, session_id="sess-1", tool_name="Edit",
+                            original_file=_NO_ORIGINAL_FILE) -> dict:
+    tool_response = {"filePath": str(file_path), "success": True}
+    if original_file is not _NO_ORIGINAL_FILE:
+        # t-277/t-279: tool_response.originalFile (Edit/Write Zod
+        # schemas -- see journal_echo.py's "PAYLOAD-SCOPED ECHO BASE").
+        tool_response["originalFile"] = original_file
     return {
         "session_id": session_id,
         "transcript_path": "/x/transcript.jsonl",
@@ -167,7 +180,7 @@ def _post_tool_use_payload(file_path, cwd, session_id="sess-1", tool_name="Edit"
         "hook_event_name": "PostToolUse",
         "tool_name": tool_name,
         "tool_input": {"file_path": str(file_path)},
-        "tool_response": {"filePath": str(file_path), "success": True},
+        "tool_response": tool_response,
         "tool_use_id": "tu-1",
     }
 
@@ -889,6 +902,36 @@ def test_e2e_non_builder_accepted_no_witness_check(tmp_path):
     assert result.returncode == 0
     assert result.stdout == ""
     assert result.stderr == ""
+
+
+def test_e2e_witness_payload_scoped_not_reechoed_on_later_unrelated_call(tmp_path):
+    # t-277/t-279 (ported from HQ): a WITNESS ECHO contradiction
+    # reported on call #1 must NOT be re-echoed on a LATER, unrelated
+    # call #2 that appends a different clean line -- call #2's
+    # original_file already includes call #1's accepted+witness line,
+    # so it's out of scope for call #2 (see
+    # journal_echo._resolve_echo_base).
+    journal_path = _seed_committed_journal(tmp_path)
+    _write_track(tmp_path, "sess-1", [
+        _run_entry("2026-07-10T08:05:00.000000", "python -m pytest tools/ gateway/ -q", "red"),
+    ])
+    contradicting_line = _accepted_line(ts=_fresh_ts(),
+                                         witness="python -m pytest tools/ gateway/ -q -> 3 failed",
+                                         notes="call #1: contradicting witness")
+    after_call_1 = HEAD_TEXT + contradicting_line + "\n"
+    journal_path.write_text(after_call_1, encoding="utf-8")
+    result1 = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path, original_file=HEAD_TEXT))
+    assert result1.returncode == 0
+    ctx1 = _parse_stdout_json(result1.stdout)["additionalContext"]
+    assert "WITNESS ECHO" in ctx1
+    assert "recorded RED" in ctx1
+
+    clean_line = _delegated_line(ts=_fresh_ts(), task_id="t-002", notes="call #2: unrelated clean line")
+    journal_path.write_text(after_call_1 + clean_line + "\n", encoding="utf-8")
+    result2 = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path, original_file=after_call_1))
+    assert result2.returncode == 0
+    assert result2.stdout == ""
+    assert result2.stderr == ""
 
 
 def test_e2e_existing_journal_echo_defect_and_witness_warn_together(tmp_path):
