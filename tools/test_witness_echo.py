@@ -146,11 +146,20 @@ def _run_entry(ts, command, outcome, agent_id=None, tool_name="Bash"):
             "agent_id": agent_id}
 
 
-def _write_track(root: Path, session_id: str, runs: list) -> Path:
+def _edit_entry(ts, agent_id=None, tool_name="Edit", file_path="tools/x.py"):
+    # VG-4: та же форма "edits"-записи, что tools/dod_track.py.build_fact
+    # пишет для Edit/Write/MultiEdit/NotebookEdit (см. её докстринг).
+    return {"ts": ts, "tool_name": tool_name, "agent_id": agent_id, "file_path": file_path}
+
+
+def _write_track(root: Path, session_id: str, runs: list, edits: list = None) -> Path:
+    # VG-4: edits -- НОВЫЙ опциональный параметр (по умолчанию [] --
+    # байт-в-байт прежнее поведение для ВСЕХ существующих вызовов этого
+    # хелпера, ни один из которых не передаёт edits).
     track_dir = root / ".claude" / "dod_track"
     track_dir.mkdir(parents=True, exist_ok=True)
     path = track_dir / f"{session_id}.json"
-    path.write_text(json.dumps({"edits": [], "runs": runs}, ensure_ascii=False, indent=2),
+    path.write_text(json.dumps({"edits": edits or [], "runs": runs}, ensure_ascii=False, indent=2),
                      encoding="utf-8")
     return path
 
@@ -283,6 +292,295 @@ def test_load_witness_runs_valid_returns_runs(tmp_path):
     runs = [_run_entry("2026-07-21T10:00:00.000000", "pytest tools/ -q", "green")]
     _write_track(tmp_path, "sess-1", runs)
     assert we._load_witness_runs(str(tmp_path), "sess-1") == runs
+
+
+# =======================================================================
+# _load_witness_edits -- pure logic (VG-4, mirrors _load_witness_runs
+# battery above -- same class of failure, symmetric coverage per R9)
+# =======================================================================
+
+
+def test_load_witness_edits_missing_session_id_none():
+    assert we._load_witness_edits(".", None) is None
+    assert we._load_witness_edits(".", "") is None
+
+
+def test_load_witness_edits_missing_file_returns_none(tmp_path):
+    assert we._load_witness_edits(str(tmp_path), "no-such-session") is None
+
+
+def test_load_witness_edits_empty_file_returns_none(tmp_path):
+    track_dir = tmp_path / ".claude" / "dod_track"
+    track_dir.mkdir(parents=True)
+    (track_dir / "sess-1.json").write_text("   \n", encoding="utf-8")
+    assert we._load_witness_edits(str(tmp_path), "sess-1") is None
+
+
+def test_load_witness_edits_malformed_json_returns_none(tmp_path):
+    track_dir = tmp_path / ".claude" / "dod_track"
+    track_dir.mkdir(parents=True)
+    (track_dir / "sess-1.json").write_text("{not valid json", encoding="utf-8")
+    assert we._load_witness_edits(str(tmp_path), "sess-1") is None
+
+
+def test_load_witness_edits_not_a_dict_returns_none(tmp_path):
+    track_dir = tmp_path / ".claude" / "dod_track"
+    track_dir.mkdir(parents=True)
+    (track_dir / "sess-1.json").write_text("[1, 2, 3]", encoding="utf-8")
+    assert we._load_witness_edits(str(tmp_path), "sess-1") is None
+
+
+def test_load_witness_edits_no_edits_key_returns_none(tmp_path):
+    track_dir = tmp_path / ".claude" / "dod_track"
+    track_dir.mkdir(parents=True)
+    (track_dir / "sess-1.json").write_text(json.dumps({"runs": []}), encoding="utf-8")
+    assert we._load_witness_edits(str(tmp_path), "sess-1") is None
+
+
+def test_load_witness_edits_empty_edits_list_returns_empty_list(tmp_path):
+    _write_track(tmp_path, "sess-1", runs=[], edits=[])
+    assert we._load_witness_edits(str(tmp_path), "sess-1") == []
+
+
+def test_load_witness_edits_valid_returns_edits(tmp_path):
+    edits = [_edit_entry("2026-07-21T10:00:00.000000")]
+    _write_track(tmp_path, "sess-1", runs=[], edits=edits)
+    assert we._load_witness_edits(str(tmp_path), "sess-1") == edits
+
+
+# =======================================================================
+# _last_edit_ts / _last_green_ts / _detect_staleness -- pure logic (VG-4,
+# требуемое усиление (в): "последний зелёный прогон трека датирован
+# ПОЗЖЕ последней правки кода в треке")
+# =======================================================================
+
+
+def test_last_edit_ts_empty_list_none():
+    assert we._last_edit_ts([]) is None
+
+
+def test_last_edit_ts_single_entry():
+    edits = [_edit_entry("2026-07-21T10:00:00.000000")]
+    assert we._last_edit_ts(edits) == "2026-07-21T10:00:00.000000"
+
+
+def test_last_edit_ts_returns_max_of_several():
+    edits = [
+        _edit_entry("2026-07-21T10:00:00.000000"),
+        _edit_entry("2026-07-21T12:00:00.000000"),
+        _edit_entry("2026-07-21T11:00:00.000000"),
+    ]
+    assert we._last_edit_ts(edits) == "2026-07-21T12:00:00.000000"
+
+
+def test_last_edit_ts_skips_malformed_entries_without_raising():
+    edits = [
+        "not a dict",
+        {"ts": 12345},  # ts not a string
+        {"no_ts_field": True},
+        _edit_entry("2026-07-21T10:00:00.000000"),
+    ]
+    assert we._last_edit_ts(edits) == "2026-07-21T10:00:00.000000"
+
+
+def test_last_edit_ts_all_malformed_returns_none():
+    assert we._last_edit_ts(["not a dict", {"ts": 1}, {}]) is None
+
+
+def test_last_green_ts_no_green_runs_none():
+    runs = [_run_entry("2026-07-21T10:00:00.000000", "pytest -q", "red")]
+    assert we._last_green_ts(runs) is None
+
+
+def test_last_green_ts_empty_runs_none():
+    assert we._last_green_ts([]) is None
+
+
+def test_last_green_ts_returns_max_of_green_only():
+    runs = [
+        _run_entry("2026-07-21T09:00:00.000000", "pytest -q", "green"),
+        _run_entry("2026-07-21T11:00:00.000000", "pytest -q", "red"),  # later, but red
+        _run_entry("2026-07-21T10:00:00.000000", "pytest -q", "green"),
+    ]
+    assert we._last_green_ts(runs) == "2026-07-21T10:00:00.000000"
+
+
+def test_detect_staleness_no_edits_none_regardless_of_runs():
+    # "если трек не несёт ts правок" -- edits пуст -- сравнивать не с
+    # чем, тихо, ДАЖЕ если runs пуст/red/несуществующий зелёный тоже.
+    assert we._detect_staleness([], []) is None
+    runs = [_run_entry("2026-07-21T10:00:00.000000", "pytest -q", "red")]
+    assert we._detect_staleness(runs, []) is None
+
+
+def test_detect_staleness_edits_no_green_run_ever_stale():
+    edits = [_edit_entry("2026-07-21T10:00:00.000000")]
+    runs = [_run_entry("2026-07-21T09:00:00.000000", "pytest -q", "red")]
+    result = we._detect_staleness(runs, edits)
+    assert result == ("2026-07-21T10:00:00.000000", None)
+
+
+def test_detect_staleness_edit_after_last_green_stale():
+    edits = [_edit_entry("2026-07-21T10:00:01.000000")]
+    runs = [_run_entry("2026-07-21T10:00:00.000000", "pytest -q", "green")]
+    result = we._detect_staleness(runs, edits)
+    assert result == ("2026-07-21T10:00:01.000000", "2026-07-21T10:00:00.000000")
+
+
+def test_detect_staleness_green_after_last_edit_silent():
+    edits = [_edit_entry("2026-07-21T10:00:00.000000")]
+    runs = [_run_entry("2026-07-21T10:00:01.000000", "pytest -q", "green")]
+    assert we._detect_staleness(runs, edits) is None
+
+
+def test_detect_staleness_boundary_equal_ts_silent():
+    # Граница правила 6а: правка РОВНО в тот же ts, что последний
+    # зелёный -- строгое ">" тихо на равенстве (см. _detect_staleness
+    # докстринг), симметрично _detect_ts_drift выше в этом файле.
+    same_ts = "2026-07-21T10:00:00.000000"
+    edits = [_edit_entry(same_ts)]
+    runs = [_run_entry(same_ts, "pytest -q", "green")]
+    assert we._detect_staleness(runs, edits) is None
+
+
+def test_detect_staleness_boundary_one_microsecond_after_is_stale():
+    # Та же граница, один шаг ЗА неё -- правка на 1 микросекунду позже
+    # зелёного -- уже нарушение.
+    edits = [_edit_entry("2026-07-21T10:00:00.000001")]
+    runs = [_run_entry("2026-07-21T10:00:00.000000", "pytest -q", "green")]
+    result = we._detect_staleness(runs, edits)
+    assert result == ("2026-07-21T10:00:00.000001", "2026-07-21T10:00:00.000000")
+
+
+# =======================================================================
+# _is_doc_only_edit_path / doc-only filtering of _last_edit_ts (VG-4
+# attempt 2, критик-BLOCKER attempt 1 -- журнальная/doc-only правка не
+# должна сама себя делать "последней правкой кода")
+# =======================================================================
+
+
+def test_is_doc_only_edit_path_jsonl_true():
+    assert we._is_doc_only_edit_path("logs/routing-log.jsonl") is True
+
+
+def test_is_doc_only_edit_path_md_true():
+    assert we._is_doc_only_edit_path("docs/SOMETHING.md") is True
+
+
+def test_is_doc_only_edit_path_json_true():
+    assert we._is_doc_only_edit_path("tools/parity_manifest.json") is True
+
+
+def test_is_doc_only_edit_path_dotfile_true():
+    assert we._is_doc_only_edit_path(".gitignore") is True
+
+
+def test_is_doc_only_edit_path_py_false():
+    assert we._is_doc_only_edit_path("tools/journal_echo.py") is False
+
+
+def test_is_doc_only_edit_path_unknown_conservatively_false():
+    # Неизвестный/пустой/не-строковый file_path -- КОНСЕРВАТИВНО НЕ
+    # doc-only (fail-safe, зеркало tools/dod_gate.py._is_doc_only_file):
+    # отсутствие информации не даёт права на исключение.
+    assert we._is_doc_only_edit_path(None) is False
+    assert we._is_doc_only_edit_path("") is False
+    assert we._is_doc_only_edit_path(123) is False
+
+
+def test_is_doc_only_edit_path_matches_dod_gate_extension_list_exactly():
+    # R9: расхождение списков -- новый класс дефекта пары. Сверка САМИХ
+    # констант (не только поведения на образцах) -- ловит дрейф списков
+    # даже на РАСШИРЕНИИ, не покрытом остальными тестами этого файла.
+    assert we.DOC_ONLY_EXTENSIONS == dod_gate.DOC_ONLY_EXTENSIONS
+    assert we.DOC_ONLY_DOTFILES == dod_gate.DOC_ONLY_DOTFILES
+
+
+def test_last_edit_ts_excludes_jsonl_journal_edit():
+    # Живой сценарий блокера: code-правка (.py) + ПОЗЖЕ правка самого
+    # журнала (logs/routing-log.jsonl, .jsonl -- doc-only) -- журнальная
+    # правка НЕ считается "последней правкой кода".
+    edits = [
+        _edit_entry("2026-07-21T10:00:00.000000", file_path="tools/x.py"),
+        _edit_entry("2026-07-21T10:05:00.000000", file_path="logs/routing-log.jsonl"),
+    ]
+    assert we._last_edit_ts(edits) == "2026-07-21T10:00:00.000000"
+
+
+def test_last_edit_ts_excludes_md_edit():
+    edits = [
+        _edit_entry("2026-07-21T10:00:00.000000", file_path="tools/x.py"),
+        _edit_entry("2026-07-21T10:05:00.000000", file_path="docs/NOTES.md"),
+    ]
+    assert we._last_edit_ts(edits) == "2026-07-21T10:00:00.000000"
+
+
+def test_last_edit_ts_all_doc_only_returns_none():
+    edits = [
+        _edit_entry("2026-07-21T10:00:00.000000", file_path="logs/routing-log.jsonl"),
+        _edit_entry("2026-07-21T10:05:00.000000", file_path="docs/NOTES.md"),
+    ]
+    assert we._last_edit_ts(edits) is None
+
+
+def test_last_edit_ts_counts_py_edit_after_green_boundary_control():
+    # Граница-контроль (не убит фильтром): .py-правка ПОСЛЕ doc-only
+    # правок -- всё ещё считается, детектор жив.
+    edits = [
+        _edit_entry("2026-07-21T10:05:00.000000", file_path="logs/routing-log.jsonl"),
+        _edit_entry("2026-07-21T10:10:00.000000", file_path="tools/x.py"),
+    ]
+    assert we._last_edit_ts(edits) == "2026-07-21T10:10:00.000000"
+
+
+def test_last_edit_ts_missing_file_path_conservatively_counted():
+    # Запись без file_path -- КОНСЕРВАТИВНО НЕ doc-only -- учитывается
+    # как правка кода (fail-safe по умолчанию).
+    edits = [_edit_entry("2026-07-21T10:00:00.000000", file_path=None)]
+    assert we._last_edit_ts(edits) == "2026-07-21T10:00:00.000000"
+
+
+# =======================================================================
+# _detect_staleness -- doc-only edits do not falsely trigger (VG-4
+# attempt 2, direct regression of the critic's live-scenario finding)
+# =======================================================================
+
+
+def test_detect_staleness_journal_edit_after_green_not_stale():
+    edits = [
+        _edit_entry("2026-07-21T10:00:00.000000", file_path="tools/x.py"),
+        _edit_entry("2026-07-21T10:05:00.000000", file_path="logs/routing-log.jsonl"),
+    ]
+    runs = [_run_entry("2026-07-21T10:01:00.000000", "pytest tools/x.py -q", "green")]
+    assert we._detect_staleness(runs, edits) is None
+
+
+def test_detect_staleness_md_edit_after_green_not_stale():
+    edits = [
+        _edit_entry("2026-07-21T10:00:00.000000", file_path="tools/x.py"),
+        _edit_entry("2026-07-21T10:05:00.000000", file_path="docs/NOTES.md"),
+    ]
+    runs = [_run_entry("2026-07-21T10:01:00.000000", "pytest tools/x.py -q", "green")]
+    assert we._detect_staleness(runs, edits) is None
+
+
+def test_detect_staleness_py_edit_after_green_still_stale_boundary_control():
+    # Тот же трек, но правка ПОСЛЕ зелёного -- .py, не doc-only -- всё
+    # ещё нарушение (детектор не убит фильтром).
+    edits = [
+        _edit_entry("2026-07-21T10:00:00.000000", file_path="logs/routing-log.jsonl"),
+        _edit_entry("2026-07-21T10:10:00.000000", file_path="tools/x.py"),
+    ]
+    runs = [_run_entry("2026-07-21T10:01:00.000000", "pytest tools/x.py -q", "green")]
+    result = we._detect_staleness(runs, edits)
+    assert result == ("2026-07-21T10:10:00.000000", "2026-07-21T10:01:00.000000")
+
+
+def test_detect_staleness_missing_file_path_after_green_still_stale():
+    edits = [_edit_entry("2026-07-21T10:10:00.000000", file_path=None)]
+    runs = [_run_entry("2026-07-21T10:01:00.000000", "pytest tools/x.py -q", "green")]
+    result = we._detect_staleness(runs, edits)
+    assert result == ("2026-07-21T10:10:00.000000", "2026-07-21T10:01:00.000000")
 
 
 # =======================================================================
@@ -451,6 +749,25 @@ def test_match_witness_mixed_agent_ids_all_counted():
     matched, loud = we._match_witness("pytest tools/x.py -q", runs)
     assert matched is True
     assert loud == []  # last (by ts) among BOTH agent_ids is green
+
+
+def test_match_witness_prefix_boundary_full_command_matches():
+    # VG-4 DoD 2: witness несёт ПОЛНУЮ (после нормализации) команду
+    # трека плюс результат -- граница "совпало".
+    runs = [_run_entry("2026-07-21T10:00:00.000000", "python -m pytest tools/ -q", "green")]
+    matched, loud = we._match_witness("python -m pytest tools/ -q -> 1298 passed", runs)
+    assert matched is True
+    assert loud == []
+
+
+def test_match_witness_prefix_boundary_one_char_short_does_not_match():
+    # Та же граница, РАЗОШЛАСЬ на один символ (усечена команда witness'а
+    # -- отсутствует последний символ трековой команды) -- НЕ матчится.
+    runs = [_run_entry("2026-07-21T10:00:00.000000", "python -m pytest tools/ -q", "green")]
+    truncated = "python -m pytest tools/ -"  # "q" отсутствует
+    matched, loud = we._match_witness(truncated + " -> 1298 passed", runs)
+    assert matched is False
+    assert loud == []
 
 
 # =======================================================================
@@ -656,6 +973,207 @@ def test_collect_witness_events_track_read_once_per_call(tmp_path, monkeypatch):
     assert calls["n"] == 1
 
 
+def test_collect_witness_events_edits_read_once_per_call(tmp_path, monkeypatch):
+    # VG-4 симметрия: _load_witness_edits -- ТОЖЕ ленивый кэш, ОДИН раз
+    # за вызов (свой независимый флаг от runs_cache, см. докстринг
+    # _collect_witness_events).
+    _write_track(tmp_path, "sess-1",
+                  runs=[_run_entry("2026-07-21T10:00:00.000000", "pytest tools/x.py -q", "green")],
+                  edits=[_edit_entry("2026-07-21T09:00:00.000000")])
+    calls = {"n": 0}
+    real = we._load_witness_edits
+
+    def counting(cwd, session_id):
+        calls["n"] += 1
+        return real(cwd, session_id)
+    monkeypatch.setattr(we, "_load_witness_edits", counting)
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    lines = [
+        _accepted_line(ts="2026-07-10T08:10:00", task_id="t-001", witness="pytest tools/x.py -q"),
+        _accepted_line(ts="2026-07-10T08:11:00", task_id="t-001", witness="pytest tools/x.py -q"),
+    ]
+    we._collect_witness_events(lines, [], payload)
+    assert calls["n"] == 1
+
+
+# =======================================================================
+# _collect_witness_events -- staleness axis (VG-4, требуемое усиление (в))
+# =======================================================================
+
+
+def test_collect_witness_events_stale_no_green_run_ever(tmp_path):
+    # Правки есть, зелёного прогона не было НИКОГДА (только red) --
+    # warn_stale с last_green_ts=None, ДАЖЕ если команда не матчится
+    # (комбинируется с warn_soft для этой же строки).
+    _write_track(tmp_path, "sess-1",
+                  runs=[_run_entry("2026-07-21T09:00:00.000000", "pytest tools/x.py -q", "red")],
+                  edits=[_edit_entry("2026-07-21T10:00:00.000000")])
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    line = _accepted_line(witness="pytest tools/x.py -q -> 1 failed")
+    events = we._collect_witness_events(_new_lines(line), [], payload)
+    kinds = {e[0] for e in events}
+    assert "warn_stale" in kinds
+    stale = next(e for e in events if e[0] == "warn_stale")
+    assert stale == ("warn_stale", 1, "2026-07-21T10:00:00.000000", None)
+    # ПЛЮС warn_loud (команда матчится, её последний прогон red) --
+    # оси независимы, обе видны для одной строки.
+    assert "warn_loud" in kinds
+
+
+def test_collect_witness_events_stale_edit_after_matched_green_command(tmp_path):
+    # Заявленная команда матчится и её СОБСТВЕННЫЙ последний прогон
+    # green (п.5 -- тишина по КОМАНДНОЙ оси), но трек в целом несёт
+    # более позднюю правку без перепрогона -- staleness срабатывает
+    # НЕЗАВИСИМО, ортогонально командному матчингу (VG-4 мотив: конкретная
+    # команда честно подтверждена, witness в целом всё равно устарел).
+    _write_track(tmp_path, "sess-1",
+                  runs=[_run_entry("2026-07-21T10:00:00.000000", "pytest tools/x.py -q", "green")],
+                  edits=[_edit_entry("2026-07-21T11:00:00.000000")])
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    line = _accepted_line(witness="pytest tools/x.py -q -> 5 passed")
+    events = we._collect_witness_events(_new_lines(line), [], payload)
+    assert events == [("warn_stale", 1, "2026-07-21T11:00:00.000000", "2026-07-21T10:00:00.000000")]
+
+
+def test_collect_witness_events_not_stale_green_after_last_edit(tmp_path):
+    # Зелёный прогон ПОЗЖЕ последней правки -- инвариант держится,
+    # никакого warn_stale (полная тишина по обеим осям).
+    _write_track(tmp_path, "sess-1",
+                  runs=[_run_entry("2026-07-21T11:00:00.000000", "pytest tools/x.py -q", "green")],
+                  edits=[_edit_entry("2026-07-21T10:00:00.000000")])
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    line = _accepted_line(witness="pytest tools/x.py -q -> 5 passed")
+    events = we._collect_witness_events(_new_lines(line), [], payload)
+    assert events == []
+
+
+def test_collect_witness_events_no_edits_in_track_no_staleness_check(tmp_path):
+    # Трек без единой правки (edits=[]) -- "если трек не несёт ts правок"
+    # -- сравнивать не с чем, staleness тихо пропускается (не warn, не
+    # note -- отдельная ось, командный матчинг работает как раньше).
+    _write_track(tmp_path, "sess-1",
+                  runs=[_run_entry("2026-07-21T10:00:00.000000", "pytest tools/x.py -q", "green")],
+                  edits=[])
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    line = _accepted_line(witness="pytest tools/x.py -q -> 5 passed")
+    events = we._collect_witness_events(_new_lines(line), [], payload)
+    assert events == []
+
+
+def test_collect_witness_events_track_missing_edits_key_no_staleness(tmp_path):
+    # Трек-файл битый по форме edits (не список) -- _load_witness_edits
+    # отдаёт None -- staleness тихо пропускается (fail-open), не роняет
+    # остальную сверку.
+    track_dir = tmp_path / ".claude" / "dod_track"
+    track_dir.mkdir(parents=True)
+    (track_dir / "sess-1.json").write_text(
+        json.dumps({"edits": "not a list",
+                    "runs": [_run_entry("2026-07-21T10:00:00.000000", "pytest tools/x.py -q", "green")]}),
+        encoding="utf-8")
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    line = _accepted_line(witness="pytest tools/x.py -q -> 5 passed")
+    events = we._collect_witness_events(_new_lines(line), [], payload)
+    assert events == []
+
+
+def test_collect_witness_events_retro_suppresses_staleness_too(tmp_path):
+    # DoD 5 расширен VG-4: retro в notes -> note, БЕЗ warn ЛЮБОГО вида
+    # -- ДАЖЕ если трек одновременно и командно противоречит (red), и
+    # устарел (правка после зелёного).
+    _write_track(tmp_path, "sess-1",
+                  runs=[_run_entry("2026-07-21T09:00:00.000000", "pytest tools/x.py -q", "green")],
+                  edits=[_edit_entry("2026-07-21T10:00:00.000000")])
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    line = _accepted_line(witness="pytest tools/x.py -q -> 5 passed",
+                           notes="retroactive acceptance, bounds fixed")
+    events = we._collect_witness_events(_new_lines(line), [], payload)
+    assert len(events) == 1
+    assert events[0][0] == "note"
+
+
+def test_collect_witness_events_track_empty_note_suppresses_staleness(tmp_path):
+    # Трек пуст (runs=[]) -- NOTE_TRACK_EMPTY -- staleness не
+    # вычисляется вовсе, ДАЖЕ если файл несёт edits (нечего сравнивать
+    # без runs).
+    _write_track(tmp_path, "sess-1", runs=[],
+                  edits=[_edit_entry("2026-07-21T10:00:00.000000")])
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    line = _accepted_line(witness="pytest tools/x.py -q -> 5 passed")
+    events = we._collect_witness_events(_new_lines(line), [], payload)
+    assert len(events) == 1
+    assert events[0][0] == "note"
+    assert events[0][2] == we.NOTE_TRACK_EMPTY
+
+
+# =======================================================================
+# _collect_witness_events -- live-scenario regression (VG-4 attempt 2,
+# критик-BLOCKER attempt 1): code-правка -> зелёный прогон -> ПОЗЖЕ
+# doc-only правка (журнал/.md) -- witness НЕ должен ложно состариваться
+# =======================================================================
+
+
+def test_collect_witness_events_journal_edit_after_green_no_false_stale(tmp_path):
+    # (а) DoD attempt 2: .py-правка -> зелёный прогон -> ПОЗЖЕ Edit
+    # logs/routing-log.jsonl (та же строка, что несёт САМ accepted --
+    # живой сценарий блокера) -- warn_stale НЕ выдаётся.
+    _write_track(tmp_path, "sess-1",
+                 runs=[_run_entry("2026-07-21T10:01:00.000000",
+                                    "pytest tools/x.py -q", "green")],
+                 edits=[
+                     _edit_entry("2026-07-21T10:00:00.000000", file_path="tools/x.py"),
+                     _edit_entry("2026-07-21T10:05:00.000000",
+                                 file_path="logs/routing-log.jsonl"),
+                 ])
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    line = _accepted_line(witness="pytest tools/x.py -q -> 5 passed")
+    events = we._collect_witness_events(_new_lines(line), [], payload)
+    assert events == []
+
+
+def test_collect_witness_events_md_edit_after_green_no_false_stale(tmp_path):
+    # (б) то же с .md-правкой вместо журнальной.
+    _write_track(tmp_path, "sess-1",
+                 runs=[_run_entry("2026-07-21T10:01:00.000000",
+                                    "pytest tools/x.py -q", "green")],
+                 edits=[
+                     _edit_entry("2026-07-21T10:00:00.000000", file_path="tools/x.py"),
+                     _edit_entry("2026-07-21T10:05:00.000000", file_path="docs/NOTES.md"),
+                 ])
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    line = _accepted_line(witness="pytest tools/x.py -q -> 5 passed")
+    events = we._collect_witness_events(_new_lines(line), [], payload)
+    assert events == []
+
+
+def test_collect_witness_events_py_edit_after_green_still_stale_boundary_control(tmp_path):
+    # (в) граница-контроль: .py-правка ПОСЛЕ зелёного (не doc-only) --
+    # детектор жив, warn_stale ВЫДАЁТСЯ.
+    _write_track(tmp_path, "sess-1",
+                 runs=[_run_entry("2026-07-21T10:01:00.000000",
+                                    "pytest tools/x.py -q", "green")],
+                 edits=[
+                     _edit_entry("2026-07-21T10:00:00.000000", file_path="logs/routing-log.jsonl"),
+                     _edit_entry("2026-07-21T10:10:00.000000", file_path="tools/x.py"),
+                 ])
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    line = _accepted_line(witness="pytest tools/x.py -q -> 5 passed")
+    events = we._collect_witness_events(_new_lines(line), [], payload)
+    assert events == [("warn_stale", 1, "2026-07-21T10:10:00.000000", "2026-07-21T10:01:00.000000")]
+
+
+def test_collect_witness_events_missing_file_path_edit_after_green_still_stale(tmp_path):
+    # (г) правка без file_path ПОСЛЕ зелёного -- консервативный дефолт,
+    # НЕ doc-only -- warn_stale ВЫДАЁТСЯ.
+    _write_track(tmp_path, "sess-1",
+                 runs=[_run_entry("2026-07-21T10:01:00.000000",
+                                    "pytest tools/x.py -q", "green")],
+                 edits=[_edit_entry("2026-07-21T10:10:00.000000", file_path=None)])
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    line = _accepted_line(witness="pytest tools/x.py -q -> 5 passed")
+    events = we._collect_witness_events(_new_lines(line), [], payload)
+    assert events == [("warn_stale", 1, "2026-07-21T10:10:00.000000", "2026-07-21T10:01:00.000000")]
+
+
 # =======================================================================
 # performance -- DoD 11 (10K+ witness, сотни runs, без квадратичного взрыва)
 # =======================================================================
@@ -777,6 +1295,60 @@ def test_build_witness_segment_ascii_only_false_keeps_command_readable():
     ev = ("warn_loud", 2, "команда с кириллицей", "2026-07-21T10:00:00.000000")
     seg = we.build_witness_segment([ev], ascii_only=False)
     assert "команда с кириллицей" in seg
+
+
+# =======================================================================
+# build_witness_segment / _format_witness_line -- "warn_stale" (VG-4)
+# =======================================================================
+
+
+def test_build_witness_segment_stale_exact_format_with_last_green():
+    ev = ("warn_stale", 4, "2026-07-21T11:00:00.000000", "2026-07-21T10:00:00.000000")
+    seg = we.build_witness_segment([ev])
+    assert seg == (
+        "WITNESS ECHO: line 4 track staleness - last code edit at "
+        "2026-07-21T11:00:00.000000 is after the last green run "
+        "(last green: 2026-07-21T10:00:00.000000) - witness not confirmed "
+        "by a green run after the last edit")
+
+
+def test_build_witness_segment_stale_no_green_run_shows_none_literal():
+    ev = ("warn_stale", 4, "2026-07-21T11:00:00.000000", None)
+    seg = we.build_witness_segment([ev])
+    assert "last green: none" in seg
+
+
+def test_build_witness_segment_stale_sanitizes_control_chars_in_ts():
+    ev = ("warn_stale", 4, "2026-07-21T11:00:00\x00\x1f.000000", "2026-07-21T10:00:00.000000")
+    seg = we.build_witness_segment([ev])
+    assert "\x00" not in seg
+    assert "\x1f" not in seg
+
+
+def test_build_witness_segment_stale_ascii_only_replaces_non_ascii_ts():
+    ev = ("warn_stale", 4, "клод-2026-07-21T11:00:00", "2026-07-21T10:00:00.000000")
+    seg = we.build_witness_segment([ev], ascii_only=True)
+    assert "клод" not in seg
+    assert "?" in seg
+
+
+def test_build_witness_segment_stale_and_soft_mixed_five_boundary():
+    # Потолок общий на все виды -- 3 warn_soft + 2 warn_stale = 5, тишина
+    # по "more" (граница правила 6а -- ровно MAX_WITNESS_LINES событий
+    # суммарно, независимо от их вида).
+    events = ([("warn_soft", i) for i in range(1, 4)] +
+              [("warn_stale", i, f"2026-07-21T1{i}:00:00.000000", None) for i in range(4, 6)])
+    seg = we.build_witness_segment(events)
+    assert seg.count("WITNESS ECHO") == 5
+    assert "more" not in seg
+
+
+def test_build_witness_segment_stale_and_soft_mixed_six_adds_one_more():
+    events = ([("warn_soft", i) for i in range(1, 4)] +
+              [("warn_stale", i, f"2026-07-21T1{i}:00:00.000000", None) for i in range(4, 7)])
+    seg = we.build_witness_segment(events)
+    assert seg.count("WITNESS ECHO") == 5
+    assert seg.endswith("; +1 more")
 
 
 # =======================================================================
@@ -992,3 +1564,189 @@ def test_e2e_existing_journal_echo_defect_and_witness_warn_together(tmp_path):
     assert "'category'" in ctx
     assert "WITNESS ECHO" in ctx
     assert "; WITNESS ECHO" in ctx
+
+
+# =======================================================================
+# main() end-to-end -- staleness axis (VG-4, требуемое усиление (в))
+# =======================================================================
+
+
+def test_e2e_stale_edit_after_last_green_loud(tmp_path):
+    journal_path = _seed_committed_journal(tmp_path)
+    _write_track(tmp_path, "sess-1",
+                 runs=[_run_entry("2026-07-10T08:00:00.000000",
+                                    "python -m pytest tools/ gateway/ -q", "green")],
+                 edits=[_edit_entry("2026-07-10T08:04:00.000000")])
+    new_line = _accepted_line(witness="python -m pytest tools/ gateway/ -q -> 930 passed")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
+    assert result.returncode == 0
+    hook_output = _parse_stdout_json(result.stdout)
+    ctx = hook_output["additionalContext"]
+    assert "WITNESS ECHO" in ctx
+    assert "track staleness" in ctx
+    assert "2026-07-10T08:04:00.000000" in ctx  # last edit ts
+    assert ctx in result.stderr
+
+
+def test_e2e_not_stale_green_after_last_edit_silent(tmp_path):
+    journal_path = _seed_committed_journal(tmp_path)
+    _write_track(tmp_path, "sess-1",
+                 runs=[_run_entry("2026-07-10T08:06:00.000000",
+                                    "python -m pytest tools/ gateway/ -q", "green")],
+                 edits=[_edit_entry("2026-07-10T08:04:00.000000")])
+    new_line = _accepted_line(ts=_fresh_ts(),
+                               witness="python -m pytest tools/ gateway/ -q -> 930 passed")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_e2e_retro_suppresses_staleness_warn(tmp_path):
+    journal_path = _seed_committed_journal(tmp_path)
+    _write_track(tmp_path, "sess-1",
+                 runs=[_run_entry("2026-07-10T08:00:00.000000",
+                                    "python -m pytest tools/ gateway/ -q", "green")],
+                 edits=[_edit_entry("2026-07-10T08:04:00.000000")])
+    new_line = _accepted_line(ts=_fresh_ts(),
+                               witness="python -m pytest tools/ gateway/ -q -> 930 passed",
+                               notes="retroactive fix of missed accepted event")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_e2e_staleness_payload_scoped_not_reechoed_on_later_unrelated_call(tmp_path):
+    # Ось 10 (docs/SIBLING_MAP.md, D-0069): warn_stale, сообщённый на
+    # вызове #1, НЕ должен переоцениваться заново на ПОЗДНЕЙШЕМ,
+    # несвязанном вызове #2, добавляющем другую чистую строку -- та же
+    # payload-scoped база (_resolve_echo_base), что уже покрыта для
+    # warn_loud (см. test_e2e_witness_payload_scoped_not_reechoed_on_later_unrelated_call
+    # выше) -- здесь тот же класс инварианта проверен для НОВОГО вида
+    # события этой задачи.
+    journal_path = _seed_committed_journal(tmp_path)
+    _write_track(tmp_path, "sess-1",
+                 runs=[_run_entry("2026-07-10T08:00:00.000000",
+                                    "python -m pytest tools/ gateway/ -q", "green")],
+                 edits=[_edit_entry("2026-07-10T08:04:00.000000")])
+    stale_line = _accepted_line(ts=_fresh_ts(),
+                                 witness="python -m pytest tools/ gateway/ -q -> 930 passed",
+                                 notes="call #1: stale witness")
+    after_call_1 = HEAD_TEXT + stale_line + "\n"
+    journal_path.write_text(after_call_1, encoding="utf-8")
+    result1 = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path, original_file=HEAD_TEXT))
+    assert result1.returncode == 0
+    ctx1 = _parse_stdout_json(result1.stdout)["additionalContext"]
+    assert "track staleness" in ctx1
+
+    clean_line = _delegated_line(ts=_fresh_ts(), task_id="t-002",
+                                  notes="call #2: unrelated clean line")
+    journal_path.write_text(after_call_1 + clean_line + "\n", encoding="utf-8")
+    result2 = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path,
+                                                original_file=after_call_1))
+    assert result2.returncode == 0
+    assert result2.stdout == ""
+    assert result2.stderr == ""
+
+
+def test_e2e_live_scenario_journal_write_itself_not_false_stale(tmp_path):
+    # VG-4 attempt 2 -- прямой e2e-регресс живого сценария блокера
+    # (критик, диагноз координатора): .py-правка -> зелёный прогон ->
+    # ПОЗЖЕ Edit самого logs/routing-log.jsonl (ИМЕННО ТОТ Edit-вызов,
+    # что дописывает эту accepted-строку -- живой хук пишет trek-запись
+    # ДО или наравне с тем же вызовом, здесь смоделирован явной
+    # doc-only-записью с более поздним ts, тот же практический эффект,
+    # что вызвал 6/6 ложных срабатываний). Ожидание: main() полностью
+    # тих (returncode 0, пустые stdout/stderr) -- НЕ "track staleness".
+    journal_path = _seed_committed_journal(tmp_path)
+    _write_track(tmp_path, "sess-1",
+                 runs=[_run_entry("2026-07-10T08:01:00.000000",
+                                    "python -m pytest tools/ gateway/ -q", "green")],
+                 edits=[
+                     _edit_entry("2026-07-10T08:00:00.000000", file_path="tools/journal_echo.py"),
+                     _edit_entry("2026-07-10T08:04:00.000000", file_path="logs/routing-log.jsonl"),
+                 ])
+    new_line = _accepted_line(ts=_fresh_ts(),
+                               witness="python -m pytest tools/ gateway/ -q -> 930 passed")
+    journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
+    result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+# =======================================================================
+# adversarial battery -- VG-4 DoD 3 (fail-open, existing behaviour intact)
+# =======================================================================
+
+
+def test_collect_witness_events_witness_not_a_string_skipped(tmp_path):
+    _write_track(tmp_path, "sess-1", [
+        _run_entry("2026-07-21T10:00:00.000000", "pytest tools/x.py -q", "red"),
+    ])
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    for bad_witness in (123, True, ["pytest", "tools/x.py"], {"cmd": "pytest"}, 3.14, None):
+        obj = json.loads(_accepted_line())
+        obj["witness"] = bad_witness
+        events = we._collect_witness_events(_new_lines(json.dumps(obj)), [], payload)
+        assert events == [], f"unexpected events for witness={bad_witness!r}"
+
+
+def test_collect_witness_events_witness_100kb_no_quadratic_blowup(tmp_path):
+    # DoD 3: witness 100 КБ -- существующая производительность/сборка не
+    # ломается (расширяет DoD 11 узла N2, который тестировал 10К -- это
+    # тест ИМЕННО заявленной в спеке VG-4 границы 100 КБ).
+    _write_track(tmp_path, "sess-1",
+                 runs=[_run_entry(f"2026-07-21T10:{i % 60:02d}:00.000000",
+                                    f"pytest tools/test_module_{i}.py -q", "green")
+                       for i in range(200)],
+                 edits=[_edit_entry("2026-07-21T09:00:00.000000")])
+    filler = "x" * 50_000
+    witness = f"{filler} manual review only, no command referenced {filler}"
+    assert len(witness) > 100_000
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    line = _accepted_line(witness=witness)
+    start = time.perf_counter()
+    events = we._collect_witness_events(_new_lines(line), [], payload)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 2.0
+    kinds = {e[0] for e in events}
+    assert "warn_soft" in kinds  # ни одна из 200 команд не встречается
+
+
+def test_collect_witness_events_unicode_emoji_in_track_command_survives(tmp_path):
+    # DoD 3: юникод/эмодзи в КОМАНДЕ трека -- не роняет сборку/сравнение,
+    # доходит до вывода читаемым (raw-канал) и безопасно заменённым
+    # (ascii-канал).
+    emoji_cmd = "pytest tools/x.py -q  # 🚀 релиз-прогон"
+    normalized_cmd = we._normalize_ws(emoji_cmd)  # matched cmd is the GROUPED (normalized) key
+    _write_track(tmp_path, "sess-1", [
+        _run_entry("2026-07-21T10:00:00.000000", emoji_cmd, "red"),
+    ])
+    payload = {"session_id": "sess-1", "cwd": str(tmp_path)}
+    line = _accepted_line(witness=emoji_cmd + " -> 1 failed")
+    events = we._collect_witness_events(_new_lines(line), [], payload)
+    assert len(events) == 1
+    kind, line_no, cmd, ts = events[0]
+    assert kind == "warn_loud"
+    assert cmd == normalized_cmd
+    raw_seg = we.build_witness_segment(events, ascii_only=False)
+    assert "🚀" in raw_seg
+    ascii_seg = we.build_witness_segment(events, ascii_only=True)
+    assert "🚀" not in ascii_seg
+    assert "?" in ascii_seg
+
+
+def test_detect_staleness_unicode_ts_does_not_raise():
+    # DoD 3: юникод/эмодзи в ПОЛЕ ts стороннего (адверсариального) трека
+    # -- строковый max() работает на любых строках, не роняет вычисление;
+    # sanitize на выводе (см. test_build_witness_segment_stale_*) уже
+    # проверяет безопасность отображения.
+    edits = [_edit_entry("🚀-not-a-real-ts")]
+    runs = [_run_entry("2026-07-21T10:00:00.000000", "pytest -q", "green")]
+    result = we._detect_staleness(runs, edits)  # must not raise
+    assert result is not None  # "🚀..." > ISO-строка лексикографически -> "stale"

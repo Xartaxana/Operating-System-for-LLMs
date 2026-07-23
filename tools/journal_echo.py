@@ -204,6 +204,89 @@ MAX_WITNESS_LINES = 5
 NOTE_RETRO = "retro accepted - track incomparable"
 NOTE_TRACK_EMPTY = "track empty/unreadable - witness incomparable"
 
+# --- WITNESS ECHO STALENESS (VG-4, this task) ---------------------------
+# Мотив задачи VG-4: witness-текст ("<команда> -> <результат>") -- слово
+# исполнителя, форма проверяется (journal_validator), подлинность --
+# ДО этой задачи только частично (см. _match_witness/_collect_witness_events
+# выше, узел N2): совпадение конкретной заявленной команды с треком и
+# исход её ПОСЛЕДНЕГО прогона (red/green). Пробел, который эта задача
+# закрывает: witness может честно ссылаться на КОМАНДУ, чей ПОСЛЕДНИЙ
+# прогон был зелёным, -- и всё же быть УСТАРЕВШИМ, если после этого
+# зелёного прогона код (любой файл, не обязательно тот, что покрывает
+# именно эта команда) ПРАВИЛСЯ ЗАНОВО, а перепрогона не было. Это ТОТ ЖЕ
+# инвариант, что уже enforce'ит tools/dod_gate.py на SubagentStop
+# ("последняя правка РАНЬШЕ последнего зелёного прогона" -- см. его
+# evaluate()) -- здесь он СВЕРЯЕТСЯ ЗАНОВО, в другой момент (запись
+# accepted-строки в журнал, не остановка субагента) и по всему треку
+# сессии (edits/runs ЛЮБОГО agent_id -- тот же принцип, что
+# _group_runs_by_normalized_command уже применяет для командного
+# матчинга: "прогон builder-субагента лежит в том же <session_id>.json").
+#
+# СОЗНАТЕЛЬНО НЕ ПОРТИРУЕТСЯ из dod_gate.py: per-agent-фильтрация,
+# предохранитель consecutive_blocks -- это ПОЛИТИКА блокировки сдачи
+# (зона dod_gate.py, NON-GOALS этой задачи явно запрещают его
+# трогать/импортировать).
+#
+# КРИТИК-ФИКС (attempt 2, BLOCKER attempt 1): doc-only-исключение
+# ПОРТИРУЕТСЯ (зеркалом, не импортом -- см. DOC_ONLY_EXTENSIONS/
+# DOC_ONLY_DOTFILES/_is_doc_only_edit_path ниже, тот же список, что
+# tools/dod_gate.py.DOC_ONLY_EXTENSIONS/DOC_ONLY_DOTFILES/
+# _is_doc_only_file -- "не изобретай свой", буквально координатор).
+# Attempt 1 сознательно ЕГО НЕ портировал ("шум редкий, на doc-only
+# правке") -- опровергнуто измерением на живом треке Lead-сессии:
+# tools/dod_track.py.build_fact пишет в "edits" ЛЮБУЮ правку внутри
+# cwd (единственное исключение -- scratchpad, вне cwd), включая правку
+# САМОГО logs/routing-log.jsonl этим же PostToolUse-вызовом (Edit-тул,
+# пишущий accepted-строку, сам порождает edit-запись трека с ts ПОЗЖЕ
+# последнего зелёного прогона) -- БЕЗ doc-only-фильтра КАЖДАЯ батчевая
+# запись accepted-строки ложно "состаривала" сама себя (6/6 на живом
+# треке). .jsonl уже входит в DOC_ONLY_EXTENSIONS дод_gate -- один этот
+# фильтр закрывает и общий класс (.md/.json/.jsonl без прогона), и
+# частный случай правки самого журнала (routing-log.jsonl -- .jsonl),
+# отдельного "журнального" критерия сверх doc-only не требуется (было
+# бы дублированием того же списка расширений).
+#
+# ДАННЫЕ ЕСТЬ (не гипотеза, эмпирика докстринга tools/dod_track.py):
+# трек НЕСЁТ ts правок -- каждая запись "edits" несёт "ts" (ISO с
+# микросекундами, dod_track._now_iso, тот же формат/конвенция, что
+# "runs"."ts", на которую уже опирается _last_by_ts выше) -- вопрос
+# спеки VG-4 "если трек несёт ts правок" разрешён утвердительно, не
+# требует отдельного уточнения у координатора. staleness -- ВСЕГДА
+# видимый warn (kind "warn_stale"), не тихая "note"-ветка (в отличие от
+# NOTE_RETRO/NOTE_TRACK_EMPTY выше): это не "сравнивать нечем", а
+# "сравнили и НЕ сошлось" -- тот же класс сигнала, что warn_loud/warn_soft.
+
+# Зеркало tools/dod_gate.py.DOC_ONLY_EXTENSIONS/DOC_ONLY_DOTFILES (attempt 2
+# критик-фикс -- см. блок выше за полный разбор находки): ТОТ ЖЕ список,
+# ЛОКАЛЬНАЯ копия (не импорт -- dod_gate.py вне owns этой задачи, та же
+# самодостаточность хуков кита, что уже объясняет докстринг модуля для
+# _raw_sanitize/_ascii_sanitize/_witness_track_path). Расхождение списка
+# между этим файлом и dod_gate.py -- НОВЫЙ класс дефекта пары (R9,
+# критик-формулировка буквально) -- при правке ЛЮБОГО из двух списков
+# править ОБА тем же коммитом.
+DOC_ONLY_EXTENSIONS = {".md", ".json", ".jsonl"}
+DOC_ONLY_DOTFILES = {".gitignore", ".gitattributes", ".editorconfig"}
+
+
+def _is_doc_only_edit_path(file_path) -> bool:
+    """Зеркало tools/dod_gate.py._is_doc_only_file -- ТА ЖЕ логика,
+    буквально скопированная (не переизобретённая): неизвестный/пустой/
+    не-строковый file_path -> False (консервативно НЕ doc-only --
+    отсутствие информации не даёт права на исключение из "правки кода",
+    тот же fail-safe принцип, что dod_gate/dod_track уже применяют для
+    doc-only/scratchpad-исключений); dotfile из DOC_ONLY_DOTFILES ->
+    True; иначе -- расширение (case-insensitive) в DOC_ONLY_EXTENSIONS.
+    .jsonl входит в этот список -- ПОКРЫВАЕТ И logs/routing-log.jsonl
+    (сам механизм этой находки), и любой другой .jsonl где угодно в
+    репо -- без отдельного, более узкого "журнального" критерия (см.
+    блок выше за то, почему отдельный критерий избыточен)."""
+    if not isinstance(file_path, str) or not file_path:
+        return False
+    path = Path(file_path)
+    if path.name.lower() in DOC_ONLY_DOTFILES:
+        return True
+    return path.suffix.lower() in DOC_ONLY_EXTENSIONS
+
 
 # --- TS DRIFT ECHO при записи (расширение этой задачи, слово оператора
 # 2026-07-22 «делай сразу с защитой в journal_echo») ---------------------
@@ -750,6 +833,122 @@ def _load_witness_runs(cwd, session_id):
         return None
 
 
+def _load_witness_edits(cwd, session_id):
+    """Читает edits-список трека текущей сессии (VG-4) -- СТРУКТУРНО
+    зеркалит _load_witness_runs выше (свой независимый разбор диска, не
+    общая внутренняя функция с ней): та же самодостаточность-предпочтение,
+    что docstring модуля уже объясняет для локальных копий
+    _raw_sanitize/_ascii_sanitize -- каждый читатель трека в этом файле
+    самостоятелен по чтению, единственное общее -- путь формулы
+    (_witness_track_path). Возвращает list (может быть ПУСТЫМ) при
+    успешном чтении; None на ЛЮБОЙ отказ (session_id некорректен, файла
+    нет/пуст/битый JSON/не dict, "edits" отсутствует/не список) -- тот же
+    полный список отказов, что _load_witness_runs. Вызывающий код
+    (_detect_staleness) трактует и None, и [] одинаково -- "правок в
+    треке нет, сравнивать не с чем" (см. её докстринг)."""
+    if not isinstance(session_id, str) or not session_id:
+        return None
+    path = _witness_track_path(cwd, session_id)
+    try:
+        if not path.exists():
+            return None
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if not text.strip():
+            return None
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            return None
+        edits = data.get("edits")
+        if not isinstance(edits, list):
+            return None
+        return edits
+    except Exception:
+        return None
+
+
+def _last_edit_ts(edits: list):
+    """Максимальный ts среди edits-записей трека, СЧИТАЮЩИХСЯ "правкой
+    кода" (VG-4) -- та же лексикографика-== хронология конвенция, что
+    _last_by_ts уже применяет к runs (dod_track._now_iso -- фиксированная
+    ширина ISO с микросекундами, см.
+    test_dod_track_now_iso_matches_fixed_width_format в
+    tools/test_witness_echo.py).
+
+    КРИТИК-ФИКС (attempt 2, BLOCKER attempt 1 -- см. докстринг секции
+    "WITNESS ECHO STALENESS" выше за полный разбор находки): записи,
+    чей file_path -- doc-only (_is_doc_only_edit_path -- зеркало
+    tools/dod_gate.py._is_doc_only_file, тот же список расширений),
+    ИСКЛЮЧАЮТСЯ из максимума -- ИМЕННО ЗДЕСЬ подключён фильтр,
+    определённый выше, но attempt 2 (убит рестартом среды) оставил
+    неподключённым: без него КАЖДАЯ правка logs/routing-log.jsonl
+    (.jsonl -- doc-only) сама себя делала "последней правкой кода",
+    ложно состаривая witness ЭТОЙ ЖЕ accepted-строки (6/6 на живом
+    треке Lead-сессии, диагноз координатора). Запись БЕЗ file_path
+    (None/не строка -- старый трек до t-159, либо payload без поля) --
+    КОНСЕРВАТИВНО НЕ doc-only (_is_doc_only_edit_path(None) == False,
+    см. её докстринг) -- УЧИТЫВАЕТСЯ как правка кода, отсутствие
+    информации не даёт права на исключение (тот же fail-safe принцип,
+    что весь остальной файл).
+
+    Записи без строкового "ts" (битая запись стороннего трека) тоже
+    пропускаются -- защитный дефолт, не роняет вычисление максимума по
+    остальным. Не dict-элементы тоже пропускаются. Пустой/весь-doc-only/
+    весь-битый edits -> None (нечего сравнивать, см. _detect_staleness)."""
+    values = [e.get("ts") for e in edits
+              if isinstance(e, dict) and isinstance(e.get("ts"), str)
+              and not _is_doc_only_edit_path(e.get("file_path"))]
+    return max(values) if values else None
+
+
+def _last_green_ts(runs: list):
+    """Максимальный ts среди runs-записей трека с outcome=="green" (VG-4)
+    -- та же защита от битых записей, что _last_edit_ts выше. Нет ни
+    одного зелёного прогона (только red, либо runs вовсе пуст) -> None."""
+    values = [r.get("ts") for r in runs
+              if isinstance(r, dict) and r.get("outcome") == "green"
+              and isinstance(r.get("ts"), str)]
+    return max(values) if values else None
+
+
+def _detect_staleness(runs: list, edits: list):
+    """VG-4, требуемое усиление (в): "последний зелёный прогон трека
+    датирован ПОЗЖЕ последней правки кода в треке" -- ТОТ ЖЕ инвариант,
+    что tools/dod_gate.py.evaluate() уже enforce'ит на SubagentStop (см.
+    докстринг секции "WITNESS ECHO STALENESS" выше за полное сравнение и
+    сознательно НЕ портированные из dod_gate куски -- per-agent-фильтр,
+    doc-only-исключение, предохранитель).
+
+    Возвращает None (тихо -- инвариант держится ИЛИ нечего сравнивать)
+    | (last_edit_ts, last_green_ts_or_None) (нарушен -- warn_stale, см.
+    _collect_witness_events).
+
+    Нет ни одной правки в треке (last_edit_ts is None -- edits пуст/весь
+    битый/None) -> None БЕЗ дальнейшей проверки -- сравнивать буквально
+    не с чем (тот же принцип "нет данных -- нет вердикта", что весь
+    остальной файл; см. docstring "ДАННЫЕ ЕСТЬ" выше за то, почему это
+    НЕ ветка "трек не несёт ts правок" спеки VG-4 -- та ветка про
+    структурное отсутствие поля в треке ВООБЩЕ, не про пустой список
+    правок конкретной сессии).
+
+    Есть хотя бы одна правка: нарушение, если ЛИБО зелёных прогонов в
+    треке нет вовсе (last_green_ts is None), ЛИБО последняя правка
+    строго позже последнего зелёного (last_edit_ts > last_green_ts,
+    строковое сравнение -- лексикографика ISO-с-микросекундами, тот же
+    приём, что _last_by_ts). Правка РОВНО в тот же ts, что зелёный
+    прогон (граница, на практике недостижимо -- микросекундное
+    разрешение делает коллизию исчезающе маловероятной, но формула
+    строгого ">" тиха на равенстве, симметрично _detect_ts_drift выше в
+    этом файле) НЕ нарушение -- зелёный прогон не считается устаревшим
+    относительно правки, случившейся не позже него."""
+    last_edit_ts = _last_edit_ts(edits)
+    if last_edit_ts is None:
+        return None
+    last_green_ts = _last_green_ts(runs)
+    if last_green_ts is None or last_edit_ts > last_green_ts:
+        return (last_edit_ts, last_green_ts)
+    return None
+
+
 def _group_runs_by_normalized_command(runs: list) -> dict:
     """{normalized_command: [(ts, outcome), ...]} по ВСЕМ прогонам трека,
     ЛЮБОГО agent_id (спека: "Поиск по ВСЕМ agent_id -- прогон
@@ -836,6 +1035,16 @@ def _collect_witness_events(new_lines: list, head_lines: list, payload: dict) ->
       5. иначе (совпало, последний прогон green) -> ничего не
          добавляется -- полная тишина по строке (тот же принцип, что
          TIER ECHO "все measured несут слово -- тишина").
+      6. (VG-4, НОВОЕ, независимая ось поверх 1-5, см. _detect_staleness):
+         трек непуст (п.2 не сработал) И несёт хотя бы одну правку И
+         (зелёных прогонов нет вовсе ИЛИ последняя правка ПОЗЖЕ
+         последнего зелёного) -> ДОПОЛНИТЕЛЬНО ("warn_stale", line_no,
+         last_edit_ts, last_green_ts_or_None) -- ортогонально п.3/4:
+         КОНКРЕТНАЯ заявленная в witness команда может честно совпасть с
+         её же собственным последним зелёным прогоном (п.5, тишина по
+         ЭТОЙ оси) и ОДНОВРЕМЕННО трек в целом нести более позднюю
+         правку без последующего перепрогона -- обе оси печатаются
+         НЕЗАВИСИМО для одной строки, если обе сработали.
 
     "note"-события НИКОГДА не печатаются (см. build_witness_segment) --
     возвращаются наравне с warn-событиями исключительно для тестируемости
@@ -849,12 +1058,21 @@ def _collect_witness_events(new_lines: list, head_lines: list, payload: dict) ->
     Трек читается ЛЕНИВО и НЕ БОЛЕЕ ОДНОГО РАЗА за вызов хука (session_id
     общий для всех строк одного PostToolUse-события) -- та же "прочитан
     один раз" производительность, что докстринг модуля декларирует для
-    disk_text/git в main()."""
+    disk_text/git в main(); VG-4 добавляет ВТОРОЙ, НЕЗАВИСИМЫЙ ленивый
+    кэш той же формы для edits (_load_witness_edits) -- свой собственный
+    флаг/кэш, тот же принцип "один раз за вызов хука", отдельный от
+    runs_cache (одно чтение диска на runs, одно на edits -- см.
+    докстринг _load_witness_edits за то, почему это НЕ общая с
+    _load_witness_runs внутренняя функция: сохраняет тестовый контракт
+    test_collect_witness_events_track_read_once_per_call, завязанный
+    именно на monkeypatch _load_witness_runs)."""
     events = []
     session_id = payload.get("session_id") if isinstance(payload, dict) else None
     cwd = payload.get("cwd") if isinstance(payload, dict) else None
     runs_loaded = False
     runs_cache = None
+    edits_loaded = False
+    edits_cache = None
     for idx, line in enumerate(new_lines):
         line_no = len(head_lines) + idx + 1
         try:
@@ -880,6 +1098,16 @@ def _collect_witness_events(new_lines: list, head_lines: list, payload: dict) ->
             if not runs_cache:
                 events.append(("note", line_no, NOTE_TRACK_EMPTY))
                 continue
+
+            # VG-4 (п.6 выше): независимая staleness-ось -- вычисляется
+            # ПАРАЛЛЕЛЬНО командному матчингу ниже, не вместо него.
+            if not edits_loaded:
+                edits_cache = _load_witness_edits(cwd, session_id)
+                edits_loaded = True
+            staleness = _detect_staleness(runs_cache, edits_cache or [])
+            if staleness is not None:
+                last_edit_ts, last_green_ts = staleness
+                events.append(("warn_stale", line_no, last_edit_ts, last_green_ts))
 
             matched_any, loud = _match_witness(witness, runs_cache)
             if not matched_any:
@@ -909,7 +1137,14 @@ def _format_witness_line(event: tuple, ascii_only: bool) -> str:
     dod_track._now_iso всегда чистый ASCII без control-chars (см.
     tools/test_witness_echo.py за формат-тест) -- sanitize здесь no-op
     в штатном случае, но закрывает адверсариальный край (битый/
-    сторонний трек с control-chars или гигантским значением в поле ts)."""
+    сторонний трек с control-chars или гигантским значением в поле ts).
+
+    "warn_stale" (VG-4, НОВОЕ): ts из трека (last_edit_ts, и, если есть,
+    last_green_ts) -- ТА ЖЕ динамика стороннего JSON, тот же sanitize по
+    каналу, что cmd/ts у warn_loud выше. last_green_ts может быть None
+    (нет ни одного зелёного прогона в треке вовсе -- см. _detect_staleness)
+    -- отображается литералом "none" (не через sanitize -- статический
+    ASCII-литерал, не значение из трека)."""
     sanitize = _ascii_sanitize if ascii_only else _raw_sanitize
     kind = event[0]
     line_no = event[1]
@@ -917,6 +1152,12 @@ def _format_witness_line(event: tuple, ascii_only: bool) -> str:
         _, _, cmd, ts = event
         return (f"WITNESS ECHO: line {line_no} contradiction - command "
                 f"'{sanitize(cmd)}' recorded RED in session track (last red at {sanitize(str(ts))})")
+    if kind == "warn_stale":
+        _, _, last_edit_ts, last_green_ts = event
+        green_part = sanitize(str(last_green_ts)) if last_green_ts is not None else "none"
+        return (f"WITNESS ECHO: line {line_no} track staleness - last code edit at "
+                f"{sanitize(str(last_edit_ts))} is after the last green run (last green: "
+                f"{green_part}) - witness not confirmed by a green run after the last edit")
     # warn_soft
     return (f"WITNESS ECHO: line {line_no} witness command(s) not observed in "
             "session track (batch/cross-session/retro acceptance legitimate - verify manually)")
@@ -924,13 +1165,19 @@ def _format_witness_line(event: tuple, ascii_only: bool) -> str:
 
 def build_witness_segment(witness_events: list, ascii_only: bool = False) -> str:
     """Собирает WITNESS ECHO-часть additionalContext -- ТОЛЬКО из
-    "warn_loud"/"warn_soft" событий ("note" -- тихие по определению,
+    "warn_loud"/"warn_soft"/"warn_stale" событий (VG-4 добавляет
+    "warn_stale" к видимым видам; "note" -- тихие по определению,
     НИКОГДА не печатаются, см. _collect_witness_events); потолок
     MAX_WITNESS_LINES=5 (правило 6а -- граничные тесты на 5/6), тот же
-    "+K more"-паттерн, что build_tier_segment. Пустой список видимых
+    "+K more"-паттерн, что build_tier_segment -- ОБЩИЙ потолок на ВСЕ
+    видимые виды вместе (не отдельный per-kind лимит: одна и та же строка
+    журнала уже может дать несколько events разных видов, см.
+    _collect_witness_events п.6, и это НЕ новый лимит этой задачи --
+    MAX_WITNESS_LINES существовал ДО VG-4, здесь только расширен
+    список видов, которые он считает). Пустой список видимых
     событий -> "" (вызывающий код трактует пустую строку как отсутствие
     сегмента, тот же принцип, что build_tier_segment)."""
-    warn_events = [e for e in witness_events if e[0] in ("warn_loud", "warn_soft")]
+    warn_events = [e for e in witness_events if e[0] in ("warn_loud", "warn_soft", "warn_stale")]
     if not warn_events:
         return ""
     head = warn_events[:MAX_WITNESS_LINES]
