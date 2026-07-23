@@ -119,9 +119,11 @@ existing tool, never a build (D-0030).
 - **REMAINING TO CLOSE the workstream (and with it Phase 2):**
   leaf-routing exploitation mode is ACTIVE since 2026-07-22
   (operator word; CURRENT_CONTEXT carries the mode) — the first
-  LIVE window of `basis: "judge"` acceptances accrues naturally;
-  calibration #4 (~07-25) audits it via check 30 (leaf-class purity,
-  judge-hallucination spot-checks, Rule #1 economics); on a clean
+  LIVE window of `basis: "judge"` acceptances accrued (07-22);
+  calibration #4 RAN 2026-07-23 (early, operator word) and check 30
+  came back CLEAN: 8/8 judge-basis acceptances leaf-class, no judge
+  hallucinations found (2 judge-form cases recorded), economics in
+  Rule #1's favor — see the `calibrated` 07-23 notes; on this
   audit the closure block lands here with the Architect's signature,
   and the closing commit moves the Phase 2 narrative to the archive
   home per D-0078. CLOSING-COMMIT DUTY (operator word 2026-07-22,
