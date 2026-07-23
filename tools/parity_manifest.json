@@ -1,0 +1,386 @@
+[
+  {
+    "hq": "tools/calibration_counts.py",
+    "kit": "toolkit/tools/calibration_counts.py",
+    "synced_hq_sha256": "2fe2aedc6a939638d22b0dec1c857d19f47f49286fa74ea7d2d04761035e1dc7",
+    "synced_kit_sha256": "74fac402077ef61aa1781422b8a6dd67f0c197009707b31fe15b7d2de71f1167",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/critic_snapshot.py",
+    "kit": "toolkit/tools/critic_snapshot.py",
+    "synced_hq_sha256": "b31e71b706fb2eadb3a56a83617891de2f872cc036051188072817fd4e3b2f96",
+    "synced_kit_sha256": "7a088952fa163787fd37e684aee037cb86602d47faa93c4b0a9600021c2e5655",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/critic_verdict_check.py",
+    "kit": "toolkit/tools/critic_verdict_check.py",
+    "synced_hq_sha256": "cee9fa2d93c274788b25f1378e0d9f6b9f72d01c0fa15d5c65fea010e07dd21b",
+    "synced_kit_sha256": "526aa3ff926ce848b4c8042190e1154bfe9d470ba5c37d1bc5104de10b4bb0cb",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/dispatch_gate.py",
+    "kit": "toolkit/tools/dispatch_gate.py",
+    "synced_hq_sha256": "4cfad0321d7169e7e25e8976e7f4cf637f09685c4a036c8562d62e29fd80a303",
+    "synced_kit_sha256": "6a6914b2178e4ba9da983c8660af095420e50a31120f07933a3ea7be07a25184",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/dod_gate.py",
+    "kit": "toolkit/tools/dod_gate.py",
+    "synced_hq_sha256": "08a06408770bb75a4a98d3dd9f95a63f0312f33382b4b4578510c0163ebc7ac8",
+    "synced_kit_sha256": "32214e649df31863273b6324a0f5852f65955527761e1f91df95e5715097c148",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/dod_track.py",
+    "kit": "toolkit/tools/dod_track.py",
+    "synced_hq_sha256": "f460b292800d7e9ec26faed2b2234077b901c087300f139e4a99c3ff3daff60b",
+    "synced_kit_sha256": "0b654b9a03000fdd345a098e4104dbe671b797ecca4332f5ed156f1f220e8a48",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/escape_check.py",
+    "kit": "toolkit/tools/escape_check.py",
+    "synced_hq_sha256": "90f730d3076008a99be59af0d543cd3be756bbaad38e81f56f77f542803a15c8",
+    "synced_kit_sha256": "c18be1c6c560c3bb047fbafd70867edbb33762a0baada531197898369955ff46",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/hygiene_gate.py",
+    "kit": "toolkit/tools/hygiene_gate.py",
+    "synced_hq_sha256": "d41a365f77a5675ad832dbf7e8a28cc9c9d7177c552e9758e948817cb98860f8",
+    "synced_kit_sha256": "73ff320105770fd9c0ece404dc82877ea8394dbee095aebda811f6ed50c6f6fe",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/journal_echo.py",
+    "kit": "toolkit/tools/journal_echo.py",
+    "synced_hq_sha256": "49bae4281741a99eb2a471ea10aebcc7a1347463a460c0d350f2f466dc9c8117",
+    "synced_kit_sha256": "6d28b543cd5d620cc9709f952652642c8099b61de0a951939185d20797ad1e0f",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/journal_validator.py",
+    "kit": "toolkit/tools/journal_validator.py",
+    "synced_hq_sha256": "aa5ca473fa453f7466c53927088578b596af44ffaa3db9f560f0fbe96fa39fbd",
+    "synced_kit_sha256": "47aae5dc8572624e65356b98278b1212504cdd530001b7dc79eaac4c238a97ff",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/judge_accept.py",
+    "kit": "toolkit/tools/judge_accept.py",
+    "synced_hq_sha256": "f189b4953bdc4efebb9cd2115f3ed92ebf0315e65a7205203cac4a3c1445b6f0",
+    "synced_kit_sha256": "b0960668ae56be18b4f803bef6a2f0781e4c4499dc955e25dd9b8089d5a82d75",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/judge_client.py",
+    "kit": "toolkit/tools/judge_client.py",
+    "synced_hq_sha256": "d71f7ef8da9cffd545371fdbcd0e26521b5561c76cf6beb113283794ff806242",
+    "synced_kit_sha256": "500e2661d3db30cac98a86229cf0d593e6a6a71082f101fffb458c6099c9f8e3",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/main_gate.py",
+    "kit": "toolkit/tools/main_gate.py",
+    "synced_hq_sha256": "a2d0e086a616fb0e95fc53e498343d9a3d338d5734dc5a9c8c671798debc5d13",
+    "synced_kit_sha256": "e319fcf173a1de37e3360e3c6f7b6d5bc54b1d41e557804d07c3724ff819da3e",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/mechanism_gate.py",
+    "kit": "toolkit/tools/mechanism_gate.py",
+    "synced_hq_sha256": "2a7fcc51e4ed9e060f587a54bfda8d07544678ac57a8b5512a4fad5c81a4746c",
+    "synced_kit_sha256": "dafc87c5bea81dc0ec28f25da0b364fcbad38a80c0d18ba8e005f605986ff083",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/permission_audit.py",
+    "kit": "toolkit/tools/permission_audit.py",
+    "synced_hq_sha256": "179558e3835187d7568c3f90dda93fbec47deca9db86380883bc0fb6251c92fc",
+    "synced_kit_sha256": "c94fda4b10388439bc1c4dbe21c777baff786fec42142753897082e0bfdbcac7",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/pi_run_guard.py",
+    "kit": "toolkit/tools/pi_run_guard.py",
+    "synced_hq_sha256": "9a355786933e066b8153635f30906ee5045474aa2caafbca98bf80279a8aefcd",
+    "synced_kit_sha256": "64725849411043fbe210448f5c1841eb34921be949c14527ce67a5d2b81994bd",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/preflight_quota.py",
+    "kit": "toolkit/tools/preflight_quota.py",
+    "synced_hq_sha256": "4c86fc3da01d3a71543adc9eb5563884d34c4a3d7834508fd372fe2319a6c33c",
+    "synced_kit_sha256": "bb47e48556650c54adda598d34ba46b4c4d5a8a73d8210d918b418214ab8d6dc",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/savings_report.py",
+    "kit": "toolkit/tools/savings_report.py",
+    "synced_hq_sha256": "3eaabcb01400e3edaf82f0fa3b3ddf7193c68dd45fb6be2cd64d7d266eff17d1",
+    "synced_kit_sha256": "c3398fce1c414c47002805561decc924bcbf2c60c0458a8d645eadc4d75ab129",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/session_context.py",
+    "kit": "toolkit/tools/session_context.py",
+    "synced_hq_sha256": "2d6239ef5e74d7c65af5d229f355c5d4867b77cbb6f9ab6757a669bec93fbd66",
+    "synced_kit_sha256": "8bf6bda73ba4215a3beabc79a009b2776b307dbeee2bd57e4f9bbc4f54678068",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_calibration_counts.py",
+    "kit": "toolkit/tools/test_calibration_counts.py",
+    "synced_hq_sha256": "20067ffc4f803e54070b2fd1a2e9c4d2e6e4b3dde4ca3758c1bb6449e2f46392",
+    "synced_kit_sha256": "2599893d6e9209ffd707983e0ccec431ef137e9bd27a6439f5338dbd1f10d447",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_critic_verdict_check.py",
+    "kit": "toolkit/tools/test_critic_verdict_check.py",
+    "synced_hq_sha256": "eae62beadfef5c186bcf1a2a54c51f815d53a022ed3d06b41dfee8b6196be50c",
+    "synced_kit_sha256": "dd96d675c1e5b69dbed2745a2f5da90639ce3a7835afb722c73871a88f641b99",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_dispatch_gate.py",
+    "kit": "toolkit/tools/test_dispatch_gate.py",
+    "synced_hq_sha256": "4e96f8e91e0fc18f3297ec06d139474cdf7491b9ecda32ae9b36b53c56fcc801",
+    "synced_kit_sha256": "10341c7dd1c4fce19d45f9cff4bf613afb142b937a8d1aa2a48493289c268fbc",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_dod_gate.py",
+    "kit": "toolkit/tools/test_dod_gate.py",
+    "synced_hq_sha256": "2fe82f6a5985f9a9b74a5a5de75b8033382f58f3b557fe5e53cf24d011fee3d7",
+    "synced_kit_sha256": "5821670d8eba3f2738fa7977187f9702e3020178caec9a3163f76f0776170827",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_dod_track.py",
+    "kit": "toolkit/tools/test_dod_track.py",
+    "synced_hq_sha256": "571a8009bb7ef31b824efd95df2852ef6164350f415c84527b852d5dbad7e51a",
+    "synced_kit_sha256": "9c37648755496424542616e222a0b82288a32f6c33ab58aa854bffeaf27a8e8b",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_escape_check.py",
+    "kit": "toolkit/tools/test_escape_check.py",
+    "synced_hq_sha256": "17c11880d0158ba7c10461107177e95322541730545baff8f0e806363100f5ad",
+    "synced_kit_sha256": "102c534617e02dfb71c84c4fbd726af5170ac478aa079cc5a29b2c9a017f5310",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_hygiene_gate.py",
+    "kit": "toolkit/tools/test_hygiene_gate.py",
+    "synced_hq_sha256": "899a08c079bdefe562ca654d393da73aa7686e3c66b1209e692e8100330f9776",
+    "synced_kit_sha256": "204815ce0226e512aea6ef2d7177b0da925b3b1c1364f3112acf10cb7327a06a",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_journal_echo.py",
+    "kit": "toolkit/tools/test_journal_echo.py",
+    "synced_hq_sha256": "77298be88be88620ea6fbce4869cef461aa4547eb920794b1c97fb3612249add",
+    "synced_kit_sha256": "6c50727785297ecf2020a142d934bf3090a37b9b249e126c46da83188d03cde8",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_journal_validator.py",
+    "kit": "toolkit/tools/test_journal_validator.py",
+    "synced_hq_sha256": "a4932c24c9e935ec3f0866e47471332a25d7a86174bc5ce73abd552fcc38d4dc",
+    "synced_kit_sha256": "5eee1b89147217c2d13f232eaaaa77d784b3a149e7668d9cfda5c30be4c7be33",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_judge_accept.py",
+    "kit": "toolkit/tools/test_judge_accept.py",
+    "synced_hq_sha256": "d9eb7cbc00daa6b017b4ae2441242d30adb41b28731a122195730735a72536d3",
+    "synced_kit_sha256": "db850507cf8fe63009ff8d68bdba5b94673201ec0e0a2131454176ded0e61119",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_main_gate.py",
+    "kit": "toolkit/tools/test_main_gate.py",
+    "synced_hq_sha256": "7e018939cc64d932bfe8cd6ead58ced572f8535a1a68a6c8e5fcf86dd0962835",
+    "synced_kit_sha256": "c0864c6cf09cb431320c99544e71a0e88ca99e3fb7cc499c47dbd8d9cb70460d",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_mechanism_gate.py",
+    "kit": "toolkit/tools/test_mechanism_gate.py",
+    "synced_hq_sha256": "6620162ad8023ae5d6399bc93d7b309edd30f68edbcc9457c93b0959b44481f6",
+    "synced_kit_sha256": "02a9518ef753c8cee54c67df61fde76b1323eca6e2dca4c61d8e4975189aa5ac",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_permission_audit.py",
+    "kit": "toolkit/tools/test_permission_audit.py",
+    "synced_hq_sha256": "67ea9bb94d3ca62c3ea7a0809fd54b818ab7b60f86a672323acb52213d800114",
+    "synced_kit_sha256": "459e343bfcfddc2c07f0f21d0a4fe4f0fd284434c722af1b27cee6bfd1eec392",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_pi_run_guard.py",
+    "kit": "toolkit/tools/test_pi_run_guard.py",
+    "synced_hq_sha256": "2c3b38ae56332e76aa25f86e785d2614cb9806dbb107b633aed3d8e04c4fc5f4",
+    "synced_kit_sha256": "9e7cc4dd8163be26bbd412a7ea826667f313772f6aa552e748ce22cd1942258d",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_preflight_quota.py",
+    "kit": "toolkit/tools/test_preflight_quota.py",
+    "synced_hq_sha256": "30676175ddc5505c1eab7219ffbe34069473c55db2d6a2b72f76b6a1a5a4b098",
+    "synced_kit_sha256": "df21c1c55882311eb59179598fdb534318af866ee0d8e6067c7a570a1821756f",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_savings_report.py",
+    "kit": "toolkit/tools/test_savings_report.py",
+    "synced_hq_sha256": "3668f4563d8872d689d71135668f66f7b9cf7b25e517e60f1368d921a418db78",
+    "synced_kit_sha256": "d45febca51d87171fdcea5716b44211a012d5dcb56d0108950722af5143dbc27",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_session_context.py",
+    "kit": "toolkit/tools/test_session_context.py",
+    "synced_hq_sha256": "ad6bd24c0e4de31b5684bdd3a9cd806239bd25ce0043da09bf8b4fe06afb687b",
+    "synced_kit_sha256": "84c18e208c3283340c6b3b2c41916a2fa917f1a4f13bfde19b480356ae9cb4ad",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_tier_echo.py",
+    "kit": "toolkit/tools/test_tier_echo.py",
+    "synced_hq_sha256": "8bd197b2299acec8259cd648c914555886dde23f4dd17257e2e807d990dd8f2d",
+    "synced_kit_sha256": "26915ef4fe4197883bf52e55d17775264c2a634edbe531de519433c965d6e0df",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_usage_report.py",
+    "kit": "toolkit/tools/test_usage_report.py",
+    "synced_hq_sha256": "1a7839eeac206f7ffac44e6e96f44c3f2ab5de11e01a721cbc3148d0c97186d1",
+    "synced_kit_sha256": "fc40d7d689a0f0223084e931a1f2909fcb551d33c75503a61396e65dd386ad14",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/test_witness_echo.py",
+    "kit": "toolkit/tools/test_witness_echo.py",
+    "synced_hq_sha256": "343166845d52ea14c25c6f3a7b5242b5dbd097f9906fb59a816070d9264e51fb",
+    "synced_kit_sha256": "236b2d5fba9c73c03e3e090ebfb1bc077da9bdd57e22db4b9eb9c747d89393cf",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/tier_echo.py",
+    "kit": "toolkit/tools/tier_echo.py",
+    "synced_hq_sha256": "94017c004d4648de881497f04d9cb81bf86d9c8e133785f4d7222c74ef325e7b",
+    "synced_kit_sha256": "134b77f4c8de78508dcf0e6674ea3a02576e4fdcc59fa0a07f60544fe766fdaa",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "tools/usage_report.py",
+    "kit": "toolkit/tools/usage_report.py",
+    "synced_hq_sha256": "989f575990d0a4ebec83c863ea6bef97555425ca4d66c8009f8e4c33ecbf386a",
+    "synced_kit_sha256": "15d84ae08bfc1e0c9360de4e6c8acb512a575d188d3bacff3c6c6ee2a9f93297",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "gateway/shadow_eval.py",
+    "kit": "toolkit/gateway/shadow_eval.py",
+    "synced_hq_sha256": "0d5fde1f5ad62b07eae075a95a59f5226cc642c011ab0c7ba81717395ca61eed",
+    "synced_kit_sha256": "2476647e6771aaf108a416e90c368c04a1b93ffeb81cf574a87b2e0b4857c841",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "PROCESS/BOOT_REPORT_PROTOCOL.md",
+    "kit": "toolkit/PROCESS/BOOT_REPORT_PROTOCOL.md",
+    "synced_hq_sha256": "e5f0eab564956804d5b0483c8c4c6de5c141ccfe51eb2fc09c0afc34bb332a24",
+    "synced_kit_sha256": "b6e577de34c37a0150a30067b4114bc907a427bd4d3161b4277511148cd93004",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "PROCESS/JUDGE_CALIBRATION_PROTOCOL.md",
+    "kit": "toolkit/PROCESS/JUDGE_CALIBRATION_PROTOCOL.md",
+    "synced_hq_sha256": "12760d81f706542cfe3ebf9a3f6a71a8fb4ebd7479e8456bafc2fdb63f25c261",
+    "synced_kit_sha256": "cca79388f085d9e08370cba8357d5ce55ccb67808f999e82fd523f0296df01cb",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "PROCESS/LEAD_RANKING_EXAM.md",
+    "kit": "toolkit/PROCESS/LEAD_RANKING_EXAM.md",
+    "synced_hq_sha256": "7102b3ab42feef27509f76a73826b847d2761deabe0e45dba00b3dd99ef73097",
+    "synced_kit_sha256": "5760f5ac29ecd01f4bec93cdf2606579235945f89245142e693ca3b30bd5ea03",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "PROCESS/SESSION_PROTOCOL.md",
+    "kit": "toolkit/PROCESS/SESSION_PROTOCOL.md",
+    "synced_hq_sha256": "865762db5557d621eb3f152257cbfa26f6245a0425d983ee1f63b67610aecaf5",
+    "synced_kit_sha256": "f2ddc240a45760f4d479bb98e4cd0d6b3b334b01cd02b133a35441a413d2d31f",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md",
+    "kit": "toolkit/PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md",
+    "synced_hq_sha256": "f78924832abbbdea3ede1291dfa5cb8c8b5d244d7526933f5e9a9c4f43bc5b21",
+    "synced_kit_sha256": "be6fa4307de648e7b1d5b30fe5a1283fc3e9f85a204c957928c7ac6496ab3c42",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  },
+  {
+    "hq": "CLAUDE.md",
+    "kit": "toolkit/CLAUDE.md",
+    "synced_hq_sha256": "7e8924e44c2defe864a0f77976e0c8ec6e8a074c5b7fdef0a130cbee30aa4f0c",
+    "synced_kit_sha256": "d9a44b776364e123913414dd5621417c88aded91a6732b8ed60949e0bc9f943f",
+    "synced_at": "2026-07-23T23:29:45",
+    "note": ""
+  }
+]
