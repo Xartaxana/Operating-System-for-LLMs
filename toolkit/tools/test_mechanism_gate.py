@@ -153,6 +153,70 @@ def test_explicit_skip_line_matches():
     assert not mg.SKIP_RE.search("axes are covered by not a mechanism")
 
 
+# --- D-0093 (source deployment's Dog range): SKIP_RE line anchor --------
+# Contrast: TIER_LINE_RE was already anchored ^...$ MULTILINE; SKIP_RE was
+# fail-open -- an unanchored .search() matched an inline quote of the
+# skip syntax in the middle of commit-message prose, silencing the gate.
+
+
+def test_skip_re_standalone_line_in_multiline_message():
+    # (1) a standalone line inside a multi-line message -> active.
+    msg = "feat: mechanism X\n\naxes: not a mechanism (reason)\n\nmore text\n"
+    assert mg.SKIP_RE.search(msg)
+
+
+def test_skip_re_standalone_line_with_space_indent():
+    # (2) the same line indented with spaces -> active.
+    msg = "feat: mechanism X\n\n   axes: not a mechanism (indented reason)\n"
+    assert mg.SKIP_RE.search(msg)
+
+
+def test_skip_re_inline_quote_mid_sentence_does_not_match():
+    # (3) an inline quote in the middle of a sentence -> NOT active.
+    msg = ("feat: mechanism X\n\nthe line \"axes: not a mechanism (example)\" "
+           "would bypass the gate without the anchor\n")
+    assert not mg.SKIP_RE.search(msg)
+
+
+def test_skip_re_line_starting_with_guillemet_does_not_match():
+    # (4) a line starting with a guillemet quote character -> NOT active
+    # (a non-whitespace char precedes "axes", the ^\s* anchor rejects it).
+    msg = "feat: mechanism X\n\n«axes: not a mechanism (example)»\n"
+    assert not mg.SKIP_RE.search(msg)
+
+
+def test_skip_re_line_starting_with_straight_quote_does_not_match():
+    # (5) a line starting with a straight quote " -> NOT active.
+    msg = 'feat: mechanism X\n\n"axes: not a mechanism (example)"\n'
+    assert not mg.SKIP_RE.search(msg)
+
+
+def test_skip_re_matches_on_crlf_message():
+    # (6) CRLF message: a standalone line with \r\n endings -> active
+    # (MULTILINE's ^ sits right after \n, with no leading \r on the line).
+    msg = "feat: mechanism X\r\n\r\naxes: not a mechanism (reason)\r\n"
+    assert mg.SKIP_RE.search(msg)
+
+
+def test_decide_inline_quote_without_axis_block_blocks():
+    # (7) end-to-end via decide(): a mechanism staged path, a message with
+    # an INLINE quote of the skip syntax and NO axis block -> the gate
+    # BLOCKS (code 1) -- the quote does not activate skip.
+    msg = ("feat: mechanism X\n\nthe line \"axes: not a mechanism (example)\" "
+           "would bypass the gate\n")
+    code, reason = mg.decide(msg=msg, block_extra="", staged=["CLAUDE.md"],
+                             map_text="## Axis 1 -- Deployments\n")
+    assert code == 1 and "1" in reason
+
+
+def test_decide_standalone_skip_line_passes():
+    # (8) end-to-end: a real skip line as its own standalone line -> code 0.
+    msg = "docs: typo fix\n\naxes: not a mechanism (typo in rule 3)\n"
+    code, _ = mg.decide(msg=msg, block_extra="", staged=["CLAUDE.md"],
+                        map_text="## Axis 1 -- Deployments\n")
+    assert code == 0
+
+
 # --- Tier declaration on the "mechanism" branch (ported from D-0072) ----
 
 def test_resolve_lead_binding_defaults_to_fable_without_config():

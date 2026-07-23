@@ -735,7 +735,21 @@ def git_hooks_channel(root: Path) -> list:
     Never raises: git being absent, the subprocess call failing, or any
     other problem while reading the config is itself folded into one
     WARNING string here (a more specific message than the generic one
-    wiring_lines()'s own try/except would produce)."""
+    wiring_lines()'s own try/except would produce).
+
+    THIRD, independent fact (D-0093, Dog range): a hook file existing
+    and readable on disk is not enough -- git only executes a hook that
+    is BOTH tracked as executable in the index (mode 100755) AND
+    present on disk; a hook committed as 100644 is silently skipped by
+    git on Linux clones (Windows/NTFS carries no meaningful exec bit at
+    all, so this cannot be checked via the filesystem -- deliberately
+    read from `git ls-files -s`, the INDEX, not os.stat()). Checked via
+    the same subprocess idiom as the hooksPath call above: never raises,
+    a failed invocation folds into one WARNING string same as the
+    hooksPath failure path. Two sub-facts per required hook, both
+    reported when true: not present in the index at all (untracked --
+    a clone gets no gate whatsoever, worse than non-executable), or
+    present with a mode other than 100755 (committed non-executable)."""
     root = Path(root)
     expected = (root / _GITHOOKS_DIRNAME).resolve()
     reason = "journal_validator/mechanism_gate do not run on commits"
@@ -774,6 +788,45 @@ def git_hooks_channel(root: Path) -> list:
     for name in _REQUIRED_GITHOOKS:
         if not (root / _GITHOOKS_DIRNAME / name).is_file():
             warnings.append(f"hook file missing: {_GITHOOKS_DIRNAME}/{name} -- {reason}")
+
+    # D-0093: git-INDEX exec-bit check (never the filesystem -- see
+    # docstring). Same subprocess idiom as the hooksPath call above;
+    # a failed invocation folds into one WARNING, same treatment as
+    # that call's own except-branch, and does not block the two checks
+    # already computed above (each fact stays independently reportable).
+    try:
+        ls_result = subprocess.run(
+            ["git", "ls-files", "-s", "--", _GITHOOKS_DIRNAME],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception as e:
+        detail = _ascii_sanitize(f"git ls-files -s failed ({type(e).__name__})", 120)
+        warnings.append(f"{detail} -- {reason}")
+        ls_result = None
+
+    modes = {}
+    if ls_result is not None:
+        for line in (ls_result.stdout or "").splitlines():
+            meta, sep, path_part = line.partition("\t")
+            if not sep:
+                continue
+            fields = meta.split()
+            if not fields:
+                continue
+            modes[Path(path_part).name] = fields[0]
+
+    if ls_result is not None:
+        for name in _REQUIRED_GITHOOKS:
+            if name not in modes:
+                warnings.append(f"hook {name} untracked -- clones get no gate")
+            elif modes[name] != "100755":
+                warnings.append(
+                    f"hook {name} committed non-executable ({modes[name]}) -- "
+                    "Linux clones get silently dead gates (D-0093)"
+                )
 
     return warnings
 

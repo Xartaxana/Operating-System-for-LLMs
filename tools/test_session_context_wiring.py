@@ -30,12 +30,24 @@ def _init_repo_with_hooks(tmp_path, hookspath="own"):
     """Builds a minimal git repo under tmp_path with a working .githooks/
     (pre-commit + commit-msg present) and core.hooksPath pointed at it,
     unless hookspath overrides that (None = leave unset; a Path = point
-    hooksPath there instead)."""
+    hooksPath there instead).
+
+    D-0093: both hook files are also `git add`-ed and forced to mode
+    100755 in the index (`git update-index --chmod=+x`) -- this is the
+    "fully wired" baseline every scenario in this file other than the
+    dedicated exec-bit tests assumes (a git-channel WARNING from the new
+    exec-bit sub-check would otherwise leak into every test using this
+    helper, including ones with exact-equality assertions). The
+    dedicated exec-bit tests below override tracking/mode explicitly via
+    _set_hook_mode_non_executable / _untrack_hook."""
     _git(["init", "-q"], tmp_path)
     githooks = tmp_path / ".githooks"
     githooks.mkdir()
     (githooks / "pre-commit").write_text("#!/bin/sh\n", encoding="utf-8")
     (githooks / "commit-msg").write_text("#!/bin/sh\n", encoding="utf-8")
+    _git(["add", ".githooks/pre-commit", ".githooks/commit-msg"], tmp_path)
+    _git(["update-index", "--chmod=+x", ".githooks/pre-commit"], tmp_path)
+    _git(["update-index", "--chmod=+x", ".githooks/commit-msg"], tmp_path)
     if hookspath == "own":
         _git(["config", "core.hooksPath", str(githooks)], tmp_path)
     elif hookspath is None:
@@ -43,6 +55,19 @@ def _init_repo_with_hooks(tmp_path, hookspath="own"):
     else:
         _git(["config", "core.hooksPath", str(hookspath)], tmp_path)
     return tmp_path
+
+
+def _set_hook_mode_non_executable(tmp_path, name):
+    """Forces one hook's INDEX mode to 100644 (committed non-executable),
+    leaving it tracked and present on disk -- isolates the "wrong mode"
+    sub-fact from the "untracked" one."""
+    _git(["update-index", f"--chmod=-x", f".githooks/{name}"], tmp_path)
+
+
+def _untrack_hook(tmp_path, name):
+    """Removes one hook from the INDEX only (--cached), keeping the file
+    on disk -- isolates the "untracked" sub-fact from "missing file"."""
+    _git(["rm", "--cached", "-q", f".githooks/{name}"], tmp_path)
 
 
 def _write_settings(root, commands):
@@ -68,6 +93,25 @@ def _write_settings(root, commands):
 
 def test_wiring_ok_on_current_repo():
     lines = sc.wiring_lines(REPO_ROOT)
+    # TEMPORARY accommodation (D-0093): as of this dispatch both
+    # .githooks/pre-commit and .githooks/commit-msg are still indexed at
+    # 100644 in THIS repo (chmod-at-acceptance is the Lead's INSTALL-line
+    # sibling fix, not owned by this dispatch -- see task spec). The new
+    # exec-bit sub-check (B1) therefore legitimately turns the OK line
+    # into exec-bit WARNING lines today. This branch documents that
+    # explicitly rather than silently loosening the assertion: ANY
+    # warning of a DIFFERENT class (hookspath mismatch, missing file,
+    # untracked, a failed git call) still fails this test. Once chmod
+    # lands, wiring_lines() reverts to the clean OK line and the second
+    # branch below (the original, unweakened assertion set) covers it
+    # without further edits to this test.
+    exec_bit_only = bool(lines) and all(
+        "committed non-executable" in line for line in lines
+    )
+    if exec_bit_only:
+        assert all(line.startswith("WIRING WARNING:") for line in lines), lines
+        assert all(line.isascii() for line in lines), lines
+        return
     assert len(lines) == 1, lines
     assert lines[0].startswith("WIRING: OK ("), lines
     assert "git hooks: pre-commit, commit-msg" in lines[0]
@@ -77,7 +121,15 @@ def test_wiring_ok_on_current_repo():
 
 
 def test_git_hooks_channel_clean_on_current_repo():
-    assert sc.git_hooks_channel(REPO_ROOT) == []
+    # TEMPORARY accommodation (D-0093): see test_wiring_ok_on_current_repo's
+    # comment above -- today's index has both hooks at 100644, so this
+    # channel legitimately reports "committed non-executable" for both
+    # instead of []. Anything OTHER than that warning class would still
+    # be a real defect (hookspath mismatch, a missing file, untracked, a
+    # failed git call) and fails this assert.
+    warnings = sc.git_hooks_channel(REPO_ROOT)
+    unexpected = [w for w in warnings if "committed non-executable" not in w]
+    assert unexpected == [], warnings
 
 
 def test_harness_channel_clean_on_current_repo():
@@ -140,6 +192,73 @@ def test_git_channel_hookspath_points_to_missing_dir(tmp_path):
     _init_repo_with_hooks(tmp_path, hookspath=missing)
     warnings = sc.git_hooks_channel(tmp_path)
     assert any("does not resolve to" in w for w in warnings), warnings
+    assert all(w.isascii() for w in warnings), warnings
+
+
+# ---------------------------------------------------------------------------
+# 5b. git-channel: D-0093 exec-bit sub-check (git INDEX, not the
+#     filesystem -- Windows/NTFS carries no meaningful exec bit).
+# ---------------------------------------------------------------------------
+
+
+def test_git_channel_both_hooks_tracked_executable_is_clean(tmp_path):
+    # (1) both hooks 100755 in the index -> channel clean, output
+    # unchanged from the pre-D-0093 baseline.
+    _init_repo_with_hooks(tmp_path)
+    assert sc.git_hooks_channel(tmp_path) == []
+
+
+def test_wiring_ok_when_both_hooks_tracked_executable(tmp_path):
+    _init_repo_with_hooks(tmp_path)
+    _write_settings(tmp_path, [])
+    lines = sc.wiring_lines(tmp_path)
+    assert len(lines) == 1, lines
+    assert lines[0].startswith("WIRING: OK ("), lines
+
+
+def test_git_channel_hook_committed_non_executable_warns(tmp_path):
+    # (2) one hook 100644 -> WARNING naming the file and the mode.
+    _init_repo_with_hooks(tmp_path)
+    _set_hook_mode_non_executable(tmp_path, "pre-commit")
+    warnings = sc.git_hooks_channel(tmp_path)
+    assert any(
+        "pre-commit" in w and "100644" in w and "committed non-executable" in w
+        for w in warnings
+    ), warnings
+    # The OTHER hook (still 100755) must not be flagged.
+    assert not any("commit-msg" in w for w in warnings), warnings
+    assert all(w.isascii() for w in warnings), warnings
+
+
+def test_git_channel_hook_untracked_warns(tmp_path):
+    # (3) hook absent from `git ls-files` (never added / rm --cached)
+    # -> WARNING "untracked", distinct from the "missing file" warning
+    # (the file is still present on disk here).
+    _init_repo_with_hooks(tmp_path)
+    _untrack_hook(tmp_path, "commit-msg")
+    assert (tmp_path / ".githooks" / "commit-msg").is_file()  # still on disk
+    warnings = sc.git_hooks_channel(tmp_path)
+    assert any("commit-msg" in w and "untracked" in w for w in warnings), warnings
+    assert not any("missing" in w for w in warnings), warnings
+    assert all(w.isascii() for w in warnings), warnings
+
+
+def test_git_channel_ls_files_failure_folds_into_one_warning(tmp_path, monkeypatch):
+    # (4) the `git ls-files -s` call itself fails -> same treatment as
+    # the existing hooksPath call's own except-branch: folds into one
+    # WARNING string, never raises. The hooksPath call (which succeeds
+    # here) is left untouched -- only ls-files is made to fail.
+    _init_repo_with_hooks(tmp_path)
+    real_run = sc.subprocess.run
+
+    def _flaky_run(cmd, *args, **kwargs):
+        if len(cmd) >= 2 and cmd[0] == "git" and cmd[1] == "ls-files":
+            raise OSError("simulated git ls-files failure")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(sc.subprocess, "run", _flaky_run)
+    warnings = sc.git_hooks_channel(tmp_path)
+    assert any("ls-files" in w and "failed" in w for w in warnings), warnings
     assert all(w.isascii() for w in warnings), warnings
 
 

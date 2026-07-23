@@ -90,6 +90,31 @@ as-is, not changing a mechanism): use the exact phrase the gate
 recognizes, `axes: not a mechanism (<reason>)`, filling in your own
 `<reason>` (e.g. "installing the template's own shipped files").
 
+## Hook executability and liveness (both paths; D-0093)
+
+Git runs a hook only if its file is EXECUTABLE. On Linux/macOS a hook
+committed with index mode `100644` is silently ignored: the gate
+looks installed, `core.hooksPath` is set, the file is on disk — and
+nothing ever fires. A broken gate is indistinguishable from a working
+one by observed behavior (both let commits through), so check both
+things explicitly right after step 3 of either path:
+
+1. Committed modes: `git ls-files -s .githooks` must show `100755`
+   for both hooks. If you see `100644`, fix it in the index and
+   commit: `git update-index --chmod=+x .githooks/pre-commit
+   .githooks/commit-msg`. The filesystem bit is not the thing that
+   travels — clones inherit the INDEX mode.
+2. Liveness by PROBE, not by reading the file: stage a deliberately
+   invalid journal line, attempt a commit, confirm the gate REJECTS
+   it, then revert the probe. "hooksPath set + file present" is not
+   liveness.
+
+The same rule applies to any later delivery that changes an
+executable file of the enforcement chain: the carrier ships the FULL
+target content of the file (a delta line cannot express the file's
+invariants — the `set -e` lesson of finding F-53), and the delivery
+ends with the same probe.
+
 ## Onboarding
 
 Both paths converge here: run the onboarding skill

@@ -300,6 +300,16 @@ is the REVISION DELTA, never the full kit:
 4. Update the ledger's recorded kit revision in the same move. The
    cost is bounded by the delta and paid by the host (Rule #1); a
    full re-scan is the fallback only when no revision was recorded.
+5. Sealed delivery for the enforcement chain (D-0093): a delta item
+   that changes an EXECUTABLE control-chain file (a git hook, a hook
+   script) ships the FULL target content of that file, never a
+   "add this line" delta — a delta cannot carry the file's
+   invariants (the `set -e` lesson of finding F-53). Applying it
+   ends with a liveness PROBE: a known-invalid input is rejected by
+   the gate, then the probe is reverted; the probe's witness goes
+   into the batch's acceptance. Check hook executability while
+   you're there: `git ls-files -s .githooks` must show `100755`
+   (`100644` = a silently dead gate on Linux clones).
 
 ## Failure detector
 

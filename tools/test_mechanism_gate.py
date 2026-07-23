@@ -141,6 +141,70 @@ def test_explicit_skip_line_matches():
     assert not mg.SKIP_RE.search("оси покрыты не-механизмом")
 
 
+# --- D-0093 (полигон Dog): якорь SKIP_RE — только ОТДЕЛЬНАЯ строка ------
+# Контраст: TIER_LINE_RE уже был заякорен ^…$ MULTILINE (t-278); SKIP_RE
+# был fail-open — .search() без якоря матчил инлайн-цитату синтаксиса
+# отказа посреди прозы коммит-сообщения, глуша гейт целиком.
+
+
+def test_skip_re_standalone_line_in_multiline_message():
+    # (1) отдельная строка внутри многострочного сообщения → активен.
+    msg = "feat: механизм X\n\nоси: не-механизм (причина)\n\nдоп. текст\n"
+    assert mg.SKIP_RE.search(msg)
+
+
+def test_skip_re_standalone_line_with_space_indent():
+    # (2) та же строка с отступом пробелами → активен.
+    msg = "feat: механизм X\n\n   оси: не-механизм (причина с отступом)\n"
+    assert mg.SKIP_RE.search(msg)
+
+
+def test_skip_re_inline_quote_mid_sentence_does_not_match():
+    # (3) инлайн-цитата в середине предложения → НЕ активен.
+    msg = ("feat: механизм X\n\nстрока «оси: не-механизм (пример)» "
+           "обходила бы гейт, если бы не якорь\n")
+    assert not mg.SKIP_RE.search(msg)
+
+
+def test_skip_re_line_starting_with_guillemet_does_not_match():
+    # (4) строка, начинающаяся с «ёлочки» → НЕ активен (перед «оси» стоит
+    # непробельный символ «, якорь ^\s* его не пропускает).
+    msg = "feat: механизм X\n\n«оси: не-механизм (пример)»\n"
+    assert not mg.SKIP_RE.search(msg)
+
+
+def test_skip_re_line_starting_with_straight_quote_does_not_match():
+    # (5) строка, начинающаяся с прямой кавычки " → НЕ активен.
+    msg = 'feat: механизм X\n\n"оси: не-механизм (пример)"\n'
+    assert not mg.SKIP_RE.search(msg)
+
+
+def test_skip_re_matches_on_crlf_message():
+    # (6) CRLF-сообщение: отдельная строка с \r\n-концами → активен (после
+    # \n MULTILINE-якорь встаёт сразу перед «оси», без ведущего \r).
+    msg = "feat: механизм X\r\n\r\nоси: не-механизм (причина)\r\n"
+    assert mg.SKIP_RE.search(msg)
+
+
+def test_decide_inline_quote_without_axis_block_blocks():
+    # (7) сквозной кейс через decide(): механизменный staged-путь,
+    # сообщение с ИНЛАЙН-цитатой skip-синтаксиса и БЕЗ осевого блока →
+    # гейт БЛОКИРУЕТ (код 1) — цитата не активирует skip.
+    msg = ("feat: механизм X\n\nстрока «оси: не-механизм (пример)» "
+           "обходила бы гейт\n")
+    code, reason = mg.decide(msg=msg, block_extra="", staged=["CLAUDE.md"],
+                             map_text="## Ось 1 — Деплои\n")
+    assert code == 1 and "1" in reason
+
+
+def test_decide_standalone_skip_line_passes():
+    # (8) сквозной кейс: настоящая skip-строка отдельной строкой → код 0.
+    msg = "docs: правка опечатки\n\nоси: не-механизм (опечатка в правиле 3)\n"
+    code, _ = mg.decide(msg=msg, block_extra="", staged=["CLAUDE.md"],
+                        map_text="## Ось 1 — Деплои\n")
+    assert code == 0
+
+
 # --- t-068 / D-0072: строка tier на ветке «механизм» ---------------------
 
 def test_resolve_lead_binding_defaults_to_fable_without_config():

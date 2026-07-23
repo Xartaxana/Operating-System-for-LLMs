@@ -14,7 +14,13 @@ without git):
    English phrasing, CLAUDE.md rule 10) works ONLY from the commit
    message -- a written statement by the committer, the same pattern
    as `dispatch_skipped`. Not looked up in the diff: decision text that
-   quotes the skip syntax would otherwise bypass the gate.
+   quotes the skip syntax would otherwise bypass the gate. Inside the
+   message itself the line counts ONLY as its OWN separate line
+   (^...$ anchor with MULTILINE, indentation by spaces allowed) --
+   otherwise an inline quote of the skip syntax in the middle of the
+   message's prose would silence the whole gate (source deployment's
+   Dog range finding, D-0093); the same anchor already used by
+   TIER_LINE_RE below.
 4. Axis block -- lines "axis N: <verdict>" for EVERY axis of the
    current docs/SIBLING_MAP.md -- looked up in the commit message PLUS
    in the staged diff of ONE file, DECISIONS.md (this template ships a
@@ -101,7 +107,12 @@ MECHANISM_PREFIXES = (
 # commit); ported as English to match the artifact these regexes
 # actually run against.
 AXIS_HEADING_RE = re.compile(r"^##\s+Axis\s+(\d+)", re.MULTILINE)
-SKIP_RE = re.compile(r"axes\s*:\s*not\s+a\s+mechanism\s*\(", re.IGNORECASE)
+# Line anchor (D-0093, source deployment's Dog range): without ^...$/
+# MULTILINE the phrase matched via .search() ANYWHERE in the message --
+# an inline quote of the skip syntax in the middle of prose ("...the
+# line \"axes: not a mechanism (example)\" would bypass...") silenced
+# the whole gate. Symmetric with the already-anchored TIER_LINE_RE.
+SKIP_RE = re.compile(r"^\s*axes\s*:\s*not\s+a\s+mechanism\s*\(", re.IGNORECASE | re.MULTILINE)
 
 
 def parse_axes(map_text: str) -> list[int]:
@@ -207,7 +218,7 @@ def decide(msg: str, block_extra: str, staged: list[str],
         return 0, ""
     if merging:
         return 0, ""
-    if SKIP_RE.search(msg):  # message only -- not looked up in the diff
+    if SKIP_RE.search(msg):  # message only -- not looked up in the diff + own separate line only (anchor, D-0093)
         return 0, ""
     if map_text is None:
         return 1, (f"axis map not found ({MAP_PATH}) -- fail-closed, "
