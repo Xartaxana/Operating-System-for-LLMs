@@ -122,7 +122,15 @@ stage boundary (marker «батч мелочей» in notes); self-execution wit
 a skip event is legal only for an edit BLOCKING the current move —
 the reason must name the blockage. Lead-tier work per the table
 (decomposition, specs, acceptance, architecture, policy) needs no
-skip events.
+skip events. DETERMINISTIC SCRIPT RUNS (D-0095): launching /
+collecting a deterministic script (exam runner, D-construction
+orchestrator, validator, health check — code with no AI judgment in
+the coordinator's loop) is an ENVIRONMENT operation, not a task
+mapping to a tier: no `dispatch_skipped` event is required. The
+trace duty stays — the run's result lives in its own carrier (Runs
+log, the construction's journal events, a report); a run with no
+carrier trace is still a violation. In doubt (the run embeds
+judgment) — the old skip-event form is the safe default.
 
 R9. **Fix the class, not the instance (D-0043)**: name the class;
 walk the siblings VIA docs/SIBLING_MAP.md (point lookup, NOT a repo
@@ -171,10 +179,20 @@ parallel fan-out — ownership per R4 + optional maxConcurrent. The
 manifest is DECLARATIVE on reads (reading past the basket is a report
 line, not a violation), NORMATIVE on writes; a point read-only
 dispatch just enumerates its basket inline. Completeness of DoD and
-manifest is the DISPATCHER's duty BEFORE sending. The DoD is written
-INLINE in the dispatch prompt itself — named acceptance criteria plus
-the exact verification run; a bare pointer to a spec file or an
-earlier event is NOT a DoD. A worker returning
+manifest is the DISPATCHER's duty BEFORE sending — executed as a
+FIVE-POINT CHECKLIST (D-0096) run against every dispatch before it
+goes: (1) explicit question / completeness criterion or acceptance
+keys; (2) DoD inline with the exact verification run; (3) "given"
+enumerated AND sufficient — data, fixtures, paths NAMED, not
+implied; (4) writing dispatch: owns/non-goals/handoff present;
+(5) freshness — the spec's load-bearing facts checked against their
+carrier, not memory (a stale note in the spec is a dispatcher
+defect). A checklist miss exposed by a reject or finding = a
+spec-defect of the dispatcher (check-23 case); promotion to a
+machine layer follows the next recurrence (D-0063). The DoD is
+written INLINE in the dispatch prompt itself — named acceptance
+criteria plus the exact verification run; a bare pointer to a spec
+file or an earlier event is NOT a DoD. A worker returning
 a DoD-less dispatch (or a writing/parallel one without a manifest)
 with questions is the emergency net, not the normal cycle: frequent
 returns = a spec-discipline defect of the coordinator, a calibration
