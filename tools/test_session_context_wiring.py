@@ -66,8 +66,21 @@ def _set_hook_mode_non_executable(tmp_path, name):
 
 def _untrack_hook(tmp_path, name):
     """Removes one hook from the INDEX only (--cached), keeping the file
-    on disk -- isolates the "untracked" sub-fact from "missing file"."""
-    _git(["rm", "--cached", "-q", f".githooks/{name}"], tmp_path)
+    on disk -- isolates the "untracked" sub-fact from "missing file".
+
+    VG-1 witness-run finding (pre-existing, unrelated to VG-1's own
+    logic): this repo's git build refuses a bare `git rm --cached` here
+    with "staged content different from both the file and HEAD" -- the
+    helper's baseline (_init_repo_with_hooks) `git add`s the hook but
+    never commits it, so there is no HEAD copy to fall back to, and git
+    treats removing it from the index as potentially losing the only
+    copy of that content. `-f` is the standard, intended bypass for
+    exactly this case (we know the content survives on disk, which the
+    assertion right after this call's call site already confirms) --
+    without it, EVERY test using this helper silently exercised a no-op
+    (the hook stayed tracked), not the "untracked" scenario the test
+    names."""
+    _git(["rm", "--cached", "-f", "-q", f".githooks/{name}"], tmp_path)
 
 
 def _write_settings(root, commands):
@@ -157,14 +170,85 @@ def test_git_channel_missing_required_file(tmp_path):
 
 # ---------------------------------------------------------------------------
 # 3. git-channel: hooksPath not set at all (boundary: bare/unset)
+#
+# VG-1 part A: an unset core.hooksPath is no longer a bare WARNING -- the
+# channel now attempts a one-line self-heal (`git config --local
+# core.hooksPath .githooks`) FIRST. In a real, writable git repo with a
+# working .githooks/ (exactly this helper's baseline), that self-heal
+# succeeds, so the fact returned is now the AUTOFIX line, not the old
+# "not set" warning. The three tests below replace the single old test:
+# autofix succeeds (this scenario), autofix fails because git itself
+# errors on the write, and autofix "succeeds" at the git-config level but
+# the recheck still finds the required hook files missing.
 # ---------------------------------------------------------------------------
 
 
-def test_git_channel_hookspath_unset(tmp_path):
+def test_git_channel_hookspath_unset_autofixes(tmp_path):
     _init_repo_with_hooks(tmp_path, hookspath=None)
     warnings = sc.git_hooks_channel(tmp_path)
-    assert any("core.hooksPath not set" in w for w in warnings), warnings
+    assert any(
+        w == "AUTOFIX: core.hooksPath set to .githooks" for w in warnings
+    ), warnings
     assert all(w.isascii() for w in warnings), warnings
+    # The fix actually stuck in the repo's own local config, not just
+    # claimed in the returned fact string.
+    result = _git(["config", "core.hooksPath"], tmp_path)
+    assert result.stdout.strip() == ".githooks"
+
+
+def test_git_channel_hookspath_unset_autofix_degrades_to_warn_when_git_write_fails(
+    tmp_path, monkeypatch
+):
+    # "git недоступен" / a failing write (e.g. read-only config): the
+    # WRITE call is made to fail while the READ call (which reports
+    # unset) is left untouched -- the channel must fall back to the
+    # original-style warning, with the failure reason appended, not
+    # raise and not silently print AUTOFIX.
+    _init_repo_with_hooks(tmp_path, hookspath=None)
+    real_run = sc.subprocess.run
+
+    def _failing_write(cmd, *args, **kwargs):
+        if len(cmd) >= 3 and cmd[0] == "git" and cmd[1] == "config" and "--local" in cmd:
+            raise OSError("simulated: git config write failed")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(sc.subprocess, "run", _failing_write)
+    warnings = sc.git_hooks_channel(tmp_path)
+    assert any(
+        "core.hooksPath not set" in w and "autofix failed" in w for w in warnings
+    ), warnings
+    assert not any(w.startswith("AUTOFIX:") for w in warnings), warnings
+    assert all(w.isascii() for w in warnings), warnings
+    # The real config must be untouched (still unset) -- the failed write
+    # attempt must not have left a bogus value behind.
+    result = _git(["config", "core.hooksPath"], tmp_path)
+    assert result.returncode != 0 or not result.stdout.strip()
+
+
+def test_git_channel_hookspath_unset_autofix_reports_failure_when_hook_files_missing(
+    tmp_path,
+):
+    # The `git config` write itself succeeds (nothing stops it from
+    # pointing hooksPath at a directory whose files don't exist yet), but
+    # the recheck must catch that the required hook files are still
+    # missing -- reported as a failed autofix, not a false AUTOFIX line.
+    _git(["init", "-q"], tmp_path)
+    (tmp_path / ".githooks").mkdir()
+    # Deliberately do NOT create pre-commit/commit-msg under .githooks.
+    warnings = sc.git_hooks_channel(tmp_path)
+    assert any(
+        "core.hooksPath not set" in w
+        and "autofix" in w
+        and "missing" in w
+        for w in warnings
+    ), warnings
+    assert not any(w.startswith("AUTOFIX:") for w in warnings), warnings
+    assert all(w.isascii() for w in warnings), warnings
+    # The write itself DID succeed (git doesn't validate the target
+    # directory's contents when setting the config) -- confirms the
+    # failure is caught by the recheck, not by the write call.
+    result = _git(["config", "core.hooksPath"], tmp_path)
+    assert result.stdout.strip() == ".githooks"
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +280,26 @@ def test_git_channel_hookspath_points_to_missing_dir(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# 5a. VG-1 part A adversarial: hooksPath already set to a RELATIVE path
+#     that resolves to the SAME directory as .githooks (not empty, not
+#     "elsewhere" -- just a different SPELLING of the correct value).
+#     Must be recognized as already-correct: no warning, no autofix
+#     attempt, no AUTOFIX line either.
+# ---------------------------------------------------------------------------
+
+
+def test_git_channel_hookspath_relative_path_equivalent_to_githooks_is_clean(tmp_path):
+    _init_repo_with_hooks(tmp_path, hookspath=None)
+    _git(["config", "core.hooksPath", "./.githooks"], tmp_path)
+    warnings = sc.git_hooks_channel(tmp_path)
+    assert warnings == [], warnings
+    # Confirm the value was left exactly as configured -- untouched by
+    # any autofix (nothing needed fixing).
+    result = _git(["config", "core.hooksPath"], tmp_path)
+    assert result.stdout.strip() == "./.githooks"
+
+
+# ---------------------------------------------------------------------------
 # 5b. git-channel: D-0093 exec-bit sub-check (git INDEX, not the
 #     filesystem -- Windows/NTFS carries no meaningful exec bit).
 # ---------------------------------------------------------------------------
@@ -214,6 +318,24 @@ def test_wiring_ok_when_both_hooks_tracked_executable(tmp_path):
     lines = sc.wiring_lines(tmp_path)
     assert len(lines) == 1, lines
     assert lines[0].startswith("WIRING: OK ("), lines
+
+
+# ---------------------------------------------------------------------------
+# VG-1 part A, wiring_lines()-level: the AUTOFIX fact renders as its own
+# "WIRING AUTOFIX: ..." line, NOT folded into "WIRING WARNING: ..." and
+# NOT silently absorbed into a "WIRING: OK" line either -- a self-healed
+# discrepancy is still worth a line of its own (spec: "вместо WARN", not
+# "instead of nothing").
+# ---------------------------------------------------------------------------
+
+
+def test_wiring_lines_renders_autofix_line_not_warning_or_ok(tmp_path):
+    _init_repo_with_hooks(tmp_path, hookspath=None)
+    _write_settings(tmp_path, [])
+    lines = sc.wiring_lines(tmp_path)
+    assert lines == ["WIRING AUTOFIX: core.hooksPath set to .githooks"], lines
+    assert not any(line.startswith("WIRING WARNING:") for line in lines)
+    assert not any(line.startswith("WIRING: OK") for line in lines)
 
 
 def test_git_channel_hook_committed_non_executable_warns(tmp_path):
@@ -458,7 +580,16 @@ def test_wiring_lines_python_not_found(tmp_path, monkeypatch):
 
 
 def test_wiring_lines_multiple_warnings(tmp_path):
-    _init_repo_with_hooks(tmp_path, hookspath=None)  # git-channel warning
+    # VG-1 part A: an UNSET hooksPath now autofixes in a writable repo
+    # like this helper's baseline (see the dedicated autofix tests
+    # above), so it can no longer stand in for "a plain git-channel
+    # warning" here -- use "points elsewhere" instead (a foreign,
+    # already-valid value, deliberately NOT autofixed, per the same
+    # part-A carve-out) to keep this test's own point (multiple
+    # DIFFERENT channels' warnings aggregate together) intact.
+    other_dir = tmp_path / "elsewhere"
+    other_dir.mkdir()
+    _init_repo_with_hooks(tmp_path, hookspath=other_dir)  # git-channel warning
     _write_settings(tmp_path, ["python tools/nope.py"])  # harness-channel warning
     lines = sc.wiring_lines(tmp_path)
     assert all(line.startswith("WIRING WARNING:") for line in lines)

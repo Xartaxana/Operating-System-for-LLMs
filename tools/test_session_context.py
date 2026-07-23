@@ -133,6 +133,130 @@ def test_last_event_line_empty_journal():
     assert "empty or missing" in last_event_line([])
 
 
+# ---- VG-1 part B: CLOCK DRIFT line ----------------------------------------
+# Field precedent (2026-07-23): a session's journal tail carried
+# ts=20:16:32 while the system clock read 19:45:56 -- a previous
+# environment's clock ran ahead. Threshold: > 60s. Battery per CLAUDE.md
+# R11: acceptance keys (fires when ahead, silent when not) + the boundary
+# itself (60s exactly vs 61s) + adversarial fail-open inputs.
+
+
+def test_clock_drift_line_absent_when_journal_ts_behind_system_clock():
+    # The ordinary case: journal ts is BEFORE now (system clock ahead, or
+    # equal) -- no drift, no line.
+    events = [_event("delegated", ts="2026-07-10T08:00:00")]
+    now = datetime.datetime(2026, 7, 10, 9, 0, 0)
+    assert sc.clock_drift_line(events, now) == ""
+
+
+def test_clock_drift_line_at_threshold_boundary_is_silent():
+    # Exactly 60s ahead: the spec's threshold is "> 60s" -- AT the
+    # boundary must NOT fire.
+    now = datetime.datetime(2026, 7, 10, 8, 0, 0)
+    events = [_event("delegated", ts="2026-07-10T08:01:00")]  # +60s
+    assert sc.clock_drift_line(events, now) == ""
+
+
+def test_clock_drift_line_one_second_past_threshold_fires():
+    # 61s ahead -- one second past the boundary -- must fire.
+    now = datetime.datetime(2026, 7, 10, 8, 0, 0)
+    events = [_event("delegated", ts="2026-07-10T08:01:01")]  # +61s
+    line = sc.clock_drift_line(events, now)
+    assert line.startswith("CLOCK DRIFT: last journal ts is ")
+    assert "min ahead of system clock" in line
+    assert "D-0089" in line
+    assert "non-monotonic" in line
+    assert line.isascii()
+
+
+def test_clock_drift_line_reports_minutes_ahead():
+    # Field-precedent-shaped magnitude: ~30 minutes ahead.
+    now = datetime.datetime(2026, 7, 23, 19, 45, 56)
+    events = [_event("delegated", ts="2026-07-23T20:16:32")]
+    line = sc.clock_drift_line(events, now)
+    assert "CLOCK DRIFT: last journal ts is 31 min ahead of system clock" in line
+
+
+def test_clock_drift_line_empty_journal_is_silent():
+    now = datetime.datetime(2026, 7, 10, 8, 0, 0)
+    assert sc.clock_drift_line([], now) == ""
+
+
+def test_clock_drift_line_missing_ts_field_is_silent():
+    now = datetime.datetime(2026, 7, 10, 8, 0, 0)
+    events = [{"event": "delegated"}]  # no 'ts' key at all
+    assert sc.clock_drift_line(events, now) == ""
+
+
+def test_clock_drift_line_malformed_non_iso_ts_is_silent():
+    # Adversarial: a broken/non-ISO tail ts must fail open (no line, no
+    # crash), not raise out of build_context_lines()/main().
+    now = datetime.datetime(2026, 7, 10, 8, 0, 0)
+    events = [_event("delegated", ts="not-a-timestamp-at-all")]
+    assert sc.clock_drift_line(events, now) == ""
+
+
+def test_clock_drift_line_non_string_ts_is_silent():
+    # Adversarial: a malformed journal line where ts ended up a number
+    # (not the contractual string) must not crash with an AttributeError
+    # from parse_ts()'s own .strip() call.
+    now = datetime.datetime(2026, 7, 10, 8, 0, 0)
+    events = [{"event": "delegated", "ts": 12345}]
+    assert sc.clock_drift_line(events, now) == ""
+
+
+def test_build_context_lines_includes_clock_drift_when_present(tmp_path):
+    events = [_event("delegated", ts="2026-07-10T09:05:00", task_id="t-001")]
+    root = _seed_repo(tmp_path, events=events)
+    now = datetime.datetime(2026, 7, 10, 9, 0, 0)  # journal ts is +5min ahead
+    lines = sc.build_context_lines(root, now)
+    assert any(l.startswith("CLOCK DRIFT:") for l in lines), lines
+
+
+def test_build_context_lines_omits_clock_drift_when_absent(tmp_path):
+    events = [_event("delegated", ts="2026-07-10T08:00:00", task_id="t-001")]
+    root = _seed_repo(tmp_path, events=events)
+    now = datetime.datetime(2026, 7, 10, 9, 0, 0)  # journal ts is BEHIND now
+    lines = sc.build_context_lines(root, now)
+    assert not any(l.startswith("CLOCK DRIFT:") for l in lines), lines
+
+
+def test_main_survives_malformed_tail_ts_no_clock_drift_crash(tmp_path, capsys):
+    # Adversarial (journal missing entirely): main() must still run
+    # clean, and clock_drift_line's own empty-journal branch must not be
+    # the source of any crash.
+    root = tmp_path
+    (root / "logs").mkdir()
+    # No routing-log.jsonl file at all.
+    (root / "gateway").mkdir()
+    with open(root / "gateway" / "config.yaml", "w", encoding="utf-8") as f:
+        yaml.safe_dump(CONFIG, f)
+    with open(root / "gateway" / "budgets.yaml", "w", encoding="utf-8") as f:
+        yaml.safe_dump(BUDGETS, f)
+    conn = sqlite3.connect(root / "gateway" / "requests.db")
+    conn.execute(REQUESTS_SCHEMA)
+    conn.commit()
+    conn.close()
+    code = sc.main(root)
+    assert code == 0
+    out = capsys.readouterr().out.strip().splitlines()
+    assert not any(l.startswith("session-context warning:") for l in out)
+    assert not any(l.startswith("CLOCK DRIFT:") for l in out)
+
+
+def test_main_survives_broken_tail_ts_no_clock_drift_crash(tmp_path, capsys):
+    # Adversarial (journal PRESENT but tail ts is not ISO at all): must
+    # not crash main(), and must simply omit the CLOCK DRIFT line rather
+    # than raise.
+    events = [_event("delegated", ts="garbage-not-a-timestamp", task_id="t-001")]
+    root = _seed_repo(tmp_path, events=events)
+    code = sc.main(root)
+    assert code == 0
+    out = capsys.readouterr().out.strip().splitlines()
+    assert not any(l.startswith("session-context warning:") for l in out)
+    assert not any(l.startswith("CLOCK DRIFT:") for l in out)
+
+
 # ---- degradation window: open vs closed ----
 
 def test_open_degradation_window_detects_unclosed():

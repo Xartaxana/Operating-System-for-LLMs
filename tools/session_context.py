@@ -85,6 +85,30 @@ main()'s outer boundary and blanking the ENTIRE context block (NOW,
 MODEL, JOURNAL, etc. would all be lost together, which is a strictly
 worse failure than losing just the wiring lines). main()'s own
 try/except is untouched.
+
+--- VG-1 (two-part addition, one file) ---
+Part A: the git-channel's "core.hooksPath not set" WARNING now attempts
+a one-line self-heal FIRST -- `git config --local core.hooksPath
+.githooks` -- before falling back to the warning; a confirmed success
+prints "WIRING AUTOFIX: core.hooksPath set to .githooks" instead (see
+_try_hookspath_autofix() and _AUTOFIX_FACT_PREFIX, right before
+git_hooks_channel()). Deliberately scoped to the UNSET case only: when
+core.hooksPath is already set to some OTHER path, that is somebody's
+existing configuration (human or a prior session) and is left alone,
+WARNING unchanged -- only a genuinely empty value is treated as safe to
+wire up automatically. The exec-bit (D-0093) and required-file checks
+below this branch are unmodified.
+
+Part B: a CLOCK DRIFT line (clock_drift_line(), called from
+build_context_lines() right after last_event_line()) -- field precedent
+2026-07-23: a session's journal tail carried a ts LATER than the system
+clock (a previous environment's clock ran ahead). When the tail event's
+ts is more than 60s ahead of `now`, this prints "CLOCK DRIFT: last
+journal ts is <N> min ahead of system clock -- new events will be
+non-monotonic (D-0089: do not rewrite past lines)" so the mismatch is
+visible instead of silently producing non-monotonic ts ordering on the
+next append. Fail-open on an empty journal, a missing/blank tail ts, or
+a tail ts that does not parse as the journal's naive-ISO format.
 """
 
 import contextlib
@@ -231,6 +255,53 @@ def last_event_line(events: list) -> str:
     return (
         f"LAST EVENT: ts={e.get('ts')} event={e.get('event')}"
         f" agent={e.get('agent')} task_id={e.get('task_id') or '-'}"
+    )
+
+
+# VG-1 part B: threshold (seconds) above which the tail journal event's ts
+# being AHEAD of the system clock is worth a line of its own, rather than
+# silent noise from ordinary sub-second/sub-minute scheduling jitter
+# between when an event was written and when this hook happens to run.
+_CLOCK_DRIFT_THRESHOLD_SECONDS = 60
+
+
+def clock_drift_line(events: list, now: datetime.datetime = None) -> str:
+    """VG-1 part B (field precedent 2026-07-23: a session's journal tail
+    carried ts=20:16:32 while the system clock read 19:45:56 -- a
+    previous environment's clock ran ahead of this one). NOW and LAST
+    EVENT are printed side by side already; this makes the DRIFT itself
+    visible instead of leaving a session to notice the mismatch by eye
+    and rediscover D-0089 the hard way: if the tail event's ts is MORE
+    than _CLOCK_DRIFT_THRESHOLD_SECONDS ahead of `now`, any event this
+    session appends will sit, by ts, BEFORE that tail line -- which is
+    not a rewrite of the past (D-0089 is about literally editing old
+    lines) but produces the same non-monotonic-journal symptom a reader
+    would otherwise blame on a rewrite. Returns '' (no line) when the
+    journal is empty, the tail event carries no/blank ts, that ts is not
+    parseable as the journal's naive-ISO format, or the drift is at or
+    under the threshold -- fail-open by construction, same contract as
+    last_calibration_line()'s own parse_ts() use immediately above it (a
+    ValueError/TypeError from parse_ts on a malformed ts is caught here;
+    an ImportError/SyntaxError from the deferred preflight_quota import
+    itself is deliberately NOT caught, for the same reason quota_lines()
+    re-raises those two -- see this module's top-of-file N4 comment)."""
+    if not events:
+        return ""
+    now = now or datetime.datetime.now()
+    ts = events[-1].get("ts")
+    if not ts:
+        return ""
+    try:
+        last_ts = parse_ts(ts)
+    except (ValueError, TypeError, AttributeError):
+        return ""
+    drift_seconds = (last_ts - now).total_seconds()
+    if drift_seconds <= _CLOCK_DRIFT_THRESHOLD_SECONDS:
+        return ""
+    drift_minutes = round(drift_seconds / 60)
+    return (
+        f"CLOCK DRIFT: last journal ts is {drift_minutes} min ahead of system clock"
+        " -- new events will be non-monotonic (D-0089: do not rewrite past lines)"
     )
 
 
@@ -720,6 +791,76 @@ _WIRING_LINE_MAX_LEN = 300
 # recognized and checked, not silently misparsed.
 _HOOK_COMMAND_RE = re.compile(r"^python tools/([^/\\]+\.py)$")
 
+# VG-1 part A: a fact string returned by _try_hookspath_autofix() on a
+# CONFIRMED success is prefixed with this marker so wiring_lines() can
+# tell it apart from an ordinary warning fact and render it as
+# "WIRING AUTOFIX: ..." instead of "WIRING WARNING: ...". No other
+# git/harness-channel fact ever starts with this literal string.
+_AUTOFIX_FACT_PREFIX = "AUTOFIX: "
+
+
+def _try_hookspath_autofix(root: Path, reason: str) -> str:
+    """VG-1 part A: core.hooksPath came back UNSET -- before falling back
+    to the plain 'core.hooksPath not set' WARNING, attempt the one-line
+    self-heal `git config --local core.hooksPath .githooks` (relative
+    path, LOCAL repo config only -- never --global/--system, per the
+    spec's explicit constraint) and recheck.
+
+    Returns the AUTOFIX fact (_AUTOFIX_FACT_PREFIX + "core.hooksPath set
+    to .githooks") on a confirmed success: the `git config` write itself
+    exited 0 AND both required hook files are actually present on disk
+    under .githooks/ afterward (setting hooksPath to a directory whose
+    hook files don't exist would "succeed" as a git operation while
+    leaving the wiring exactly as broken as before). Any other outcome
+    returns the ORIGINAL 'core.hooksPath not set' warning fact with an
+    "; autofix failed: <reason>" suffix -- covering the three failure
+    causes named in the spec: git itself unavailable/erroring (the write
+    call raises), the config being unwritable e.g. read-only (the write
+    call exits non-zero), and .githooks's required files missing even
+    after a successful config write. Never raises -- same fail-open
+    contract as the rest of this channel.
+
+    Deliberately attempted ONLY for the UNSET case -- NOT when
+    core.hooksPath already resolves to some OTHER path (that branch,
+    handled entirely by the caller, never calls this function): an
+    already-present value is somebody's explicit prior configuration
+    (human or an earlier session), silently overwriting it is exactly
+    the harm the spec's carve-out exists to prevent ("не перетирать
+    чужой выбор молча"). Only a genuinely unset hooksPath is treated as
+    "nothing to preserve, safe to wire up automatically"."""
+    base_warning = f"core.hooksPath not set -- {reason}"
+    try:
+        set_result = subprocess.run(
+            ["git", "config", "--local", "core.hooksPath", str(_GITHOOKS_DIRNAME)],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception as e:
+        detail = _ascii_sanitize(f"git config write failed ({type(e).__name__})", 120)
+        return f"{base_warning}; autofix failed: {detail}"
+
+    if set_result.returncode != 0:
+        stderr_lines = (set_result.stderr or "").strip().splitlines()
+        raw_detail = stderr_lines[0] if stderr_lines else f"exit code {set_result.returncode}"
+        detail = _ascii_sanitize(raw_detail, 120)
+        return f"{base_warning}; autofix failed: git config write error ({detail})"
+
+    missing = [
+        name
+        for name in _REQUIRED_GITHOOKS
+        if not (root / _GITHOOKS_DIRNAME / name).is_file()
+    ]
+    if missing:
+        missing_str = _ascii_sanitize(", ".join(missing), 120)
+        return (
+            f"{base_warning}; autofix set core.hooksPath but required"
+            f" file(s) still missing: {missing_str}"
+        )
+
+    return f"{_AUTOFIX_FACT_PREFIX}core.hooksPath set to {_GITHOOKS_DIRNAME}"
+
 
 def git_hooks_channel(root: Path) -> list:
     """git-channel: core.hooksPath must resolve to <root>/.githooks, AND
@@ -769,7 +910,12 @@ def git_hooks_channel(root: Path) -> list:
     raw = (result.stdout or "").strip()
     warnings = []
     if result.returncode != 0 or not raw:
-        warnings.append(f"core.hooksPath not set -- {reason}")
+        # VG-1 part A: attempt the self-heal before settling for the WARN
+        # (see _try_hookspath_autofix's own docstring for the full
+        # success/failure contract). Only reached when hooksPath is
+        # UNSET -- the "set to something else" branch below never calls
+        # this, by design (see that function's docstring).
+        warnings.append(_try_hookspath_autofix(root, reason))
     else:
         configured = Path(raw)
         if not configured.is_absolute():
@@ -967,13 +1113,26 @@ def python_channel():
     return shutil.which("python")
 
 
+def _wiring_line_for(fact: str) -> str:
+    """VG-1 part A: formats one git/harness-channel fact into its final
+    WIRING output line. A fact carrying _AUTOFIX_FACT_PREFIX (a CONFIRMED
+    self-heal, see _try_hookspath_autofix) renders as 'WIRING AUTOFIX:
+    ...' -- a discrepancy that got RESOLVED, not one still open -- so it
+    must not read like a warning. Every other fact keeps the existing
+    'WIRING WARNING: ...' rendering unchanged."""
+    if fact.startswith(_AUTOFIX_FACT_PREFIX):
+        return f"WIRING {fact}"
+    return f"WIRING WARNING: {fact}"
+
+
 def wiring_lines(root: Path = None) -> list:
     """Combines the three wiring-integrity channels into either a single
-    'WIRING: OK (...)' line (spec point 1, everything wired) or one
-    'WIRING WARNING: <fact>' line per discrepancy across all three
-    channels. Feeds the SAME output stream as boot_budget_lines() etc.
-    (build_context_lines() below appends this list exactly like the
-    others).
+    'WIRING: OK (...)' line (spec point 1, everything wired), one
+    'WIRING WARNING: <fact>' line per discrepancy, or a 'WIRING AUTOFIX:
+    <fact>' line where the git-channel self-healed an unset
+    core.hooksPath (VG-1 part A -- see _try_hookspath_autofix). Feeds the
+    SAME output stream as boot_budget_lines() etc. (build_context_lines()
+    below appends this list exactly like the others).
 
     Unlike quota_lines()/open_dispatches() -- which have no local
     try/except and rely entirely on main()'s single outer boundary --
@@ -1022,7 +1181,7 @@ def wiring_lines(root: Path = None) -> list:
         )
         return [_ascii_sanitize(line, _WIRING_LINE_MAX_LEN)]
     return [
-        _ascii_sanitize(f"WIRING WARNING: {w}", _WIRING_LINE_MAX_LEN) for w in warnings
+        _ascii_sanitize(_wiring_line_for(w), _WIRING_LINE_MAX_LEN) for w in warnings
     ]
 
 
@@ -1038,6 +1197,10 @@ def build_context_lines(
     events = read_journal_events(root)
 
     lines = [now_line(now), model_line(stdin_payload), last_event_line(events)]
+
+    drift_line = clock_drift_line(events, now)
+    if drift_line:
+        lines.append(drift_line)
 
     open_since = open_degradation_window(events)
     if open_since:
