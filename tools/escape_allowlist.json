@@ -1,4 +1,10 @@
 {
+  "judge_prompt_pin": {
+    "source": "gateway/shadow_eval.py",
+    "symbol": "JUDGE_SYSTEM_PROMPT",
+    "sha256": "179b700690a76bfad799123b1e70dc7d9d59d9a845886682acf77e63e56ae9e1",
+    "evidence": "t-254 2026-07-21 13/13 vs manual (D-0031)"
+  },
   "entries": [
     {
       "id": "critic-skipped-concession",
