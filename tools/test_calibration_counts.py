@@ -530,3 +530,51 @@ def test_unclosed_tasks_listed(tmp_path):
     ])
     report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
     assert report["unclosed_tasks"] == ["t-001"]
+
+
+# ---------------------------------------------------------------------
+# Находка t-293: семантика закрытия в "незакрытых задачах" -- closes:
+# токен в notes ЛЮБОГО позднего события и decomposable как закрывающий
+# статус. Кейс 3 (regress-guard: чисто открытая delegated -> ЕСТЬ в
+# незакрытых) уже покрыт test_unclosed_tasks_listed выше -- не дублируем.
+# ---------------------------------------------------------------------
+def test_unclosed_closed_by_closes_token_in_later_event(tmp_path):
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        ev("2026-07-15T00:00:00", "delegated", agent="scout", model="haiku",
+           task_id="t-001", category="recon", notes="n"),
+        # позднее событие -- НЕ lifecycle-эвент (calibrated), но closes:
+        # токен в его notes всё равно должен закрыть t-001
+        ev("2026-07-15T01:00:00", "calibrated", agent="lead", model="fable",
+           category="calibration", notes="еженедельный прогон closes:t-001"),
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-16T00:00:00"))
+    assert report["unclosed_tasks"] == []
+
+
+def test_unclosed_closed_by_decomposable(tmp_path):
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        ev("2026-07-15T00:00:00", "delegated", agent="scout", model="haiku",
+           task_id="t-002", category="recon", notes="n"),
+        ev("2026-07-15T00:10:00", "decomposable", agent="scout", model="haiku",
+           task_id="t-002", category="recon", notes="разложимо на части"),
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-16T00:00:00"))
+    assert report["unclosed_tasks"] == []
+    assert report["closed_by_decomposable"] == ["t-002"]
+
+
+def test_unclosed_closes_token_trailing_punctuation(tmp_path):
+    # "closes:t-042;" -- закрывает по форме сканера (session_context.py
+    # _CLOSES_RE: t-\d+, хвостовая пунктуация естественно отсекается
+    # \d+, отдельная обрезка не нужна).
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        ev("2026-07-15T00:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-042", category="implementation", notes="n"),
+        ev("2026-07-15T00:10:00", "dispatch_skipped", agent="builder", model="sonnet",
+           category="implementation", notes="батч мелочей; closes:t-042; продолжение в t-050"),
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-16T00:00:00"))
+    assert report["unclosed_tasks"] == []

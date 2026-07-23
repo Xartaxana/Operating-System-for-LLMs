@@ -56,6 +56,27 @@ ALWAYS_REQUIRED_FIELDS = ("agent", "category", "notes")
 # test_schema_constants_match_journal_validator в test_calibration_counts.py.
 REPLACES_WORKER_RE = re.compile(r"replaces_worker:(\S+)")
 
+# Незакрытые-задачи фикс (находка t-293): литерал-зеркало _CLOSES_RE из
+# tools/session_context.py -- та же форма, что читает SessionStart-сканер
+# (левый анкор \b, чтобы "discloses:t-001"/"encloses:t-133" не матчились
+# как substring; значение -- ТОЛЬКО t-\d+, не произвольный non-whitespace
+# токен -- это и есть форма сканера, не "первый non-whitespace фрагмент"
+# буквально: хвостовая пунктуация типа "closes:t-042;" естественно
+# отсекается самим \d+, не требует отдельной обрезки). Продублирован
+# намеренно, не импортирован -- та же причина, что REPLACES_WORKER_RE
+# выше (этот скрипт работает с ОБОИМИ журналами OS/AO3, не зависит от
+# session_context.py, который специфичен для OS-хука).
+CLOSES_RE = re.compile(r"(?<!\w)closes:(t-\d+)")
+
+
+def extract_closes_tokens(notes: Optional[str]) -> List[str]:
+    """closes:t-NNN токены из notes -- зеркало
+    session_context._closes_task_ids: пустой список для не-строки/
+    отсутствующего notes, никогда не бросает."""
+    if not isinstance(notes, str):
+        return []
+    return CLOSES_RE.findall(notes)
+
 
 def extract_replaces_worker(notes: Optional[str]) -> Optional[str]:
     """Правило 9(в2), сторона счётчика (не гейта): вытаскивает хэндл из
@@ -267,6 +288,20 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
     # check порядок, как в валидаторе) -- self-reference (маркер ссылается
     # на worker_ref ЭТОЙ ЖЕ новой строки) не находит себя в prior_refs.
     task_worker_refs: Dict[str, set] = {}
+    # Незакрытые-задачи фикс (находка t-293), часть (1): closes:-токены
+    # собираются из notes ВСЕХ распарсенных строк (не только lifecycle-
+    # событий -- токен может лежать в notes любого ПОЗДНЕГО события,
+    # напр. dispatch_skipped/calibrated), по ВСЕМУ файлу, зеркаля
+    # session_context.open_dispatches(), который тоже сканирует notes
+    # безотносительно типа события. Простое присутствие токена закрывает
+    # задачу для этого счётчика (не пытаемся воспроизвести полную
+    # (ts, file_idx)-семантику "может ли более поздний delegated
+    # переоткрыть после токена" из session_context.py -- этот скрипт
+    # выдаёт КАНДИДАТОВ, не связывающий приговор; см. докстринг файла).
+    closed_via_token: set = set()
+    for pl in parsed_lines:
+        for closed_tid in extract_closes_tokens(pl.data.get("notes")):
+            closed_via_token.add(closed_tid)
     duplicate_delegates = []
     for pl in parsed_lines:
         d = pl.data
@@ -319,6 +354,12 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
                 task_worker_refs.setdefault(tid, set()).add(worker_ref.strip())
         elif ev in ("accepted", "rejected", "escalated"):
             last_status[tid] = ev
+        elif ev == "decomposable":
+            # Незакрытые-задачи фикс (находка t-293), часть (2): по
+            # стейт-машине политики (CLAUDE.md mermaid-диаграмма журнала)
+            # decomposable ЗАКРЫВАЕТ диспатч (возврат координатору под
+            # тем же task_id) -- не остаётся "delegated" навечно.
+            last_status[tid] = "decomposable"
         # defect_found не двигает lifecycle-статус исходной задачи (у него
         # свой task_id новой находки; ref указывает на исходную).
 
@@ -403,11 +444,21 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
         })
 
     # --- 10. Незакрытые задачи ---
+    # Находка t-293: "открыто" -- последний lifecycle-статус delegated
+    # (decomposable теперь тоже lifecycle-статус, см. выше -- закрывает),
+    # И задача НЕ отмечена closes:-токеном нигде в notes журнала.
     unclosed_tasks = []
+    closed_by_decomposable = []
     for tid, status in last_status.items():
+        if tid in closed_via_token:
+            continue
+        if status == "decomposable":
+            closed_by_decomposable.append(tid)
+            continue
         if status == "delegated":
             unclosed_tasks.append(tid)
     unclosed_tasks.sort()
+    closed_by_decomposable.sort()
 
     return {
         "journal": path,
@@ -429,6 +480,7 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
         ],
         "degradation_pairs": degradation_pairs,
         "unclosed_tasks": unclosed_tasks,
+        "closed_by_decomposable": closed_by_decomposable,
     }
 
 
@@ -523,11 +575,14 @@ def render_text(report: Dict[str, Any]) -> str:
     else:
         out.append("  (нет событий деградации в окне)")
 
-    out.append(_fmt_section("Незакрытые задачи (последний lifecycle-эвент = delegated)"))
+    out.append(_fmt_section("Незакрытые задачи (последний lifecycle-эвент = delegated, "
+                             "без closes:-токена)"))
     if report["unclosed_tasks"]:
         out.append("  " + ", ".join(report["unclosed_tasks"]))
     else:
         out.append("  (нет)")
+    if report["closed_by_decomposable"]:
+        out.append("  закрыта: decomposable -- " + ", ".join(report["closed_by_decomposable"]))
 
     return "\n".join(out)
 
