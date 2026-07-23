@@ -204,12 +204,19 @@ per task — a measured goal (exams / calibration check), not a gate.
 
 R13. **Leaf routing (D-0087).** Intake classifies every task: a LEAF
 closes under one performer of one allocate-category with no
-dependencies; doubt = graph. A leaf MAY run through the
-D-construction: category→tier by the ladder, worker executes,
-acceptance by a CALIBRATED JUDGE (verdict recorded; `basis:
-"judge"`), deterministic R6 mirror on reject (one retry same tier →
-one-step escalation → failed back to the coordinator); the
-coordinator stays out of the leaf loop. TWO legal judge forms: the
+dependencies; doubt = graph. A leaf runs through the D-construction
+BY DEFAULT (D-0094 — MAY promoted to default on the clean check-30
+audit of calibration #4, 2026-07-23): category→tier by the ladder,
+worker executes, acceptance by a CALIBRATED JUDGE (verdict recorded;
+`basis: "judge"`), deterministic R6 mirror on reject (one retry same
+tier → one-step escalation → failed back to the coordinator); the
+coordinator stays out of the leaf loop. A deviation — the
+coordinator taking a leaf through the standard acceptance path — is
+legal ONLY with a recorded reason in the journal (t-286 form; the
+window detector is check 30). Recon-leaf intent keys / DoD carry the
+NEGATIVE-FORM-CONTROL criterion (command hygiene p.6): a negative
+claim in the material without its positive same-form control →
+reject (check-20 cases t-268/t-272 — the miss passed two judges). TWO legal judge forms: the
 gateway alias (judge-sonnet, needs a live proxy; the only form for
 script-driven constructions) and a SUBSCRIPTION judge-subagent
 carrying the pinned JUDGE_SYSTEM_PROMPT (gateway/shadow_eval.py)
