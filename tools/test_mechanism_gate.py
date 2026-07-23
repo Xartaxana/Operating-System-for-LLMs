@@ -186,6 +186,26 @@ def test_skip_re_matches_on_crlf_message():
     assert mg.SKIP_RE.search(msg)
 
 
+def test_skip_re_first_line_of_message_no_leading_newline_matches():
+    # (6b, критик t-288 тест-гэп) skip-строка — САМАЯ ПЕРВАЯ строка
+    # сообщения целиком, БЕЗ ведущего \n (в отличие от (1)/(2)/(6) выше,
+    # где skip-строке предшествует хотя бы один перевод строки) →
+    # активен: MULTILINE ^ матчит и позицию 0 строки, не только позицию
+    # сразу после \n.
+    msg = "оси: не-механизм (причина, без ведущего текста)\n\nдоп. текст\n"
+    assert mg.SKIP_RE.search(msg)
+
+
+def test_decide_first_line_skip_no_leading_newline_passes():
+    # (8b, критик t-288 тест-гэп) сквозной кейс через decide(): то же
+    # самое сообщение (skip-строка первой, без ведущего \n) реально
+    # пропускает механизменный коммит без осевого блока.
+    msg = "оси: не-механизм (опечатка в правиле 3)\n"
+    code, _ = mg.decide(msg=msg, block_extra="", staged=["CLAUDE.md"],
+                        map_text="## Ось 1 — Деплои\n")
+    assert code == 0
+
+
 def test_decide_inline_quote_without_axis_block_blocks():
     # (7) сквозной кейс через decide(): механизменный staged-путь,
     # сообщение с ИНЛАЙН-цитатой skip-синтаксиса и БЕЗ осевого блока →

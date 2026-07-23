@@ -243,6 +243,35 @@ def test_git_channel_hook_untracked_warns(tmp_path):
     assert all(w.isascii() for w in warnings), warnings
 
 
+def test_git_channel_ls_files_nonzero_returncode_folds_into_one_warning_no_untracked(
+    tmp_path, monkeypatch
+):
+    # (4b, critic t-288) `git ls-files -s` returns nonzero WITHOUT raising
+    # (e.g. a git-internal error) and with empty stdout -- must get the
+    # SAME one-WARNING-and-skip treatment as the exception branch above,
+    # NOT fall through and mislabel both hooks "untracked" (that would lie
+    # about the cause: the mode dict would just be empty because nothing
+    # was parsed, not because git actually reports the hooks untracked).
+    _init_repo_with_hooks(tmp_path)
+    real_run = sc.subprocess.run
+
+    class _FakeResult:
+        returncode = 1
+        stdout = ""
+        stderr = "fatal: simulated ls-files error"
+
+    def _failing_run(cmd, *args, **kwargs):
+        if len(cmd) >= 2 and cmd[0] == "git" and cmd[1] == "ls-files":
+            return _FakeResult()
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(sc.subprocess, "run", _failing_run)
+    warnings = sc.git_hooks_channel(tmp_path)
+    assert any("ls-files" in w and "failed" in w for w in warnings), warnings
+    assert not any("untracked" in w for w in warnings), warnings
+    assert all(w.isascii() for w in warnings), warnings
+
+
 def test_git_channel_ls_files_failure_folds_into_one_warning(tmp_path, monkeypatch):
     # (4) the `git ls-files -s` call itself fails -> same treatment as
     # the existing hooksPath call's own except-branch: folds into one

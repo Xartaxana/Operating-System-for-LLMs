@@ -179,10 +179,22 @@ def find_tier_declarations(msg: str) -> list[str]:
     (see decide_full below) -- reject if even ONE found line fails to
     match the binding, even when another (e.g. a real, later) line
     does match. The alternative ("passes if ANY line matches") was
-    rejected: it would let one spoofed/quoted matching line mask a
-    REAL mismatched value elsewhere in the same message -- tier
-    spoofing is more dangerous than a false reject on an incidentally
-    tier-line-shaped quoted example."""
+    rejected: with MULTIPLE tier lines in one message, it would let one
+    spoofed/quoted matching line mask a REAL mismatched value elsewhere
+    in the same message.
+
+    GUARANTEE-SCOPE CLARIFICATION (source deployment critic t-278(a) --
+    docstring corrected, no code change): "ALL must pass" defends
+    exactly that MULTI-LINE case (a real mismatched line plus a
+    spoofing matching line next to it) -- a SINGLE-LINE spoofer (one
+    fake tier line, no real one present) passes BOTH semantics THE
+    SAME: this function never checks that the declared tier is TRUE,
+    only that its declared FORM matches the binding (truthfulness of
+    the declaration is calibration's job, reconciled against
+    transcripts -- code guarantees the form, a tier above judges the
+    meaning). The actual effect of the chosen semantics is fail-closed
+    on quotes/multiple lines (a false reject is safer than a false
+    accept), not a general anti-spoofing guarantee."""
     return [m.strip() for m in TIER_LINE_RE.findall(msg)]
 
 

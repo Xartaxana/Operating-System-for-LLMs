@@ -189,6 +189,40 @@ def test_v2_git_add_path_alone_no_warn():
     assert output is None
 
 
+def test_p5_grep_journal_path_read_only_no_warn():
+    # П5 (handoff 07-22 вечер, батч мелочей) -- read-only обращение
+    # grep'ом к журнальному пути. ЭМПИРИКА (правило 3): против ТЕКУЩЕГО
+    # кода этого файла (уже несёт v2/t-255 порт) заявленный в спеке
+    # false positive НЕ воспроизводится -- _is_journal_bypass() требует
+    # ">" ИЛИ printf/echo в команде, простой grep без них не триггерит
+    # ни до, ни после этого коммита; тест закрывает недостающий (ранее
+    # непокрытый явным тестом) DoD-кейс, поведение не меняет.
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("grep -n pattern logs/routing-log.jsonl")
+    )
+    assert exit_code == 0
+    assert output is None
+
+
+def test_p5_rg_journal_path_read_only_no_warn():
+    # П5, тот же класс, инструмент rg (ripgrep) вместо grep.
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("rg pattern logs/routing-log.jsonl")
+    )
+    assert exit_code == 0
+    assert output is None
+
+
+def test_p5_grep_with_context_flags_journal_path_no_warn():
+    # Граница: -A/-B/-C context-флаги grep'а не вносят ">" в команду
+    # (это НЕ shell-редирект) -- всё ещё тихо.
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("grep -A2 -B2 pattern logs/routing-log.jsonl")
+    )
+    assert exit_code == 0
+    assert output is None
+
+
 def test_v2_git_commit_message_mentions_routing_log_and_arrow_no_warn():
     command = (
         'git commit -m "Update routing-log format: '

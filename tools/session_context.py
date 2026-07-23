@@ -807,6 +807,19 @@ def git_hooks_channel(root: Path) -> list:
         warnings.append(f"{detail} -- {reason}")
         ls_result = None
 
+    if ls_result is not None and ls_result.returncode != 0:
+        # A non-zero returncode (e.g. empty stdout because git itself
+        # errored -- not because the hooks are genuinely untracked) gets
+        # the SAME one-WARNING-and-skip treatment as the except branch
+        # above, instead of falling through into the loop below and
+        # being silently misreported as "untracked" for both hooks
+        # (critic t-288 finding).
+        detail = _ascii_sanitize(
+            f"git ls-files -s failed (returncode {ls_result.returncode})", 120
+        )
+        warnings.append(f"{detail} -- {reason}")
+        ls_result = None
+
     modes = {}
     if ls_result is not None:
         for line in (ls_result.stdout or "").splitlines():

@@ -134,23 +134,35 @@ NUMERIC_RC_FIELDS = ("rc", "exit_code", "returnCode", "return_code")
 # repo (path shape "...Temp/claude/<repo>/<session_id>/scratchpad/...").
 # Edits there are excluded from main-edit scope entirely: not counted
 # as code edits for either the doc-only exemption or the green
-# invariant (main_gate.py/dod_gate.py). Literal substring match,
-# case-insensitive: the path can arrive in any case on some platforms.
-_SCRATCHPAD_PATTERN = "scratchpad"
+# invariant (main_gate.py/dod_gate.py). Criterion -- EXCLUSIVELY "path
+# resolves entirely outside cwd (the repo root)" (see
+# _is_scratchpad_path()); a real harness scratchpad is always outside
+# cwd, so this fully covers it.
+#
+# NARROWED (source deployment critic t-278(b), mirrored per sibling
+# rule): this used to ALSO carry a literal substring match on
+# "scratchpad" (case-insensitive) as a separate, cwd-independent
+# criterion. Removed: it was redundant to the outside-cwd criterion for
+# a real scratchpad path, and gave a latent fail-open on a hypothetical
+# IN-REPO file whose NAME merely contains "scratchpad" (e.g.
+# tools/scratchpad_utils.py) -- such a file lives INSIDE the repo and
+# should not be exempted from main-edit scope. The per-repo gating
+# frame (by location, not by filename) was adopted by the coordinator
+# earlier.
 
 
 def _is_scratchpad_path(file_path, cwd) -> bool:
-    """True if file_path is a harness scratchpad path ('scratchpad' in
-    the path, case-insensitive) OR the path resolves to somewhere
-    OUTSIDE the repo root (cwd) entirely. Conservative (symmetric with
+    """True if the path resolves to somewhere OUTSIDE the repo root
+    (cwd) entirely -- this IS the harness-scratchpad criterion (see the
+    module comment above for the narrowed boundary: a "scratchpad"
+    substring in the name no longer triggers the exemption by itself,
+    only location outside cwd does). Conservative (symmetric with
     _is_doc_only_file): an UNKNOWN file_path/cwd returns False (NOT
     excluded, the invariant stays in force) -- missing information does
     not earn an exemption from main-edit scope, the same fail-safe
     principle as the doc-only exemption's unknown-extension handling."""
     if not isinstance(file_path, str) or not file_path:
         return False
-    if _SCRATCHPAD_PATTERN in file_path.lower():
-        return True
     if not isinstance(cwd, str) or not cwd:
         return False
     try:

@@ -198,6 +198,26 @@ def test_skip_re_matches_on_crlf_message():
     assert mg.SKIP_RE.search(msg)
 
 
+def test_skip_re_first_line_of_message_no_leading_newline_matches():
+    # (6b, source deployment critic t-288 test gap) the skip line is the
+    # VERY FIRST line of the message, with NO leading \n (unlike (1)/(2)/
+    # (6) above, where the skip line is preceded by at least one newline)
+    # -> active: MULTILINE ^ matches position 0 of the string too, not
+    # only the position right after a \n.
+    msg = "axes: not a mechanism (reason, no leading text)\n\nmore text\n"
+    assert mg.SKIP_RE.search(msg)
+
+
+def test_decide_first_line_skip_no_leading_newline_passes():
+    # (8b, source deployment critic t-288 test gap) end-to-end via
+    # decide(): the same message (skip line first, no leading \n)
+    # actually passes a mechanism-touching commit with no axis block.
+    msg = "axes: not a mechanism (typo in rule 3)\n"
+    code, _ = mg.decide(msg=msg, block_extra="", staged=["CLAUDE.md"],
+                        map_text="## Axis 1 -- Deployments\n")
+    assert code == 0
+
+
 def test_decide_inline_quote_without_axis_block_blocks():
     # (7) end-to-end via decide(): a mechanism staged path, a message with
     # an INLINE quote of the skip syntax and NO axis block -> the gate

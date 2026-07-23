@@ -386,9 +386,31 @@ def test_build_fact_normal_repo_absolute_path_not_excluded(tmp_path):
     assert entry["file_path"] == str(inner)
 
 
-def test_build_fact_scratchpad_excluded_without_cwd_present():
+def test_build_fact_scratchpad_word_without_cwd_no_longer_excluded():
+    # (source deployment critic t-278(b), mirrored) DIVERGENCE from
+    # prior behavior, documented not silent: a bare "scratchpad"
+    # substring (no cwd) no longer excludes on its own -- the criterion
+    # is now solely "outside cwd", which cannot be evaluated without
+    # cwd at all -- fail-safe: NOT excluded.
     payload = {"tool_name": "Write", "tool_input": {"file_path": "/tmp/scratchpad/x.py"}}
-    assert dod_track.build_fact(payload) is None
+    kind, entry = dod_track.build_fact(payload)
+    assert kind == "edit"
+    assert entry["file_path"] == "/tmp/scratchpad/x.py"
+
+
+def test_build_fact_repo_internal_scratchpad_named_file_not_excluded():
+    # (source deployment critic t-278(b) DoD requirement, mirrored) an
+    # in-repo path whose NAME merely contains "scratchpad" is NOT
+    # excluded from main scope -- cwd matches the root, so "outside cwd"
+    # is false, and the standalone substring branch no longer exists.
+    payload = {
+        "tool_name": "Edit",
+        "cwd": "D:/repo",
+        "tool_input": {"file_path": "D:/repo/tools/scratchpad_utils.py"},
+    }
+    kind, entry = dod_track.build_fact(payload)
+    assert kind == "edit"
+    assert entry["file_path"] == "D:/repo/tools/scratchpad_utils.py"
 
 
 def test_build_fact_no_cwd_and_no_scratchpad_word_not_excluded():
@@ -399,11 +421,19 @@ def test_build_fact_no_cwd_and_no_scratchpad_word_not_excluded():
 
 
 def test_is_scratchpad_path_direct_boundary_cases():
-    assert dod_track._is_scratchpad_path("C:/x/scratchpad/y.py", None) is True
-    assert dod_track._is_scratchpad_path("C:/x/SCRATCHPAD/y.py", None) is True
+    # (source deployment critic t-278(b), mirrored) without cwd, a
+    # "scratchpad" name is no longer enough by itself -- the criterion
+    # is entirely "outside cwd", which cannot be evaluated without cwd
+    # -> False (fail-safe).
+    assert dod_track._is_scratchpad_path("C:/x/scratchpad/y.py", None) is False
+    assert dod_track._is_scratchpad_path("C:/x/SCRATCHPAD/y.py", None) is False
     assert dod_track._is_scratchpad_path(None, "D:/repo") is False
     assert dod_track._is_scratchpad_path("", "D:/repo") is False
     assert dod_track._is_scratchpad_path("tools/x.py", "D:/repo") is False
+    # the existing outside-cwd case stays green as before.
+    assert dod_track._is_scratchpad_path("C:/x/scratchpad/y.py", "D:/repo") is True
+    # an in-repo path with "scratchpad" in the name is NOT excluded.
+    assert dod_track._is_scratchpad_path("D:/repo/scratchpad_utils.py", "D:/repo") is False
 
 
 # ---------------------------------------------------------------------

@@ -420,11 +420,34 @@ def test_build_fact_normal_repo_absolute_path_not_excluded(tmp_path):
     assert entry["file_path"] == str(inner)
 
 
-def test_build_fact_scratchpad_excluded_without_cwd_present():
-    # Boundary: "scratchpad" substring alone is enough, no cwd needed
-    # at all for THIS branch of the check.
+def test_build_fact_scratchpad_word_without_cwd_no_longer_excluded():
+    # (критик t-278 (б), Lead-решение по батчу мелочей) РАСХОЖДЕНИЕ с
+    # прежним поведением, задокументировано, не тихо: substring
+    # "scratchpad" САМ ПО СЕБЕ (без cwd) БОЛЬШЕ НЕ исключает -- условие
+    # убрано как избыточное к вне-cwd критерию и латентно fail-open на
+    # РЕПО-файле с этим словом в имени. Без cwd критерий "вне корня
+    # репо" вообще не может быть вычислен -- fail-safe: НЕ исключается
+    # (тот же принцип, что test_build_fact_no_cwd_and_no_scratchpad_word_not_excluded
+    # ниже).
     payload = {"tool_name": "Write", "tool_input": {"file_path": "/tmp/scratchpad/x.py"}}
-    assert dod_track.build_fact(payload) is None
+    kind, entry = dod_track.build_fact(payload)
+    assert kind == "edit"
+    assert entry["file_path"] == "/tmp/scratchpad/x.py"
+
+
+def test_build_fact_repo_internal_scratchpad_named_file_not_excluded():
+    # (1) критик t-278 (б) DoD-требование: репо-внутренний путь, чьё имя
+    # просто содержит "scratchpad", НЕ исключается из main-скоупа --
+    # cwd совпадает с корнем, значит "вне cwd" ложно, а substring-условие
+    # больше не существует отдельно.
+    payload = {
+        "tool_name": "Edit",
+        "cwd": "D:/repo",
+        "tool_input": {"file_path": "D:/repo/tools/scratchpad_utils.py"},
+    }
+    kind, entry = dod_track.build_fact(payload)
+    assert kind == "edit"
+    assert entry["file_path"] == "D:/repo/tools/scratchpad_utils.py"
 
 
 def test_build_fact_no_cwd_and_no_scratchpad_word_not_excluded():
@@ -438,11 +461,19 @@ def test_build_fact_no_cwd_and_no_scratchpad_word_not_excluded():
 
 
 def test_is_scratchpad_path_direct_boundary_cases():
-    assert dod_track._is_scratchpad_path("C:/x/scratchpad/y.py", None) is True
-    assert dod_track._is_scratchpad_path("C:/x/SCRATCHPAD/y.py", None) is True
+    # (критик t-278 (б)) без cwd "scratchpad" в имени БОЛЬШЕ НЕ хватает
+    # само по себе -- критерий целиком завязан на "вне cwd", а без cwd
+    # эта проверка невычислима -> False (fail-safe).
+    assert dod_track._is_scratchpad_path("C:/x/scratchpad/y.py", None) is False
+    assert dod_track._is_scratchpad_path("C:/x/SCRATCHPAD/y.py", None) is False
     assert dod_track._is_scratchpad_path(None, "D:/repo") is False
     assert dod_track._is_scratchpad_path("", "D:/repo") is False
     assert dod_track._is_scratchpad_path("tools/x.py", "D:/repo") is False
+    # (2) существующий вне-cwd случай остаётся зелёным как раньше.
+    assert dod_track._is_scratchpad_path("C:/x/scratchpad/y.py", "D:/repo") is True
+    # (1) репо-внутренний путь с "scratchpad" в имени -- НЕ исключается
+    # (критик t-278 (б) DoD-требование).
+    assert dod_track._is_scratchpad_path("D:/repo/scratchpad_utils.py", "D:/repo") is False
 
 
 # ---------------------------------------------------------------------
