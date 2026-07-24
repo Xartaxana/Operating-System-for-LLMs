@@ -36,9 +36,23 @@ PHASE 4 — HARDENING FOR DELIVERY (D-0098) ОТКРЫТА 2026-07-24 слово
 механизмов D-0063 в силе). Входная оценка исполнена — enforcement-gap
 аудит 07-24 (t-312..t-315, отчёт
 docs/task_reports/2026-07-24_enforcement-gap-audit.md). Workstreams и
-гейт — ROADMAP «Phase 4». Статус 07-24: E4 исполнен (2105d4f —
-tools-ограничение builder штаб+кит, кит-critic; AO3 — их 927e692);
-кит-порт t-316 в работе; E1 — за ним; ре-аудит и минор — по гейту.
+гейт — ROADMAP «Phase 4». СТАТУС 07-24: WORKSTREAMS 1–3 ИСПОЛНЕНЫ
+ЦЕЛИКОМ, критик-гейт t-318 fit/0 блокеров (перегоны: штаб 1538,
+кит 1352, exam-kit 270 passed): ws1 — протухшие строки переписаны
+(a9310db); ws2 — кит-полнота уложена (c0d25e2: wiring_check.py
+закрыл D-0092 кодом, hygiene v3, 4 слоя journal_echo, judge_prompt_
+pin, D-0085-доки, INSTALL escape-шаг; exam-кит 7b6b2fa); ws3 — E4
+(2105d4f, вкл. внеплановую дыру кит-critic) + E1 страж R6-зеркала
+(edfd134, обе стороны). Базлайн parity пере-снят 09:08 (50 пар
+CLEAN). ЗАПЕЧЁННЫЙ ПОРТ-ДОЛГ (базлайн его не видит — явные строки):
+кит-calibration_counts без accepted_tids-фикса t-309;
+кит-usage_report без комментария-сверки. ХВОСТЫ Phase 4 (не гейт):
+F2 критика — неэкранированный SQL LIKE (метасимвол _ в слагах,
+класс t-126); F3 — кодировка piped-CLI соседей (точечный scout);
+DOC_ONLY_EXTENSIONS без .yaml/.yml (решение Lead); строка-класс
+справочных docs/*.md в номенклатуре леджера; exam-кит
+mechanism_gate без тест-файла. ОСТАЛОСЬ ПО ГЕЙТУ: (г) чистый
+ре-аудит; (в) кит-минор по релизному слову (kit-release, D-0097).
 
 ## Current Task (Authoritative, D-0025)
 
