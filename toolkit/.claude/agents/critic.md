@@ -2,6 +2,7 @@
 name: critic
 description: Critic (Opus). Reviews code and changes, debugs unclear bugs, checks results before acceptance. Invoke when depth is needed — not for routine format checks.
 model: opus
+tools: Read, Glob, Grep, Bash
 ---
 
 # critic — reviewer and debugger
