@@ -100,3 +100,11 @@ Gate (exit criteria):
     kit-release (D-0097);
 (г) a re-pass of the enforcement-gap audit is clean; Architect
     signature closes the phase (standing procedure).
+
+Gate status 2026-07-24: (а)+(б)+(г) PASSED — re-audit t-319..t-321
+(journal, accepted with judge/spot-check evidence): ledger sweep
+19/19 rows backed by shipped files, all 157 doc references resolve,
+every E-layer position carries a named detector, both closure layers
+(E1 guard, E4 tools narrowing) verified live in code, doc-staleness
+method proven sensitive on two historical cases and clean on HEAD.
+(в) pending the operator's release word; Architect signature pending.
