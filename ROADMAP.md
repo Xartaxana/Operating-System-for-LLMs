@@ -61,3 +61,42 @@ release: v0.5.0, 2026-07-23). Operator direction in session;
 residuals live in CURRENT_CONTEXT's queue on their own evidence
 triggers. Full narrative:
 docs/task_reports/2026-07-15_roadmap-closed-phases.md.
+
+## Phase 4 — Hardening for Delivery (D-0098) — OPEN 2026-07-24
+
+Opened by the operator's word in session 2026-07-24: finish every
+tail and close POTENTIAL holes so the delivery is complete — the
+priority shifts from building ourselves on our own violation
+statistics to hunting holes no future user should ever hit
+(promotion default flip for the delivered product, D-0098; D-0063
+stays for staff-internal mechanisms). Entry evaluation (D-0033 —
+first task is an evaluation, never a build): the 2026-07-24
+enforcement-gap audit, t-312..t-315,
+docs/task_reports/2026-07-24_enforcement-gap-audit.md.
+
+Workstreams (live; execution queue in CURRENT_CONTEXT):
+
+1. Stale-line hygiene — CURRENT_CONTEXT rewrite of the four audited
+   stale items (audit §1).
+2. Kit completeness — port batch t-316 (wiring_check code for
+   D-0092, hygiene v3, journal_echo ts-drift/warn_stale,
+   judge_prompt_pin, corpus rule, t-278 gate set in
+   exam_fullgates_kit) + INSTALL escape-allowlist step.
+3. E-layer closures (audit §2/§3): E1 escalation guard (attempt≥3
+   without escalated → machine signal at write time), E4
+   builder-role tools narrowing (both deployments + kit twin);
+   remaining E-items get recorded "held by discipline" lines with
+   named detectors (D-0064 form).
+4. Re-audit and release — clean audit re-pass, then a kit minor via
+   the kit-release skill (D-0097).
+
+Gate (exit criteria):
+(а) "promised by delivery, no code behind it" class = 0 (D-0092
+    class closed and swept);
+(б) every norm in the enforcement map carries either a machine
+    layer or a recorded "held by discipline" line with a named
+    detector (D-0064 form) — no unclassified gaps;
+(в) a kit minor carrying the full port set is released through
+    kit-release (D-0097);
+(г) a re-pass of the enforcement-gap audit is clean; Architect
+    signature closes the phase (standing procedure).
