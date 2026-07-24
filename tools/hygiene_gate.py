@@ -314,14 +314,14 @@ test_vg5_journal_read_piped_to_unrelated_tee_no_warn.
 `git -C <dir> add <paths...logs/routing-log.jsonl...> && git -C <dir>
 commit -m "..." && git -C <dir> push -u origin ...` -- GIT_COMMIT_RE/
 GIT_STATEMENT_RE (ДО этой правки) требовали, чтобы подкоманда
-(add/commit/...) шла СРАЗУ после "git\s+"; глобальная опция `-C <dir>`
+(add/commit/...) шла СРАЗУ после "git\\s+"; глобальная опция `-C <dir>`
 между ними ломала матч -- git-statement НЕ маскировался,
 _strip_commit_messages тоже не резал -m (GIT_COMMIT_RE не совпадал),
 поэтому подстрока "routing-log" (в аргументах add) и `>`-символ
 (типично из "->" в тексте commit-сообщения или из иного unrelated
 редиректа тем же коммитом) виделись детектором как одна связка --
 ложный WARN (до промоции) / ложный БЛОК (после). ФИКС: оба регекса
-теперь допускают `(?:-C\s+\S+\s+)*` (0+ повторов) МЕЖДУ "git" и
+теперь допускают `(?:-C\\s+\\S+\\s+)*` (0+ повторов) МЕЖДУ "git" и
 подкомандой -- литеральный префикс "-C" делает каждый повтор
 однозначным (без катастрофического backtracking). Регресс-тест --
 test_vg5_git_dash_capital_c_compound_add_commit_push_no_warn (форма

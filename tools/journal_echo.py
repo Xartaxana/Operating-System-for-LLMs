@@ -721,16 +721,17 @@ def build_context(violations: list, ascii_only: bool = False) -> str:
 
 
 def combine_context(violations: list, tier_events: list, witness_events: list = None,
-                     ts_drift_events: list = None, fallback_marker: str = "",
-                     ascii_only: bool = False) -> str:
+                     ts_drift_events: list = None, escalation_events: list = None,
+                     fallback_marker: str = "", ascii_only: bool = False) -> str:
     """Спека п.3: "один JSON additionalContext может нести и дефекты
-    формы, и TIER ECHO-строки (раздели '; ')". ПЯТЬ НЕЗАВИСИМЫХ
+    формы, и TIER ECHO-строки (раздели '; ')". ШЕСТЬ НЕЗАВИСИМЫХ
     сегментов -- build_context(violations) (ЦЕЛИКОМ, свой заголовок
     "JOURNAL ECHO: N дефект(ов)..." не меняется -- существующие тесты
     завязаны на этот формат буквально), build_tier_segment(tier_events),
     (расширение N2, узел «валидационный импорт»)
     build_witness_segment(witness_events), (расширение TS-DRIFT-задачи)
-    build_ts_drift_segment(ts_drift_events) и (эта задача, t-277/t-279)
+    build_ts_drift_segment(ts_drift_events), (batch B6, задача 1)
+    build_escalation_segment(escalation_events) и (t-277/t-279)
     fallback_marker -- склеиваются через "; ", только если непусты. Любое
     подмножество сегментов пусто -> итог = склейка ОСТАВШИХСЯ непустых,
     JSON всё равно печатается, пока хоть один сегмент непуст. Все пусты
@@ -743,19 +744,28 @@ def combine_context(violations: list, tier_events: list, witness_events: list = 
     санитайзер (статическая ASCII-строка, никогда не несёт стороннего
     текста -- тот же принцип, что статический префикс build_context).
     Вызывающий код (main()) передаёт его пустой строкой, если TIER/
-    WITNESS/TS-DRIFT в ЭТОМ вызове хука не деградировали до
+    WITNESS/TS-DRIFT/ESCALATION в ЭТОМ вызове хука не деградировали до
     HEAD-дифф-фолбэка (см. _resolve_echo_base) -- поэтому его отсутствие
     в старых 2-/3-/4-позиционных вызовах ничего не меняет.
 
-    witness_events=None / ts_drift_events=None (значения по умолчанию,
-    НЕ [] -- сохраняет старые 2- и 3-позиционные формы вызова
-    combine_context(violations, tier_events[, witness_events]) БЕЗ
-    изменения поведения: сегмент для None -> build_*([]) -> "", итог
-    идентичен дотиерной/довитнесовой сигнатуре -- существующие вызовы/
-    тесты, завязанные на короткую форму, продолжают работать буквально
-    как раньше, см. tools/test_journal_echo.py). fallback_marker="" --
-    та же логика: default никогда не добавляет сегмент, старые вызовы
-    без этого аргумента не меняют поведение ни на байт."""
+    witness_events=None / ts_drift_events=None / escalation_events=None
+    (значения по умолчанию, НЕ [] -- сохраняет старые 2-, 3- и
+    4-позиционные формы вызова combine_context(violations, tier_events[,
+    witness_events[, ts_drift_events]]) БЕЗ изменения поведения: сегмент
+    для None -> build_*([]) -> "", итог идентичен до-эскалационной
+    сигнатуре -- существующие вызовы/тесты, завязанные на короткую
+    форму, продолжают работать буквально как раньше, см.
+    tools/test_journal_echo.py/tools/test_journal_echo_tsdrift.py).
+    escalation_events добавлен КАК НОВЫЙ 5-Й позиционный параметр (ПЕРЕД
+    fallback_marker, который сдвигается на 6-е место) -- ни один
+    существующий вызов в репо не передаёт fallback_marker позиционно
+    (только 2-4 позиционных аргумента или именованно, эмпирически
+    проверено grep'ом по всем test_journal_echo*.py/test_witness_echo.py
+    перед этой правкой) -- сдвиг НЕ ломает ни один существующий call
+    site, кроме main() ниже в этом же файле, который эта же задача
+    обновляет. fallback_marker="" -- та же логика: default никогда не
+    добавляет сегмент, старые вызовы без этого аргумента не меняют
+    поведение ни на байт."""
     parts = []
     if violations:
         parts.append(build_context(violations, ascii_only))
@@ -768,6 +778,9 @@ def combine_context(violations: list, tier_events: list, witness_events: list = 
     ts_drift_segment = build_ts_drift_segment(ts_drift_events or [], ascii_only)
     if ts_drift_segment:
         parts.append(ts_drift_segment)
+    escalation_segment = build_escalation_segment(escalation_events or [], ascii_only)
+    if escalation_segment:
+        parts.append(escalation_segment)
     if fallback_marker:
         parts.append(fallback_marker)
     return "; ".join(parts)
@@ -1188,6 +1201,269 @@ def build_witness_segment(witness_events: list, ascii_only: bool = False) -> str
     return body
 
 
+# --- ESCALATION ECHO при записи (batch B6, task 1: R6-эскалация машинный
+# страж на пути записи, workstream 3 / Phase 4 D-0098) --------------------
+# ДЫРА (R6, CLAUDE.md "Routing rules"): "два rejected одного task_id на
+# одном ярусе -> эскалация ОБЯЗАТЕЛЬНА" держится ТОЛЬКО дисциплиной на
+# пути записи -- единственный существующий детектор до этой задачи --
+# недельный чек 3 (calibration), который смотрит журнал ПОСТФАКТУМ, не в
+# момент записи третьего ретрая тем же ярусом. Этот слой -- WARN, НЕ
+# блок (промоция в блок -- следующий шаг D-0063, эта задача её явно НЕ
+# делает, см. NON-GOALS спеки: journal_validator.py не трогается): тот
+# же паттерн, что TS DRIFT ECHO выше в этом файле уже применяет для
+# F-29/D-0079 (warn на моменте записи; жёсткий gate -- отдельный, более
+# грубый инструмент, здесь не задействован).
+#
+# ДВЕ ФОРМЫ (спека B6, буквально):
+#  1. новая delegated с attempt (число) >=3: если выше в файле НЕТ
+#     события escalated с тем же task_id -- WARN.
+#  2. новая delegated БЕЗ поля attempt вовсе, но с task_id, у которого
+#     выше >=2 rejected с ОДИНАКОВЫМ model и НЕТ escalated ПОСЛЕ
+#     второго такого rejected -- тот же WARN ("ретрай, забывший
+#     attempt").
+#
+# ОБЩИЙ ДЕТЕКТОР (_escalation_group_unsatisfied): обе формы сводятся к
+# ОДНОЙ проверке -- группируя ИЗВЕСТНЫЕ rejected task_id по model, ЛЮБАЯ
+# группа размера >=2 БЕЗ escalated, зафиксированного ПОСЛЕ второй (по
+# позиции строки) записи этой группы, -- нарушение. Это ЕСТЕСТВЕННО
+# реализует легальные исключения спеки (правило 6а -- граничные тесты
+# на них обеих сторон см. tools/test_journal_echo_escalation.py):
+#  - "attempt>=3 при существующем escalated выше" -- escalated ПОСЛЕ
+#    второй rejected группы гасит именно эту группу;
+#  - "attempt=2" -- ниже порога >=3, форма 1 не триггерится вовсе (и
+#    форма 2 не триггерится тоже -- attempt ПРИСУТСТВУЕТ, пусть и <3,
+#    форма 2 требует ОТСУТСТВИЯ поля);
+#  - "attempt>=3 при rejected на РАЗНЫХ ярусах" -- если модели rejected
+#    этого task_id не повторяются (каждая встречается <2 раз), НИ ОДНА
+#    группа не достигает размера 2 -- вакуумно "нет нарушений" (тот же
+#    механизм гасит и форму 2: без совпадающей пары модели её триггер
+#    вообще не находит группу размера >=2).
+#
+# ИСКЛЮЧЁННЫЕ ТРИГГЕРЫ (не ретраи -- CLAUDE.md таблица Journal, ТРИ
+# легальных формы ПОВТОРНОГО delegated на открытую задачу): agent=
+# "critic" (критик-вход) И notes с "replaces_worker:<хэндл>"
+# (journal_validator.extract_replaces_worker -- ПЕРЕИСПОЛЬЗОВАН, та же
+# формула, что валидатор уже применяет для правила 9в2, не продублирована
+# руками) -- ни то, ни другое НЕ ретрай, обе формы этого слоя пропускают
+# такие строки целиком (см. _check_delegated_retry).
+#
+# ИСТОЧНИК "ВЫШЕ" (спека: "потребляй ТОЛЬКО payload-scoped echo_new_lines
+# [триггер]; историю файла читать для КОНТЕКСТА можно"): base_lines
+# (payload-scoped, см. _resolve_echo_base -- primary-путь отдаёт ПОЛНОЕ
+# содержимое диска ДО этого конкретного tool-вызова, не только
+# committed HEAD) + уже обработанные строки ЭТОГО ЖЕ батча
+# (new_lines[:idx]) -- ОДИН линейный проход (_collect_escalation_events),
+# состояние (rejected/escalated по task_id) накапливается ПО ХОДУ; на
+# delegated-строке проверка смотрит УЖЕ накопленное состояние (delegated
+# сама не пишет в state -- порядок update-vs-check для неё безразличен).
+# "pos" -- порядковый индекс строки единого прохода (base_lines, потом
+# new_lines) -- обычное монотонно растущее целое, не ts: сравнение ">"
+# для "escalated ПОСЛЕ второго rejected" не требует парсинга дат.
+#
+# НИКОГДА НЕ БЛОКИРУЕТ (спека, буквально "exit 0, без permissionDecision"):
+# этот слой не меняет exit-код main() -- WARN уходит ТЕМ ЖЕ
+# additionalContext/stderr-каналом, что TIER/WITNESS/TS-DRIFT (этот файл
+# в принципе никогда не печатает permissionDecision, см. модульный
+# докстринг "ВЫВОД").
+#
+# Fail-open (тот же паттерн, что _collect_tier_events/_collect_ts_drift_events):
+# битый JSON одной строки, не-dict строка -- try/except с `continue` per
+# строке, не роняет разбор остальных и не роняет хук.
+MAX_ESCALATION_LINES = 5  # тот же класс потолка, что MAX_TIER_LINES/
+# MAX_WITNESS_LINES/MAX_TS_DRIFT_LINES выше в этом файле -- собственное
+# инженерное решение (спека числа не называет), то же число 5, тот же
+# мотив (standalone/большой батч без потолка -> неограниченный
+# additionalContext на один вызов хука). Граничные тесты на 5/6 --
+# правило 6а, см. tools/test_journal_echo_escalation.py.
+
+
+def _escalation_group_unsatisfied(rejected: list, escalated: list) -> bool:
+    """True -- для этого task_id ЕСТЬ хотя бы одна model-группа rejected
+    размера >=2 БЕЗ escalated, зафиксированного ПОСЛЕ второй (по позиции)
+    записи этой группы (см. секцию выше за полный разбор -- ЕДИНЫЙ
+    детектор обеих форм спеки, реализующий заодно оба легальных
+    исключения "escalated выше"/"rejected на разных ярусах").
+
+    rejected -- [(pos, model), ...], escalated -- [pos, ...] (позиции --
+    целочисленный индекс строки единого прохода _collect_escalation_events,
+    растущий монотонно). Модель, не являющаяся строкой (битая/
+    отсутствующая rejected.model), группируется под её фактическим
+    значением как ключ словаря (в т.ч. None) -- защитный дефолт, две
+    записи с одинаковым "битым" значением всё равно образуют группу (не
+    роняет проверку); на практике 'model' -- REQUIRED-поле rejected
+    (journal_validator), этот слой не полагается на форму строк выше."""
+    by_model: dict = {}
+    for pos, model in rejected:
+        by_model.setdefault(model, []).append(pos)
+    for positions in by_model.values():
+        if len(positions) >= 2:
+            second_pos = sorted(positions)[1]
+            if not any(epos > second_pos for epos in escalated):
+                return True
+    return False
+
+
+def _check_delegated_retry(obj: dict, state: dict):
+    """Для ОДНОЙ delegated-строки (obj -- уже распарсенный dict) решает,
+    триггерит ли она одну из двух форм спеки, и если да -- нарушен ли
+    детектор (_escalation_group_unsatisfied) для её task_id по
+    накопленному state (см. _collect_escalation_events). Возвращает
+    (trigger, task_id, attempt_display) | None.
+
+    Исключённые триггеры (см. секцию выше): agent=="critic" -> None
+    сразу; notes с "replaces_worker:<хэндл>"
+    (journal_validator.extract_replaces_worker(...) is not None) -> None
+    сразу -- ни один из них не ретрай, независимо от attempt/task_id.
+
+    task_id отсутствует/не строка/пусто -> None (нечего проверять,
+    тот же fail-open принцип, что весь остальной файл).
+
+    attempt -- число (int/float, БЕЗ bool -- isinstance(x, bool) is
+    True для литералов True/False в Python, защитный отвод: bool --
+    НЕ то же самое, что число attempt, даже будучи подклассом int).
+    Форма 1 (attempt>=3): trigger="attempt". Форма 2 (attempt
+    ОТСУТСТВУЕТ -- obj.get("attempt") is None -- И по task_id УЖЕ
+    накоплено >=2 rejected, хотя бы потенциально из одной model-группы,
+    финальный отсев -- ниже): trigger="no_attempt". Ни то ни другое ->
+    None (в т.ч. attempt=1, attempt=2, attempt нечислового типа кроме
+    None -- явные легальные случаи спеки).
+
+    Финальный отсев: _escalation_group_unsatisfied(rejected, escalated)
+    False -> None (легально, см. секцию выше). True -> WARN-кортеж;
+    attempt_display -- заявленное attempt для формы 1, ИЛИ
+    len(rejected)+1 для формы 2 (оценка "каким по счёту attempt эта
+    delegated-строка фактически является", раз само поле забыто --
+    собственное инженерное решение, спека даёт буквальный шаблон
+    "attempt N" только для формы 1, не уточняя число для формы 2;
+    задокументировано, флаг для Lead-ревью per rule 3)."""
+    if obj.get("agent") == "critic":
+        return None
+    if journal_validator.extract_replaces_worker(obj.get("notes")) is not None:
+        return None
+    task_id = obj.get("task_id")
+    if not isinstance(task_id, str) or not task_id:
+        return None
+    attempt = obj.get("attempt")
+    is_attempt_number = isinstance(attempt, (int, float)) and not isinstance(attempt, bool)
+    task_state = state.get(task_id, {"rejected": [], "escalated": []})
+    rejected = task_state["rejected"]
+    escalated = task_state["escalated"]
+    if is_attempt_number and attempt >= 3:
+        trigger = "attempt"
+    elif attempt is None and len(rejected) >= 2:
+        trigger = "no_attempt"
+    else:
+        return None
+    if not _escalation_group_unsatisfied(rejected, escalated):
+        return None
+    attempt_display = attempt if trigger == "attempt" else len(rejected) + 1
+    return (trigger, task_id, attempt_display)
+
+
+def _collect_escalation_events(new_lines: list, base_lines: list) -> list:
+    """Один линейный проход base_lines (история -- КОНТЕКСТ, спека явно
+    это разрешает) + new_lines (payload-scoped ТРИГГЕР -- проверка
+    делается ТОЛЬКО на строках отсюда, спека: "потребляй ТОЛЬКО
+    payload-scoped echo_new_lines"). Строит per-task_id state
+    {"rejected": [(pos, model)], "escalated": [pos]} по ходу прохода
+    (_absorb) и, на КАЖДОЙ delegated-строке ИЗ new_lines, проверяет её
+    против state, накопленного СТРОГО ДО неё (_check_delegated_retry) --
+    затем (не раньше) сама строка тоже поглощается в state, если она
+    сама rejected/escalated (delegated -- никогда, но следующие строки
+    ЭТОГО ЖЕ батча могут на неё сослаться).
+
+    line_no -- ТА ЖЕ формула, что TIER ECHO/WITNESS ECHO/TS DRIFT ECHO
+    (len(base_lines)+idx+1) -- совместимые номера строк по всему файлу.
+
+    Fail-open построчно (тот же паттерн, что _collect_tier_events/
+    _collect_ts_drift_events): битый JSON одной строки -- try/except с
+    `continue`, не прерывает разбор остальных строк батча."""
+    events = []
+    state: dict = {}
+
+    def _touch(task_id):
+        return state.setdefault(task_id, {"rejected": [], "escalated": []})
+
+    def _absorb(obj, pos):
+        event = obj.get("event")
+        task_id = obj.get("task_id")
+        if not isinstance(task_id, str) or not task_id:
+            return
+        if event == "rejected":
+            _touch(task_id)["rejected"].append((pos, obj.get("model")))
+        elif event == "escalated":
+            _touch(task_id)["escalated"].append(pos)
+
+    pos = 0
+    for line in base_lines:
+        pos += 1
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict):
+                _absorb(obj, pos)
+        except Exception:
+            continue
+
+    for idx, line in enumerate(new_lines):
+        pos += 1
+        line_no = len(base_lines) + idx + 1
+        try:
+            obj = json.loads(line)
+            if not isinstance(obj, dict):
+                continue
+            if obj.get("event") == "delegated":
+                warn = _check_delegated_retry(obj, state)
+                if warn is not None:
+                    trigger, task_id, attempt_display = warn
+                    events.append((line_no, trigger, task_id, attempt_display))
+            _absorb(obj, pos)
+        except Exception:
+            continue
+    return events
+
+
+def _format_escalation_line(event: tuple, ascii_only: bool) -> str:
+    """"R6-ЗЕРКАЛО: line N attempt A без escalated по task_id T - после
+    двух rejected одного яруса эскалация обязательна" -- спека даёт этот
+    текст как литерал (attempt N без escalated по task_id -- после двух
+    rejected одного яруса эскалация обязательна), "line N" -- добавлено
+    ПОВЕРХ буквальной цитаты по аналогии со всеми остальными форматерами
+    этого файла (TIER ECHO/WITNESS ECHO/TS DRIFT ECHO все несут "line N"/
+    "строка N" -- различимость строк батча при склейке через "; ");
+    значение task_id -- ПОДСТАВЛЕНО после "по task_id" (спека называет
+    task_id частью сообщения, не даёт отдельного плейсхолдера для его
+    значения -- предупреждение без конкретного task_id было бы
+    практически бесполезно координатору, тот же принцип, что WITNESS
+    ECHO вставляет cmd/ts, TIER ECHO -- measured; own decision,
+    задокументировано, флаг для Lead-ревью per rule 3). Тире спеки
+    ("—") -- обычный ASCII-дефис здесь (тот же выбор, что NOTE_RETRO/
+    NOTE_TRACK_EMPTY выше в этом файле уже сделали для другого
+    литерала). task_id -- динамика стороннего JSON-поля, санитайзится
+    ПО КАНАЛУ (raw для stdout, ascii для stderr), тот же принцип, что
+    cmd/ts в _format_witness_line."""
+    sanitize = _ascii_sanitize if ascii_only else _raw_sanitize
+    line_no, _trigger, task_id, attempt_display = event
+    return (f"R6-ЗЕРКАЛО: line {line_no} attempt {attempt_display} без escalated "
+            f"по task_id {sanitize(str(task_id))} - после двух rejected одного "
+            "яруса эскалация обязательна")
+
+
+def build_escalation_segment(escalation_events: list, ascii_only: bool = False) -> str:
+    """Собирает ESCALATION-часть additionalContext -- ТОТ ЖЕ паттерн, что
+    build_tier_segment/build_ts_drift_segment (потолок MAX_ESCALATION_LINES=5
+    строк на вызов хука, "+K more" сверху). Пустой escalation_events ->
+    "" (вызывающий код трактует пустую строку как отсутствие сегмента,
+    тот же принцип, что остальные build_*)."""
+    if not escalation_events:
+        return ""
+    head = escalation_events[:MAX_ESCALATION_LINES]
+    rest = len(escalation_events) - len(head)
+    body = "; ".join(_format_escalation_line(ev, ascii_only) for ev in head)
+    if rest > 0:
+        body += f"; +{rest} more"
+    return body
+
+
 # --- PAYLOAD-SCOPED ECHO BASE (critic diagnosis t-277, this task) ------
 # ROOT CAUSE: TIER ECHO/WITNESS ECHO/TS DRIFT ECHO above all shared ONE
 # base -- new_lines = staged_lines[len(head_lines):], head_lines from
@@ -1352,11 +1628,16 @@ def main() -> int:
        регрессией валидации, не багом (в отличие от TIER/WITNESS/
        TS-DRIFT ниже, у которых "видел раньше -- не показывай снова"
        ИМЕННО желаемое поведение).
-     - ЭХО-СЛОИ (TIER ECHO/WITNESS ECHO/TS DRIFT ECHO) -- ПО-СОБЫТИЙНАЯ
-       payload-scoped база (_resolve_echo_base, см. секцию "PAYLOAD-
-       SCOPED ECHO BASE" выше): каждый вызов хука оценивает ТОЛЬКО
-       строки, добавленные ИМЕННО ЭТИМ tool-вызовом -- никогда те, что
-       уже были на диске (закоммичены или нет) до него."""
+     - ЭХО-СЛОИ (TIER ECHO/WITNESS ECHO/TS DRIFT ECHO/ESCALATION ECHO) --
+       ПО-СОБЫТИЙНАЯ payload-scoped база (_resolve_echo_base, см. секцию
+       "PAYLOAD-SCOPED ECHO BASE" выше): каждый вызов хука оценивает
+       ТОЛЬКО строки, добавленные ИМЕННО ЭТИМ tool-вызовом -- никогда
+       те, что уже были на диске (закоммичены или нет) до него.
+       ESCALATION ECHO (batch B6, задача 1) -- ЕДИНСТВЕННОЕ отличие от
+       TIER/WITNESS/TS-DRIFT: он ЧИТАЕТ base_lines как историю ДЛЯ
+       КОНТЕКСТА (см. докстринг секции "ESCALATION ECHO" выше), но
+       триггерит проверку ТОЛЬКО на строках echo_new_lines -- та же
+       payload-scoped база, тот же вызов, отдельный смысл использования."""
     _reconfigure_streams_utf8()
     try:
         raw_bytes = sys.stdin.buffer.read()
@@ -1429,7 +1710,20 @@ def main() -> int:
         except Exception:
             ts_drift_events = []
 
-        if not violations and not tier_events and not witness_visible and not ts_drift_events:
+        # ESCALATION ECHO (batch B6, задача 1 -- R6-эскалация машинный
+        # страж): ТА ЖЕ payload-scoped база, что TIER/WITNESS/TS-DRIFT
+        # выше (см. докстринг секции "ESCALATION ECHO" за то, как
+        # base_lines используется как история для КОНТЕКСТА, а триггер
+        # остаётся на echo_new_lines). Fail-open вторым слоем поверх
+        # построчного try/except внутри самой _collect_escalation_events
+        # -- тот же паттерн, что WITNESS ECHO/TS DRIFT ECHO выше.
+        try:
+            escalation_events = _collect_escalation_events(echo_new_lines, echo_base_lines)
+        except Exception:
+            escalation_events = []
+
+        if (not violations and not tier_events and not witness_visible
+                and not ts_drift_events and not escalation_events):
             return 0
 
         # Фолбэк-пометка (эта задача): видна ТОЛЬКО когда мы всё равно
@@ -1441,12 +1735,12 @@ def main() -> int:
         # Lead-правка (критик-приёмка + Lead-смок): два разных канала,
         # два разных варианта санитайза (см. докстринг build_context).
         # combine_context склеивает дефекты формы, TIER ECHO-строки,
-        # WITNESS ECHO-строки, TS DRIFT-строки и (эта задача) фолбэк-
-        # пометку (спека п.3) -- см. докстринг combine_context.
+        # WITNESS ECHO-строки, TS DRIFT-строки, ESCALATION-строки (batch
+        # B6) и фолбэк-пометку (спека п.3) -- см. докстринг combine_context.
         context_for_stdout = combine_context(violations, tier_events, witness_events, ts_drift_events,
-                                              fallback_marker, ascii_only=False)
+                                              escalation_events, fallback_marker, ascii_only=False)
         context_for_stderr = combine_context(violations, tier_events, witness_events, ts_drift_events,
-                                              fallback_marker, ascii_only=True)
+                                              escalation_events, fallback_marker, ascii_only=True)
 
         sys.stderr.write(context_for_stderr + "\n")
         output = {

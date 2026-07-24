@@ -35,14 +35,49 @@ the manifest baseline:
   both-drift  both changed since the baseline -- a port likely happened
               but the manifest baseline was never updated (--sync)
 
-HASHING IS OVER RAW BYTES (sha256 of the file's on-disk bytes, no text
-normalization). LIMITATION, BY DESIGN, DOCUMENTED HERE: a bare CRLF/LF
-checkout difference between the two working trees (e.g. one clone under
-Windows line-ending settings, the other under Unix) registers as a hash
-mismatch -- i.e. as drift -- even if the text content is identical. This
-tool does not normalize line endings before hashing; a CRLF-only "drift"
-must be recognized as such by whoever reads the report, not silently
-absorbed by the tool.
+HASHING IS CRLF/LF-NORMALIZED (t-309 addendum, task 5): sha256 is computed
+over the file's on-disk bytes with every literal CRLF pair (b"\r\n")
+collapsed to LF (b"\n") first -- NOT raw bytes verbatim. INVARIANT: the
+hash is invariant to whether a given working tree checked the file out
+with CRLF or LF line endings, as long as the actual TEXT CONTENT (line
+contents + line count) is identical -- this is exactly what cross-platform
+baselines need, since the two sides of a pair (and the same side re-cloned
+on a different OS/git-autocrlf setting) legitimately differ ONLY in this
+checkout-time detail. WHY (empirical, not assumed -- t-309 addendum,
+2026-07-24): this Windows HQ checkout runs with core.autocrlf=true (CRLF
+in the working tree); the parity_manifest.json baseline was captured in a
+Linux session (LF). Before this fix, `git diff 28b3d4f..HEAD --
+toolkit/tools/{judge_accept,judge_client,critic_verdict_check}.py` was
+EMPTY (git itself, which normalizes CRLF/LF for diffing, sees no content
+change) while parity_check --check reported KIT-DRIFT/BOTH-DRIFT for
+those exact pairs -- a mass FALSE POSITIVE purely from the raw-bytes
+hash disagreeing with git's own line-ending-aware comparison. Normalizing
+CRLF->LF before hashing (applied identically to BOTH sides of every pair,
+in sha256_of() below -- the single call site every other function in this
+module routes through) makes this tool agree with git's notion of
+"content changed" instead of contradicting it.
+
+BINARY SAFETY (deliberately simple, not a general text/binary sniff):
+sha256_of() only ever collapses the LITERAL two-byte sequence b"\r\n" --
+a lone b"\r" NOT immediately followed by b"\n" (old-Mac-style line
+endings, or a `\r` byte that is simply part of binary/non-text data with
+no line-ending meaning at all) is left completely untouched. This is a
+plain, deterministic byte-level substitution (bytes.replace, no text
+decoding, no charset guessing) -- it never raises, never depends on the
+file's encoding, and is safe to run over any file this manifest could
+ever reference (source .py/.md files today, per the module docstring's
+"INITIAL PAIR SET" -- none of which are binary, but the substitution
+itself does not assume that).
+
+REMAINING LIMITATION, still by design: this is a line-ending
+normalization ONLY, not a general text-diff-equivalence check -- any
+OTHER byte-level difference (including old-Mac-style bare-CR endings,
+whitespace-only changes of any other shape, or true binary drift) still
+registers as a hash mismatch exactly as before. Baseline hashes already
+recorded in tools/parity_manifest.json are NOT retroactively recomputed
+by this change (no --init/--sync side effect) -- see this module's own
+CLI section for how a baseline is (re)established when the Lead decides
+to.
 
 EXIT CODE CONTRACT: this is a MEASUREMENT tool, not a gate -- there is
 nothing legitimate to block on, since hq-drift alone is normal operation
@@ -103,6 +138,38 @@ from pathlib import Path
 from typing import Any
 
 
+def _reconfigure_stdout_utf8() -> None:
+    """Windows fix (t-309): this CLI's own stdout defaults to the process's
+    ANSI/console codepage (cp1251 observed on this machine) when stdout is
+    a pipe, not a real console, and PYTHONUTF8 isn't set -- every print()
+    call in run_check()/run_sync()/run_init() below can carry a repo-root-
+    relative path from the manifest, and paths are free-form text (this
+    repo carries no filename charset restriction). A pair whose path
+    contains characters outside cp1251 (observed failure: CJK -- cp1251
+    covers Cyrillic/Latin but not CJK at all) raised a bare
+    UnicodeEncodeError out of print() -- a real crash (nonzero exit +
+    traceback on stdout), not a cosmetic garbling: this tool's own exit-
+    code contract (module docstring, "EXIT CODE CONTRACT") promises 0 on
+    a clean --check result, which a mid-print crash breaks outright. Same
+    fix/pattern already used by every hook in this kit for the identical
+    class (tools/hygiene_gate.py._reconfigure_stdout_utf8,
+    tools/session_context.py, tools/dod_track.py, tools/journal_echo.py):
+    reconfigure stdout to UTF-8 explicitly rather than rely on the
+    platform default. errors="replace" keeps this a fail-open cosmetic
+    guard (an even-stranger byte would degrade to '?', never crash) --
+    consistent with the rest of this module never raising on report
+    formatting. A no-op on platforms whose default stdout encoding is
+    already UTF-8 (Linux/macOS) -- purely additive, no behavior change
+    there. stderr is untouched: this module never writes to stderr (every
+    ERROR line goes through the same print()/stdout path -- see
+    run_check/run_sync/run_init above), so there is nothing there to
+    reconfigure."""
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
 DEFAULT_MANIFEST_RELPATH = "tools/parity_manifest.json"
 
 REQUIRED_FIELDS = (
@@ -124,8 +191,18 @@ class ManifestError(Exception):
 
 
 def sha256_of(path: Path) -> str:
-    """sha256 hex digest of the file's raw on-disk bytes."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    """sha256 hex digest of the file's on-disk bytes, CRLF/LF-normalized
+    (t-309 addendum, task 5 -- see module docstring's "HASHING IS
+    CRLF/LF-NORMALIZED" section for the empirical basis and the exact
+    invariant/limitation). Every literal b"\\r\\n" pair is collapsed to
+    b"\\n" BEFORE hashing; a lone b"\\r" not immediately followed by
+    b"\\n" is left byte-for-byte untouched (binary-safe by construction --
+    a plain bytes.replace, no decoding, never raises). The ONE call site
+    every other function in this module routes through -- discover_pairs()/
+    run_check()/run_sync() all call this, never hashlib directly -- so the
+    normalization is applied identically and automatically to BOTH sides
+    of every pair, everywhere a hash is computed."""
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def now_iso() -> str:
@@ -380,6 +457,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _reconfigure_stdout_utf8()
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 

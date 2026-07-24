@@ -15,8 +15,11 @@ Covers DoD:
  2. --sync updates exactly one pair; --init without --force refuses to
     overwrite an existing manifest.
  3. Adversarial battery: pair file deleted; manifest broken JSON;
-    duplicate pair in manifest; CRLF vs LF (documented as drift, not
-    normalized); unicode filenames; empty file. All produce explicit
+    duplicate pair in manifest; CRLF vs LF (t-309 addendum: NORMALIZED
+    before hashing -- a checkout-only CRLF/LF difference is no longer
+    drift, see the "t-309 addendum" section below for the boundary
+    battery; a REAL content difference under a CRLF checkout is still
+    detected); unicode filenames; empty file. All produce explicit
     errors, never a traceback.
  4. --init generates a manifest matching the live repo intersection
     rules (tested against a synthetic layout mirroring the real one,
@@ -47,11 +50,26 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def run_cli(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    # Windows fix (t-309): explicit encoding="utf-8" -- without it, text=True
+    # falls back to locale.getpreferredencoding(False) (cp1251 observed on
+    # this machine) to DECODE the child's stdout/stderr bytes. The child
+    # (tools/parity_check.py) now explicitly reconfigures its own stdout to
+    # UTF-8 (see parity_check._reconfigure_stdout_utf8) so unicode paths in
+    # the manifest print cleanly instead of crashing -- but that fix alone
+    # only fixes the WRITE side; the parent (this test harness) must decode
+    # with the SAME encoding on the READ side, or UTF-8 bytes get
+    # mis-decoded as cp1251 (mojibake, not a crash, but not equal to the
+    # original string either -- see test_unicode_filenames_handled_cleanly).
+    # errors="replace" keeps this fail-open/never-crash on the test side
+    # too, matching the tool's own contract (module docstring, "EXIT CODE
+    # CONTRACT": parity_check never raises on report formatting).
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args],
         cwd=str(cwd),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -345,7 +363,32 @@ def test_manifest_duplicate_pair_is_explicit_error(tmp_path):
     assert "duplicate" in proc.stdout.lower()
 
 
-def test_crlf_vs_lf_registers_as_drift_documented_limitation(tmp_path):
+# ---------------------------------------------------------------------------
+# t-309 addendum (task 5): sha256_of() CRLF/LF normalization -- Lead finding
+# that raw-byte hashing produced mass false KIT-DRIFT/BOTH-DRIFT on this
+# Windows HQ (core.autocrlf=true) against a Linux-session baseline, while
+# `git diff` (line-ending-aware) showed no real change. See parity_check.py
+# module docstring, "HASHING IS CRLF/LF-NORMALIZED", for the full basis.
+# ---------------------------------------------------------------------------
+
+
+def test_sha256_of_crlf_and_lf_same_content_same_hash(tmp_path):
+    # Boundary (a): a file checked out with CRLF and the SAME file checked
+    # out with LF must hash IDENTICALLY -- the core invariant this fix adds.
+    lf_path = tmp_path / "lf.py"
+    crlf_path = tmp_path / "crlf.py"
+    lf_path.write_bytes(b"line1\nline2\nline3\n")
+    crlf_path.write_bytes(b"line1\r\nline2\r\nline3\r\n")
+    assert parity_check.sha256_of(lf_path) == parity_check.sha256_of(crlf_path)
+
+
+def test_crlf_vs_lf_checkout_no_longer_registers_as_drift(tmp_path):
+    # e2e sibling of the unit test above, through --check: a pair whose
+    # baseline was recorded against LF content, but whose CURRENT on-disk
+    # bytes are CRLF (a re-checkout under different line-ending settings,
+    # same text) -- must classify CLEAN, not KIT-DRIFT (this is the exact
+    # false-positive class the Lead addendum reported: git diff empty,
+    # parity_check drifted).
     root = tmp_path
     lf = b"line1\nline2\n"
     crlf = b"line1\r\nline2\r\n"
@@ -357,10 +400,59 @@ def test_crlf_vs_lf_registers_as_drift_documented_limitation(tmp_path):
 
     proc = run_cli(["--check"], cwd=root)
     assert_no_traceback(proc)
-    assert proc.returncode == 0  # drift alone is not a gate failure
+    assert proc.returncode == 0
+    assert "CLEAN (1)" in proc.stdout
+    assert "KIT-DRIFT -- SUSPICIOUS, staging touched out of band (0)" in proc.stdout
+    assert "BOTH-DRIFT -- port likely happened, manifest baseline stale (0)" in proc.stdout
+
+
+def test_crlf_checkout_with_real_content_difference_still_detected(tmp_path):
+    # Boundary (b): normalization must NOT swallow a genuine content
+    # difference just because line endings also differ -- a real edit
+    # (different text, not just \r\n vs \n) under CRLF checkout must still
+    # register as drift.
+    root = tmp_path
+    lf = b"line1\nline2\n"
+    write_pair(root, "tools/a.py", "toolkit/tools/a.py", lf, lf)
+    write_manifest(root, [manifest_entry("tools/a.py", "toolkit/tools/a.py", lf, lf)])
+
+    # kit side: CRLF checkout AND a real edit (line2 -> line2-changed)
+    (root / "toolkit" / "tools" / "a.py").write_bytes(b"line1\r\nline2-changed\r\n")
+
+    proc = run_cli(["--check"], cwd=root)
+    assert_no_traceback(proc)
+    assert proc.returncode == 0
     assert "KIT-DRIFT" in proc.stdout
     kit_drift_section = proc.stdout.split("KIT-DRIFT")[1].split("BOTH-DRIFT")[0]
     assert "tools/a.py" in kit_drift_section
+
+
+def test_sha256_of_lone_cr_without_lf_untouched_deterministic(tmp_path):
+    # Boundary (c): binary safety -- a lone b"\r" NOT followed by b"\n"
+    # (old-Mac-style ending, or just a \r byte inside otherwise-binary
+    # data) must NOT be touched by the CRLF-only substitution; the hash
+    # must be deterministic (repeatable) and must differ from the same
+    # bytes with \r\n actually present (proves the substitution really is
+    # literal-\r\n-only, not "any \r").
+    path_bare_cr = tmp_path / "bare_cr.bin"
+    path_bare_cr.write_bytes(b"line1\rline2\r")
+    first = parity_check.sha256_of(path_bare_cr)
+    second = parity_check.sha256_of(path_bare_cr)
+    assert first == second  # deterministic, repeat read gives same digest
+    # sanity: bare \r bytes are NOT collapsed the way \r\n pairs are --
+    # hashing the literal bytes directly (no replace at all) must agree.
+    assert first == hashlib.sha256(b"line1\rline2\r").hexdigest()
+
+
+def test_sha256_of_no_newlines_at_all_deterministic(tmp_path):
+    # Boundary (c), sibling: a file with no line-ending bytes whatsoever
+    # (single line, no trailing newline) -- substitution is a no-op,
+    # hash equals the plain raw-bytes digest.
+    path = tmp_path / "no_newline.py"
+    path.write_bytes(b"just one line, no newline at all")
+    assert parity_check.sha256_of(path) == hashlib.sha256(
+        b"just one line, no newline at all"
+    ).hexdigest()
 
 
 def test_unicode_filenames_handled_cleanly(tmp_path):

@@ -218,6 +218,61 @@ def test_validate_manifest_order_references_unknown_arm_raises():
 
 
 # ---------------------------------------------------------------------------
+# 1a. arm/task id hyphen invariant (t-126, B5 t-2a 2026-07-24):
+#     sandbox_metrics's LIKE '<slug>-%' sub-slug match only distin-
+#     guishes a real sub-project from an unrelated one when the raw
+#     arm/task id is hyphen-free -- validate_manifest rejects a
+#     hyphenated id early with a message naming the field and value.
+# ---------------------------------------------------------------------------
+
+
+def _hyphen_check_base_manifest():
+    return {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+    }
+
+
+def test_validate_manifest_arm_name_with_hyphen_raises():
+    manifest = {
+        **_hyphen_check_base_manifest(),
+        "arms": [{"name": "A-bad", "layout": "empty"}],
+        "tasks": [{"id": "t1", "text": "hi"}],
+        "order": {"t1": ["A-bad"]},
+    }
+    with pytest.raises(ValueError, match=r"arm 'name'.*'A-bad'"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_task_id_with_hyphen_raises():
+    manifest = {
+        **_hyphen_check_base_manifest(),
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "C-t2", "text": "hi"}],
+        "order": {"C-t2": ["A"]},
+    }
+    with pytest.raises(ValueError, match=r"task 'id'.*'C-t2'"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_hyphen_free_ids_ok():
+    # Boundary control: plain (hyphen-free) arm/task ids pass through
+    # validate_manifest unchanged -- proves the new check is scoped to
+    # '-' specifically, not e.g. rejecting valid ids generally.
+    manifest = {
+        **_hyphen_check_base_manifest(),
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "text": "hi"}],
+        "order": {"t1": ["A"]},
+    }
+    validate_manifest(manifest)  # must not raise
+
+
+# ---------------------------------------------------------------------------
 # 2. launch-plan generation (dry-run path)
 # ---------------------------------------------------------------------------
 
@@ -691,6 +746,77 @@ def test_window_load_separates_foreign_projects_and_respects_window(cc_db):
 
 
 # ---------------------------------------------------------------------------
+# 4a. window_load() sub-slug exclusion (t-126, B5 t-2b 2026-07-24): a
+#     sandboxed session's own subagent can log under a distinct
+#     '<exclude_project>-<suffix>' slug -- that sub-slug must NOT show
+#     up as foreign 'window load', same as sandbox_metrics already
+#     folds it into the sandbox's OWN metrics via LIKE.
+# ---------------------------------------------------------------------------
+
+
+def test_window_load_excludes_exact_exclude_slug(cc_db):
+    # Boundary (1): the exact exclude-slug row itself stays excluded --
+    # existing NOT IN behavior must not be broken by adding NOT LIKE.
+    conn = cc_db
+    exam_proj = "D--fake-polygon-B-t1"
+
+    _insert_row(conn, exam_proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.01)
+
+    load = window_load(
+        conn, exclude_projects=[exam_proj],
+        window_start="2026-07-07T12:00:00.000Z", window_end="2026-07-07T12:05:00.000Z",
+    )
+
+    assert {row["project"] for row in load} == set()
+
+
+def test_window_load_excludes_sub_slug_of_exclude_project(cc_db):
+    # Boundary (2): a sub-slug '<exclude>-C-t2' (e.g. a subagent's own
+    # distinct ~/.claude/projects slug) is now ALSO excluded -- it is
+    # not genuinely foreign load, it's the same sandboxed session.
+    conn = cc_db
+    exam_proj = "D--fake-polygon-B-t1"
+    sub_slug = exam_proj + "-C-t2"
+
+    _insert_row(conn, exam_proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.01)
+    _insert_row(conn, sub_slug, "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 30, 0.02)
+
+    load = window_load(
+        conn, exclude_projects=[exam_proj],
+        window_start="2026-07-07T12:00:00.000Z", window_end="2026-07-07T12:05:00.000Z",
+    )
+
+    assert {row["project"] for row in load} == set()
+
+
+def test_window_load_does_not_false_exclude_unrelated_similar_prefix(cc_db):
+    # Boundary (3): a project sharing only a bare prefix with the
+    # exclude slug, WITHOUT the '-' boundary right after it
+    # (e.g. exam_proj + "X..." rather than exam_proj + "-..."), is a
+    # genuinely unrelated project and must still show up as foreign
+    # load -- LIKE '<exclude>-%' requires the literal '-' next char.
+    conn = cc_db
+    exam_proj = "D--fake-polygon-B-t1"
+    unrelated = exam_proj + "X-more"  # no '-' immediately after exam_proj
+
+    _insert_row(conn, exam_proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.01)
+    _insert_row(conn, unrelated, "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 999, 9.99)
+
+    load = window_load(
+        conn, exclude_projects=[exam_proj],
+        window_start="2026-07-07T12:00:00.000Z", window_end="2026-07-07T12:05:00.000Z",
+    )
+
+    projects_seen = {row["project"] for row in load}
+    assert unrelated in projects_seen
+    assert exam_proj not in projects_seen
+
+    row = next(r for r in load if r["project"] == unrelated)
+    assert row["turns"] == 1
+    assert row["out_tokens"] == 999
+
+
+# ---------------------------------------------------------------------------
 # 5. project-name slug (~/.claude/projects encoding), pinned against
 #    the real exam_release2 polygon on this machine.
 # ---------------------------------------------------------------------------
@@ -910,6 +1036,93 @@ def test_run_dossier_tests_scopes_to_new_non_click_files(tmp_path):
     results = run_dossier_tests(sandbox, baseline_files)
 
     assert {r["file"] for r in results} == {"test_new.py"}
+
+
+# ---------------------------------------------------------------------------
+# 7a. run_dossier_tests() "empty_stdout_warn" marker (B5 t-1, 2026-07-24):
+#     rc==0 with fully empty (or whitespace-only) captured stdout is not
+#     a silent success -- it is surfaced via "empty_stdout_warn": True.
+#     Boundary per DoD: (a) rc==0 + non-empty -> no key; (b) rc==0 +
+#     empty -> WARN; (c) rc!=0 -> unchanged (no key), regardless of
+#     stdout content. subprocess.run is monkeypatched (same technique
+#     as section 6/6a) so real pytest's own stdout shape can't mask the
+#     boundary being tested.
+# ---------------------------------------------------------------------------
+
+
+def _dossier_sandbox_with_one_test(tmp_path):
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    (sandbox / "test_new.py").write_text("def test_y():\n    assert True\n", encoding="utf-8")
+    return sandbox
+
+
+def test_run_dossier_tests_warns_on_empty_stdout_at_rc_zero(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    sandbox = _dossier_sandbox_with_one_test(tmp_path)
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda *a, **k: FakeProc())
+    results = run_dossier_tests(sandbox, baseline_files=set())
+
+    assert len(results) == 1
+    assert results[0]["rc"] == 0
+    assert results[0]["empty_stdout_warn"] is True
+
+
+def test_run_dossier_tests_warns_on_whitespace_only_stdout_at_rc_zero(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    sandbox = _dossier_sandbox_with_one_test(tmp_path)
+
+    class FakeProc:
+        returncode = 0
+        stdout = "   \n\t\n"
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda *a, **k: FakeProc())
+    results = run_dossier_tests(sandbox, baseline_files=set())
+
+    assert len(results) == 1
+    assert results[0]["rc"] == 0
+    assert results[0]["empty_stdout_warn"] is True
+
+
+def test_run_dossier_tests_no_warn_on_nonempty_stdout_at_rc_zero(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    sandbox = _dossier_sandbox_with_one_test(tmp_path)
+
+    class FakeProc:
+        returncode = 0
+        stdout = "1 passed in 0.01s\n"
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda *a, **k: FakeProc())
+    results = run_dossier_tests(sandbox, baseline_files=set())
+
+    assert len(results) == 1
+    assert results[0]["rc"] == 0
+    assert "empty_stdout_warn" not in results[0]
+
+
+def test_run_dossier_tests_no_warn_on_empty_stdout_at_rc_nonzero(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    sandbox = _dossier_sandbox_with_one_test(tmp_path)
+
+    class FakeProc:
+        returncode = 1
+        stdout = ""
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda *a, **k: FakeProc())
+    results = run_dossier_tests(sandbox, baseline_files=set())
+
+    assert len(results) == 1
+    assert results[0]["rc"] == 1
+    assert "empty_stdout_warn" not in results[0]
 
 
 # ---------------------------------------------------------------------------

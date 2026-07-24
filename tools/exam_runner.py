@@ -84,7 +84,18 @@ KNOWN_LAYOUTS = {"empty", "template"}
 
 def validate_manifest(manifest):
     """Raises ValueError on any structural problem (missing required
-    field, unknown layout, order referencing an unknown task/arm).
+    field, unknown layout, order referencing an unknown task/arm, an
+    arm/task id containing '-'). The hyphen check (t-126, B5 t-2a
+    2026-07-24) closes a latent invariant: sandbox_metrics folds
+    sub-slug projects (a sandboxed subagent's own distinct
+    ~/.claude/projects slug) into the parent sandbox's metrics via
+    'project = ? OR project LIKE ?' with pattern <slug>-%; that LIKE
+    only correctly picks out genuine sub-slugs of THIS arm/task and
+    not an unrelated project's slug when the raw arm/task id itself is
+    hyphen-free -- a hyphenated id could make a legitimately different
+    project's slug LIKE-match as if it were a sub-slug. Checked on the
+    raw ids at validation time (not on the composed project slug,
+    which always contains hyphens from path separators regardless).
     Mutates manifest in place only to fill the 'parallel' default (1)
     when absent. Returns the manifest for chaining."""
     if not isinstance(manifest, dict):
@@ -106,6 +117,14 @@ def validate_manifest(manifest):
     for arm in manifest["arms"]:
         if "name" not in arm:
             raise ValueError(f"arm missing 'name': {arm}")
+        if "-" in arm["name"]:
+            raise ValueError(
+                f"arm 'name' must not contain '-': {arm['name']!r} -- sandbox_metrics's "
+                f"'project = ? OR project LIKE ?' sub-slug match (pattern "
+                f"<slug>-%, t-126) only distinguishes a real sub-project from an "
+                f"unrelated one when the raw arm id is hyphen-free; a hyphenated id "
+                f"would make LIKE false-match a different project"
+            )
         if arm.get("layout") not in KNOWN_LAYOUTS:
             raise ValueError(
                 f"unknown layout {arm.get('layout')!r} for arm {arm.get('name')!r} "
@@ -127,6 +146,14 @@ def validate_manifest(manifest):
     for task in manifest["tasks"]:
         if "id" not in task:
             raise ValueError(f"task missing 'id': {task}")
+        if "-" in task["id"]:
+            raise ValueError(
+                f"task 'id' must not contain '-': {task['id']!r} -- sandbox_metrics's "
+                f"'project = ? OR project LIKE ?' sub-slug match (pattern "
+                f"<slug>-%, t-126) only distinguishes a real sub-project from an "
+                f"unrelated one when the raw task id is hyphen-free; a hyphenated id "
+                f"would make LIKE false-match a different project"
+            )
         has_text = "text" in task
         has_sessions = "sessions" in task
         if not has_text and not has_sessions:
@@ -738,9 +765,26 @@ def sandbox_metrics(conn, project):
 
 def window_load(conn, exclude_projects, window_start, window_end):
     """Turn count + summed output_tokens per OTHER project (not in
-    exclude_projects) whose ts falls in [window_start, window_end] --
-    the 'foreign load in the exam window' table, sorted by turns
-    desc."""
+    exclude_projects, AND not a SUB-SLUG of one) whose ts falls in
+    [window_start, window_end] -- the 'foreign load in the exam
+    window' table, sorted by turns desc.
+
+    Sub-slug exclusion (t-126, B5 t-2b 2026-07-24): a sandboxed
+    session's own subagent can log under a distinct
+    '<exclude_project>-<suffix>' project slug (same mechanism
+    sandbox_metrics folds into its OWN sandbox's metrics via
+    LIKE '<slug>-%', see that function's docstring) -- without this
+    exclusion here, that same sub-slug would ALSO double-count as
+    'foreign load' in this table, since a plain project NOT IN (...)
+    only catches an EXACT exclude_projects match. Each exclude_projects
+    entry (a full composed project slug, e.g. 'D--repo-A-t1' -- itself
+    already full of hyphens from path separators, which is harmless
+    here since SQL LIKE treats '-' as a literal character, not a
+    wildcard) therefore additionally excludes project LIKE
+    '<entry>-%'. An unrelated project sharing only a prefix without
+    that trailing '-' boundary (e.g. '<entry>X...') is NOT excluded --
+    LIKE requires the literal '-' as the next character after the
+    entry."""
     exclude_projects = list(exclude_projects)
     query = (
         "SELECT project, COUNT(*), SUM(output_tokens) "
@@ -751,6 +795,9 @@ def window_load(conn, exclude_projects, window_start, window_end):
         placeholders = ",".join("?" for _ in exclude_projects)
         query += f" AND project NOT IN ({placeholders})"
         params.extend(exclude_projects)
+        not_like_clauses = " AND ".join("project NOT LIKE ?" for _ in exclude_projects)
+        query += f" AND {not_like_clauses}"
+        params.extend(p + "-%" for p in exclude_projects)
     query += " GROUP BY project ORDER BY 2 DESC"
     rows = conn.execute(query, params).fetchall()
     return [{"project": r[0], "turns": r[1], "out_tokens": r[2] or 0} for r in rows]
@@ -764,7 +811,16 @@ def run_dossier_tests(sandbox_dir, baseline_files):
     needs=click clone subtree (click/**, the literal dest name used by
     prepare()'s needs=click copy). Runs `python -m pytest <file> -q`
     for each (this is NOT a claude invocation -- it genuinely executes,
-    per spec), and returns a list of {file, rc, output_tail}.
+    per spec), and returns a list of {file, rc, output_tail}. A run
+    whose rc==0 but whose stdout is EMPTY after .strip() additionally
+    carries "empty_stdout_warn": True -- pytest exiting 0 with no
+    captured output is not distinguishable from a broken capture pipe
+    or a silently-skipped run, so it is surfaced as a warning instead
+    of folding into ordinary rc==0 success (mirrors the "empty_stdout"
+    marker convention of _run_one_session, but scoped to rc==0 only:
+    a non-zero rc is already visibly a failure and this marker adds
+    nothing there). The key is omitted when stdout is non-empty or
+    rc != 0.
 
     Precedent (run #3, C/t2): without this scoping, dossier test runs
     swept in click's own upstream test_*.py files (33 of them,
@@ -791,8 +847,12 @@ def run_dossier_tests(sandbox_dir, baseline_files):
             cwd=str(sandbox_dir),
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
-        tail = (proc.stdout or "")[-2000:]
-        results.append({"file": rel_str, "rc": proc.returncode, "output_tail": tail})
+        stdout = proc.stdout or ""
+        tail = stdout[-2000:]
+        entry = {"file": rel_str, "rc": proc.returncode, "output_tail": tail}
+        if proc.returncode == 0 and not stdout.strip():
+            entry["empty_stdout_warn"] = True
+        results.append(entry)
     return results
 
 
@@ -860,7 +920,8 @@ def _render_dossier_markdown(dossier):
         if not r["tests"]:
             lines.append("(no test_*.py found)")
         for t in r["tests"]:
-            lines.append(f"- {t['file']}: rc={t['rc']}")
+            warn = " WARN: empty stdout despite rc=0" if t.get("empty_stdout_warn") else ""
+            lines.append(f"- {t['file']}: rc={t['rc']}{warn}")
             lines.append("```")
             lines.append(t["output_tail"])
             lines.append("```")

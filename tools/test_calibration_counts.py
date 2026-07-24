@@ -552,6 +552,42 @@ def test_unclosed_closed_by_closes_token_in_later_event(tmp_path):
     assert report["unclosed_tasks"] == []
 
 
+# ---------------------------------------------------------------------
+# Находка t-305: ts-неупорядоченный сегмент -- живой класс t-029.
+# Задача закрыта accepted, но ФАЙЛОВАЯ позиция лжёт: строго ПОСЛЕ этого
+# accepted в файле встречается ещё один (orphan) delegated того же
+# task_id, чей ts на самом деле РАНЬШЕ accepted (ts правдив, позиция
+# нет) -- зеркало живого дефекта в logs/routing-log.jsonl, задокументи-
+# рованного в session_context.py (open_dispatches() docstring, "t-029
+# (orphan delegated inserted mid-file AFTER its accepted -- file
+# position lies, ts is true)"). Эталон (session_context.py boot-сканер)
+# закрывает такую задачу безусловно, ЛЮБОЙ accepted -- JOURNAL LAW,
+# независимо от файловой позиции/ts; до находки t-305 calibration_counts
+# листил её "открытой", т.к. последним ПО ФАЙЛОВОЙ ПОЗИЦИИ lifecycle-
+# эвентом был delegated.
+# ---------------------------------------------------------------------
+def test_unclosed_not_falsely_listed_when_ts_disordered_orphan_delegated_after_accepted(tmp_path):
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        ev("2026-07-10T09:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-029", category="implementation", notes="n",
+           worker_ref="cli:2026-07-10T09:00:00"),
+        ev("2026-07-10T09:30:00", "accepted", agent="builder", model="sonnet",
+           task_id="t-029", by="sonnet", witness="w", category="implementation",
+           notes="n"),
+        # orphan: файловая позиция ПОСЛЕ accepted выше, но собственный ts
+        # (09:05) на самом деле РАНЬШЕ accepted (09:30) -- ts-неупорядо-
+        # ченный исторический сегмент, позиция файла лжёт.
+        ev("2026-07-10T09:05:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-029", category="implementation",
+           notes="orphan, ts lies, file position true",
+           worker_ref="cli:2026-07-10T09:05:00"),
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-11T00:00:00"))
+    assert report["unclosed_tasks"] == []
+    assert "t-029" not in report["unclosed_tasks"]
+
+
 def test_unclosed_closed_by_decomposable(tmp_path):
     p = tmp_path / "j.jsonl"
     write_journal(p, [

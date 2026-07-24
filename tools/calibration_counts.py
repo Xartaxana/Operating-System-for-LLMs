@@ -302,6 +302,38 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
     for pl in parsed_lines:
         for closed_tid in extract_closes_tokens(pl.data.get("notes")):
             closed_via_token.add(closed_tid)
+    # Находка t-305 (незакрытые-задачи, часть 2): зеркало
+    # session_context.open_dispatches()'s "JOURNAL LAW" -- ЛЮБОЙ accepted
+    # закрывает свой task_id БЕЗУСЛОВНО, независимо от файловой позиции
+    # или ts (D-0060: reopen после accepted запрещён валидатором). Живой
+    # дефект без этого: ts-неупорядоченный сегмент 07-10 в logs/
+    # routing-log.jsonl несёт t-029 -- orphan delegated вставлен В ФАЙЛЕ
+    # ПОСЛЕ своего же accepted (файловая позиция лжёт, ts правдив) -- см.
+    # session_context.py docstring за тот же прецедент. last_status ниже
+    # копит "последний lifecycle-статус ПО ФАЙЛОВОМУ ПОРЯДКУ" без такого
+    # закона -- простое last-write-wins по позиции файла листит t-029
+    # "открытой", т.к. orphan delegated обрабатывается строго ПОСЛЕ
+    # accepted. Эталон -- session_context.open_dispatches() (boot-
+    # сканер): accepted_tids проверяется ПЕРВЫМ и БЕЗУСЛОВНО, до любой
+    # (ts, file_idx)-семантики для delegated. Собирается по ВСЕМУ файлу
+    # (parsed_lines, не только окно) -- тот же охват, что last_status и
+    # closed_via_token выше. Применяется ТОЧЕЧНО только к разделу
+    # «Незакрытые задачи» (10) ниже -- last_status сам НЕ переписан
+    # (duplicate_delegates-классификация (branch по prior_status) —
+    # отдельный вопрос вне скоупа этой находки, её семантика не
+    # меняется). Признанное отличие от session_context: этот скрипт НЕ
+    # воспроизводит полную (ts, file_idx)-семантику для delegated/
+    # closes:-токенов (см. закрытие-по-токену комментарий выше) -- он
+    # добавляет только тот ОДИН закон (accepted == безусловное
+    # закрытие), который непосредственно объясняет живой t-029-дефект;
+    # это КАНДИДАТСКИЙ скрипт (докстринг файла), не связывающий приговор.
+    accepted_tids: set = set()
+    for pl in parsed_lines:
+        if pl.data.get("event") != "accepted":
+            continue
+        tid = pl.data.get("task_id")
+        if isinstance(tid, str) and tid:
+            accepted_tids.add(tid)
     duplicate_delegates = []
     for pl in parsed_lines:
         d = pl.data
@@ -447,10 +479,17 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
     # Находка t-293: "открыто" -- последний lifecycle-статус delegated
     # (decomposable теперь тоже lifecycle-статус, см. выше -- закрывает),
     # И задача НЕ отмечена closes:-токеном нигде в notes журнала.
+    # Находка t-305: И задача НЕ несёт ЛЮБОГО accepted нигде в журнале
+    # (accepted_tids выше -- JOURNAL LAW, зеркало session_context.
+    # open_dispatches(), безусловно и до decomposable/delegated-статуса --
+    # закрывает даже когда последний ПО ФАЙЛОВОЙ ПОЗИЦИИ lifecycle-эвент
+    # это delegated, см. комментарий у accepted_tids за живой t-029-разбор).
     unclosed_tasks = []
     closed_by_decomposable = []
     for tid, status in last_status.items():
         if tid in closed_via_token:
+            continue
+        if tid in accepted_tids:
             continue
         if status == "decomposable":
             closed_by_decomposable.append(tid)

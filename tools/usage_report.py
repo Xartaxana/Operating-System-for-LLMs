@@ -293,6 +293,20 @@ _TASK7_NEW_COLUMNS = ("agent_id", "agent_type")
 # Unknown models get cost=None (Rule #1: never a silent $0). Do NOT
 # add a model here without a verified source -- guessing is exactly
 # what Rule #1 forbids.
+#
+# cross-checked vs gateway/config.yaml 2026-07-24 (axis-2 pair, B5
+# t-3): every model below that appears as a gateway/config.yaml
+# litellm_params.model target (fable-5/opus-4-8/sonnet-5/sonnet-4-6/
+# haiku-4-5-20251001) has NO explicit input_cost_per_token/
+# output_cost_per_token override there -- those aliases pass straight
+# through to litellm's own built-in cost DB, so there is no second
+# numeric price in this repo for these models to diverge from. The
+# only aliases in gateway/config.yaml WITH explicit per-token prices
+# are intern/analyst (ollama, synthetic Haiku-class pricing) -- not
+# models priced here. "claude-haiku-4-5" (bare, undated) has no
+# gateway/config.yaml alias at all. No divergence found among the
+# models compared; if gateway/config.yaml ever gains an explicit
+# override for one of these ids, re-diff against this table.
 CACHE_WRITE_MULTIPLIER = 1.25  # 5-minute TTL write premium
 CACHE_READ_MULTIPLIER = 0.1
 
