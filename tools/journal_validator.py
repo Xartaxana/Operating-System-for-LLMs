@@ -60,24 +60,59 @@
     коммите); без изменений.
 10. ts новых строк монотонны относительно последней строки HEAD и
     между собой; не позже now+10 минут (F-29). Нижней границы нет.
-11. Матрица D-0058 (только для НОВЫХ строк): новые accepted/rejected
-    несут typed-поле "by". Для agent=lead матрица не применяется --
-    "by" достаточно присутствия. Для agent из {scout,builder,critic}
-    ТОЛЬКО accepted дополнительно легален, если tier(by) > tier(agent)
-    (haiku<sonnet<opus<fable по agent: scout=haiku, builder=sonnet,
-    critic=opus), либо typed-поле "basis" из {"critic",
-    "queued-to-lead"}, либо basis=="judge" -- НО ТОЛЬКО когда
-    СОБСТВЕННОЕ поле "category" этой же строки ∈ {"recon",
-    "implementation"} (лист-классы R13/D-0087, CLAUDE.md «Leaf
-    routing»: "Judge acceptance is legitimate ONLY for leaf-class
-    dispatches (recon, or implementation to a written spec)"). basis
-    "judge" на любой другой category -- НЕ валидный basis, проваливается
-    в tier-проверку наравне с любой другой парой agent/by (t-276:
-    штабной раньше принимал "judge" безусловно, без проверки
-    лист-класса -- расхождение с уже записанной нормой, устранено этой
-    правкой). Спека буквально требует tier/basis-проверку только для
-    accepted, не rejected -- rejected несёт "by" без дальнейшей
-    проверки (см. отчёт: буквальное чтение, не домысел).
+11. Матрица D-0058 (только для НОВЫХ строк, только для accepted --
+    rejected несёт "by" без дальнейшей проверки, буквальное чтение
+    спеки). Для agent=lead матрица не применяется -- "by" достаточно
+    присутствия. Для agent из {scout,builder,critic}: (batch B7,
+    2026-07-24 -- членство "basis in BASIS_VALUES" заменено на
+    легальность ПО ПАРЕ (by, agent), после живой утечки AO3 07-24: два
+    Sonnet-координатора приняли Sonnet-класс (builder) результат через
+    basis=queued-to-lead -- членство пропускало basis без проверки,
+    предписывает ли матрица очередь именно ЭТОЙ паре):
+
+    а) ok_tier -- tier(by) > tier(agent) (haiku<sonnet<opus<fable по
+       agent: scout=haiku, builder=sonnet, critic=opus) -- легально
+       ПРИ ЛЮБОМ basis (или без него).
+    б) basis=="judge" -- легально ТОЛЬКО когда СОБСТВЕННОЕ поле
+       "category" этой же строки ∈ {"recon", "implementation"}
+       (лист-классы R13/D-0087, CLAUDE.md «Leaf routing»: "Judge
+       acceptance is legitimate ONLY for leaf-class dispatches (recon,
+       or implementation to a written spec)"); правка t-276 сохранена
+       без изменений. ПРОВЕРЯЕТСЯ ПЕРВЫМ, независимо от tier(by) --
+       калиброванный судья не координатор яруса, его легальность не
+       завязана на ok_tier/floor ниже.
+    в) FLOOR "по by ниже sonnet, координация не предусмотрена": если
+       tier(by) известен (by ЛИТЕРАЛЬНО "haiku") И ok_tier не выполнен
+       И basis не "judge" -- FAIL БЕЗУСЛОВНО, никакой basis не спасает
+       (CLAUDE.md «Role ≠ tier» матрица: "below Sonnet | no
+       coordination is provided for | --"). Развилка (документируется
+       намеренно, не решена молча): буква ядра ("OR the decision
+       carries a higher tier's input (a critic verdict)") читалась бы
+       так, что basis="critic" спасает ЛЮБОЙ by, включая haiku -- но
+       строка матрицы для "below Sonnet" не содержит исключения для
+       "critic verdict" и говорит "no coordination is provided for"
+       безусловно; сессия-haiku в принципе не функционирует как
+       координатор в этой структуре, поэтому floor берёт верх НАД
+       общим "carries higher tier's input" для basis="critic"/
+       "queued-to-lead" (но НЕ для basis="judge" -- отдельный, не
+       координаторский, путь приёмки, см. б). Выбор закреплён тестом
+       test_matrix_haiku_by_critic_basis_below_sonnet_floor_fails.
+    г) basis=="critic" -- легален ТОЛЬКО когда ярус критика (opus,
+       фиксированный) СТРОГО выше яруса agent, т.е. agent -- класса
+       scout/builder: критик-вход поверх собственного класса критика
+       (agent=critic) смысла не имеет и НЕ легален.
+    д) basis=="queued-to-lead" -- легален ТОЛЬКО для пары
+       agent=critic (класс критика, ярус opus) И by ∈ {"sonnet",
+       "opus"} (для by=sonnet -- очередь легальна ИМЕННО критик-классу,
+       НЕ builder-классу: у sonnet-координатора builder-класс легален
+       только через basis="critic" -- это ровно AO3-кейс,
+       test_matrix_sonnet_by_builder_queued_to_lead_fails_ao3_case; для
+       by=opus -- очередь легальна критик-классу как равному ярусу).
+       agent=scout/builder с basis="queued-to-lead" не проходит эту
+       ветку (scout уже закрыт ok_tier почти всегда; builder -- нет,
+       собственно AO3-дыра).
+    е) Любой иной basis (включая отсутствие) -- FAIL с общим
+       D-0058-сообщением.
 
 12. Любой FAIL -> exit 1, по каждой нарушившей строке -- номер строки,
     event/task_id, какая проверка упала. Крэш валидатора (исключение,
@@ -139,6 +174,13 @@ TASK_ID_REQUIRED_EVENTS = {"delegated", "accepted", "rejected", "escalated", "de
 FAILURE_CLASSES = {"spec", "capability", "recon", "tooling"}
 TIER_ORDER = {"haiku": 0, "sonnet": 1, "opus": 2, "fable": 3}
 AGENT_TIER = {"scout": "haiku", "builder": "sonnet", "critic": "opus"}
+# Известные строковые значения non-judge basis -- ЧИСТЫЙ enum/справка
+# (внешние потребители: WEEKLY_CALIBRATION_PROTOCOL.md, log_append.py),
+# больше НЕ используется как проверка легальности "basis in
+# BASIS_VALUES" -- с batch B7 (2026-07-24) легальность решает пара
+# (by, agent) в _matrix_d0058_violation, не голое членство (закрыта
+# утечка AO3 07-24: basis=queued-to-lead проходило членство для ЛЮБОГО
+# by/agent, включая builder-класс у sonnet-координатора).
 BASIS_VALUES = {"critic", "queued-to-lead"}
 JUDGE_BASIS_VALUE = "judge"
 # Лист-классы, для которых basis "judge" легален (правило 11 / CLAUDE.md
@@ -283,46 +325,104 @@ def check_append_only(staged_lines: list[str], head_lines: list[str]):
 
 
 def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None:
-    """Правило 11. Возвращает текст нарушения или None. Применяется ТОЛЬКО
-    к accepted (буквальное чтение спеки: "accepted легален, если...";
-    rejected несёт "by" без дальнейшей tier/basis-проверки).
+    """Правило 11 (batch B7, 2026-07-24: пары-легальности вместо
+    членства-в-множестве). Возвращает текст нарушения или None.
+    Применяется ТОЛЬКО к accepted (буквальное чтение спеки: "accepted
+    легален, если..."; rejected несёт "by" без дальнейшей
+    tier/basis-проверки).
 
-    basis=="judge" валиден ТОЛЬКО когда собственное поле "category" этой
-    же строки -- лист-класс (LEAF_CATEGORIES); любой другой basis
-    по-прежнему сверяется с BASIS_VALUES безусловно (t-276: до этой
-    правки "judge" принимался безусловно, без проверки лист-класса --
-    расхождение со штатной нормой R13/D-0087, устранено здесь)."""
+    Порядок проверок сознательно НЕ if-каскад "первый матч побеждает
+    без объяснения" -- каждая ветка читается против одной строки
+    таблицы CLAUDE.md «Role ≠ tier» (см. правило 11 в модульном
+    докстринге для полной таблицы пар и цитат):
+
+    1) basis=="judge" -- отдельный, не координаторский путь приёмки
+       (калиброванный судья, R13/D-0087): легален ТОЛЬКО на лист-класс
+       category, НЕЗАВИСИМО от tier(by) -- проверяется первым, чтобы
+       floor п.3 его не перехватывал (правка t-276 сохранена как есть).
+    2) ok_tier: tier(by) > tier(agent) -- легально при любом basis.
+    3) FLOOR: tier(by) известен и СТРОГО ниже sonnet (т.е. by=="haiku")
+       -- FAIL безусловно, ни один basis (кроме уже отработавшего
+       "judge") не спасает ("below Sonnet: no coordination is provided
+       for").
+    4) basis=="critic": легален, только если tier("opus") строго выше
+       tier(agent) -- т.е. agent класса scout/builder, не critic.
+    5) basis=="queued-to-lead": легален ТОЛЬКО для agent класса critic
+       И by ∈ {"sonnet", "opus"}.
+    6) иначе -- FAIL с общим D-0058-сообщением."""
     if event != "accepted":
         return None
     if agent == "lead":
         return None  # Lead-tier работа: presence "by" уже проверена выше
     if agent not in AGENT_TIER:
         return None  # неизвестный agent -- матрица не определена спекой
-    agent_tier = AGENT_TIER[agent]
+    agent_tier_name = AGENT_TIER[agent]
+    agent_tier = TIER_ORDER[agent_tier_name]
     by_tier = TIER_ORDER.get(by)
-    ok_tier = by_tier is not None and by_tier > TIER_ORDER[agent_tier]
     basis = obj.get("basis")
+
+    # (1) judge -- отдельный путь, не координаторский; проверяется до
+    # tier/floor, category решает всё.
     if basis == JUDGE_BASIS_VALUE:
-        ok_basis = obj.get("category") in LEAF_CATEGORIES
-    else:
-        ok_basis = basis in BASIS_VALUES
-    if ok_tier or ok_basis:
-        return None
-    if basis == JUDGE_BASIS_VALUE:
-        # Отдельное сообщение именно для судейского basis на нелистовую
-        # (или отсутствующую/пустую) category -- называет и category, и
-        # правило (R13/D-0087), не смешивается с общим D-0058-сообщением
-        # ниже (t-276 DoD: "внятное сообщение -- назови категорию и
-        # правило").
+        if obj.get("category") in LEAF_CATEGORIES:
+            return None
         return (
             f"R13/D-0087: basis \"judge\" is legal only for leaf-class "
             f"dispatches (recon/implementation), got category={obj.get('category')!r}"
         )
+
+    # (2) ok_tier -- строго выше, легально при любом basis (или без него).
+    if by_tier is not None and by_tier > agent_tier:
+        return None
+
+    # (3) FLOOR: by известного яруса СТРОГО ниже sonnet -- координация
+    # не предусмотрена ни при каком basis (Role != tier matrix: "below
+    # Sonnet: no coordination is provided for"). Развилка с буквой ядра
+    # ("carries a higher tier's input") документирована и решена в
+    # пользу floor -- см. правило 11 модульного докстринга.
+    if by_tier is not None and by_tier < TIER_ORDER["sonnet"]:
+        return (
+            f"D-0058: by={by!r} -- ярус ниже sonnet, координация не "
+            f"предусмотрена ни при каком basis={basis!r} (Role != tier "
+            f"matrix: 'below Sonnet: no coordination is provided for'); "
+            f"agent={agent!r} не может быть принят этим by"
+        )
+
+    # (4) basis=="critic" -- легален, если критик (opus) строго выше
+    # agent (agent класса scout/builder).
+    if basis == "critic":
+        if TIER_ORDER["opus"] > agent_tier:
+            return None
+        return (
+            f"D-0058: agent={agent!r} (ярус {agent_tier_name}) принят с "
+            f"basis='critic', но критик (opus) не строго выше яруса "
+            f"исполнителя -- критик-вход поверх собственного класса "
+            f"критика смысла не имеет; легальный путь для agent='critic' "
+            f"-- by строго выше opus (by='fable'), либо "
+            f"basis='queued-to-lead' при by∈{{sonnet,opus}}"
+        )
+
+    # (5) basis=="queued-to-lead" -- легален ТОЛЬКО критик-классу у
+    # by∈{sonnet,opus} (AO3-кейс: builder-класс у sonnet-координатора
+    # НЕ проходит -- легален только через basis='critic').
+    if basis == "queued-to-lead":
+        if agent == "critic" and by in ("sonnet", "opus"):
+            return None
+        return (
+            f"D-0058: agent={agent!r} принят by={by!r} с "
+            f"basis='queued-to-lead' -- для {agent!r}-класса у "
+            f"{by!r}-координатора легален только basis='critic' (или "
+            f"judge на leaf-implementation, если category -- лист-класс); "
+            f"очередь (queued-to-lead) доступна только для critic-класса "
+            f"работ"
+        )
+
+    # (6) прочее -- общий D-0058 отказ.
     return (
         f"D-0058: agent={agent!r} принят by={by!r} (не строго выше яруса "
-        f"исполнителя) и нет валидного basis (нужно critic/queued-to-lead, "
-        f"либо judge на лист-класс -- category ∈ recon/implementation, "
-        f"R13/D-0087)"
+        f"исполнителя) и нет валидного basis (нужно critic/queued-to-lead "
+        f"по паре, либо judge на лист-класс -- category ∈ "
+        f"recon/implementation, R13/D-0087)"
     )
 
 
