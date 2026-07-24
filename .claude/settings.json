@@ -25,6 +25,12 @@
           { "type": "command", "command": "python tools/dod_track.py" },
           { "type": "command", "command": "python tools/journal_echo.py" }
         ]
+      },
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          { "type": "command", "command": "python tools/negative_lint.py" }
+        ]
       }
     ],
     "SubagentStop": [
