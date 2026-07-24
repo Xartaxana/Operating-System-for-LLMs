@@ -165,6 +165,24 @@ CLAUDE.md wins and that's a bug report against this file.
    exam's PASS, and the keep-or-replace decision below uses the last
    unconditioned score.
 
+   **D-0085 reference ladder** (baseline for "no worse than the
+   mirror"): the exam score of the model bound to a host function is
+   compared against this function's reference bar, not judged in
+   isolation. Bindings and prices, taken from D-0085 (the reference
+   deployment's evidence line — do not invent numbers for a different
+   host binding):
+   - scout = Haiku 4.5 ($1 / $5 per MTok)
+   - builder = Sonnet ($3 / $15 per MTok)
+   - critic = Opus 4.8 ($5 / $25 per MTok)
+   - Lead = Fable ($10 / $50 per MTok)
+   - judge = `judge-sonnet` (calibration bar: 13/13 agreement,
+     `PROCESS/JUDGE_CALIBRATION_PROTOCOL.md`)
+
+   Record the comparison as a row in the Adoption Ledger (the
+   function, the host's bound model, the reference bar above, and
+   whether the exam met it) — not just a pass/fail note in the Runs
+   log.
+
    Run the exam defined for each role below; roles listed without one
    state the reason:
    - **scout**: first run the `scout-exam-gen` skill (it writes a

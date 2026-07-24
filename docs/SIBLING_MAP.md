@@ -291,9 +291,12 @@ SCOUT_GOLDEN_SET) проверяется на переносимость по в
 
 ## Ось 10 — База отбора «новых строк» эхо-хуков при записи (t-277/t-279, 2026-07-22)
 
-tools/journal_echo.py эхо-слои (TIER / WITNESS / TS-DRIFT) <->
-toolkit/tools/journal_echo.py (TIER / WITNESS; ts-drift — деферрал в
-силе). Инвариант: эхо-слой оценивает ТОЛЬКО строки, добавленные
+tools/journal_echo.py эхо-слои (TIER / WITNESS / TS-DRIFT /
+ESCALATION — страж R6-зеркала, t-317 Phase 4) <->
+toolkit/tools/journal_echo.py (та же четвёрка слоёв: ts-drift и
+warn_stale портированы t-316, ESCALATION — t-317 тем же батчем;
+деферрал ts-drift РАЗРЕШЁН 2026-07-24). Инвариант: эхо-слой
+оценивает ТОЛЬКО строки, добавленные
 ТЕКУЩИМ tool-вызовом — payload-scoped через _resolve_echo_base
 (источник tool_response.originalFile; fail-open → HEAD-дифф с
 видимой пометкой FALLBACK_MARKER_TEXT), НЕ кумулятивный HEAD-дифф.

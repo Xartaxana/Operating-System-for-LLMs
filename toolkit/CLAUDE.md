@@ -27,8 +27,8 @@ a property of the deployment. The intern/junior/middle/senior grades
 (API track) are price/capability rungs for MODELS, used for
 accounting and the assignment table — they do not appear in the rules
 themselves (grades are an accounting ladder for models, not a policy
-vocabulary; the mapping between the two vocabularies is documented
-separately in this deployment).
+vocabulary; the mapping between the two vocabularies is documented in
+`docs/TWO_VOCABULARIES.md`).
 
 ## Routing rules
 
