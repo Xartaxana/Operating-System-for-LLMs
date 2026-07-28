@@ -435,13 +435,19 @@ accepting model); `accepted` for scout/builder/critic is legitimate
 when tier(by) is above the tier of `agent`, OR with a `basis` field:
 "critic" / "queued-to-lead" — the role-vs-tier acceptance matrix
 encoded — OR "judge" on a leaf-class dispatch that reproduced the
-calibration set first (rule 13); for non-Claude workers the `basis`
-field is mandatory on `by`. `by` and `model` are DIFFERENT formats, on purpose: `by` must be
+calibration set first (rule 13); work performed by a non-Claude
+model still carries a `basis` on acceptance — the matrix compares
+FUNCTION-tier words, not model ids, and `basis` supplies the input
+the tier comparison cannot. `by` and `model` are DIFFERENT formats,
+on purpose: `by` must be
 a bare tier keyword from `TIER_ORDER` in `tools/journal_validator.py`
-(`haiku`/`sonnet`/`opus`/`fable`) — the validator compares tiers
-numerically, so a full model id (e.g. `"claude-opus-4-8"`) matches no
-`TIER_ORDER` key and silently fails the tier comparison (no crash,
-just an unconditional fail); `model` has no such constraint — it's
+(`haiku`/`sonnet`/`opus`/`fable`) — since 2026-07-28 an unknown `by`
+FAILS the matrix outright: no `basis` (including "judge") legalizes
+an acceptance from an acceptor outside `TIER_ORDER` (ported from a
+sibling deployment's pair-matrix fix); a full model id (e.g.
+`"claude-opus-4-8"`) matches no `TIER_ORDER` key and is exactly that
+unknown-`by` case — a loud, named violation, not a silent tier-miss;
+`model` has no such constraint — it's
 free-form, and a full model id there is recommended, since it's more
 useful for calibration than a bare tier keyword. The validator's own
 failure detector is a dedicated pair of calibration checks. Events:

@@ -70,7 +70,13 @@ log" section):
     replaced by legality-PER-(by, agent)-PAIR, after the live AO3
     07-24 leak: two different Sonnet coordinators accepted Sonnet-class
     (builder) results via basis=queued-to-lead -- membership passed
-    that basis regardless of WHICH by/agent pair it was attached to):
+    that basis regardless of WHICH by/agent pair it was attached to).
+    PRECEDES branches (a)-(f) (t-323, port of AO3's fix 30e79c8,
+    2026-07-28): an enum check "is by even in TIER_ORDER" -- an
+    unknown by FAILS unconditionally, BEFORE the judge branch too --
+    judge's by-independence (staff fix t-276, branch b below) applies
+    only to LEGAL tier words; no basis of any kind legalizes an
+    acceptance from an unknown acceptor:
 
     a) ok_tier -- tier(by) > tier(agent) (haiku<sonnet<opus<fable by
        agent: scout=haiku, builder=sonnet, critic=opus) -- legal at
@@ -112,6 +118,18 @@ log" section):
        concession).
     f) any other basis (including none) -- FAIL with the generic
        role-vs-tier message.
+
+    SURFACE NARROWING (t-323, critic verdict 2026-07-28): the by-shape
+    enum gate applies ONLY to accepted with agent ∈ {scout, builder,
+    critic}; OUTSIDE the gate (recorded DECISIONS, not oversights):
+    rejected -- by carries no matrix check at all (a literal reading
+    of the spec, see the top of rule 11); agent=lead -- a non-tier by
+    is legal (a live precedent, by="operator", in
+    logs/routing-log.jsonl -- the operator sits at the apex of the
+    hierarchy, rule 11a); agent outside AGENT_TIER -- the matrix is
+    simply undefined by the spec (an early return before any branch).
+    Form-validation candidates for these three neighbors are queued
+    for calibration #5 (the coordinator places the queue item itself).
 
     NOTE (history): at the time of this port the reference validator
     (the staff repo's own tools/journal_validator.py) accepted
@@ -340,6 +358,21 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
         return None  # Lead-tier work: presence of "by" already checked above
     if agent not in AGENT_TIER:
         return None  # unknown agent -- the matrix doesn't define one
+    if by not in TIER_ORDER:
+        # Port of AO3's fix (their calibration #4, commit 30e79c8): an
+        # enum/shape check ("is by even a known tier") precedes ANY
+        # matrix semantics, including judge (t-323) -- no basis
+        # legalizes an acceptance from an unknown acceptor; ok_tier/
+        # floor stayed silent at by_tier=None, and basis="critic"/
+        # "judge" never looked at by at all -- the AO3 07-24 hole this
+        # closes.
+        return (
+            f"role-vs-tier acceptance matrix: by={by!r} is not a known "
+            f"tier ({sorted(TIER_ORDER)}) -- basis cannot legalize an "
+            f"acceptance from an unknown acceptor (an enum/shape check "
+            f"precedes the matrix's semantics; ported from AO3's fix "
+            f"30e79c8)"
+        )
     agent_tier_name = AGENT_TIER[agent]
     agent_tier = TIER_ORDER[agent_tier_name]
     by_tier = TIER_ORDER.get(by)

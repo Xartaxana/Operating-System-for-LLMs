@@ -490,21 +490,102 @@ def test_matrix_scout_accepted_same_tier_with_basis_now_fails_below_sonnet_floor
     assert any("role-vs-tier" in v for v in violations)
 
 
-def test_matrix_non_claude_by_requires_basis():
+def test_matrix_model_id_in_by_fails_as_unknown_tier():
+    # RENAMED (critic verdict on t-323, 2026-07-28): the old names/claims
+    # here were stale. (a) test_matrix_non_claude_by_with_basis_critic_passes
+    # asserted code==0 for a full model id in "by" with basis="critic" --
+    # that was EXACTLY the AO3 07-24 hole this batch closes, and became a
+    # verbatim duplicate of test_b7_1_sonnet_by_builder_agent_critic_basis_ok
+    # once "by" was corrected to a legal tier word -- deleted, no
+    # information lost. (b) this test (test_matrix_non_claude_by_requires_basis)
+    # asserted "requires basis" as if that were still a distinct rule --
+    # it is not: a full model id in "by" is now simply an UNKNOWN-TIER
+    # value, and fails identically WITH or WITHOUT basis (the enum gate
+    # runs before any basis is even inspected). A model id belongs in
+    # "model", never in "by" -- "by" is always a bare TIER_ORDER keyword,
+    # even for non-Claude workers.
+    staged_no_basis = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
+                                     model="sonnet", task_id="t-001", witness="w",
+                                     by="gemini-2.5-flash",
+                                     notes="model id in by, no basis -- unknown tier, not 'requires basis'"))
+    code, violations = jv.decide(staged_no_basis, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("is not a known tier" in v for v in violations), violations
+
+    staged_critic_basis = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
+                                         model="sonnet", task_id="t-001", witness="w",
+                                         by="gemini-2.5-flash", basis="critic",
+                                         notes="model id in by, critic basis -- still unknown tier, still fails"))
+    code, violations = jv.decide(staged_critic_basis, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("is not a known tier" in v for v in violations), violations
+
+
+# ---- t-323: unknown "by" fails the D-0058 matrix UNCONDITIONALLY (port
+# of AO3's own fix, their calibration #4, commit 30e79c8) -- a "by"
+# outside TIER_ORDER is never legalized by any basis, including
+# "judge"; the enum/shape check runs BEFORE every branch of
+# _matrix_d0058_violation. ----
+
+def test_t323_unknown_by_fails_even_with_critic_basis():
     staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
-                            model="sonnet", task_id="t-001", witness="w", by="gemini-2.5-flash",
-                            notes="non-Claude by, no basis"))
+                            model="sonnet", task_id="t-001", witness="w", by="banana",
+                            basis="critic", notes="unknown by, critic basis -- must fail (t-323)"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1
-    assert any("role-vs-tier" in v for v in violations)
+    assert any("is not a known tier" in v and "banana" in v for v in violations), violations
 
 
-def test_matrix_non_claude_by_with_basis_critic_passes():
-    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
-                            model="sonnet", task_id="t-001", witness="w", by="gemini-2.5-flash",
-                            basis="critic", notes="non-Claude by, critic basis"))
+def test_t323_unknown_by_case_sensitive_fails_not_via_queued_to_lead_branch():
+    # "Sonnet" (capitalized) is NOT the same key as "sonnet" in
+    # TIER_ORDER -- case sensitivity is part of the enum check itself,
+    # not a separate rule; must fail via the NEW unknown-by branch, not
+    # the queued-to-lead pair-message (rule e).
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="scout",
+                            model="haiku", task_id="t-001", by="Sonnet", basis="queued-to-lead",
+                            notes="capitalized by -- unknown tier, not the legal 'sonnet' (t-323)"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
-    assert code == 0
+    assert code == 1
+    assert any("is not a known tier" in v for v in violations), violations
+    assert not any("queued-to-lead" in v for v in violations), violations
+
+
+def test_t323_unknown_by_fails_before_judge_branch_even_on_leaf_category():
+    # the enum/shape check runs BEFORE basis=="judge" is even inspected
+    # -- an unknown by fails even on a leaf-class category, where judge
+    # would otherwise be by-independent (staff fix t-276).
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", witness="w", by="banana",
+                            basis="judge", category="implementation",
+                            notes="unknown by, judge basis, leaf category -- still fails (t-323)"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("is not a known tier" in v for v in violations), violations
+    assert not any("leaf-class dispatch" in v for v in violations), violations
+
+
+def test_t323_boundary_fable_known_tier_still_passes_via_ok_tier():
+    obj = json.loads(_line(event="accepted", ts="2026-07-10T08:10:00", agent="critic",
+                            model="opus", task_id="t-001", by="fable",
+                            notes="fable is a KNOWN tier -- ok_tier unaffected by t-323"))
+    assert "basis" not in obj
+    staged = _staged(json.dumps(obj, ensure_ascii=False))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_t323_boundary_haiku_known_tier_floor_message_unchanged():
+    # regression pin: "haiku" IS a known tier (present in TIER_ORDER) --
+    # the NEW unknown-by branch must NOT fire for it; the pre-existing
+    # floor message (rule c) still names it, byte-for-byte unchanged by
+    # t-323.
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", witness="w", by="haiku",
+                            basis="critic", notes="known tier below sonnet -- floor, not the new branch"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("tier below sonnet" in v for v in violations), violations
+    assert not any("is not a known tier" in v for v in violations), violations
 
 
 # ---- batch B7 (2026-07-24): D-0058 pair-legality table --
