@@ -77,8 +77,75 @@ exit 0 when clean / 1 when any issue was found, a human-readable
 report on stdout) plus the importable `check_wiring(root) -> dict`
 function -- the CLI is a thin wrapper around exactly that function,
 so the two forms can never disagree.
+
+CLI ROOT/MODE FLAGS (closes external-review P2, t-326): the CLI grew
+--host-root/--kit-root/--mode on top of the single implicit
+`repo_root()` guess, because that guess collapses two different
+things a caller might mean by "the root to check":
+
+  - an INSTALLED host repo (has its own configured core.hooksPath,
+    its own .githooks/.claude) -- the only case check_git_hooks_path
+    was ever meaningful for;
+  - the KIT'S OWN SOURCE TREE (e.g. this repo's toolkit/ directory,
+    reviewed from the staff repo one level up) -- which is NOT a
+    self-contained git repo with its own hooksPath wiring; its git
+    config is whatever the ENCLOSING repo happens to have configured,
+    which has no reason to point at <kit-root>/.githooks. Running the
+    old single-root CLI against a kit source tree therefore produced
+    a spurious "core.hooksPath does not resolve to ..." finding that
+    looks identical to a real wiring defect (the reported P2 case).
+
+--mode installed (default, byte-identical to the pre-existing
+behavior on a real installed host -- DoD (a)) checks --host-root
+(default: the old `repo_root()` guess) with every check above.
+--mode source checks --kit-root (default: same guess) but SKIPS
+check_git_hooks_path -- the one check above that is genuinely about
+live installation state rather than the kit tree's own committed
+content -- printing which check(s) it skipped instead of silently
+omitting the finding. Every other check (hook files present +
+git-INDEX modes, harness settings.json referencing real files,
+untracked .githooks/ cruft, adoption-ledger reconciliation) is
+unaffected by install-vs-source and keeps running in BOTH modes: they
+read the kit's own committed tree, which is exactly what a source
+review wants checked. In --mode installed, a --host-root that has
+NEITHER .githooks NOR .claude is flagged loudly as a probable wrong
+invocation (most likely: someone ran the installed-mode default from
+inside a kit source checkout) before the normal report, with a
+forced-nonzero exit -- a caller diagnosis error, not a clean/dirty
+wiring verdict. --kit-root is meaningless in --mode installed (and
+--host-root is meaningless in --mode source); passing the
+mode-inapplicable flag is not an error, but prints one warning line
+naming which flag was ignored, so a caller doesn't silently believe
+an unused flag took effect.
+
+CLI MESSAGE ENCODING (fixed after critic review of t-326): every
+string this module prints is plain ASCII -- no em-dash (U+2014, only
+`--`), no non-ASCII punctuation, no other-language text. A prior
+version's two new diagnostic strings used Cyrillic and an em-dash;
+under a narrow console codepage (verified: PYTHONIOENCODING=cp437 --
+neither Cyrillic byte encodes; PYTHONIOENCODING=cp866 -- the
+Cyrillic bytes DO encode there, but the em-dash does not) `print()`
+raised UnicodeEncodeError before a single check result could be
+shown, crashing the whole run on --mode source under cp437 and on
+the wrong-root diagnostic under cp866. This module runs on arbitrary
+host machines with unknown console codepages, and it is not a
+mechanism this repo's own dogfooding session controls the codepage
+of -- so every printed string here follows the ASCII-only invariant
+already used by tools/session_context.py's own printed lines, not
+this repo's (Russian-language) CLAUDE.md/journal convention.
+
+ARGPARSE CONTRACT CHANGE (also from that review): the previous
+hand-rolled arg handling ignored argv entirely (`_ = sys.argv[1:]`),
+so an unrecognized flag was silently a no-op. Now that argument
+parsing does real work (--host-root/--kit-root/--mode), an
+unrecognized flag is an argparse error: prints usage to stderr and
+exits 2, same as any other Python CLI built on argparse. No caller of
+this script is known to depend on the old silent-ignore behavior for
+any flag other than --check (checked at the review that raised this
+point) -- --check itself is still accepted and still a no-op.
 """
 
+import argparse
 import json
 import re
 import subprocess
@@ -340,37 +407,160 @@ def check_adoption_ledger(root: Path, git_issues: list, harness_issues: list) ->
     return issues
 
 
-def check_wiring(root: Path = None) -> dict:
+# Names check_wiring's `skip` parameter recognizes -- exactly the
+# check functions defined above, by their own function names, so a
+# caller of check_wiring() and someone reading this module's source
+# are looking at the same vocabulary. An unrecognized name in `skip`
+# is silently a no-op (nothing in check_wiring's own five-line body
+# matches an unknown key) by the same "fail open, no raise" contract
+# the individual check_* functions already follow -- see D-0058
+# discussion in the module docstring's CLI section for why an unknown
+# --mode-adjacent name here is a warning at the CLI layer instead of
+# an exception at this layer, which is the importable function other
+# callers besides the CLI also use directly.
+_KNOWN_CHECK_NAMES = frozenset(
+    {
+        "check_git_hooks_path",
+        "check_required_hooks",
+        "check_harness_hooks",
+        "check_untracked_enforcement_files",
+        "check_adoption_ledger",
+    }
+)
+
+
+def check_wiring(root: Path = None, skip: frozenset = frozenset()) -> dict:
     """Runs every check above and aggregates them into
     {"ok": bool, "issues": [str, ...]}. Never raises: each check
     function already fails open (a subprocess/file/parse error becomes
     an issue string, not an exception) -- this is a thin aggregator
-    with no I/O of its own beyond what the checks already perform."""
+    with no I/O of its own beyond what the checks already perform.
+
+    `skip` -- a set of check function names (see _KNOWN_CHECK_NAMES)
+    to OMIT from this run, each contributing an empty issue list in
+    place of actually running. Default empty set: the aggregation is
+    byte-identical to before this parameter existed (regression pin:
+    test_check_wiring_default_skip_is_byte_identical_to_before).
+    Exists so a caller auditing a kit's own SOURCE tree (--mode
+    source, t-326) can skip exactly the checks that are genuinely
+    about live installation state, through the SAME aggregation this
+    function already performs -- rather than a second, hand-inlined
+    copy of this function's five lines that a future new check would
+    silently not know to skip."""
     root = Path(root) if root else repo_root()
-    git_issues = check_git_hooks_path(root) + check_required_hooks(root)
-    harness_issues = check_harness_hooks(root)
-    untracked_issues = check_untracked_enforcement_files(root)
-    ledger_issues = check_adoption_ledger(root, git_issues, harness_issues)
+    git_hooks_issues = [] if "check_git_hooks_path" in skip else check_git_hooks_path(root)
+    required_hooks_issues = [] if "check_required_hooks" in skip else check_required_hooks(root)
+    git_issues = git_hooks_issues + required_hooks_issues
+    harness_issues = [] if "check_harness_hooks" in skip else check_harness_hooks(root)
+    untracked_issues = (
+        [] if "check_untracked_enforcement_files" in skip else check_untracked_enforcement_files(root)
+    )
+    ledger_issues = (
+        []
+        if "check_adoption_ledger" in skip
+        else check_adoption_ledger(root, git_issues, harness_issues)
+    )
     issues = git_issues + harness_issues + untracked_issues + ledger_issues
     return {"ok": not issues, "issues": issues}
 
 
+# Checks that are genuinely about a LIVE installation's state (a real
+# git config value someone had to run `git config core.hooksPath ...`
+# to set) rather than about the kit's own committed tree content --
+# see the module docstring's "CLI ROOT/MODE FLAGS" section for why
+# only this one check qualifies. This is BOTH the skip set passed to
+# check_wiring() and (via its keys) the printed skip message -- one
+# dict, so the message and the actual skip decision cannot drift
+# apart, and so a future check added to check_wiring() that ALSO
+# turns out to be host-install-only is skipped here by adding its
+# name to this one dict, not by re-deriving a second, separate list.
+_SOURCE_MODE_SKIP = {"check_git_hooks_path": "core.hooksPath wiring"}
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="wiring_check.py",
+        description="Read-only auditor of the kit's enforcement-chain wiring (D-0092/D-0093).",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="documented invocation flag; has no effect on behavior (there is only one report form).",
+    )
+    parser.add_argument(
+        "--host-root",
+        default=None,
+        metavar="PATH",
+        help="root of the INSTALLED host repo to audit in --mode installed "
+        "(default: this script's own repo_root() guess -- unchanged from "
+        "the pre-existing single-root behavior).",
+    )
+    parser.add_argument(
+        "--kit-root",
+        default=None,
+        metavar="PATH",
+        help="root of the kit's SOURCE tree to audit in --mode source "
+        "(default: the same repo_root() guess as --host-root's default).",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("installed", "source"),
+        default="installed",
+        help="'installed' (default): audit an installed host repo -- today's "
+        "behavior, unchanged. 'source': audit the kit's own source tree, "
+        "skipping the checks that only make sense against a live install.",
+    )
+    return parser
+
+
 def main(argv=None) -> int:
-    """CLI form: `python tools/wiring_check.py --check`. The --check
-    flag is the documented invocation shape; this function runs the
-    same check_wiring() regardless of argv (there is only one mode), so
-    an unrecognized or missing flag never diverges from the importable
-    function's own behavior."""
-    _ = sys.argv[1:] if argv is None else argv
-    root = repo_root()
-    result = check_wiring(root)
+    """CLI form: `python tools/wiring_check.py --check`, now with
+    --host-root/--kit-root/--mode (see module docstring). Both modes
+    still route through check_wiring()/the individual check_* functions
+    directly -- no separate reporting logic -- so the CLI and the
+    importable functions can never disagree on what counts as an
+    issue, only on which root and which subset of checks apply."""
+    args = _build_arg_parser().parse_args(sys.argv[1:] if argv is None else argv)
+    default_root = repo_root()
+    host_root = Path(args.host_root).resolve() if args.host_root else default_root
+    kit_root = Path(args.kit_root).resolve() if args.kit_root else default_root
+
+    bad_root = False
+    if args.mode == "source":
+        if args.host_root is not None:
+            print("warning: --host-root is ignored in --mode source (only --kit-root is used)")
+        root = kit_root
+        skip_names = sorted(_SOURCE_MODE_SKIP)
+        skip_label = ", ".join(f"{name} ({_SOURCE_MODE_SKIP[name]})" for name in skip_names)
+        print(f"source mode: skipping host-only checks: {skip_label}")
+        result = check_wiring(root, skip=frozenset(_SOURCE_MODE_SKIP))
+    else:
+        if args.kit_root is not None:
+            print("warning: --kit-root is ignored in --mode installed (only --host-root is used)")
+        root = host_root
+        if not (root / _GITHOOKS_DIRNAME).is_dir() and not (root / ".claude").is_dir():
+            bad_root = True
+            print(
+                f"host-root {root} does not look like an installed host "
+                "(no .githooks and no .claude) -- likely run from the wrong "
+                "root; use --mode source to check kit source instead"
+            )
+        result = check_wiring(root)
+
     if result["ok"]:
         print("WIRING: OK")
-        return 0
-    print(f"WIRING: {len(result['issues'])} issue(s)")
-    for issue in result["issues"]:
-        print(f"  - {issue}")
-    return 1
+        exit_code = 0
+    else:
+        print(f"WIRING: {len(result['issues'])} issue(s)")
+        for issue in result["issues"]:
+            print(f"  - {issue}")
+        exit_code = 1
+
+    if bad_root:
+        # Caller-diagnosis error, not a clean/dirty wiring verdict: never
+        # let a coincidentally-clean check_wiring() result mask it.
+        exit_code = 1
+    return exit_code
 
 
 if __name__ == "__main__":
