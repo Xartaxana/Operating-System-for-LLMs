@@ -175,6 +175,59 @@ def test_dod_marker_case_insensitive():
 
 
 # ---------------------------------------------------------------------
+# Критик t-336 (fit_with_fixes), F1: та же подстрочная слабость -- на
+# этот раз в DOD_MARKERS_RE проверки 1 (симметрично дыре t-332/OWNS_WORD_RE
+# в проверке 2). \bDoD\b и \bwitness\b -- границы слова.
+# ---------------------------------------------------------------------
+
+
+def test_f_dod_marker_only_as_filename_substring_now_blocks_closed_hole():
+    # ЗАКРЫТАЯ ДЫРА (эмпирика критика t-336): промпт БЕЗ настоящего DoD-
+    # маркера, называющий tools/dod_gate.py и tools/dod_track.py в
+    # корзине "дано" -- ДО фикса голый r"DoD" (IGNORECASE) матчил
+    # подстроку "dod" внутри "dod_gate.py"/"dod_track.jsonl" -> проверка 1
+    # ложно пропускала (exit_code был 0). ПОСЛЕ фикса (\bDoD\b) -- границы
+    # нет ("_" словесный символ), реального DoD-маркера тоже нет -> БЛОК.
+    prompt = (
+        "Дано: tools/dod_gate.py, tools/dod_track.py, tools/dod_track.jsonl. "
+        "Прочитай оба и сравни поведение."
+    )
+    exit_code, message = dispatch_gate.decide(
+        _builder_payload(prompt, description="sonnet: read")
+    )
+    assert exit_code == 2
+    assert "без DoD" in message
+
+
+def test_g_dod_word_boundary_recognizes_colon_and_hyphen_forms():
+    # "DoD:" (двоеточие -- не-словесный символ, граница есть) и
+    # "DoD-маркер" (дефис -- не-словесный символ, граница есть) --
+    # ОБЕ формы по-прежнему признаются DoD-маркером после \b-фикса.
+    exit_code1, _ = dispatch_gate.decide(
+        _builder_payload("DoD: тест зелёный.", description="sonnet: fix")
+    )
+    assert exit_code1 == 0
+
+    exit_code2, _ = dispatch_gate.decide(
+        _builder_payload("Приложи DoD-маркер к диспатчу.", description="sonnet: fix")
+    )
+    assert exit_code2 == 0
+
+
+def test_h_witness_word_boundary_does_not_match_test_witness_echo_filename():
+    # "test_witness_echo.py" -- "_" сразу после "witness", границы нет,
+    # НЕ признаётся DoD-маркером; настоящего DoD-слова в промпте тоже
+    # нет -> БЛОК. Позитивный контроль -- отдельное слово "witness" по-
+    # прежнему матчит (test_builder_with_witness_passes_check1 выше).
+    prompt = "Дано: tools/test_witness_echo.py. Прочитай и опиши поведение."
+    exit_code, message = dispatch_gate.decide(
+        _builder_payload(prompt, description="sonnet: read")
+    )
+    assert exit_code == 2
+    assert "без DoD" in message
+
+
+# ---------------------------------------------------------------------
 # Проверка 2: манифест на пишущем builder-диспатче.
 # ---------------------------------------------------------------------
 
@@ -238,6 +291,110 @@ def test_builder_dano_and_given_english_variant_recognized():
     )
     exit_code, _ = dispatch_gate.decide(_builder_payload(prompt, description="sonnet: write x"))
     assert exit_code == 0
+
+
+# ---------------------------------------------------------------------
+# Батч 07-28 п.(б): дыра t-332 в проверке 2 -- owns-маркер манифеста
+# считался присутствующим по голому MANIFEST_OWNS_RE (подстрока без
+# границы слова), теперь -- ТОЛЬКО по OWNS_WORD_RE (граница слова).
+# ---------------------------------------------------------------------
+
+
+def test_a_writing_dispatch_with_real_given_and_owns_manifest_passes():
+    # (а) регресс: реальный "дано" + "owns (ABSOLUTE write paths): путь".
+    prompt = (
+        "DoD: критерии приёмки — тест зелёный, witness приложен.\n"
+        "Дано: репо целиком.\n"
+        "owns (ABSOLUTE write paths): D:/repo/tools/x.py\n"
+        "Правь файл x.py по спеке."
+    )
+    exit_code, message = dispatch_gate.decide(
+        _builder_payload(prompt, description="sonnet: write x")
+    )
+    assert exit_code == 0, message
+
+
+def test_b_owns_only_as_filename_substring_in_given_now_blocks_closed_hole():
+    # (б) ЗАКРЫТАЯ ДЫРА (доклад t-332, эмпирически подтверждено): "owns"
+    # встречается ТОЛЬКО подстрокой внутри имени файла "owns_gate.py" на
+    # Given-строке -- НЕ настоящая owns-декларация. ДО этой правки голый
+    # MANIFEST_OWNS_RE матчил эту подстроку -> has_manifest ложно True ->
+    # exit_code БЫЛ 0 (пишущий диспатч без реального манифеста молча
+    # проходил гейт, D-0073 нарушалось). ПОСЛЕ правки (OWNS_WORD_RE,
+    # граница слова) -- "owns_gate.py" не матчится, реального
+    # owns-манифеста нет -> БЛОК.
+    prompt = (
+        "DoD: критерии приёмки — тест зелёный, witness приложен.\n"
+        "Дано: tools/owns_gate.py — образец экстракции.\n"
+        "Правь файл x.py по спеке."
+    )
+    exit_code, message = dispatch_gate.decide(
+        _builder_payload(prompt, description="sonnet: write x")
+    )
+    assert exit_code == 2
+    assert "манифеста" in message
+    assert "D-0073" in message
+
+
+def test_c_readonly_dispatch_mentioning_owns_gate_filename_in_given_not_blocked():
+    # (в) обратная грань класса (проверено эмпирически, факт кода -- НЕ
+    # по гипотезе спеки): read-only builder-промпт БЕЗ write-слов,
+    # упоминающий owns_gate.py в корзине "дано" -- НЕ классифицируется
+    # пишущим (WRITE_INDICATORS_RE уже несёт `\bowns\b` с retry t-152,
+    # "owns_gate.py" её не триггерит), проверка 2 пропускается целиком.
+    prompt = (
+        "Прочитай tools/owns_gate.py и tools/dispatch_gate.py, опиши логику "
+        "extract_owns_paths. DoD: явный ответ да/нет."
+    )
+    exit_code, message = dispatch_gate.decide(
+        _builder_payload(prompt, description="sonnet: read")
+    )
+    assert exit_code == 0, message
+
+
+def test_d_markdown_bold_owns_marker_recognized_as_manifest():
+    # (г) markdown-форма "**owns**: путь" -- граница слова на звёздах:
+    # `\b` матчит между "*" (не-словесный символ) и "o".
+    prompt = (
+        "DoD: witness приложен. **Дано**: репо целиком. "
+        "**owns**: D:/repo/tools/x.py. Создай файл x.py."
+    )
+    exit_code, message = dispatch_gate.decide(
+        _builder_payload(prompt, description="sonnet: write x")
+    )
+    assert exit_code == 0, message
+
+
+def test_e_owns_word_boundary_regex_direct():
+    # (д) прямая проверка регекса: "owns_gate" (словесный символ "_"
+    # сразу после "owns") НЕ матчится, "owns:" -- матчится.
+    assert dispatch_gate.OWNS_WORD_RE.search("owns_gate.py") is None
+    assert dispatch_gate.OWNS_WORD_RE.search("owns:") is not None
+    assert dispatch_gate.OWNS_WORD_RE.search("**owns**:") is not None
+
+
+def test_manifest_given_word_boundary_prodano_false_positive_fixed():
+    # ОСМОТР MANIFEST_GIVEN_RE (п.2 спеки батча): "продано" содержит
+    # подстроку "дано" БЕЗ границы слова -- ДО правки голый r"дано|given"
+    # матчил её как ложный given-маркер, хотя ни "Дано:", ни "Given:" в
+    # промпте не было. С границей слова (`\bдано\b|\bgiven\b`) "продано"
+    # больше НЕ матчится -> owns-манифест признаётся НЕПОЛНЫМ (нет
+    # настоящего given) -> БЛОК, а не ложный пропуск.
+    assert dispatch_gate.MANIFEST_GIVEN_RE.search("Всё продано на складе.") is None
+    assert dispatch_gate.MANIFEST_GIVEN_RE.search("Дано: репо целиком.") is not None
+    assert dispatch_gate.MANIFEST_GIVEN_RE.search("Given: репо целиком.") is not None
+
+    prompt = (
+        "DoD: тест зелёный, witness приложен.\n"
+        "Всё продано на складе.\n"
+        "owns: tools/x.py\n"
+        "Правь файл x.py по спеке."
+    )
+    exit_code, message = dispatch_gate.decide(
+        _builder_payload(prompt, description="sonnet: write x")
+    )
+    assert exit_code == 2
+    assert "манифеста" in message
 
 
 # ---------------------------------------------------------------------

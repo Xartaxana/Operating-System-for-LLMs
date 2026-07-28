@@ -226,7 +226,7 @@ def test_extract_owns_paths_fallback_substring_marker_when_no_word_boundary_line
         "Дано: репо целиком.\n"
         "manifest_owns_блок; D:/repo/tools/a.py; D:/repo/tools/b.py\n"
     )
-    assert owns_gate._OWNS_WORD_RE.search(prompt) is None  # предпосылка ветки
+    assert owns_gate.OWNS_WORD_RE.search(prompt) is None  # предпосылка ветки
     assert owns_gate.extract_owns_paths(prompt) == [
         "D:/repo/tools/a.py",
         "D:/repo/tools/b.py",
@@ -599,3 +599,33 @@ def test_echo_json_valid_writing_dispatch_no_prior_records_is_silent(tmp_path):
     result = _run_hook(json.dumps(payload).encode("utf-8"), cwd=tmp_path)
     assert result.returncode == 0
     assert (tmp_path / "logs" / "owns_registry.jsonl").exists()
+
+
+# ---------------------------------------------------------------------
+# Батч 07-28 п.(б): пин единства источника OWNS_WORD_RE (D-0043) --
+# owns_gate.py больше НЕ несёт свою локальную копию _OWNS_WORD_RE, а
+# импортирует OWNS_WORD_RE из dispatch_gate.py (тот же объект, который
+# теперь использует и блокирующая проверка 2 dispatch_gate'а).
+# ---------------------------------------------------------------------
+
+
+def test_owns_gate_source_has_no_local_owns_word_re_compile():
+    # Критик t-336, F2: прежний тест сравнивал `owns_gate.OWNS_WORD_RE is
+    # dispatch_gate.OWNS_WORD_RE` -- ВАКУУМНАЯ проверка, т.к. модуль `re`
+    # КЭШИРУЕТ re.compile() по паре (pattern, flags): параллельная
+    # re.compile(r"\bowns\b", re.IGNORECASE) в owns_gate.py, безо всякого
+    # импорта, дала бы ТОТ ЖЕ объект и прошла бы is-ассерт (проба критика:
+    # True/True из кэша, False после явного re.purge()) -- тест не мог
+    # отличить "импортирован" от "случайно совпал по кэшу". ФИКС: проверка
+    # по ИСТОЧНИКУ -- читаем текст файла owns_gate.py и убеждаемся, что он
+    # НЕ содержит СВОЕЙ компиляции этого паттерна, плюс позитивный
+    # контроль -- dispatch_gate.py ЭТУ компиляцию несёт (иначе negative
+    # был бы бессмысленным по правилу 6 command hygiene: негатив без
+    # позитивного контроля той же формы не доказывает отсутствие).
+    needle = 're.compile(r"\\bowns\\b"'
+    tools_dir = Path(__file__).resolve().parent
+    dispatch_gate_src = (tools_dir / "dispatch_gate.py").read_text(encoding="utf-8")
+    owns_gate_src = (tools_dir / "owns_gate.py").read_text(encoding="utf-8")
+
+    assert needle in dispatch_gate_src  # позитивный контроль формы поиска
+    assert needle not in owns_gate_src  # owns_gate больше не несёт своей копии

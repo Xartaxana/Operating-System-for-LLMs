@@ -38,10 +38,13 @@ payload["cwd"]) -- не переоткрыт заново, взят из обр�
 блокеру контрольного входа критика (см. "ОТБОР СТРОКИ ПО ГРАНИЦЕ СЛОВА"
 ниже):
  1. Owns-МАРКЕР -- ДВА уровня. (а) ОСНОВНОЙ отбор строки-кандидата --
-    ЛОКАЛЬНЫЙ _OWNS_WORD_RE = `\bowns\b`, регистронезависимо: строка
-    признаётся owns-декларацией, только если маркер стоит ОТДЕЛЬНЫМ
-    СЛОВОМ. `_` -- словесный символ для `\b`, поэтому "owns_gate.py"
-    (имя файла на Given-строке) НЕ матчится, а "owns:",
+    OWNS_WORD_RE = `\bowns\b`, регистронезависимо, ИМПОРТИРОВАННЫЙ из
+    tools/dispatch_gate.py (батч 07-28 п.(б): бывший ЛОКАЛЬНЫЙ
+    _OWNS_WORD_RE стал единой точкой правды с dispatch_gate.py -- тот
+    же объект теперь используется и его блокирующей проверкой 2,
+    D-0043): строка признаётся owns-декларацией, только если маркер
+    стоит ОТДЕЛЬНЫМ СЛОВОМ. `_` -- словесный символ для `\b`, поэтому
+    "owns_gate.py" (имя файла на Given-строке) НЕ матчится, а "owns:",
     "owns (ABSOLUTE write paths):", "**owns**:" -- матчатся.
     (б) ФОЛЛБЕК (только когда НИ ОДНА строка не дала совпадения по
     границе слова) -- прежний MANIFEST_OWNS_RE, ИМПОРТИРОВАННЫЙ из
@@ -295,18 +298,28 @@ if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
 try:
-    from tools.dispatch_gate import MANIFEST_OWNS_RE, WRITE_INDICATORS_RE  # package-style
+    from tools.dispatch_gate import (  # package-style
+        MANIFEST_OWNS_RE,
+        OWNS_WORD_RE,
+        WRITE_INDICATORS_RE,
+    )
 except ImportError:
-    from dispatch_gate import MANIFEST_OWNS_RE, WRITE_INDICATORS_RE  # sibling-module fallback
+    from dispatch_gate import (  # sibling-module fallback
+        MANIFEST_OWNS_RE,
+        OWNS_WORD_RE,
+        WRITE_INDICATORS_RE,
+    )
 
 
 # --- извлечение owns-путей из промпта -------------------------------
 
-# ЛОКАЛЬНЫЙ (не разделённый с dispatch_gate.py) отбор строки-кандидата
-# owns-декларации: маркер обязан стоять ОТДЕЛЬНЫМ СЛОВОМ. Общий
-# MANIFEST_OWNS_RE НАРОЧНО не трогаем -- он несёт БЛОКИРУЮЩУЮ проверку
-# другого гейта, см. докстринг модуля, п.1(б) (обоснование D-0043).
-_OWNS_WORD_RE = re.compile(r"\bowns\b", re.IGNORECASE)
+# БАТЧ 07-28 п.(б): отбор строки-кандидата owns-декларации (маркер
+# обязан стоять ОТДЕЛЬНЫМ СЛОВОМ) больше НЕ живёт локальной копией --
+# ИМПОРТИРОВАН из tools/dispatch_gate.py как OWNS_WORD_RE (единая точка
+# правды, D-0043; dispatch_gate.py теперь тоже использует ЕГО в своей
+# проверке 2, закрывая дыру t-332 подстрочного MANIFEST_OWNS_RE). Общий
+# MANIFEST_OWNS_RE НАРОЧНО не трогаем -- фоллбек ниже, см. докстринг
+# модуля, п.1(б) (обоснование D-0043).
 
 _PAREN_PREFIX_RE = re.compile(r"^\s*\([^)]*\)")
 _JUNK_PREFIX_RE = re.compile(r"^[\s*:\-\u2014\u00ab\u00bb\"']+")
@@ -428,8 +441,9 @@ def extract_owns_paths(prompt: str) -> list:
     ДВА ПРОХОДА (attempt 3, блокер контрольного входа критика -- см.
     докстринг модуля, "ОТБОР СТРОКИ ПО ГРАНИЦЕ СЛОВА"):
      1. ОСНОВНОЙ -- только строки, где маркер стоит ОТДЕЛЬНЫМ СЛОВОМ
-        (_OWNS_WORD_RE = `\\bowns\\b`): "owns_gate.py" в корзине "дано"
-        БОЛЬШЕ НЕ перехватывает разбор у настоящей owns-строки ниже.
+        (OWNS_WORD_RE = `\\bowns\\b`, импортирован из dispatch_gate.py,
+        батч 07-28 п.(б)): "owns_gate.py" в корзине "дано" БОЛЬШЕ НЕ
+        перехватывает разбор у настоящей owns-строки ниже.
      2. ФОЛЛБЕК -- прежний подстрочный перебор по MANIFEST_OWNS_RE,
         ВКЛЮЧАЕТСЯ ТОЛЬКО если по границе слова не совпала НИ ОДНА
         строка (сохранённая толерантность к кривым формам). Строка по
@@ -442,7 +456,7 @@ def extract_owns_paths(prompt: str) -> list:
 
     word_boundary_seen = False
     for line in lines:
-        m = _OWNS_WORD_RE.search(line)
+        m = OWNS_WORD_RE.search(line)
         if not m:
             continue
         word_boundary_seen = True
