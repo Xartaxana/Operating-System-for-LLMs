@@ -10,3 +10,6 @@ gateway/.env
 # правка/прогон и снимок критика - эфемерные, не для истории
 .claude/dod_track/
 .claude/critic_snapshot.json
+# sidecar owns_gate.py (слой 1 защиты от коллизий параллельных
+# диспатчей) -- живой трек, эфемерный, не для истории
+logs/owns_registry.jsonl
