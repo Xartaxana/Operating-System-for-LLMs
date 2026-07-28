@@ -132,6 +132,84 @@ def test_marker_ne_naideno_ni_mid_phrase():
 
 
 # ---------------------------------------------------------------------
+# Async-запуск Agent/Task -- метаданные запуска, не отчёт воркера
+# (батч 07-28, рецидив находки обкатки №1 07-24)
+# ---------------------------------------------------------------------
+
+
+def test_decide_async_launched_payload_is_silent():
+    payload = {
+        "tool_name": "Task",
+        "tool_response": {
+            "isAsync": True,
+            "status": "async_launched",
+            "agentId": "abc123",
+            "description": "sonnet: do the thing",
+            "resolvedModel": "sonnet",
+            "prompt": "Проверь: файл не найден нигде не встречается без контроля.",
+        },
+    }
+    exit_code, output = negative_lint.decide(payload)
+    assert exit_code == 0
+    assert output is None
+
+
+def test_decide_status_async_launched_alone_is_silent():
+    payload = {
+        "tool_name": "Task",
+        "tool_response": {
+            "status": "async_launched",
+            "prompt": "Такого файла не существует, негатив без контроля.",
+        },
+    }
+    exit_code, output = negative_lint.decide(payload)
+    assert exit_code == 0
+    assert output is None
+
+
+def test_decide_is_async_true_alone_is_silent():
+    payload = {
+        "tool_name": "Agent",
+        "tool_response": {
+            "isAsync": True,
+            "prompt": "Отсутствует нужный файл, негатив без контроля.",
+        },
+    }
+    exit_code, output = negative_lint.decide(payload)
+    assert exit_code == 0
+    assert output is None
+
+
+def test_decide_beyond_skip_condition_completed_status_still_warns():
+    # ЗА границей skip-условия: isAsync=False и status="completed" --
+    # json.dumps-фоллбек остаётся живым, WARN не гасится.
+    payload = {
+        "tool_name": "Task",
+        "tool_response": {
+            "isAsync": False,
+            "status": "completed",
+            "prompt": "Такого файла не существует в репозитории.",
+        },
+    }
+    exit_code, output = negative_lint.decide(payload)
+    assert exit_code == 0
+    assert output is not None
+    ctx = output["hookSpecificOutput"]["additionalContext"]
+    assert "NEGATIVE LINT" in ctx
+
+
+def test_decide_plain_string_response_negative_still_warns_regression():
+    # Регресс основного пути: обычный строковый tool_response с
+    # негативом без контроля по-прежнему warns (async-skip не задел
+    # строковую форму).
+    text = "Проверил -- такого пути не существует в репозитории."
+    exit_code, output = negative_lint.decide(_agent_payload(text))
+    assert exit_code == 0
+    assert output is not None
+    assert "NEGATIVE LINT" in output["hookSpecificOutput"]["additionalContext"]
+
+
+# ---------------------------------------------------------------------
 # Ложноположительный контроль -- форма "ЗАКРЫТО" (DoD п.4, t-297)
 # ---------------------------------------------------------------------
 

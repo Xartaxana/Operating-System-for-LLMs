@@ -116,7 +116,24 @@ find_violations()/format_warning(), что и hook. Молчание на чис
 тексте -- СОБСТВЕННОЕ решение (спека не оговаривает вывод на чистом
 входе явно), выбрано симметрично hook-поведению ("тот же анализ" в
 буквальном смысле -- тот же критерий тишины/сообщения, не только тот
-же алгоритм детекта), задокументировано здесь, не угадано молча."""
+же алгоритм детекта), задокументировано здесь, не угадано молча.
+
+ASYNC-ЗАПУСК (находка обкатки №1, 07-24, рецидив 07-28): tool_response
+асинхронного запуска Agent/Task-тула (`isAsync: true` / `status:
+"async_launched"`) -- это МЕТАДАННЫЕ ЗАПУСКА (agentId, description,
+resolvedModel, эхо промпта координатора в поле "prompt"), НЕ отчёт
+воркера. У такого dict нет ни "content", ни "text"/"output"/"stdout"/
+"stderr" -- _extract_text проваливается в json.dumps-фоллбек всего
+payload'а и линт сканирует ПРОМПТ координатора (легитимные негативные
+формулировки спеки без соседнего контроля -- ложное срабатывание).
+Пропуск легален: финальный результат воркера приходит ОТДЕЛЬНЫМ
+PostToolUse-событием позже и линтится штатно (тем же decide()) --
+здесь просто нечего анализировать. decide() проверяет это ДО
+_extract_text: tool_response -- dict и (isAsync is True ИЛИ
+status == "async_launched") -> тихий (0, None). Форма без этих
+маркеров (isAsync=False/отсутствует, status != "async_launched")
+проходит обычным путём -- json.dumps-фоллбек остаётся живым для
+прочих неопознанных dict-форм."""
 
 import argparse
 import json
@@ -262,7 +279,14 @@ def decide(payload: dict) -> tuple:
     if tool_name not in ("Task", "Agent"):
         return 0, None
 
-    text = _extract_text(payload.get("tool_response"))
+    tool_response = payload.get("tool_response")
+    if isinstance(tool_response, dict) and (
+        tool_response.get("isAsync") is True
+        or tool_response.get("status") == "async_launched"
+    ):
+        return 0, None
+
+    text = _extract_text(tool_response)
     violations = find_violations(text)
     if not violations:
         return 0, None
