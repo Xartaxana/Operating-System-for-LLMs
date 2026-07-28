@@ -30,6 +30,7 @@ critic проверяет классовую полноту фикса ПО КА
 | — | .claude/skills/qa-loop/SKILL.md (журналирование диспатчей) |
 | .claude/skills/session-handoff (D-0050) | .claude/skills/session-handoff (порт t-021, коммит 0911cf6) |
 | CURRENT_CONTEXT.md — носитель очереди OS (D-0082: кросс-деплойный пункт пишется в носитель ЦЕЛИ тем же ходом) | docs/HANDOFF.md «Открытые хвосты» — носитель очереди AO3 (та же обязанность их стороной) |
+| tools/session_context.py, wiring-чек хуков (:880-970: hooksPath + индексные моды `git ls-files -s`, ловит и untracked) + toolkit/tools/wiring_check.py (кит-твин) | scripts/wiring_check.py, SessionStart-хук (os-port-0722; индексно-модовая проверка портирована 2026-07-28; признанное отличие: untracked-хуки НЕ warn'ит — их ловит is_file()-чек на самом клоне) |
 
 ## Ось 2 — Контуры измерения (Rule #1, D-0032: учёт честен на обоих)
 
