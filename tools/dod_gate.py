@@ -204,7 +204,9 @@ SAFETY_SKIP_MESSAGE = (
     "dod_gate: предохранитель от вечного блока сработал -- 2 блока "
     "подряд уже были в этой сессии, сдача пропущена БЕЗ зелёного "
     "прогона (факт зафиксирован в треке, не является заменой "
-    "проверки)."
+    "проверки). UNSAFE COMPLETION: завершение БЕЗ зелёного прогона -- "
+    "работа не считается принятой, факт всплывёт при следующем "
+    "SessionStart."
 )
 
 CONSECUTIVE_BLOCK_LIMIT = 2
@@ -360,6 +362,24 @@ def decide(track: dict, agent_id: str | None = None) -> tuple[int, str, dict]:
     # читаются без падения (append-only, ничто их не парсит обратно).
     if consecutive >= CONSECUTIVE_BLOCK_LIMIT:
         agent_state["consecutive_blocks"] = 0
+        # t-325 (P1, внешнее ревью, сиблинг main_gate.py -- см. его decide()
+        # за полное обоснование класса) attempt 2 (критик-фикс "COLLISION"):
+        # persistent-факт в САМОМ agent_state (тот же словарь, где живёт
+        # "consecutive_blocks" этого агента) -- то, что читает
+        # session_context.py на следующем SessionStart. agent_id включён В
+        # ЗНАЧЕНИЕ (не только в ключ per_agent) -- fallback-ветка
+        # (agent_id=None) кладёт записи под ключ _FALLBACK_AGENT_KEY
+        # ("__none__"), сам agent_id теряется, если его не сохранить рядом
+        # явно. Не затирается последующим успешным прогоном: ветка
+        # "not violation" ниже трогает только "consecutive_blocks" этого
+        # agent_state, этот ключ не трогает. СПИСОК ("unsafe_completions"),
+        # не одиночный словарь (attempt 1 ошибочно перезаписывал единственный
+        # ключ на каждом срабатывании -- второй и последующий пропуск того же
+        # агента в той же сессии молча стирал факт первого): append,
+        # затирание запрещено.
+        agent_state.setdefault("unsafe_completions", []).append(
+            {"ts": _now_iso(), "reason": reason, "agent_id": agent_id}
+        )
         track.setdefault("gate_log", []).append(
             {
                 "action": "skipped_after_2_blocks",

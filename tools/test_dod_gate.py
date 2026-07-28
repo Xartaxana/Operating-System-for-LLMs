@@ -523,6 +523,129 @@ def test_decide_skips_on_third_consecutive_violation_safety_valve():
     assert entry["agent_id"] == "agent-1"
 
 
+# ---------------------------------------------------------------------
+# t-325 (P1, внешнее ревью, attempt 2 -- критик REJECTED attempt 1's single
+# overwritable dict, "COLLISION" finding): предохранитель АППЕНДИТ
+# ПЕРСИСТЕНТНЫЙ факт в gate_state.per_agent[<agent>]["unsafe_completions"]
+# (список, не одиночный ключ -- тот же словарь, где живёт
+# consecutive_blocks этого агента).
+# ---------------------------------------------------------------------
+
+
+def test_decide_records_unsafe_completion_on_safety_valve():
+    track = {
+        "edits": [{"ts": "t1", "agent_id": "agent-1"}],
+        "runs": [],
+        "gate_state": {"per_agent": {"agent-1": {"consecutive_blocks": 2}}},
+    }
+    exit_code, message, updated = dod_gate.decide(track, agent_id="agent-1")
+    assert exit_code == 0
+    facts = updated["gate_state"]["per_agent"]["agent-1"]["unsafe_completions"]
+    assert len(facts) == 1
+    assert facts[0]["reason"] == "no-green-run"
+    assert facts[0]["ts"]
+    assert facts[0]["agent_id"] == "agent-1"
+
+
+def test_decide_unsafe_completion_message_includes_break_glass_wording():
+    track = {
+        "edits": [{"ts": "t1", "agent_id": "agent-1"}],
+        "runs": [],
+        "gate_state": {"per_agent": {"agent-1": {"consecutive_blocks": 2}}},
+    }
+    _, message, _ = dod_gate.decide(track, agent_id="agent-1")
+    assert "UNSAFE COMPLETION" in message
+
+
+def test_decide_unsafe_completion_fallback_agent_id_none_records_none():
+    # Defensive fallback branch (agent_id=None) -- the fact's own "agent_id"
+    # value is honestly None too, not invented.
+    track = {
+        "edits": [{"ts": "t1", "agent_id": "agent-1"}],
+        "runs": [],
+        "gate_state": {"per_agent": {"__none__": {"consecutive_blocks": 2}}},
+    }
+    exit_code, message, updated = dod_gate.decide(track, agent_id=None)
+    assert exit_code == 0
+    facts = updated["gate_state"]["per_agent"]["__none__"]["unsafe_completions"]
+    assert facts[0]["agent_id"] is None
+
+
+def test_decide_unsafe_completion_not_erased_by_later_green_run():
+    track = {
+        "edits": [{"ts": "t1", "agent_id": "agent-1"}],
+        "runs": [],
+        "gate_state": {"per_agent": {"agent-1": {"consecutive_blocks": 2}}},
+    }
+    _, _, after_valve = dod_gate.decide(track, agent_id="agent-1")
+    assert len(after_valve["gate_state"]["per_agent"]["agent-1"]["unsafe_completions"]) == 1
+
+    green_track = {
+        "edits": [{"ts": "2026-07-16T10:00:00.000000", "agent_id": "agent-1"}],
+        "runs": [{"ts": "2026-07-16T10:00:05.000000", "outcome": "green", "agent_id": "agent-1"}],
+        "gate_state": after_valve["gate_state"],
+    }
+    exit_code, message, after_green = dod_gate.decide(green_track, agent_id="agent-1")
+    assert exit_code == 0
+    assert message == ""
+    facts = after_green["gate_state"]["per_agent"]["agent-1"]["unsafe_completions"]
+    assert len(facts) == 1
+    assert facts[0]["reason"] == "no-green-run"
+
+
+def test_decide_unsafe_completion_isolated_per_agent():
+    # agent-x's unsafe_completions must not leak into agent-y's own
+    # per_agent entry when agent-y trips ITS OWN valve independently.
+    track = {
+        "edits": [{"ts": "t1", "agent_id": "agent-x"}],
+        "runs": [],
+        "gate_state": {"per_agent": {"agent-x": {"consecutive_blocks": 2}}},
+    }
+    _, _, after_x = dod_gate.decide(track, agent_id="agent-x")
+
+    track_y = {
+        "edits": [{"ts": "t1", "agent_id": "agent-y"}],
+        "runs": [],
+        "gate_state": {
+            "per_agent": {
+                "agent-x": after_x["gate_state"]["per_agent"]["agent-x"],
+                "agent-y": {"consecutive_blocks": 2},
+            }
+        },
+    }
+    _, _, after_y = dod_gate.decide(track_y, agent_id="agent-y")
+    y_facts = after_y["gate_state"]["per_agent"]["agent-y"]["unsafe_completions"]
+    x_facts = after_y["gate_state"]["per_agent"]["agent-x"]["unsafe_completions"]
+    assert y_facts[0]["agent_id"] == "agent-y"
+    assert x_facts[0]["agent_id"] == "agent-x"
+
+
+def test_decide_unsafe_completion_collision_two_valve_trips_both_kept():
+    # Critic finding "COLLISION" (attempt 1 overwrote a single dict, losing
+    # the first occurrence on a second trip): two consecutive valve trips
+    # of the SAME agent in the same session must leave BOTH facts in the
+    # list.
+    track = {
+        "edits": [{"ts": "t1", "agent_id": "agent-1"}],
+        "runs": [],
+        "gate_state": {"per_agent": {"agent-1": {"consecutive_blocks": 2}}},
+    }
+    _, _, after_first = dod_gate.decide(track, agent_id="agent-1")
+    assert len(after_first["gate_state"]["per_agent"]["agent-1"]["unsafe_completions"]) == 1
+
+    track2 = {**track, "gate_state": after_first["gate_state"]}
+    _, _, after_block1 = dod_gate.decide(track2, agent_id="agent-1")
+    assert after_block1["gate_state"]["per_agent"]["agent-1"]["consecutive_blocks"] == 1
+    track3 = {**track, "gate_state": after_block1["gate_state"]}
+    _, _, after_block2 = dod_gate.decide(track3, agent_id="agent-1")
+    assert after_block2["gate_state"]["per_agent"]["agent-1"]["consecutive_blocks"] == 2
+
+    track4 = {**track, "gate_state": after_block2["gate_state"]}
+    _, _, after_second = dod_gate.decide(track4, agent_id="agent-1")
+    facts = after_second["gate_state"]["per_agent"]["agent-1"]["unsafe_completions"]
+    assert len(facts) == 2
+
+
 def test_decide_resets_counter_on_success():
     track = {
         "edits": [{"ts": "t1", "agent_id": "agent-1"}],
@@ -795,6 +918,30 @@ def test_echo_json_safety_valve_after_two_consecutive_blocks(tmp_path):
     # заново (блок #1 нового цикла), а не продолжает пропускать.
     r4 = _run_hook(_stop_payload(str(tmp_path), session_id, agent_id="agent-1"), cwd=tmp_path)
     assert r4.returncode == 2
+
+
+def test_echo_json_safety_valve_records_unsafe_completion_in_track(tmp_path):
+    # DoD (б): third consecutive block -> exit 0 (harness must be released
+    # unchanged), but the persistent fact lands in the track file's
+    # gate_state.per_agent[<agent>].
+    session_id = "sess-valve-fact"
+    _write_track(
+        tmp_path, session_id, {"edits": [{"ts": "t1", "agent_id": "agent-1"}], "runs": []}
+    )
+
+    r1 = _run_hook(_stop_payload(str(tmp_path), session_id, agent_id="agent-1"), cwd=tmp_path)
+    assert r1.returncode == 2
+    r2 = _run_hook(_stop_payload(str(tmp_path), session_id, agent_id="agent-1"), cwd=tmp_path)
+    assert r2.returncode == 2
+    r3 = _run_hook(_stop_payload(str(tmp_path), session_id, agent_id="agent-1"), cwd=tmp_path)
+    assert r3.returncode == 0
+    assert "UNSAFE COMPLETION" in r3.stderr
+
+    track = json.loads((tmp_path / ".claude" / "dod_track" / f"{session_id}.json").read_text())
+    facts = track["gate_state"]["per_agent"]["agent-1"]["unsafe_completions"]
+    assert len(facts) == 1
+    assert facts[0]["reason"] == "no-green-run"
+    assert facts[0]["agent_id"] == "agent-1"
 
 
 def test_echo_json_agent_y_not_skipped_by_agent_x_exhausted_valve(tmp_path):

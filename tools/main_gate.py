@@ -136,7 +136,9 @@ EMPTY_JOURNAL_WARNING = (
 SAFETY_SKIP_MESSAGE = (
     "main_gate: предохранитель от вечного блока сработал -- 2 блока "
     "подряд уже были в этой сессии, завершение пропущено БЕЗ зелёного "
-    "прогона (факт зафиксирован в треке, не является заменой проверки)."
+    "прогона (факт зафиксирован в треке, не является заменой проверки). "
+    "UNSAFE COMPLETION: завершение БЕЗ зелёного прогона -- работа не "
+    "считается принятой, факт всплывёт при следующем SessionStart."
 )
 
 CONSECUTIVE_BLOCK_LIMIT = 2
@@ -319,6 +321,22 @@ def decide(track: dict, cwd: str = ".") -> tuple[int, str, dict]:
     # гарантировано схемой).
     if consecutive >= CONSECUTIVE_BLOCK_LIMIT:
         gate_state["consecutive_blocks"] = 0
+        # t-325 (P1, внешнее ревью, attempt 2 -- критик-фикс "COLLISION"):
+        # предохранитель exit-0 раньше был НЕВИДИМ снаружи -- факт жил
+        # только в gate_log, который никто не читает на всплытие.
+        # persistent-факт в САМОМ main_gate_state (не только в append-only
+        # gate_log) -- то, что читает session_context.py на следующем
+        # SessionStart (см. select_and_ack_break_glass_lines() там). НЕ
+        # затирается последующим успешным прогоном: ветка "not violation"
+        # ниже по коду трогает только "consecutive_blocks", этот ключ не
+        # трогает вовсе. СПИСОК ("unsafe_completions"), не одиночный
+        # словарь (attempt 1 ошибочно перезаписывал единственный ключ на
+        # каждом срабатывании -- вторая и последующая сдача БЕЗ зелёного
+        # прогона в той же сессии молча стирала факт первой): append,
+        # затирание запрещено.
+        gate_state.setdefault("unsafe_completions", []).append(
+            {"ts": _now_iso(), "reason": reason}
+        )
         track.setdefault("gate_log", []).append(
             {
                 "action": "skipped_after_2_blocks",

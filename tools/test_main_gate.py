@@ -484,6 +484,92 @@ def test_decide_skips_on_third_consecutive_violation_safety_valve(tmp_path):
     assert entry["agent_id"] is None
 
 
+# ---------------------------------------------------------------------
+# t-325 (P1, внешнее ревью, attempt 2 -- критик REJECTED attempt 1's single
+# overwritable dict, "COLLISION" finding): предохранитель АППЕНДИТ
+# ПЕРСИСТЕНТНЫЙ факт в main_gate_state["unsafe_completions"] (список, не
+# одиночный ключ) -- то, что читает session_context.py на следующем
+# SessionStart.
+# ---------------------------------------------------------------------
+
+
+def test_decide_records_unsafe_completion_on_safety_valve(tmp_path):
+    track = {
+        "edits": [{"ts": "t1", "agent_id": None}],
+        "runs": [],
+        "main_gate_state": {"consecutive_blocks": 2},
+    }
+    exit_code, message, updated = main_gate.decide(track, cwd=str(tmp_path))
+    assert exit_code == 0
+    facts = updated["main_gate_state"]["unsafe_completions"]
+    assert len(facts) == 1
+    assert facts[0]["reason"] == "no-green-run"
+    assert facts[0]["ts"]
+
+
+def test_decide_unsafe_completion_message_includes_break_glass_wording(tmp_path):
+    track = {
+        "edits": [{"ts": "t1", "agent_id": None}],
+        "runs": [],
+        "main_gate_state": {"consecutive_blocks": 2},
+    }
+    _, message, _ = main_gate.decide(track, cwd=str(tmp_path))
+    assert "UNSAFE COMPLETION" in message
+
+
+def test_decide_unsafe_completion_not_erased_by_later_green_run(tmp_path):
+    # "Факт НЕ затирается последующими зелёными прогонами" -- буквально
+    # спека: safety valve fires once, then a LATER call with a green run
+    # (no violation) must leave main_gate_state.unsafe_completions in place.
+    track = {
+        "edits": [{"ts": "t1", "agent_id": None}],
+        "runs": [],
+        "main_gate_state": {"consecutive_blocks": 2},
+    }
+    _, _, after_valve = main_gate.decide(track, cwd=str(tmp_path))
+    assert len(after_valve["main_gate_state"]["unsafe_completions"]) == 1
+
+    green_track = {
+        "edits": [{"ts": "2026-07-16T10:00:00.000000", "agent_id": None}],
+        "runs": [{"ts": "2026-07-16T10:00:05.000000", "outcome": "green", "agent_id": None}],
+        "main_gate_state": after_valve["main_gate_state"],
+    }
+    exit_code, message, after_green = main_gate.decide(green_track, cwd=str(tmp_path))
+    assert exit_code == 0
+    assert message == ""
+    facts = after_green["main_gate_state"]["unsafe_completions"]
+    assert len(facts) == 1
+    assert facts[0]["reason"] == "no-green-run"
+
+
+def test_decide_unsafe_completion_collision_two_valve_trips_both_kept(tmp_path):
+    # Critic finding "COLLISION" (attempt 1 overwrote a single dict, losing
+    # the first occurrence on a second trip): two consecutive valve trips
+    # in the same session must leave BOTH facts in the list, not just the
+    # latest.
+    track = {
+        "edits": [{"ts": "t1", "agent_id": None}],
+        "runs": [],
+        "main_gate_state": {"consecutive_blocks": 2},
+    }
+    _, _, after_first = main_gate.decide(track, cwd=str(tmp_path))
+    assert len(after_first["main_gate_state"]["unsafe_completions"]) == 1
+
+    # Same violation persists -- two ordinary blocks re-arm the valve...
+    track2 = {**track, "main_gate_state": after_first["main_gate_state"]}
+    _, _, after_block1 = main_gate.decide(track2, cwd=str(tmp_path))
+    assert after_block1["main_gate_state"]["consecutive_blocks"] == 1
+    track3 = {**track, "main_gate_state": after_block1["main_gate_state"]}
+    _, _, after_block2 = main_gate.decide(track3, cwd=str(tmp_path))
+    assert after_block2["main_gate_state"]["consecutive_blocks"] == 2
+
+    # ...and the third trips it again -- SECOND fact appended, first kept.
+    track4 = {**track, "main_gate_state": after_block2["main_gate_state"]}
+    _, _, after_second = main_gate.decide(track4, cwd=str(tmp_path))
+    facts = after_second["main_gate_state"]["unsafe_completions"]
+    assert len(facts) == 2
+
+
 def test_decide_resets_counter_on_success(tmp_path):
     track = {
         "edits": [{"ts": "t1", "agent_id": None}],
@@ -633,6 +719,28 @@ def test_echo_json_safety_valve_after_two_consecutive_blocks(tmp_path):
     assert track["main_gate_state"]["consecutive_blocks"] == 0
     actions = [g["action"] for g in track["gate_log"]]
     assert actions == ["blocked", "blocked", "skipped_after_2_blocks"]
+
+
+def test_echo_json_safety_valve_records_unsafe_completion_in_track(tmp_path):
+    # DoD (а): third consecutive block -> exit 0 (harness must be released
+    # unchanged, anti-deadlock preserved), but the persistent fact lands in
+    # the track file's main_gate_state.
+    session_id = "sess-valve-fact"
+    _write_track(tmp_path, session_id, {"edits": [{"ts": "t1", "agent_id": None}], "runs": []})
+
+    r1 = _run_hook(_stop_payload(str(tmp_path), session_id), cwd=tmp_path)
+    assert r1.returncode == 2
+    r2 = _run_hook(_stop_payload(str(tmp_path), session_id), cwd=tmp_path)
+    assert r2.returncode == 2
+    r3 = _run_hook(_stop_payload(str(tmp_path), session_id), cwd=tmp_path)
+    assert r3.returncode == 0
+    assert "UNSAFE COMPLETION" in r3.stderr
+
+    track = json.loads((tmp_path / ".claude" / "dod_track" / f"{session_id}.json").read_text())
+    facts = track["main_gate_state"]["unsafe_completions"]
+    assert len(facts) == 1
+    assert facts[0]["reason"] == "no-green-run"
+    assert facts[0]["ts"]
 
 
 def test_echo_json_doc_only_jsonl_routing_log_main_edit_passes(tmp_path):

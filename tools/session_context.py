@@ -1185,6 +1185,326 @@ def wiring_lines(root: Path = None) -> list:
     ]
 
 
+# ---------------------------------------------------------------------------
+# t-325 (P1, внешнее ревью): GATE BREAK-GLASS surfacing.
+#
+# Hole this closes: both tools/main_gate.py and tools/dod_gate.py carry a
+# safety valve ("after 2 consecutive blocks, skip the 3rd -- exit 0, do not
+# hang the session forever") that used to be invisible outside the gate's
+# own append-only gate_log: nothing surfaced the fact that a session
+# COMPLETED WITHOUT a green verification run. Their sibling edit (same task)
+# makes the valve APPEND a persistent fact -- main_gate_state
+# ["unsafe_completions"] (list) / gate_state.per_agent[<agent>]
+# ["unsafe_completions"] (list) -- that survives later green runs (a
+# green run only resets consecutive_blocks, never touches this key). This
+# block is the surfacing half: on the NEXT SessionStart, scan every
+# .claude/dod_track/<session_id>.json for facts not yet acknowledged and
+# print one loud line per fact (up to a cap), exactly once.
+#
+# ATTEMPT 2 (critic-gate REJECTED attempt 1; three findings, Lead rulings
+# below -- fixed here, not re-litigated):
+#
+#  1. ACK ONLY SURVIVING LINES. Attempt 1 acknowledged every fact BEFORE
+#     build_context_lines()'s own `lines[:MAX_LINES]` (25-line budget) cut
+#     the list -- a fact whose line got silently truncated was marked
+#     acknowledged anyway and never surfaced again (verified failure: a
+#     live repo already sits at 17/25 lines, 8 lines of headroom). Fix:
+#     candidate lines are built READ-ONLY first (_break_glass_candidates,
+#     no ack write at all), and select_and_ack_break_glass_lines() below
+#     is the ONLY place that acknowledges -- it is called from
+#     build_context_lines() with the lines ALREADY built so far, computes
+#     how much of the 25-line budget is actually left, and acks ONLY the
+#     facts whose lines fit in that remaining space. A fact that does not
+#     fit is not acked and resurfaces on the next SessionStart.
+#  2. CAP. At most _BREAK_GLASS_LINE_CAP (5) individual fact lines per
+#     call, plus one trailing "... and N more ... pending" summary line
+#     when more remain -- N (and the facts behind it) are explicitly NOT
+#     acked, so they queue for a future call. The summary line itself
+#     carries no ack key (key=None) -- it is never itself "acknowledged",
+#     it just stops being emitted once the pending count drops back to
+#     <= the cap.
+#  3. D-0060 (SECOND finding): .claude/dod_track/<session_id>.json files
+#     are shared, live state -- a DIFFERENT/parallel session's PostToolUse
+#     hook may still be read-modify-writing the SAME track file
+#     (tools/dod_track.py) at the exact moment SessionStart of a new
+#     session runs this scan
+#     -- attempt 1's own read-modify-write of that SAME file (to set
+#     acknowledged_ts) could race and silently drop a concurrent edit/run
+#     record. Fix: this whole module is READ-ONLY on dod_track/*.json,
+#     full stop. Acknowledgement state lives in its OWN sidecar file,
+#     .claude/dod_track/break_glass_ack.json, whose SOLE writer/owner is
+#     this module (no gate, no dod_track.py, ever touches it) -- a
+#     dedicated file has no concurrent writer to race with. Fact identity
+#     for the ack key does not need any track-file mutation: session_id
+#     (filename stem) + gate ("main"/"dod") + agent_key (per_agent's own
+#     dict key, or "" for the agent-less main gate) + the fact's own "ts"
+#     + the fact's INDEX within its own facts list (see
+#     _unsafe_completion_facts) together identify it stably, written once
+#     by the gate itself and never rewritten afterward. The index is NOT
+#     optional (accept-with-fixup, critic-gate probe): "ts" ALONE can
+#     collide -- two facts of the same session/gate/agent observed with a
+#     byte-identical ts (Windows wall-clock granularity ~15.6ms repeated
+#     within one fast process) would otherwise share one ack key, and
+#     acknowledging the first (because the budget cut lands between them)
+#     would silently swallow the second forever.
+#  4. COLLISION (THIRD finding). Attempt 1's gates OVERWROTE a single
+#     "unsafe_completion" dict on every valve trip -- a session tripping
+#     the valve twice lost the first occurrence entirely. The gates' own
+#     sibling fix (see tools/main_gate.py / tools/dod_gate.py) now APPENDS
+#     to a list under the new key "unsafe_completions" instead. This module
+#     reads BOTH: the new plural list (iterated in full) AND the legacy
+#     singular "unsafe_completion" dict (kept for backward compatibility --
+#     see _extract_unsafe_list()) so an already-written attempt-1-shaped
+#     track file, if one ever existed on disk, is not silently orphaned.
+#
+# ASCII invariant (same Lead ruling already on record in this file's WIRING-
+# INTEGRITY block, docstring "ASCII invariant" note above wiring_lines()):
+# the spec's own illustrative wording for this line is Cyrillic, but this
+# whole module's hard constraint is "every line built here is plain ASCII"
+# (cp1251 console) -- the Lead already resolved this exact class of tension
+# in favor of English ASCII for WIRING lines; the same resolution applies
+# here rather than reopening the same question. reason/ts/session_id/gate
+# are all sourced from a dod_track JSON file a session itself wrote, so each
+# goes through _ascii_sanitize before being interpolated, same discipline as
+# MODEL/OPEN DISPATCH/WIRING.
+#
+# Fail-open per file (DoD (д)): a corrupt/unreadable JSON file is skipped
+# SILENTLY (no warning line, no exception) -- the sibling file next to it
+# must still surface normally. This is a per-file try/except, deliberately
+# narrower than wiring_lines()'s own whole-block backstop: there is no
+# shared state across track files to protect here (the sidecar is a
+# separate file, read/written once per call, not per track file), so
+# isolating the failure to exactly the broken file is both sufficient and
+# strictly better than an all-or-nothing guard. A broken/unreadable sidecar
+# file itself degrades to "treat as empty" (nothing acked yet) rather than
+# raising -- see _load_break_glass_ack().
+# ---------------------------------------------------------------------------
+
+_DOD_TRACK_DIRNAME = Path(".claude") / "dod_track"
+_BREAK_GLASS_ACK_FILENAME = "break_glass_ack.json"
+_BREAK_GLASS_LINE_CAP = 5
+
+
+def _extract_unsafe_list(state: dict) -> list:
+    """One gate-state dict's (main_gate_state, or one gate_state.per_agent
+    entry) unsafe-completion facts, oldest-first: the new plural list key
+    "unsafe_completions" (attempt 2 fix -- append, never overwrite) PLUS
+    the legacy singular "unsafe_completion" dict (attempt 1 shape, kept
+    readable for backward compatibility -- point 4 above), in that order.
+    Tolerant of any malformed shape -- a track file is data a hook wrote,
+    not a schema this function enforces."""
+    items = []
+    legacy = state.get("unsafe_completion")
+    if isinstance(legacy, dict):
+        items.append(legacy)
+    plural = state.get("unsafe_completions")
+    if isinstance(plural, list):
+        items.extend(u for u in plural if isinstance(u, dict))
+    return items
+
+
+def _unsafe_completion_facts(data: dict) -> list:
+    """Walks one parsed dod_track file's known gate-state sections and
+    returns every (gate_label, agent_key, index, unsafe_completion_dict)
+    quad found, regardless of acknowledged state (the caller filters).
+    "main" -- tools/main_gate.py's main_gate_state (agent_key "": the Stop
+    hook is always main-thread, there is no agent to key by). "dod" --
+    tools/dod_gate.py's gate_state.per_agent[<agent_key>] (zero or more,
+    one bucket per agent that ever tripped the valve in this session);
+    agent_key is per_agent's own dict key (e.g. "agent-1" or the
+    defensive-branch fallback "__none__"), used verbatim in the ack key so
+    two agents' facts never collide.
+
+    index -- this fact's position within its OWN state dict's combined
+    facts list (_extract_unsafe_list: legacy singular first at index 0 if
+    present, then the plural list in append order) -- STABLE across calls
+    because that list is append-only, and load-bearing for ack-key
+    uniqueness (critic-gate probe, attempt-2 accept-with-fixup): "ts"
+    alone is NOT guaranteed unique -- two facts of the same session/gate/
+    agent can carry a byte-identical ts (observed: Windows wall-clock
+    granularity ~15.6ms repeated four times in one fast process), which
+    would otherwise collapse two DISTINCT facts onto the same ack key --
+    acknowledging the first (because the budget cut lands between them)
+    would silently acknowledge the second too, and it would never
+    surface. Tolerant of any malformed shape."""
+    facts = []
+
+    main_state = data.get("main_gate_state")
+    if isinstance(main_state, dict):
+        facts.extend(
+            ("main", "", i, unsafe)
+            for i, unsafe in enumerate(_extract_unsafe_list(main_state))
+        )
+
+    gate_state = data.get("gate_state")
+    if isinstance(gate_state, dict):
+        per_agent = gate_state.get("per_agent")
+        if isinstance(per_agent, dict):
+            for agent_key, agent_state in per_agent.items():
+                if not isinstance(agent_state, dict):
+                    continue
+                facts.extend(
+                    ("dod", str(agent_key), i, unsafe)
+                    for i, unsafe in enumerate(_extract_unsafe_list(agent_state))
+                )
+
+    return facts
+
+
+def _break_glass_ack_path(root: Path) -> Path:
+    return Path(root) / _DOD_TRACK_DIRNAME / _BREAK_GLASS_ACK_FILENAME
+
+
+def _load_break_glass_ack(path: Path) -> dict:
+    """Fail-open: missing, unreadable, or non-dict sidecar content is
+    treated as "nothing acknowledged yet" -- same principle as every other
+    track/log reader in this file (a broken sidecar must not hide facts,
+    at worst it re-surfaces something already seen once)."""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_break_glass_ack(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def _break_glass_candidates(root: Path) -> list:
+    """READ-ONLY (point 3): scans .claude/dod_track/*.json (skipping the
+    ack sidecar itself) and the ack sidecar, and returns a list of
+    {"key": str|None, "line": str} dicts for facts NOT YET acknowledged --
+    up to _BREAK_GLASS_LINE_CAP individual fact entries (deterministically
+    sorted by their own key so results are stable across calls), plus one
+    trailing summary entry (key=None, never ack-able) when more pending
+    facts exist beyond the cap (point 2). Does NOT write anything, to
+    either the track files or the ack sidecar -- callers decide how many
+    of these survive their own outer truncation and ack accordingly (see
+    select_and_ack_break_glass_lines())."""
+    track_dir = root / _DOD_TRACK_DIRNAME
+    if not track_dir.is_dir():
+        return []
+
+    facts = []
+    for path in sorted(track_dir.glob("*.json")):
+        if path.name == _BREAK_GLASS_ACK_FILENAME:
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue  # fail-open, per-file: a broken track must not hide siblings
+        if not isinstance(data, dict):
+            continue
+
+        session_id = path.stem
+        for gate, agent_key, index, unsafe in _unsafe_completion_facts(data):
+            # Index appended (critic-gate accept-with-fixup, attempt 2):
+            # "ts" alone can collide (see _unsafe_completion_facts'
+            # docstring) -- the index makes the key unique per fact even
+            # when two facts of the same session/gate/agent share a
+            # byte-identical ts.
+            fact_ts = str(unsafe.get("ts") or "-")
+            key = f"{session_id}:{gate}:{agent_key}:{fact_ts}:{index}"
+            facts.append((key, session_id, gate, unsafe))
+
+    ack_data = _load_break_glass_ack(_break_glass_ack_path(root))
+    pending = [f for f in facts if f[0] not in ack_data]
+    pending.sort(key=lambda f: f[0])
+
+    shown = pending[:_BREAK_GLASS_LINE_CAP]
+    cap_remainder = len(pending) - len(shown)
+
+    candidates = []
+    for key, session_id, gate, unsafe in shown:
+        ts = _ascii_sanitize(str(unsafe.get("ts") or "-"), 60)
+        reason = _ascii_sanitize(str(unsafe.get("reason") or "-"), 80)
+        session_safe = _ascii_sanitize(session_id, 150)
+        line = (
+            f"GATE BREAK-GLASS: session {session_safe} ended via the {gate} gate's"
+            f" safety valve without a green run ({ts}, reason={reason})"
+        )
+        candidates.append({"key": key, "line": line})
+
+    if cap_remainder > 0:
+        candidates.append(
+            {
+                "key": None,
+                "line": (
+                    f"GATE BREAK-GLASS: ... and {cap_remainder} more"
+                    " unsafe-completion facts pending"
+                ),
+            }
+        )
+
+    return candidates
+
+
+def _ack_break_glass_keys(root: Path, keys, now: datetime.datetime = None) -> None:
+    """Writes the given fact keys into the ack sidecar as acknowledged
+    (key=None entries -- the summary line -- are filtered out, they are
+    never ack-able). A no-op (no file touched at all) when there is
+    nothing new to write, so a call with an empty/all-None key list never
+    creates the sidecar file on disk for no reason."""
+    keys = [k for k in keys if k]
+    if not keys:
+        return
+    now = now or datetime.datetime.now()
+    path = _break_glass_ack_path(root)
+    ack_data = _load_break_glass_ack(path)
+    changed = False
+    for key in keys:
+        if key not in ack_data:
+            ack_data[key] = now.strftime("%Y-%m-%dT%H:%M:%S.%f")
+            changed = True
+    if changed:
+        try:
+            _save_break_glass_ack(path, ack_data)
+        except Exception:
+            pass  # fail-open: printed line stands even if the ack-write fails
+
+
+def select_and_ack_break_glass_lines(
+    root: Path, lines_so_far: list, now: datetime.datetime = None
+) -> list:
+    """Point 1's fix, as its own testable unit: given the context lines
+    ALREADY built (before break-glass lines are appended), returns the
+    break-glass candidate lines that FIT within the module's MAX_LINES
+    budget, and acknowledges (sidecar-writes) ONLY the individual facts
+    behind those surviving lines -- a fact whose line does not fit is left
+    unacknowledged and will be offered again on the next call/SessionStart.
+    The trailing "... and N more" summary line (if present) is never
+    itself ack-able (see _break_glass_candidates) regardless of whether it
+    survives the cut."""
+    candidates = _break_glass_candidates(root)
+    if not candidates:
+        return []
+    space_left = MAX_LINES - len(lines_so_far)
+    if space_left <= 0:
+        return []
+    shown = candidates[:space_left]
+    _ack_break_glass_keys(root, [c["key"] for c in shown], now)
+    return [c["line"] for c in shown]
+
+
+def break_glass_lines(root: Path = None, now: datetime.datetime = None) -> list:
+    """Convenience entry point for direct/standalone use (unit tests, ad
+    hoc scripts): equivalent to select_and_ack_break_glass_lines() called
+    with an EMPTY preceding-lines list, i.e. the full MAX_LINES budget is
+    available -- only _BREAK_GLASS_LINE_CAP (point 2) limits the result,
+    not the 25-line context budget. build_context_lines() itself does NOT
+    call this: it calls select_and_ack_break_glass_lines() directly with
+    the lines already built so far (see below), so a fact only gets acked
+    when its line actually survives the real 25-line cut (point 1)."""
+    root = Path(root) if root else repo_root()
+    return select_and_ack_break_glass_lines(root, [], now)
+
+
 def build_context_lines(
     root: Path = None,
     now: datetime.datetime = None,
@@ -1212,6 +1532,11 @@ def build_context_lines(
     lines.extend(quota_lines(gateway_root, now))
     lines.extend(boot_budget_lines(root))
     lines.extend(wiring_lines(root))
+    # t-325 attempt 2, point 1: pass the ALREADY-BUILT lines so this call can
+    # compute how much of the 25-line budget is actually left and ack ONLY
+    # the facts whose lines survive the [:MAX_LINES] cut below -- see
+    # select_and_ack_break_glass_lines()'s own docstring.
+    lines.extend(select_and_ack_break_glass_lines(root, lines, now))
 
     return lines[:MAX_LINES]
 

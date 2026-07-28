@@ -1177,6 +1177,510 @@ def test_open_dispatches_closes_marker_wrong_case_does_not_close():
     assert opens[0]["task_id"] == "t-133"
 
 
+# ---- t-325 (P1, внешнее ревью, attempt 2): GATE BREAK-GLASS surfacing ----
+# tools/main_gate.py and tools/dod_gate.py's "skip the 3rd consecutive
+# block" safety valve now APPENDS a persistent unsafe_completion fact into
+# the dod_track file itself (sibling edit, same task; new plural
+# "unsafe_completions" list key, "unsafe_completion" singular kept readable
+# for backward compat). This block is the surfacing half -- see
+# session_context.py's own docstring above _break_glass_candidates() for
+# the full attempt-2 rationale (ack-only-shown-lines, the 5-line cap,
+# the read-only-tracks + sidecar-ack fix, and the list-not-overwrite fix).
+
+
+def _write_dod_track(track_dir: Path, session_id: str, data: dict) -> Path:
+    track_dir.mkdir(parents=True, exist_ok=True)
+    path = track_dir / f"{session_id}.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def _read_ack_sidecar(track_dir: Path) -> dict:
+    path = track_dir / "break_glass_ack.json"
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_break_glass_lines_no_dod_track_dir_is_silent(tmp_path):
+    assert sc.break_glass_lines(tmp_path) == []
+
+
+def test_break_glass_lines_empty_dod_track_dir_is_silent(tmp_path):
+    (tmp_path / ".claude" / "dod_track").mkdir(parents=True)
+    assert sc.break_glass_lines(tmp_path) == []
+
+
+def test_break_glass_lines_track_without_any_unsafe_completion_is_silent(tmp_path):
+    track_dir = tmp_path / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-clean",
+        {"edits": [], "runs": [], "main_gate_state": {"consecutive_blocks": 0}},
+    )
+    assert sc.break_glass_lines(tmp_path) == []
+
+
+def test_break_glass_lines_surfaces_main_gate_unsafe_completion(tmp_path):
+    # Legacy singular key ("unsafe_completion") -- backward-compat read
+    # path (point 4).
+    track_dir = tmp_path / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-a",
+        {
+            "main_gate_state": {
+                "consecutive_blocks": 0,
+                "unsafe_completion": {"ts": "2026-07-24T10:00:00.000000", "reason": "no-green-run"},
+            }
+        },
+    )
+    lines = sc.break_glass_lines(tmp_path)
+    assert len(lines) == 1
+    assert lines[0].startswith("GATE BREAK-GLASS:")
+    assert "sess-a" in lines[0]
+    assert "main" in lines[0]
+    assert "no-green-run" in lines[0]
+    assert lines[0].isascii()
+
+
+def test_break_glass_lines_surfaces_dod_gate_unsafe_completion_per_agent(tmp_path):
+    track_dir = tmp_path / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-b",
+        {
+            "gate_state": {
+                "per_agent": {
+                    "agent-1": {
+                        "consecutive_blocks": 0,
+                        "unsafe_completion": {
+                            "ts": "t1",
+                            "reason": "no-green-run",
+                            "agent_id": "agent-1",
+                        },
+                    }
+                }
+            }
+        },
+    )
+    lines = sc.break_glass_lines(tmp_path)
+    assert len(lines) == 1
+    assert "sess-b" in lines[0]
+    assert "dod" in lines[0]
+
+
+def test_break_glass_lines_surfaces_multiple_agents_in_same_track(tmp_path):
+    track_dir = tmp_path / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-multi",
+        {
+            "gate_state": {
+                "per_agent": {
+                    "agent-1": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}},
+                    "agent-2": {"unsafe_completion": {"ts": "t2", "reason": "green-before-last-edit"}},
+                }
+            }
+        },
+    )
+    lines = sc.break_glass_lines(tmp_path)
+    assert len(lines) == 2
+
+
+def test_break_glass_lines_reads_new_plural_list_key_multiple_facts(tmp_path):
+    # New shape (attempt 2, point 4): "unsafe_completions" is a LIST --
+    # every fact in it must surface, not just the last one.
+    track_dir = tmp_path / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-list",
+        {
+            "main_gate_state": {
+                "unsafe_completions": [
+                    {"ts": "t1", "reason": "no-green-run"},
+                    {"ts": "t2", "reason": "green-before-last-edit"},
+                ]
+            }
+        },
+    )
+    lines = sc.break_glass_lines(tmp_path)
+    assert len(lines) == 2
+    assert any("no-green-run" in l for l in lines)
+    assert any("green-before-last-edit" in l for l in lines)
+
+
+def test_break_glass_lines_reads_both_legacy_singular_and_new_plural_keys(tmp_path):
+    # Tolerance for a track file carrying BOTH shapes at once (e.g. one
+    # fact written before the plural-key fix, one after) -- both surface.
+    track_dir = tmp_path / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-mixed-keys",
+        {
+            "main_gate_state": {
+                "unsafe_completion": {"ts": "t0", "reason": "legacy"},
+                "unsafe_completions": [{"ts": "t1", "reason": "no-green-run"}],
+            }
+        },
+    )
+    lines = sc.break_glass_lines(tmp_path)
+    assert len(lines) == 2
+
+
+# ---- point 3 (D-0060): tracks are READ-ONLY, ack lives in the sidecar ----
+
+
+def test_break_glass_lines_does_not_modify_the_track_file(tmp_path):
+    track_dir = tmp_path / ".claude" / "dod_track"
+    path = _write_dod_track(
+        track_dir,
+        "sess-c",
+        {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+    )
+    original_bytes = path.read_bytes()
+    sc.break_glass_lines(tmp_path)
+    assert path.read_bytes() == original_bytes
+
+
+def test_break_glass_lines_never_writes_to_any_track_file(tmp_path):
+    # Critic-required invariant (point 3): scanning MULTIPLE track files
+    # must leave every one of them byte-for-byte unchanged.
+    track_dir = tmp_path / ".claude" / "dod_track"
+    paths = [
+        _write_dod_track(
+            track_dir,
+            f"sess-ro-{i}",
+            {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+        )
+        for i in range(3)
+    ]
+    originals = {p: p.read_bytes() for p in paths}
+    sc.break_glass_lines(tmp_path)
+    for p, original in originals.items():
+        assert p.read_bytes() == original
+
+
+def test_break_glass_lines_records_acknowledgement_in_sidecar_file(tmp_path):
+    track_dir = tmp_path / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-c",
+        {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+    )
+    sc.break_glass_lines(tmp_path)
+    ack = _read_ack_sidecar(track_dir)
+    assert len(ack) == 1
+    # Key carries a trailing fact-index (critic-gate accept-with-fixup:
+    # "ts" alone can collide -- see _unsafe_completion_facts' docstring);
+    # legacy singular key -> index 0.
+    assert "sess-c:main::t1:0" in ack
+    assert ack["sess-c:main::t1:0"]  # non-empty ack timestamp
+
+
+def test_break_glass_lines_ignores_its_own_sidecar_file_as_a_track(tmp_path):
+    track_dir = tmp_path / ".claude" / "dod_track"
+    track_dir.mkdir(parents=True)
+    (track_dir / "break_glass_ack.json").write_text("{}", encoding="utf-8")
+    assert sc.break_glass_lines(tmp_path) == []
+
+
+def test_break_glass_lines_repeat_call_is_silent_exactly_once_boundary(tmp_path):
+    # DoD (г): the same fact must surface EXACTLY ONCE -- a second scan of
+    # the same (now-acknowledged-in-the-sidecar) file is silent.
+    track_dir = tmp_path / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-d",
+        {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+    )
+    first = sc.break_glass_lines(tmp_path)
+    assert len(first) == 1
+    second = sc.break_glass_lines(tmp_path)
+    assert second == []
+
+
+def test_break_glass_lines_preexisting_sidecar_ack_never_reprints(tmp_path):
+    # A fact already acknowledged in the SIDECAR (e.g. by a previous
+    # SessionStart process) must not print even on this process's very
+    # first scan.
+    track_dir = tmp_path / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-e",
+        {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+    )
+    (track_dir / "break_glass_ack.json").write_text(
+        json.dumps({"sess-e:main::t1:0": "2026-07-24T09:00:00.000000"}), encoding="utf-8"
+    )
+    assert sc.break_glass_lines(tmp_path) == []
+
+
+def test_break_glass_lines_two_facts_with_identical_ts_get_distinct_ack_keys(tmp_path):
+    # Critic-gate probe (attempt-2 accept-with-fixup): two facts of the
+    # same session/gate/agent can carry a byte-identical "ts" (Windows
+    # wall-clock granularity). Without the index in the ack key, the
+    # SECOND fact would silently collapse onto the first's key and never
+    # surface once the first is acknowledged. Both facts here share the
+    # exact same ts string.
+    track_dir = tmp_path / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-dup-ts",
+        {
+            "main_gate_state": {
+                "unsafe_completions": [
+                    {"ts": "2026-07-24T10:00:00.000000", "reason": "no-green-run"},
+                    {"ts": "2026-07-24T10:00:00.000000", "reason": "green-before-last-edit"},
+                ]
+            }
+        },
+    )
+    lines = sc.break_glass_lines(tmp_path)
+    assert len(lines) == 2
+    ack = _read_ack_sidecar(track_dir)
+    assert len(ack) == 2  # two DISTINCT keys, not collapsed into one
+
+    # Nothing left pending -- both were shown and acked.
+    assert sc.break_glass_lines(tmp_path) == []
+
+
+def test_select_and_ack_identical_ts_facts_budget_cut_between_them_shows_only_first(tmp_path):
+    # Exact reproduction of the coordinator's requested boundary: two
+    # facts with a byte-identical ts, space_left=1 -- only the FIRST is
+    # shown and acked; the second must resurface on the next call, not be
+    # silently swallowed by a collapsed ack key.
+    track_dir = tmp_path / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-dup-ts-budget",
+        {
+            "main_gate_state": {
+                "unsafe_completions": [
+                    {"ts": "2026-07-24T10:00:00.000000", "reason": "no-green-run"},
+                    {"ts": "2026-07-24T10:00:00.000000", "reason": "green-before-last-edit"},
+                ]
+            }
+        },
+    )
+    filler = ["x"] * (sc.MAX_LINES - 1)  # space_left == 1
+    shown = sc.select_and_ack_break_glass_lines(tmp_path, filler)
+    assert len(shown) == 1
+    assert "no-green-run" in shown[0]
+
+    remaining = sc.select_and_ack_break_glass_lines(tmp_path, [])
+    assert len(remaining) == 1
+    assert "green-before-last-edit" in remaining[0]
+
+
+def test_break_glass_lines_broken_json_file_does_not_block_sibling(tmp_path):
+    # DoD (д): a corrupt track file next to a good one must not hide the
+    # good one's fact.
+    track_dir = tmp_path / ".claude" / "dod_track"
+    track_dir.mkdir(parents=True)
+    (track_dir / "sess-broken.json").write_text("{not valid json", encoding="utf-8")
+    _write_dod_track(
+        track_dir,
+        "sess-ok",
+        {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+    )
+    lines = sc.break_glass_lines(tmp_path)
+    assert len(lines) == 1
+    assert "sess-ok" in lines[0]
+
+
+def test_break_glass_lines_non_dict_json_file_is_skipped(tmp_path):
+    # Adversarial: a track file whose top-level JSON value is a list (or
+    # any non-dict) must not crash the scan.
+    track_dir = tmp_path / ".claude" / "dod_track"
+    track_dir.mkdir(parents=True)
+    (track_dir / "sess-list.json").write_text("[1, 2, 3]", encoding="utf-8")
+    _write_dod_track(
+        track_dir,
+        "sess-ok2",
+        {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+    )
+    lines = sc.break_glass_lines(tmp_path)
+    assert len(lines) == 1
+    assert "sess-ok2" in lines[0]
+
+
+def test_break_glass_lines_ignores_non_json_files_in_dod_track_dir(tmp_path):
+    track_dir = tmp_path / ".claude" / "dod_track"
+    track_dir.mkdir(parents=True)
+    (track_dir / "README.txt").write_text("not a track file", encoding="utf-8")
+    assert sc.break_glass_lines(tmp_path) == []
+
+
+def test_break_glass_lines_sanitizes_non_ascii_reason(tmp_path):
+    # reason/ts are journal/track-sourced (a hook could in principle carry
+    # anything) -- same ASCII discipline as MODEL/OPEN DISPATCH/WIRING.
+    track_dir = tmp_path / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-cyr",
+        {
+            "main_gate_state": {
+                "unsafe_completion": {"ts": "t1", "reason": "причина-с-кириллицей"}
+            }
+        },
+    )
+    lines = sc.break_glass_lines(tmp_path)
+    assert len(lines) == 1
+    assert lines[0].isascii()
+
+
+# ---- point 2: CAP at 5 fact lines + trailing summary line ----------------
+
+
+def test_break_glass_lines_cap_boundary_exactly_five_no_summary_line(tmp_path):
+    track_dir = tmp_path / ".claude" / "dod_track"
+    for i in range(5):
+        _write_dod_track(
+            track_dir,
+            f"sess-{i:02d}",
+            {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+        )
+    lines = sc.break_glass_lines(tmp_path)
+    assert len(lines) == 5
+    assert not any("more unsafe-completion facts pending" in l for l in lines)
+
+
+def test_break_glass_lines_cap_limits_to_five_plus_summary_line(tmp_path):
+    track_dir = tmp_path / ".claude" / "dod_track"
+    for i in range(7):
+        _write_dod_track(
+            track_dir,
+            f"sess-{i:02d}",
+            {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+        )
+    lines = sc.break_glass_lines(tmp_path)
+    assert len(lines) == 6  # 5 facts + 1 summary
+    fact_lines = [l for l in lines if l.startswith("GATE BREAK-GLASS: session")]
+    summary_lines = [l for l in lines if "more unsafe-completion facts pending" in l]
+    assert len(fact_lines) == 5
+    assert len(summary_lines) == 1
+    assert "2 more" in summary_lines[0]
+
+
+def test_break_glass_lines_cap_remainder_not_acked_resurfaces_next_call(tmp_path):
+    # Point 2: facts beyond the cap are NOT acked -- they must surface on
+    # a later call once the earlier ones have been acknowledged.
+    track_dir = tmp_path / ".claude" / "dod_track"
+    for i in range(7):
+        _write_dod_track(
+            track_dir,
+            f"sess-{i:02d}",
+            {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+        )
+    first = sc.break_glass_lines(tmp_path)
+    assert len(first) == 6  # 5 facts + summary
+
+    second = sc.break_glass_lines(tmp_path)
+    assert len(second) == 2
+    assert all(l.startswith("GATE BREAK-GLASS: session") for l in second)
+
+    third = sc.break_glass_lines(tmp_path)
+    assert third == []
+
+
+# ---- point 1: ack ONLY lines surviving the MAX_LINES cut ------------------
+
+
+def test_select_and_ack_break_glass_lines_no_space_left_does_not_ack(tmp_path):
+    # Lead ruling point 1's own test boundary: the preceding context lines
+    # already fill the whole MAX_LINES budget -> the pending fact must be
+    # neither shown NOR acked -- it must resurface once space frees up.
+    track_dir = tmp_path / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-full",
+        {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+    )
+    filler = ["x"] * sc.MAX_LINES
+    shown = sc.select_and_ack_break_glass_lines(tmp_path, filler)
+    assert shown == []
+
+    shown_again = sc.select_and_ack_break_glass_lines(tmp_path, [])
+    assert len(shown_again) == 1
+    assert shown_again[0].startswith("GATE BREAK-GLASS:")
+
+
+def test_select_and_ack_break_glass_lines_partial_space_acks_only_shown(tmp_path):
+    track_dir = tmp_path / ".claude" / "dod_track"
+    for i in range(3):
+        _write_dod_track(
+            track_dir,
+            f"sess-p{i}",
+            {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+        )
+    # Exactly 2 slots left out of MAX_LINES -- 3 facts pending, only 2 fit.
+    filler = ["x"] * (sc.MAX_LINES - 2)
+    shown = sc.select_and_ack_break_glass_lines(tmp_path, filler)
+    assert len(shown) == 2
+
+    # The unshown third fact must resurface with room to spare.
+    remaining = sc.select_and_ack_break_glass_lines(tmp_path, [])
+    assert len(remaining) == 1
+
+
+def test_select_and_ack_break_glass_lines_exact_boundary_one_slot_short(tmp_path):
+    # Adjacent boundary to the "no space at all" case: MAX_LINES - 1 slots
+    # used, exactly 1 left -- the single pending fact DOES fit and IS acked.
+    track_dir = tmp_path / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-boundary",
+        {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+    )
+    filler = ["x"] * (sc.MAX_LINES - 1)
+    shown = sc.select_and_ack_break_glass_lines(tmp_path, filler)
+    assert len(shown) == 1
+
+    shown_again = sc.select_and_ack_break_glass_lines(tmp_path, [])
+    assert shown_again == []  # already acked -- does not resurface
+
+
+def test_build_context_lines_includes_break_glass_line(tmp_path):
+    root = _seed_repo(tmp_path, events=[_event("delegated", task_id="t-001")])
+    track_dir = root / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-live",
+        {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+    )
+    lines = sc.build_context_lines(root)
+    assert any(l.startswith("GATE BREAK-GLASS:") for l in lines)
+
+
+def test_build_context_lines_no_break_glass_line_when_none_pending(tmp_path):
+    root = _seed_repo(tmp_path, events=[_event("delegated", task_id="t-001")])
+    lines = sc.build_context_lines(root)
+    assert not any(l.startswith("GATE BREAK-GLASS:") for l in lines)
+
+
+def test_main_prints_break_glass_line_once_then_silent_on_rerun(tmp_path, capsys):
+    # DoD (в) + (г) at the main()/SessionStart level: prints once, silent
+    # on the next SessionStart of the same repo state.
+    root = _seed_repo(tmp_path, events=[_event("delegated", task_id="t-001")])
+    track_dir = root / ".claude" / "dod_track"
+    _write_dod_track(
+        track_dir,
+        "sess-live",
+        {"main_gate_state": {"unsafe_completion": {"ts": "t1", "reason": "no-green-run"}}},
+    )
+
+    code = sc.main(root)
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "GATE BREAK-GLASS:" in out
+
+    code2 = sc.main(root)
+    assert code2 == 0
+    out2 = capsys.readouterr().out
+    assert "GATE BREAK-GLASS:" not in out2
+
+
 def test_open_dispatches_closes_marker_inside_longer_word_does_not_close():
     # Critic-gate finding (t-133 remainder attempt 2): an unanchored
     # regex would match "closes:" INSIDE "discloses:" too -- the
