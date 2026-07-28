@@ -85,8 +85,9 @@ reads at boot (OS: CURRENT_CONTEXT.md; AO3: docs/HANDOFF.md); own
 journal notes / FINDINGS are not a carrier — an item living only
 there is NOT handed over (D-0082, F-48). A task of ≥5 journal events
 OR ≥2 sessions is carried as a markdown DAG in docs/tasks/ (D-0080:
-nodes/statuses/tiers); a node's status moves in the same move as its
-journal event.
+nodes/statuses/tiers; a WRITING node also declares its owns paths —
+rationale in POLICY_FULL, 2026-07-28); a node's status moves in the
+same move as its journal event.
 
 R5. **Flat delegation (D-0037)**: workers never spawn workers. A task
 found decomposable returns to the Lead via a `decomposable` event.
