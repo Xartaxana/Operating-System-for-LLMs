@@ -30,7 +30,7 @@ critic проверяет классовую полноту фикса ПО КА
 | — | .claude/skills/qa-loop/SKILL.md (журналирование диспатчей) |
 | .claude/skills/session-handoff (D-0050) | .claude/skills/session-handoff (порт t-021, коммит 0911cf6) |
 | CURRENT_CONTEXT.md — носитель очереди OS (D-0082: кросс-деплойный пункт пишется в носитель ЦЕЛИ тем же ходом) | docs/HANDOFF.md «Открытые хвосты» — носитель очереди AO3 (та же обязанность их стороной) |
-| tools/session_context.py, wiring-чек хуков (:880-970: hooksPath + индексные моды `git ls-files -s`, ловит и untracked) + toolkit/tools/wiring_check.py (кит-твин) | scripts/wiring_check.py, SessionStart-хук (os-port-0722; индексно-модовая проверка портирована 2026-07-28; признанное отличие: untracked-хуки НЕ warn'ит — их ловит is_file()-чек на самом клоне) |
+| tools/session_context.py, wiring-чек хуков (:880-970: hooksPath + индексные моды `git ls-files -s`, ловит и untracked) + tools/wiring_check.py (t-338: тонкий standalone CLI над КАНАЛАМИ session_context + новый skills-casing канал; fail-closed чекер — цель enforcement_probe в pre-commit; ТРЕТИЙ одноимённый модуль семейства) + toolkit/tools/wiring_check.py (кит-твин, ДРУГОЙ контракт: read-only универсальный аудитор хоста со своим --check, без session_context; casing-канала НЕТ — порт-очередь минора) | scripts/wiring_check.py, SessionStart-хук (os-port-0722; индексно-модовая проверка портирована 2026-07-28; признанное отличие: untracked-хуки НЕ warn'ит — их ловит is_file()-чек на самом клоне; casing-канала НЕТ при живом .claude/skills/qa-loop/SKILL.md, аналога enforcement_probe НЕТ — оба пункта в очереди передачи AO3) |
 
 ## Ось 2 — Контуры измерения (Rule #1, D-0032: учёт честен на обоих)
 
@@ -318,6 +318,19 @@ VALIDATION (decide() / JOURNAL ECHO) намеренно остаётся на
 echo_new_lines/echo_base_lines, не пересчитывать HEAD-дифф;
 кит-сиблинг — тем же диффом. Детектор класса: чек 26(г) калибровки
 (регулярные fallback-метки = originalFile исчез из payload).
+
+## Ось 11 — Синк-пары Dog↔штаб (D-0082, заведена 2026-07-29 портом t-338)
+
+Dog (D:\Dog) — деплой кита с двусторонним обменом механизмов; в ось 7
+он не входит (не публичная поставка), но обмененные механизмы образуют
+пары, расходящиеся ровно как ось 4. Правило: фикс класса в одной копии
+пары требует вопроса «а в их копии?»; передача — по D-0082 в носитель
+ЦЕЛИ при безопасном касании; молчаливое расхождение — класс F-9.
+
+| Это репо | D:\Dog |
+|---|---|
+| tools/search_control_gate.py + tools/claim_control_gate.py (порт t-338 их t-021/t-022; правки ШТАБА поверх оригинала: word-boundary маркеры (F4 t-339), границы таблиц/заголовков (F5), bisect (F6), компакция >500 (F8), классификация поиска по строке команды, PowerShell-ветка) | tools/search_control_gate.py + tools/claim_control_gate.py (первоисточник; правки штаба им НЕ переданы — очередь передачи Dog в CURRENT_CONTEXT, при безопасном касании их носителя) |
+| tools/negative_lint.py (первоисточник — штаб) | их входящее на синк 2 (записано их стороной 07-29) |
 
 ## Проверка самой карты (D-0048)
 

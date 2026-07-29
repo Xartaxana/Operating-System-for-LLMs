@@ -13,3 +13,6 @@ gateway/.env
 # sidecar owns_gate.py (слой 1 защиты от коллизий параллельных
 # диспатчей) -- живой трек, эфемерный, не для истории
 logs/owns_registry.jsonl
+# синк Dog 07-29 (D-0082): сессионный леджер search_control_gate_next.py
+# половины A -- живой per-session трек, эфемерный, не для истории
+logs/.search-ledger/

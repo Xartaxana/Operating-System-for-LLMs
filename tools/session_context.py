@@ -1161,6 +1161,22 @@ def wiring_lines(root: Path = None) -> list:
         git_warnings = git_hooks_channel(root)
         harness_warnings, importable_count = harness_channel(root)
         python_path = python_channel()
+        # t-338 (Dog synk 07-29): the skills-casing channel lives in
+        # tools/wiring_check.py (the standalone observer CLI, same
+        # directory -- resolvable for the same sys.path[0] reason that
+        # file imports session_context back); the Lead wired this call
+        # in at acceptance per D-0069. Lazy import, fail-open: a
+        # missing/broken wiring_check must never break SessionStart --
+        # any failure degrades to one WARNING string, same contract as
+        # the channels above.
+        try:
+            import wiring_check as _wc
+            skills_warnings, skills_ok_count = _wc.skills_casing_channel(root)
+        except Exception as e:
+            skills_warnings = [
+                f"skills-casing channel unavailable ({type(e).__name__})"
+            ]
+            skills_ok_count = 0
     except Exception as e:
         return [
             _ascii_sanitize(
@@ -1169,7 +1185,7 @@ def wiring_lines(root: Path = None) -> list:
             )
         ]
 
-    warnings = list(git_warnings) + list(harness_warnings)
+    warnings = list(git_warnings) + list(harness_warnings) + list(skills_warnings)
     if not python_path:
         warnings.append("python not found on PATH")
 
@@ -1177,7 +1193,8 @@ def wiring_lines(root: Path = None) -> list:
         python_safe = _ascii_sanitize(python_path, 150)
         line = (
             "WIRING: OK (git hooks: pre-commit, commit-msg;"
-            f" harness hooks: {importable_count} files importable; python: {python_safe})"
+            f" harness hooks: {importable_count} files importable;"
+            f" skills casing: {skills_ok_count} ok; python: {python_safe})"
         )
         return [_ascii_sanitize(line, _WIRING_LINE_MAX_LEN)]
     return [

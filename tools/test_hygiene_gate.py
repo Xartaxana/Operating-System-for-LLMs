@@ -772,6 +772,176 @@ def test_v2_non_commit_git_command_not_scrubbed_by_message_stripper():
     assert not hygiene_gate.GIT_COMMIT_RE.search(command)
 
 
+# ---------------------------------------------------------------------
+# часть C (синк Dog 07-29, D-0082) -- heredoc-скраб тела git commit
+# -F - <<EOF ... EOF во всех 4 написаниях делимитера (голый EOF,
+# 'EOF', "EOF", <<-EOF); маркерные слова ("routing-log", "printf",
+# "->") внутри тела не должны триггерить класс (г), т.к. git-statement
+# маскирование (_mask_git_statements) само по себе останавливается на
+# первом "\n" внутри heredoc-тела и НЕ достаёт до него -- ровно дыра,
+# которую закрывает эта часть.
+# ---------------------------------------------------------------------
+
+
+def _heredoc_journal_command(opener, closer="EOF"):
+    return (
+        f"git commit -F - {opener}\n"
+        "old logs/routing-log.jsonl -> renamed, see printf example\n"
+        f"{closer}"
+    )
+
+
+def test_c_heredoc_bare_delimiter_journal_words_not_blocked():
+    command = _heredoc_journal_command("<<EOF")
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_c_heredoc_single_quoted_delimiter_journal_words_not_blocked():
+    command = _heredoc_journal_command("<<'EOF'")
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_c_heredoc_double_quoted_delimiter_journal_words_not_blocked():
+    command = _heredoc_journal_command('<<"EOF"')
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_c_heredoc_dash_variant_delimiter_journal_words_not_blocked():
+    command = _heredoc_journal_command("<<-EOF")
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_c_python_heredoc_still_caught_class_v_regress():
+    # python - <<EOF -- НЕ git commit, класс (в) должен по-прежнему
+    # ловить: COMMIT_HEREDOC_RE применяется ТОЛЬКО под гардом
+    # GIT_COMMIT_RE (см. _strip_commit_messages) -- python-heredoc её
+    # не проходит и не задет этой правкой.
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("python - <<EOF\nprint(1)\nEOF")
+    )
+    assert exit_code == 0
+    ctx = output["hookSpecificOutput"]["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C in ctx
+
+
+def test_c_heredoc_body_unrelated_regression_still_blocks_real_write():
+    # Контроль в другую сторону: НЕ git commit heredoc, реально
+    # пишущий в журнал -- должен остаться БЛОКОМ (регресс
+    # test_vg5_block_heredoc_redirect не задет частью C, гард
+    # GIT_COMMIT_RE не совпадает с "cat <<EOF").
+    command = 'cat <<EOF >> logs/routing-log.jsonl\n{"event":"x"}\nEOF'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_c_heredoc_unit_strip_commit_messages_removes_body():
+    command = _heredoc_journal_command("<<EOF")
+    stripped = hygiene_gate._strip_commit_messages(command)
+    assert "routing-log" not in stripped.lower()
+    assert "printf" not in stripped.lower()
+
+
+# ---------------------------------------------------------------------
+# F1 (критик t-339) -- две живые репродукции блокирующего класса (г):
+# heredoc-скраб раньше (1) поглощал РЕАЛЬНУЮ команду на остатке строки-
+# опенера heredoc'а и (2) глобально ел ЛЮБОЙ heredoc где-то ещё в
+# составной команде, стоило встретиться "git commit" где угодно.
+# ---------------------------------------------------------------------
+
+
+def test_f1_critic_repro1_heredoc_with_real_write_on_opener_line_still_blocks():
+    # Остаток строки-опенера (` && echo "{}" >> logs/routing-log.jsonl`)
+    # -- РЕАЛЬНАЯ, отдельная shell-команда (heredoc не поглощает остаток
+    # строки в bash), не часть heredoc-тела -- должна остаться видимой.
+    command = (
+        'git commit -F - <<EOF && echo "{}" >> logs/routing-log.jsonl\n'
+        "irrelevant heredoc body text\n"
+        "EOF"
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is not None
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_f1_critic_repro1_control_same_command_without_heredoc_still_blocks():
+    # Контроль критика: та же команда БЕЗ heredoc должна была и раньше,
+    # и сейчас давать deny -- сверка, что F1 не сломал существующий
+    # регресс (не только "новый" случай стал зелёным).
+    command = 'git commit -F - "x" && echo "{}" >> logs/routing-log.jsonl'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is not None
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_f1_critic_repro2_python_heredoc_after_git_commit_still_blocks():
+    # heredoc `python - <<'PY'` НЕ относится к git commit (класс (в)
+    # ловит его отдельно) -- его тело с реальной записью в журнал
+    # должно остаться видимым классу (г), несмотря на "git commit"
+    # где-то раньше в той же составной команде.
+    command = (
+        "git commit -m \"x\" && python - <<'PY'\n"
+        "open('logs/routing-log.jsonl', 'a').write('x')\n"
+        "PY"
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is not None
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_f1_heredoc_body_2_greater_and_1_still_warns_class_b_raw_command_check():
+    # Критик t-339: фикс закрывает ТОЛЬКО класс (г) -- классы (а)/(б)/(в)
+    # считаются по СЫРОЙ команде (_collect_warn_classes), скраб их не
+    # касается. " 2>&1" внутри git-commit-heredoc-тела по-прежнему
+    # триггерит WARN класса (б) -- НЕ регресс, задокументированный
+    # остаток (см. докстринг COMMIT_HEREDOC_RE).
+    command = "git commit -F - <<EOF\nsome text with 2>&1 inside\nEOF"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is not None
+    assert "permissionDecision" not in output["hookSpecificOutput"]
+    assert hygiene_gate.MSG_REDIRECT_STDERR in output["hookSpecificOutput"]["additionalContext"]
+
+
+def test_f1_heredoc_belongs_to_git_commit_unit():
+    command = 'git commit -F - <<EOF\nbody\nEOF'
+    match = hygiene_gate.COMMIT_HEREDOC_RE.search(command)
+    assert match is not None
+    assert hygiene_gate._heredoc_belongs_to_git_commit(command, match) is True
+
+
+def test_f1_heredoc_not_belonging_to_git_commit_unit():
+    command = "git commit -m \"x\" && cat <<EOF\nbody\nEOF"
+    match = hygiene_gate.COMMIT_HEREDOC_RE.search(command)
+    assert match is not None
+    assert hygiene_gate._heredoc_belongs_to_git_commit(command, match) is False
+
+
+def test_f1_is_python_heredoc_opener_unit():
+    command = "python - <<'PY'\nbody\nPY"
+    match = hygiene_gate.COMMIT_HEREDOC_RE.search(command)
+    assert match is not None
+    assert hygiene_gate._is_python_heredoc_opener(command, match) is True
+
+
+def test_f1_non_python_heredoc_opener_unit():
+    command = "git commit -F - <<EOF\nbody\nEOF"
+    match = hygiene_gate.COMMIT_HEREDOC_RE.search(command)
+    assert match is not None
+    assert hygiene_gate._is_python_heredoc_opener(command, match) is False
+
+
 # --- (в) истинные позитивы живы после портов (не ослаблены) ---
 
 

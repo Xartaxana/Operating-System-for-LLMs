@@ -8,3 +8,9 @@ python tools/journal_validator.py
 # N4 (docs/tasks/2026-07-21_validation-import.md): escape-allowlist -- CLAUDE.md
 # permanent concessions stay hash-pinned to their authorizing D-decision.
 python tools/escape_check.py
+# t-338 (Dog synk 07-29, rule "verify a repair against its watcher"):
+# a staged change touching the enforcement chain must pass the wiring
+# observer (tools/wiring_check.py) before the commit lands; fail-closed.
+# Way out of a deadlock: the observer reads the WORKING TREE -- fix it
+# there and the commit unblocks (see tools/enforcement_probe.py docstring).
+python tools/enforcement_probe.py

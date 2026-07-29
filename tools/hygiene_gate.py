@@ -437,6 +437,93 @@ COMMIT_MESSAGE_ARG_RE = re.compile(
     re.DOTALL,
 )
 
+# --- часть C (синк Dog 07-29, D-0082, item 3) -- heredoc-скраб тела
+# коммит-сообщения ---------------------------------------------------
+# Заимствовано из D:\Dog\tools\hygiene_gate.py (COMMIT_HEREDOC_RE):
+# `git commit -F - <<EOF ... EOF` (в любом написании делимитера -- голый
+# EOF, 'EOF', "EOF", вариант <<-) подаёт тело сообщения через stdin;
+# ничего не резало его до части C, поэтому маркерные слова внутри
+# heredoc-тела ложно триггерили детекторы (в)/(б) наравне с обычной
+# прозой. Применяется ТОЛЬКО когда команда содержит `git commit`
+# (тот же гард GIT_COMMIT_RE, что уже используется _strip_commit_messages
+# ниже) -- `python - <<EOF` (наш класс (в), PY_HEREDOC_RE) не содержит
+# "git commit" и остаётся нетронутым и ловимым.
+#
+# F1 (критик t-339, две живые репродукции, ИСПРАВЛЕНО ЭТОЙ правкой):
+#   репро 1: `git commit -F - <<EOF && echo "{}" >> logs/routing-log.jsonl`
+#   -- ОСТАТОК СТРОКИ-ОПЕНЕРА после `<<DELIM` (` && echo ... >>
+#   logs/routing-log.jsonl`) -- это РЕАЛЬНАЯ, отдельная shell-команда
+#   (heredoc-редирект не поглощает остаток строки в bash), а не часть
+#   heredoc-тела. Старый регекс (`.1.*?^\2\s*$` от самого совпадения
+#   `<<...`) поглощал и его тоже, пряча реальную запись от класса (г).
+#   ФИКС: регекс теперь ЯВНО разделяет опенер-токен (группа 1),
+#   остаток строки-опенера (группа 4, СОХРАНЯЕТСЯ дословно) и
+#   тело+закрывающую строку (группа 5, единственное, что вырезается) --
+#   см. _strip_commit_messages, где замена собирает группы 1+4+" ".
+#   репро 2: `git commit -m "x" && python - <<'PY'` с записью в журнал
+#   в теле -- ПРЕЖНИЙ КОД применял COMMIT_HEREDOC_RE.sub ГЛОБАЛЬНО по
+#   всей команде, стоило ГДЕ-ТО встретиться "git commit" (гард
+#   GIT_COMMIT_RE.search на ВСЮ команду) -- поэтому скраб съедал ЛЮБОЙ
+#   heredoc в составной команде, включая НЕ относящийся к git commit
+#   `python - <<'PY'` (класс (в) должен сам его ловить, а его РЕАЛЬНАЯ
+#   запись в теле терялась из видимости класса (г)). ФИКС: скраб
+#   применяется ТОЛЬКО когда heredoc (а) НЕ имеет опенера
+#   `python -...<<...` (см. _is_python_heredoc_opener, PY_HEREDOC_RE-
+#   форма) И (б) реально принадлежит STATEMENT'у, содержащему
+#   `git commit` (см. _heredoc_belongs_to_git_commit -- ищет ближайший
+#   предшествующий разделитель цепочки `;`/`&`/`|` перед heredoc'ом,
+#   проверяет GIT_COMMIT_RE в тексте statement'а "так далеко"). Иначе
+#   heredoc остаётся НЕТРОНУТЫМ -- реальная запись в его теле остаётся
+#   видимой существующей стейтмент-скоуп-машинерии (_statements/
+#   _is_journal_bypass), как и до части C.
+#   ОСТАТОЧНОЕ ОГРАНИЧЕНИЕ (не устранено, не в объявленном evidence):
+#   вложенность нескольких heredoc'ов друг в друге не учитывается
+#   "ближайшим предшествующим разделителем" -- для порт-очереди.
+#
+#   ВАЖНО (критик t-339, зафиксировано): этот фикс закрывает ТОЛЬКО
+#   класс (г) -- детекторы (а)/(б)/(в) (`_collect_warn_classes`)
+#   считаются по СЫРОЙ, НЕзаскрабленной команде (см. decide()), скраб
+#   их не касается вовсе. Маркер " 2>&1" внутри heredoc-тела (даже
+#   git-commit-heredoc-тела) по-прежнему триггерит WARN класса (б) --
+#   это НЕ регресс, а задокументированный остаток (см. Dog-докстринг
+#   выше, "известная остаточная дыра"), не устраняется этой правкой.
+COMMIT_HEREDOC_RE = re.compile(
+    r"(<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2)([^\n]*)(\n.*?^\3\s*$)",
+    re.DOTALL | re.MULTILINE,
+)
+
+# F1: heredoc-опенер, принадлежащий классу (в) (`python - <<...`) --
+# исключается из коммит-скраба целиком (см. COMMIT_HEREDOC_RE докстринг
+# выше, репро 2). Проверяется ПОСТ-МАТЧЕМ (текст непосредственно перед
+# позицией "<<" самого совпадения), а не lookbehind -- Python re не
+# поддерживает lookbehind переменной длины для `\s+`.
+_PY_HEREDOC_PREFIX_RE = re.compile(r"python\s+-\s*$", re.IGNORECASE)
+
+
+def _is_python_heredoc_opener(text: str, match) -> bool:
+    """F1: True, если непосредственно перед литералом "<<" этого
+    heredoc-совпадения стоит "python -" (та же форма, что PY_HEREDOC_RE
+    матчит целиком) -- такой heredoc не про git commit, коммит-скраб
+    его не трогает."""
+    pos = match.start(1)  # позиция самого "<<" (группа 1 начинается с него)
+    return bool(_PY_HEREDOC_PREFIX_RE.search(text[:pos]))
+
+
+def _heredoc_belongs_to_git_commit(text: str, match) -> bool:
+    """F1: True, если heredoc реально принадлежит STATEMENT'у,
+    содержащему `git commit` -- ищет ближайший предшествующий
+    разделитель цепочки (`;`, `&`, `|`) перед НАЧАЛОМ heredoc-
+    совпадения; текст от него (или от начала команды, если разделителя
+    нет) до heredoc'а -- это "текущий statement так далеко" -- должен
+    содержать `git commit` (GIT_COMMIT_RE). Не учитывает вложенность
+    heredoc'ов друг в друге (см. докстринг COMMIT_HEREDOC_RE выше,
+    "ОСТАТОЧНОЕ ОГРАНИЧЕНИЕ")."""
+    start = match.start()
+    prefix = text[:start]
+    sep_idx = max(prefix.rfind(";"), prefix.rfind("&"), prefix.rfind("|"))
+    statement_prefix = prefix[sep_idx + 1:] if sep_idx != -1 else prefix
+    return bool(GIT_COMMIT_RE.search(statement_prefix))
+
 # --- v2 (t-255): порт (2) -- маскирование git-statement ----------
 # statement, начинающийся с `git ` + один из перечисленных
 # подкоманд (после начала команды либо сразу после разделителя
@@ -486,10 +573,34 @@ def _strip_commit_messages(command: str) -> str:
     Применяется, только если команда содержит `git commit`; сами
     пути git add/commit НЕ трогаются -- вырезается только аргумент
     сообщения. Незакрытая кавычка не матчится и остаётся как есть
-    (fail-safe в сторону детекта, см. докстринг класса (г))."""
+    (fail-safe в сторону детекта, см. докстринг класса (г)).
+
+    Часть C (синк Dog 07-29): ПОСЛЕ вырезания -m/--message резервов
+    вырезается ТАКЖЕ heredoc-ТЕЛО (`git commit -F - <<EOF ... EOF`,
+    любое написание делимитера) через COMMIT_HEREDOC_RE -- см. её
+    докстринг выше для полного разбора F1-фикса (критик t-339): (1)
+    остаток строки-опенера ПОСЛЕ `<<DELIM` сохраняется дословно
+    (`_heredoc_sub` собирает группы 1+4), вырезается ТОЛЬКО тело+
+    закрывающая строка (группа 5); (2) heredoc с опенером
+    `python -...<<...` (класс (в)) исключён из скраба
+    (_is_python_heredoc_opener); (3) скраб скоупится на heredoc,
+    реально принадлежащий STATEMENT'у с `git commit`
+    (_heredoc_belongs_to_git_commit) -- heredoc не-git-commit
+    statement'а (напр. `python - <<'PY'` после `&&`) остаётся
+    нетронутым, его реальная запись видна существующей
+    стейтмент-скоуп-машинерии (_statements/_is_journal_bypass)."""
     if not GIT_COMMIT_RE.search(command):
         return command
-    return COMMIT_MESSAGE_ARG_RE.sub(" ", command)
+    stripped = COMMIT_MESSAGE_ARG_RE.sub(" ", command)
+
+    def _heredoc_sub(m):
+        if _is_python_heredoc_opener(stripped, m):
+            return m.group(0)
+        if not _heredoc_belongs_to_git_commit(stripped, m):
+            return m.group(0)
+        return m.group(1) + m.group(4) + " "
+
+    return COMMIT_HEREDOC_RE.sub(_heredoc_sub, stripped)
 
 
 def _mask_git_statements(command: str) -> str:
