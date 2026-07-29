@@ -168,8 +168,15 @@ D-0055/D-0063/D-0064/D-0065/D-0072 (DECISIONS_FULL).
 
 R11. **DoD in every dispatch (D-0054)** — what "done" means and how
 acceptance verifies it, in the tier's form: builder — acceptance
-criteria + the verification run whose output becomes the witness;
-a task with an INTERACTIVE surface (CLI/UI taking user input) adds an
+criteria + the verification run whose output becomes the witness,
+AND the spec names its EDGE BEHAVIOR (2026-07-29, check-23 class
+(б) codification): for every limit/truncation it sets, every
+empty/absent/None input its data can carry, and every pair of its
+own requirements that can conflict, the expected behavior is STATED
+— or the fork is explicitly handed down as a question; a spec
+silent on an edge its own requirements create is a dispatcher
+defect (check-23 attribution), not the performer's guess to make.
+A task with an INTERACTIVE surface (CLI/UI taking user input) adds an
 adversarial mini-battery to the DoD — size, nesting, encoding,
 empty/broken input; every limit/boundary the code introduces gets a
 test AT and BEYOND it; SCOPE CEILING: test volume = acceptance keys +
@@ -186,12 +193,17 @@ dispatch just enumerates its basket inline. Completeness of DoD and
 manifest is the DISPATCHER's duty BEFORE sending — executed as a
 FIVE-POINT CHECKLIST (D-0096) run against every dispatch before it
 goes: (1) explicit question / completeness criterion or acceptance
-keys; (2) DoD inline with the exact verification run; (3) "given"
+keys; (2) DoD inline with the exact verification run AND the edge
+behaviors NAMED — limits/truncations, empty/absent inputs,
+conflicting requirement pairs: stated, or explicitly forked down
+(2026-07-29, check-23 class (б) — cases t-324/t-325/t-332/t-343);
+(3) "given"
 enumerated AND sufficient — data, fixtures, paths NAMED, not
 implied; (4) writing dispatch: owns/non-goals/handoff present;
 (5) freshness — the spec's load-bearing facts checked against their
 carrier, not memory (a stale note in the spec is a dispatcher
-defect). A checklist miss exposed by a reject or finding = a
+defect; machine layer since t-343 — the dispatch_gate given-path
+warn). A checklist miss exposed by a reject or finding = a
 spec-defect of the dispatcher (check-23 case); promotion to a
 machine layer follows the next recurrence (D-0063). The DoD is
 written INLINE in the dispatch prompt itself — named acceptance
