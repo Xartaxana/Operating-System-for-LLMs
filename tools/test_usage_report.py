@@ -201,6 +201,32 @@ def test_accounted_cost_cache_rates_are_distinct_from_base_input():
     assert write_cost != read_cost
 
 
+# ---- t-343 (батч 2, ось 2): claude-opus-5 == claude-opus-4-8 price ----
+
+def test_claude_opus_5_price_equals_opus_4_8():
+    # Находка калибровки №5: окно 6213 ходов claude-opus-5 шло с
+    # unknown-model WARNING / cost=None. Официальный прайс идентичен
+    # claude-opus-4-8 -- строка обязана присутствовать и БЫТЬ РАВНОЙ.
+    assert PRICES_PER_TOKEN_USD["claude-opus-5"] == PRICES_PER_TOKEN_USD["claude-opus-4-8"]
+
+
+def test_claude_opus_5_accounted_cost_no_warning():
+    cost, warning = accounted_cost(
+        "claude-opus-5",
+        input_tokens=1000, output_tokens=200,
+        cache_creation_tokens=500, cache_read_tokens=4000,
+    )
+    assert warning is None
+    input_price, output_price = PRICES_PER_TOKEN_USD["claude-opus-4-8"]
+    expected = (
+        1000 * input_price
+        + 200 * output_price
+        + 500 * input_price * CACHE_WRITE_MULTIPLIER
+        + 4000 * input_price * CACHE_READ_MULTIPLIER
+    )
+    assert cost == pytest.approx(expected)
+
+
 # ---- unknown-model warning path ----
 
 def test_unknown_model_cost_is_none_with_warning():

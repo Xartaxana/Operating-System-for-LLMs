@@ -620,3 +620,198 @@ def test_cyrillic_markers_recognized_via_raw_utf8_bytes():
         stderr=subprocess.PIPE,
     )
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+
+# ---------------------------------------------------------------------
+# ЧАСТЬ A (t-343): WARN-слой "given-пути существуют" -- given_path_warn.
+# repo_root -- реальный корень этого репо (родитель tools/), см.
+# докстринг dispatch_gate.py "ЧАСТЬ A" за обоснование "известный
+# корень" = payload["cwd"].
+# ---------------------------------------------------------------------
+
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+
+
+def _task_payload(prompt: str, cwd: str = None) -> dict:
+    tool_input = {"subagent_type": "builder", "prompt": prompt}
+    payload = {"tool_name": "Task", "tool_input": tool_input}
+    if cwd is not None:
+        payload["cwd"] = cwd
+    return payload
+
+
+def test_given_path_warn_existing_relative_path_no_warn():
+    # tools/dispatch_gate.py -- этот самый файл, точно существует.
+    warn = dispatch_gate.given_path_warn(
+        _task_payload("Дано: tools/dispatch_gate.py. Прочитай его.", cwd=_REPO_ROOT)
+    )
+    assert warn == ""
+
+
+def test_given_path_warn_existing_absolute_path_no_warn():
+    abs_path = str(Path(_REPO_ROOT) / "tools" / "dispatch_gate.py")
+    warn = dispatch_gate.given_path_warn(
+        _task_payload(f"Дано: {abs_path}. Прочитай его.", cwd=_REPO_ROOT)
+    )
+    assert warn == ""
+
+
+def test_given_path_warn_missing_relative_path_warns_with_name():
+    warn = dispatch_gate.given_path_warn(
+        _task_payload("Дано: tools/фейк.py. Прочитай его.", cwd=_REPO_ROOT)
+    )
+    assert "GIVEN-PATH WARN" in warn
+    assert "tools/фейк.py" in warn
+    assert "D-0096" in warn
+
+
+def test_given_path_warn_missing_absolute_path_under_own_root_warns():
+    # СОБСТВЕННОЕ РЕШЕНИЕ билдера (см. докстринг dispatch_gate.py,
+    # "ИЗВЕСТНЫЙ КОРЕНЬ И ЧУЖИЕ ДЕРЕВЬЯ"): абсолютные пути ПОД cwd
+    # ПРОВЕРЯЮТСЯ -- иначе абсолютные owns-манифесты этого же кита
+    # никогда бы не ловились.
+    missing_abs = str(Path(_REPO_ROOT) / "tools" / "дефект_нет_такого_файла.py")
+    warn = dispatch_gate.given_path_warn(
+        _task_payload(f"Дано: {missing_abs}. Прочитай его.", cwd=_REPO_ROOT)
+    )
+    assert "GIVEN-PATH WARN" in warn
+    assert missing_abs in warn
+
+
+def test_given_path_warn_placeholders_and_globs_no_warn():
+    prompt = (
+        "Дано: tools/<имя>.py, tools/*.py, gateway/{name}.py, docs/$VAR.md. "
+        "Это примеры плейсхолдеров, не реальные пути."
+    )
+    warn = dispatch_gate.given_path_warn(_task_payload(prompt, cwd=_REPO_ROOT))
+    assert warn == ""
+
+
+def test_given_path_warn_foreign_tree_dog_no_warn():
+    # "чужое дерево" -- D:\Dog\нет.py лежит ВНЕ payload["cwd"] (этого
+    # репо) -- не проверяется вовсе, ни warn.
+    warn = dispatch_gate.given_path_warn(
+        _task_payload(r"Дано: D:\Dog\нет.py. Прочитай его.", cwd=_REPO_ROOT)
+    )
+    assert warn == ""
+
+
+def test_given_path_warn_threshold_boundary_10_vs_11():
+    # Граница 10/11 (правило 6а): 10 отсутствующих -- полная форма
+    # (список всех имён, БЕЗ префикса "N путей не существует"); 11 --
+    # сводка ("N путей не существует, первые 3: ...").
+    names_10 = [f"tools/fake{i}.py" for i in range(1, 11)]
+    prompt_10 = "Дано: " + ", ".join(names_10) + ". Прочитай все."
+    warn_10 = dispatch_gate.given_path_warn(_task_payload(prompt_10, cwd=_REPO_ROOT))
+    assert "путей не существует" not in warn_10
+    for name in names_10:
+        assert name in warn_10
+
+    names_11 = [f"tools/fake{i}.py" for i in range(1, 12)]
+    prompt_11 = "Дано: " + ", ".join(names_11) + ". Прочитай все."
+    warn_11 = dispatch_gate.given_path_warn(_task_payload(prompt_11, cwd=_REPO_ROOT))
+    assert "11 путей не существует, первые 3:" in warn_11
+    assert "tools/fake1.py" in warn_11
+    assert "tools/fake2.py" in warn_11
+    assert "tools/fake3.py" in warn_11
+    # Полный список НЕ печатается в сводке -- 11-й элемент отсутствует
+    # дословно (только "первые 3" перечислены).
+    assert "tools/fake11.py" not in warn_11
+
+
+def test_given_path_warn_non_task_agent_tool_no_warn():
+    warn = dispatch_gate.given_path_warn(
+        {"tool_name": "Bash", "tool_input": {"prompt": "tools/фейк.py"}}
+    )
+    assert warn == ""
+
+
+def test_given_path_warn_missing_cwd_falls_back_without_crashing():
+    # payload без "cwd" -- фоллбек на os.getcwd() (см. докстринг), не
+    # должен падать; результат не проверяем содержательно (зависит от
+    # реального os.getcwd() на машине прогона), только отсутствие
+    # исключения.
+    warn = dispatch_gate.given_path_warn(_task_payload("Дано: tools/фейк.py."))
+    assert isinstance(warn, str)
+
+
+# ---------------------------------------------------------------------
+# ЧАСТЬ A: интеграция в main() -- exit_code decide() НЕ меняется ни в
+# одной ветке (к1 DoD), WARN печатается ТОЛЬКО в additionalContext на
+# stdout при exit 0, и НЕ печатается вовсе, если гейт уже блокирует
+# (спека п.3).
+# ---------------------------------------------------------------------
+
+
+def test_echo_json_given_path_warn_printed_as_additional_context_on_pass():
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {
+            "subagent_type": "builder",
+            "prompt": (
+                "DoD: критерии приёмки — тест зелёный, witness приложен.\n"
+                "Дано: tools/фейк.py.\n"
+                "Прочитай его."
+            ),
+            "description": "sonnet: read",
+        },
+        "cwd": _REPO_ROOT,
+    }
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    stdout_text = result.stdout.decode("utf-8", errors="replace")
+    out = json.loads(stdout_text)
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert "GIVEN-PATH WARN" in ctx
+    assert "tools/фейк.py" in ctx
+
+
+def test_echo_json_given_path_warn_not_printed_when_gate_blocks():
+    # Гейт блокирует по check1 (нет DoD) -- WARN-слой не обязан
+    # печататься (спека п.3, "не усложняй"); stdout остаётся пустым.
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {
+            "subagent_type": "builder",
+            "prompt": "Дано: tools/фейк.py. Просто поправь.",
+            "description": "sonnet: fix",
+        },
+        "cwd": _REPO_ROOT,
+    }
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 2
+    assert result.stdout == b""
+
+
+def test_echo_json_no_given_path_warn_when_all_paths_exist():
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {
+            "subagent_type": "builder",
+            "prompt": (
+                "DoD: критерии приёмки — тест зелёный, witness приложен.\n"
+                "Дано: tools/dispatch_gate.py.\n"
+                "Прочитай его."
+            ),
+            "description": "sonnet: read",
+        },
+        "cwd": _REPO_ROOT,
+    }
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    assert result.stdout == b""

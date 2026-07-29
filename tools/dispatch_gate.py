@@ -224,9 +224,94 @@ test_f_dod_marker_only_as_filename_substring_now_blocks_closed_hole
 test_g_dod_word_boundary_recognizes_colon_and_hyphen_forms ("DoD:" и
 "DoD-маркер" по-прежнему маркер),
 test_h_witness_word_boundary_does_not_match_test_witness_echo_filename
-(test_witness_echo.py в корзине без слова "witness" -- не маркер)."""
+(test_witness_echo.py в корзине без слова "witness" -- не маркер).
+
+ЧАСТЬ A (t-343, батч 2 находок калибровки №5, D-0096 п.5 -> машинный
+слой по рецидиву): WARN-слой «given-пути существуют». Мотив (чек 23
+калибровки №5): спека t-338 утверждала существование
+tools/wiring_check.py, файла не было -- вскрыто только возвратом
+билдера, ХОТЯ это дешёвая детерминированная встреча (путь НАЗВАН в
+тексте диспатча ДО отправки -- os.path.exists проверяем сразу).
+
+КОНТРАКТ: НОВЫЙ независимый слой поверх БЛОКИРУЮЩЕГО гейта -- exit-2
+ветки decide() (проверки 1/2/3 выше) НЕ ЗАТРОНУТЫ этой правкой ни
+байтом; given_path_warn() -- ОТДЕЛЬНАЯ функция, decide() её не
+вызывает и её результат НЕ участвует в exit_code. main() вызывает её
+ТОЛЬКО когда decide() уже вернула (0, "") -- если гейт блокирует по
+другой причине, дальше не идём (спека прямо разрешает не печатать WARN
+в этом случае, "не усложняй"). Результат -- ТОЛЬКО additionalContext
+JSON на stdout (тот же протокол, что owns_gate.py уже использует для
+своего WARN-слоя), exit_code main() всегда 0 на этой ветке.
+
+ИЗВЛЕЧЕНИЕ (extract_given_candidates -> GIVEN_ABS_WIN_PATH_RE /
+GIVEN_REPO_REL_PATH_RE): два вида локальных путей --
+ (а) абсолютный Windows-путь: `[A-Za-z]:[\\\\/]...\\.ext` -- тело пути
+     (`_PATH_BODY_CHAR`) исключает пробелы/кавычки/ёлочки/пайп и,
+     НАРОЧНО (спека п.4), плейсхолдер-символы `<>*{}$` -- любой
+     плейсхолдер (`<имя>`, `*.py`, `{name}`, `$VAR`) обрывает
+     совпадение ДО обязательного `\\.ext`, поэтому такие формы просто
+     НЕ извлекаются (не требуют отдельного фильтра-исключения);
+     запятая/точка-с-запятой ТОЖЕ исключены из тела -- собственное
+     инженерное решение (спека их не называет явно) против жадного
+     переползания через "path1.py,path2.py" без пробела в ОДНО ложное
+     совпадение.
+ (б) репо-относительный путь: ТОЛЬКО с одним из шести префиксов
+     (tools|gateway|PROCESS|docs|\\.claude|\\.githooks) и расширением
+     файла -- каталоги/голые имена не матчатся структурно (регекс
+     требует `\\.ext` в хвосте). Отрицательный lookbehind
+     `(?<![\\w/\\\\])` перед префиксом закрывает ДВЕ вещи разом: (1) не
+     матчить префикс, если он часть большего слова, (2) НЕ матчить его
+     как ПОДСТРОКУ внутри уже извлечённого абсолютного пути (напр.
+     "D:/repo/tools/x.py" -- символ ПЕРЕД "tools" там "/", lookbehind
+     не пропускает -- абсолютная и относительная формы одного файла не
+     задваиваются).
+
+ИЗВЕСТНЫЙ КОРЕНЬ И ЧУЖИЕ ДЕРЕВЬЯ (спека п.4, ФОРМУЛИРОВКА СПЕКИ
+ДОПУСКАЛА ДВЕ РАЗНЫЕ ТРАКТОВКИ -- задокументировано явно как
+СОБСТВЕННОЕ инженерное решение, не угадано молча): буквальный список
+трёх путей в спеке (D:\\Improving_AI\\..., D:\\AO3_tests\\..., D:\\Dog\\...)
+неоднозначен -- один из них ТЕКСТУАЛЬНО совпадает с корнем ЭТОГО
+самого репо, и одновременно спека явно требует тестом "чужое дерево
+(D:\\Dog\\нет.py) -> нет warn". Буквальное прочтение "все три -- всегда
+исключение" сделало бы проверку абсолютных путей СОБСТВЕННОГО репо
+(частый стиль в манифестах этого же кита: "owns (ABSOLUTE write
+paths): D:/repo/tools/x.py") НИКОГДА не срабатывающей -- асимметрично
+с относительными путями, которые проверяются всегда, и, похоже,
+противоречит мотиву механизма (t-338 мог с равным успехом быть
+абсолютным путём). РЕШЕНИЕ: "известный корень" = payload["cwd"] ТЕКУЩЕГО
+диспатча (та же точка отсчёта, что owns_gate.py уже использует для
+своего sidecar) -- абсолютный путь-кандидат ПРОВЕРЯЕТСЯ, только если он
+лежит ВНУТРИ этого корня (_is_under_root, normcase+normpath сравнение);
+абсолютный путь ВНЕ него (любой другой диск/дерево, включая примеры
+спеки AO3_tests/Dog) -- НЕ проверяется вовсе, ни warn, ни ошибка. Это
+одновременно закрывает ОБЯЗАТЕЛЬНЫЙ тест D:\\Dog\\нет.py (чужой корень)
+И оставляет механизм РАБОТАЮЩИМ на собственном репо (мотивирующий
+кейс). Координатору стоит подтвердить это прочтение отдельно -- см.
+отчёт билдера.
+
+ПОРОГ ШУМА (GIVEN_PATH_WARN_SUMMARY_THRESHOLD = 10, format_given_path_
+warn): спека содержит два, на первый взгляд конфликтующих утверждения
+-- "предупреждать только если несуществующих <= 10" (читается как "не
+предупреждать вовсе выше порога") и тут же "больше -- ...печатай
+сводкой «N путей не существует, первые 3: ...»" (читается как "печатай
+[что-то], то есть ВСЁ ЖЕ предупреждай, просто в другой форме"). Если бы
+выше порога вообще ничего не печаталось, инструкция про формат сводки
+была бы мёртвым текстом. РЕШЕНИЕ (синтез обеих половин, задокументировано):
+<= 10 -- полный список всех отсутствующих путей; > 10 -- сводка "N
+путей не существует, первые 3: <path1>, <path2>, <path3>" -- ОБЕ ветки
+печатают WARN, различается только ФОРМА. Граница тестирована ОБЕИМИ
+сторонами (правило 6а): 10 -> полная форма, 11 -> сводка
+(test_given_path_warn_threshold_boundary_10_vs_11 в
+test_dispatch_gate.py).
+
+FAIL-OPEN: given_path_warn() типизированно возвращает "" на любой
+нераспознанный payload/tool_input/prompt; main() дополнительно
+оборачивает вызов в try/except (belt-and-suspenders, тот же принцип,
+что owns_gate.py) -- адверсариальный вход не должен уронить БЛОКИРУЮЩИЙ
+хук трейсбеком из-за WARN-слоя."""
 
 import json
+import os
 import re
 import sys
 
@@ -301,9 +386,138 @@ def decide(payload: dict) -> tuple[int, str]:
     return 0, ""
 
 
+# --- ЧАСТЬ A (t-343): WARN-слой "given-пути существуют" -----------------
+# См. докстринг модуля, "ЧАСТЬ A", за полное обоснование дизайна. Этот
+# слой НЕ участвует в decide() и не меняет exit_code -- отдельная
+# функция, вызывается ТОЛЬКО из main(), ТОЛЬКО когда decide() уже
+# вернула (0, "").
+
+# Символы, исключённые из "тела" пути-кандидата: пробел/кавычки/ёлочки/
+# пайп, плейсхолдер-символы `<>*{}$` (см. докстринг, "ИЗВЛЕЧЕНИЕ") и
+# запятая/точка-с-запятой/перевод строки (списковые разделители --
+# собственное решение против жадного переползания через список без
+# пробелов, докстринг "ИЗВЛЕЧЕНИЕ" п.(а)).
+_GIVEN_PATH_BODY_CHAR = r'[^\s"\'<>|?*{}$,;\n]'
+
+GIVEN_ABS_WIN_PATH_RE = re.compile(
+    r"(?<!\w)[A-Za-z]:[\\/]" + _GIVEN_PATH_BODY_CHAR + r"*\.[A-Za-z0-9]{1,10}\b"
+)
+
+_GIVEN_REPO_REL_PREFIX = r"(?:tools|gateway|PROCESS|docs|\.claude|\.githooks)"
+GIVEN_REPO_REL_PATH_RE = re.compile(
+    r"(?<![\w/\\])"
+    + _GIVEN_REPO_REL_PREFIX
+    + r"/"
+    + _GIVEN_PATH_BODY_CHAR
+    + r"*\.[A-Za-z0-9]{1,10}\b"
+)
+
+GIVEN_PATH_WARN_SUMMARY_THRESHOLD = 10
+
+
+def extract_given_candidates(prompt: str) -> list:
+    """Возвращает [(путь_как_в_тексте, is_absolute), ...] -- дедуп,
+    порядок первого появления. См. докстринг модуля, "ИЗВЛЕЧЕНИЕ"."""
+    if not isinstance(prompt, str) or not prompt:
+        return []
+    seen_set = set()
+    candidates = []
+    for m in GIVEN_ABS_WIN_PATH_RE.finditer(prompt):
+        tok = m.group(0)
+        if tok not in seen_set:
+            seen_set.add(tok)
+            candidates.append((tok, True))
+    for m in GIVEN_REPO_REL_PATH_RE.finditer(prompt):
+        tok = m.group(0)
+        if tok not in seen_set:
+            seen_set.add(tok)
+            candidates.append((tok, False))
+    return candidates
+
+
+def _is_under_root(path_str: str, root: str) -> bool:
+    """True, когда path_str лежит внутри root (включая сам root) --
+    сравнение через normcase(normpath(...)) (регистронезависимо на
+    Windows, разделители нормализованы). См. докстринг модуля,
+    "ИЗВЕСТНЫЙ КОРЕНЬ И ЧУЖИЕ ДЕРЕВЬЯ"."""
+    try:
+        norm_path = os.path.normcase(os.path.normpath(path_str))
+        norm_root = os.path.normcase(os.path.normpath(root))
+    except Exception:
+        return False
+    return norm_path == norm_root or norm_path.startswith(norm_root + os.sep)
+
+
+def find_missing_given_paths(prompt: str, repo_root: str) -> list:
+    """Возвращает НЕсуществующие пути (как в тексте) из
+    extract_given_candidates(prompt) -- абсолютные пути ВНЕ repo_root
+    (чужое дерево) пропускаются целиком, не считаются "несуществующими"
+    (см. докстринг модуля, "ИЗВЕСТНЫЙ КОРЕНЬ И ЧУЖИЕ ДЕРЕВЬЯ")."""
+    missing = []
+    for tok, is_abs in extract_given_candidates(prompt):
+        if is_abs:
+            if not _is_under_root(tok, repo_root):
+                continue
+            exists = os.path.exists(tok)
+        else:
+            exists = os.path.exists(os.path.join(repo_root, tok))
+        if not exists:
+            missing.append(tok)
+    return missing
+
+
+def format_given_path_warn(missing: list) -> str:
+    """"" на пустом списке; иначе полная форма (<=10) или сводка (>10)
+    -- см. докстринг модуля, "ПОРОГ ШУМА"."""
+    if not missing:
+        return ""
+    if len(missing) <= GIVEN_PATH_WARN_SUMMARY_THRESHOLD:
+        listed = ", ".join(missing)
+        return (
+            "GIVEN-PATH WARN: в тексте диспатча названы несуществующие "
+            f"пути: {listed} — сверь свежесть спеки с носителем (D-0096 п.5)"
+        )
+    head = ", ".join(missing[:3])
+    return (
+        f"GIVEN-PATH WARN: {len(missing)} путей не существует, первые 3: "
+        f"{head} — сверь свежесть спеки с носителем (D-0096 п.5)"
+    )
+
+
+def given_path_warn(payload: dict) -> str:
+    """"" -- ничего предупреждать не нужно (payload не Task/Agent, нет
+    prompt, все кандидаты существуют/чужие/отсутствуют). Иначе --
+    готовое текстовое сообщение WARN (см. format_given_path_warn)."""
+    if not isinstance(payload, dict):
+        return ""
+    tool_name = payload.get("tool_name")
+    if tool_name not in ("Task", "Agent"):
+        return ""
+    tool_input = payload.get("tool_input") or {}
+    if not isinstance(tool_input, dict):
+        return ""
+    prompt = tool_input.get("prompt")
+    if not isinstance(prompt, str) or not prompt:
+        return ""
+
+    repo_root = payload.get("cwd")
+    if not isinstance(repo_root, str) or not repo_root:
+        repo_root = os.getcwd()
+
+    missing = find_missing_given_paths(prompt, repo_root)
+    return format_given_path_warn(missing)
+
+
 def _reconfigure_stderr_utf8():
     try:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
+def _reconfigure_stdout_utf8():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
 
@@ -329,6 +543,24 @@ def main() -> int:
     if exit_code == 2:
         sys.stderr.write(message + "\n")
         return 2
+
+    # ЧАСТЬ A (t-343): WARN-слой -- считается ТОЛЬКО когда гейт САМ не
+    # заблокировал (см. докстринг модуля, "ЧАСТЬ A"); try/except --
+    # belt-and-suspenders, тот же принцип, что owns_gate.py -- WARN-слой
+    # не должен уронить блокирующий хук трейсбеком.
+    try:
+        warn = given_path_warn(payload)
+    except Exception:
+        warn = ""
+    if warn:
+        _reconfigure_stdout_utf8()
+        output = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "additionalContext": warn,
+            }
+        }
+        sys.stdout.write(json.dumps(output, ensure_ascii=False) + "\n")
 
     return 0
 
