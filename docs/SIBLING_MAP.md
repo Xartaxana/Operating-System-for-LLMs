@@ -30,7 +30,7 @@ critic проверяет классовую полноту фикса ПО КА
 | — | .claude/skills/qa-loop/SKILL.md (журналирование диспатчей) |
 | .claude/skills/session-handoff (D-0050) | .claude/skills/session-handoff (порт t-021, коммит 0911cf6) |
 | CURRENT_CONTEXT.md — носитель очереди OS (D-0082: кросс-деплойный пункт пишется в носитель ЦЕЛИ тем же ходом) | docs/HANDOFF.md «Открытые хвосты» — носитель очереди AO3 (та же обязанность их стороной) |
-| tools/session_context.py, wiring-чек хуков (:880-970: hooksPath + индексные моды `git ls-files -s`, ловит и untracked) + tools/wiring_check.py (t-338: тонкий standalone CLI над КАНАЛАМИ session_context + новый skills-casing канал; fail-closed чекер — цель enforcement_probe в pre-commit; ТРЕТИЙ одноимённый модуль семейства) + toolkit/tools/wiring_check.py (кит-твин, ДРУГОЙ контракт: read-only универсальный аудитор хоста со своим --check, без session_context; casing-канала НЕТ — порт-очередь минора) | scripts/wiring_check.py, SessionStart-хук (os-port-0722; индексно-модовая проверка портирована 2026-07-28; признанное отличие: untracked-хуки НЕ warn'ит — их ловит is_file()-чек на самом клоне; casing-канала НЕТ при живом .claude/skills/qa-loop/SKILL.md, аналога enforcement_probe НЕТ — оба пункта в очереди передачи AO3) |
+| tools/session_context.py, wiring-чек хуков (:880-970: hooksPath + индексные моды `git ls-files -s`, ловит и untracked) + tools/wiring_check.py (t-338: тонкий standalone CLI над КАНАЛАМИ session_context + новый skills-casing канал; fail-closed чекер — цель enforcement_probe в pre-commit; ТРЕТИЙ одноимённый модуль семейства) + toolkit/tools/wiring_check.py (кит-твин, ДРУГОЙ контракт: read-only универсальный аудитор хоста со своим --check, без session_context; casing-канала НЕТ — порт-очередь минора) | scripts/wiring_check.py, SessionStart-хук (os-port-0722; индексно-модовая проверка портирована 2026-07-28; признанное отличие: untracked-хуки НЕ warn'ит — их ловит is_file()-чек на самом клоне; casing-канал + режим --check + scripts/enforcement_probe.py в их pre-commit ПОРТИРОВАНЫ 2026-07-29, коммит AO3 d4ff7d4 — их наблюдатель без флага остаётся fail-open принтером, гейтит только --check) |
 
 ## Ось 2 — Контуры измерения (Rule #1, D-0032: учёт честен на обоих)
 
@@ -75,6 +75,12 @@ scout / builder / critic (х2 деплоя) + Lead-правила в CLAUDE.md +
 10 QA-агентов AO3 (их промпты — цикл изменений конвейера; правки туда
 ставятся в очередь, если не по пути). Пример класса: «докладывай
 замеченные аналоги» (D-0043), «не запускай субагентов» (D-0037).
+ПРИЗНАННОЕ ОТЛИЧИЕ (2026-07-29, порт-батч d4ff7d4): E4-сужение tools
+scout-роли (у нас Bash изъят по P0 07-28) на AO3 НЕ применено — их
+scout.md п.6 сам предписывает device-проверки шеллом (Get-Device);
+пересмотр — слово их Lead + прогон их golden set тем же коммитом.
+builder-env: п.9 (мы) <-> п.10 (AO3, порт 07-29) — правка одной
+стороны требует вопроса о другой.
 
 ## Ось 4 — Парные документы (инвариант: не расходиться)
 
