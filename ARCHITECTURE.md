@@ -213,6 +213,7 @@ GRADE vocabulary belongs to models and accounting.
 | **scout** — recon | search/read, digest with a trail (D-0046) | Haiku subagent | Haiku alias (D-0085 reference ladder); no repo access in pure prompt→text lab use — recorded difference |
 | **builder** — implementation to a written spec | code/tests, witness (D-0052) | Sonnet subagent | Sonnet alias (D-0085; Opus-as-builder REJECTED by Rule #1 evidence) |
 | **critic** — review | verdict with a trail | Opus subagent | Opus alias (D-0085) |
+| **designer** — spec DRAFTING from a Lead intent brief | draft to the R11 form (DoD + manifest); forks RETURNED, never decided silently; acceptance of the draft stays with the Lead | Opus subagent (.claude/agents/designer.md; promoted provisionally at calibration #5, 2026-07-29 — pilot docs/tasks/2026-07-14_opus-designer-pilot.md) | Opus alias (D-0085) — untested on the API channel, recorded |
 | **judge** — leaf acceptance (R13/D-0087) + equivalence verdicts | verdict vs pinned intent keys; calibrated instance only (D-0031 set) | judge-subagent, pinned prompt (13/13, t-254) | `judge-sonnet` alias (calibration home) |
 | **Lead** — decomposition, specs, graph acceptance | coordinator; full authority only on the Lead tier (D-0058) | Fable session | Fable alias (D-0085); no autonomous API-side coordinator yet — script constructions run leaf machinery only |
 | **analyst** — telemetry narration | reads Ledger output only | folded into the Lead session | `analyst` alias (Qwen3-4B) |

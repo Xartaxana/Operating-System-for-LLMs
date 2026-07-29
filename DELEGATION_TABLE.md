@@ -44,7 +44,7 @@ subscription contour):
 | Implementation to a written spec, tests | High | Medium | builder (Sonnet subagent) | provisionally_validated |
 | Code review, unclear-bug debugging | High | High | critic (Opus subagent) | provisionally_validated |
 | Decomposition, spec writing, acceptance | High | Very high | Lead session only | provisionally_validated |
-| Spec DRAFTING from a Lead intent brief (forks returned, not decided) | High | pilot measures | designer (Opus; pilot 2026-07-14, docs/tasks/2026-07-14_opus-designer-pilot.md) | estimated |
+| Spec DRAFTING from a Lead intent brief (forks returned, not decided) | High | High (drafting), acceptance stays Lead | designer (Opus subagent, .claude/agents/designer.md) | provisionally_validated (calibration #5, 2026-07-29 — evidence: SHADOW_EVALUATION_LOG closing entry; pilot docs/tasks/2026-07-14_opus-designer-pilot.md) |
 
 Evidence for the 2026-07-11 status moves: relocated VERBATIM to
 docs/SHADOW_EVALUATION_LOG.md (boot diet 2026-07-16, same D-0067

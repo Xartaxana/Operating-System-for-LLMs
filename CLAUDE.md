@@ -15,6 +15,7 @@ deployment of the routing MVP; the pilot deployment is D:\AO3_tests.
 | scout | Haiku | repo search, file reading, context gathering | digest + Trail, never dumps |
 | builder | Sonnet | implementation to a written spec, tests, routine edits | diff report + witness run |
 | critic | Opus | code/architecture review, unclear bugs, acceptance gate | verdict + its own trail |
+| designer | Opus | spec DRAFTING from a Lead intent brief (forks returned, never decided) | draft spec in the R11 form + fork list |
 | Lead | Fable | decomposition, specs, acceptance, architecture, mechanisms | — |
 
 Policy rules speak ONLY these function names; the function→model
@@ -49,10 +50,12 @@ screenshot/recording; a text-only witness is insufficient. A
 self-activating enforcement file (hook on the active hooksPath etc.)
 is never placed on the path by its builder: it is delivered as
 content or under a sibling name, and the Lead places it at acceptance
-(D-0069). Opus-designer pilot (spec drafting from a Lead intent
-brief; forks returned, never decided silently): protocol and metrics
-in docs/tasks/2026-07-14_opus-designer-pilot.md; verdict due at
-calibration #4.
+(D-0069). The designer is a STANDING function since calibration #5
+(2026-07-29, provisionally_validated): spec DRAFTING from a Lead
+intent brief, forks returned and never decided silently; the draft
+passes the Lead's acceptance before any dispatch uses it (D-0037).
+Pilot protocol and evidence:
+docs/tasks/2026-07-14_opus-designer-pilot.md.
 
 R3. **critic is the MANDATORY acceptance gate** for builder diffs
 >~100 lines or touching the data schema / core / money accounting,
