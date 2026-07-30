@@ -402,3 +402,54 @@ the coordination artifacts themselves are overflowing.
   decision.
 - Report archived per D-0038: docs/task_reports/ (pointer in
   CURRENT_CONTEXT).
+
+## Phase 4 — Hardening for Delivery (D-0098) — CLOSED 2026-07-30
+
+Signature: Architect, in session 2026-07-30 — «подтверждаю закрытие
+фазы 4». Opened 2026-07-24 by the operator's word; closed six days
+later with every gate criterion met.
+
+Verbatim ROADMAP block at closure:
+
+Opened by the operator's word in session 2026-07-24: finish every
+tail and close POTENTIAL holes so the delivery is complete — the
+priority shifts from building ourselves on our own violation
+statistics to hunting holes no future user should ever hit
+(promotion default flip for the delivered product, D-0098; D-0063
+stays for staff-internal mechanisms). Entry evaluation (D-0033 —
+first task is an evaluation, never a build): the 2026-07-24
+enforcement-gap audit, t-312..t-315,
+docs/task_reports/2026-07-24_enforcement-gap-audit.md.
+
+Workstreams: 1. Stale-line hygiene — CURRENT_CONTEXT rewrite of the
+four audited stale items (audit §1) — done 07-24 (a9310db).
+2. Kit completeness — port batch t-316 (wiring_check code for
+D-0092, hygiene v3, journal_echo ts-drift/warn_stale,
+judge_prompt_pin, corpus rule, t-278 gate set in exam_fullgates_kit)
++ INSTALL escape-allowlist step — done 07-24 (c0d25e2, exam-kit
+7b6bf2fa). 3. E-layer closures (audit §2/§3): E1 escalation guard,
+E4 builder-role tools narrowing, remaining E-items with recorded
+"held by discipline" lines and named detectors — done 07-24
+(2105d4f, edfd134).
+
+Gate (exit criteria) — ALL PASSED:
+(а) "promised by delivery, no code behind it" class = 0 — PASSED
+    07-24 (re-audit t-319..t-321: ledger sweep 19/19 rows backed by
+    shipped files, all 157 doc references resolve);
+(б) every norm in the enforcement map carries a machine layer or a
+    recorded "held by discipline" line with a named detector —
+    PASSED 07-24 (same re-audit; E1/E4 verified live in code);
+(в) a kit minor carrying the full port set released through
+    kit-release (D-0097) — PASSED 2026-07-30: v0.6.0, public
+    02bac45 + annotated tag, staff snapshot aa725e6, full cycle
+    t-344..t-346 (scout inventory / designer spec / builder batch /
+    critic gate fit_with_fixes 0 blockers / Lead control rerun
+    staff 1896 passed + kit 1524 passed / parity resync 12+4 pairs /
+    hook modes 100755 in the public index, 0 deletions);
+(г) a clean re-pass of the enforcement-gap audit — PASSED 07-24
+    (doc-staleness method proven sensitive on two historical cases
+    and clean on HEAD).
+
+Post-closure queue (live in CURRENT_CONTEXT): T-K3 examiner-decision
+audit (window-miss recorded honestly), small+large economy exams on
+the release snapshot, boot-diet, next-minor named nodes.

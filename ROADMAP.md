@@ -62,49 +62,12 @@ residuals live in CURRENT_CONTEXT's queue on their own evidence
 triggers. Full narrative:
 docs/task_reports/2026-07-15_roadmap-closed-phases.md.
 
-## Phase 4 — Hardening for Delivery (D-0098) — OPEN 2026-07-24
+## Phase 4 — Hardening for Delivery (D-0098) — CLOSED 2026-07-30
 
-Opened by the operator's word in session 2026-07-24: finish every
-tail and close POTENTIAL holes so the delivery is complete — the
-priority shifts from building ourselves on our own violation
-statistics to hunting holes no future user should ever hit
-(promotion default flip for the delivered product, D-0098; D-0063
-stays for staff-internal mechanisms). Entry evaluation (D-0033 —
-first task is an evaluation, never a build): the 2026-07-24
-enforcement-gap audit, t-312..t-315,
-docs/task_reports/2026-07-24_enforcement-gap-audit.md.
-
-Workstreams (live; execution queue in CURRENT_CONTEXT):
-
-1. Stale-line hygiene — CURRENT_CONTEXT rewrite of the four audited
-   stale items (audit §1).
-2. Kit completeness — port batch t-316 (wiring_check code for
-   D-0092, hygiene v3, journal_echo ts-drift/warn_stale,
-   judge_prompt_pin, corpus rule, t-278 gate set in
-   exam_fullgates_kit) + INSTALL escape-allowlist step.
-3. E-layer closures (audit §2/§3): E1 escalation guard (attempt≥3
-   without escalated → machine signal at write time), E4
-   builder-role tools narrowing (both deployments + kit twin);
-   remaining E-items get recorded "held by discipline" lines with
-   named detectors (D-0064 form).
-4. Re-audit and release — clean audit re-pass, then a kit minor via
-   the kit-release skill (D-0097).
-
-Gate (exit criteria):
-(а) "promised by delivery, no code behind it" class = 0 (D-0092
-    class closed and swept);
-(б) every norm in the enforcement map carries either a machine
-    layer or a recorded "held by discipline" line with a named
-    detector (D-0064 form) — no unclassified gaps;
-(в) a kit minor carrying the full port set is released through
-    kit-release (D-0097);
-(г) a re-pass of the enforcement-gap audit is clean; Architect
-    signature closes the phase (standing procedure).
-
-Gate status 2026-07-24: (а)+(б)+(г) PASSED — re-audit t-319..t-321
-(journal, accepted with judge/spot-check evidence): ledger sweep
-19/19 rows backed by shipped files, all 157 doc references resolve,
-every E-layer position carries a named detector, both closure layers
-(E1 guard, E4 tools narrowing) verified live in code, doc-staleness
-method proven sensitive on two historical cases and clean on HEAD.
-(в) pending the operator's release word; Architect signature pending.
+All four workstreams done (07-24) and all four gate criteria passed:
+(а)+(б)+(г) 07-24 re-audit t-319..t-321; (в) 2026-07-30 — kit minor
+v0.6.0 released through kit-release (public 02bac45 + tag, staff
+snapshot aa725e6, cycle t-344..t-346). Closure signature —
+Architect, in session 2026-07-30: «подтверждаю закрытие фазы 4».
+Full narrative and gate report:
+docs/task_reports/2026-07-15_roadmap-closed-phases.md.
