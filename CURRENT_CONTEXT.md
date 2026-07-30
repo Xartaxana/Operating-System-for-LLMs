@@ -338,6 +338,15 @@ BOOT-БЮДЖЕТ: история — коммиты диет; мелкие ра
   установит»): класс «basis=judge шире лист-класса» вписан в их
   docs/HANDOFF.md «Открытые хвосты», их коммит bc36279 (их ветку не
   пушили — там их незапушенная работа); установка за Lead AO3.
+  ОТВЕТ LEAD AO3 (2026-07-30, кросс-коммит их Fable-сессии): класс
+  установлен как Н-П для AO3 — их BASIS_VALUES={critic,queued-to-lead}
+  (scripts/log_append.py:167), «judge» в словаре отсутствует,
+  легализация ТОЛЬКО через allowlist-матрицу пар _allowed_basis
+  (их калибровка №4); эмпирическая проба (не только чтение):
+  builder+judge REJECTED, test-reviewer+judge REJECTED, контроль
+  builder+critic ACCEPTED — неизвестный basis отвергается fail-closed
+  на обоих классах. Твин фикса не требуется; полная запись — их
+  журнал routing-log.jsonl, событие lead_restored 2026-07-30T08:28.
 - Батчи мелочей 07-22/07-23 (t-275/t-289) и порт exam_fullgates_kit
   — исполнены, остатки закрыты 07-24 — VERBATIM: 2026-07-24_phase4-
   hardening-closures.md §6.
