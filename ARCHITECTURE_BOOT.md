@@ -75,7 +75,7 @@ of leaks, never for symmetry.
   a new deployment must supply; three deployment targets and their
   validation status.
 - **Two Vocabularies: Functions and Grades** — the D-0062 bridge
-  table (functions scout/builder/critic/Lead vs grades
+  table (functions scout/builder/critic/designer/Lead vs grades
   intern/junior/middle/senior) and its consequences.
 - **Components (API supply channel — the gateway lab)** — Gateway /
   Guard / Ledger / Analyst / Judge details, the resolved Router gate
