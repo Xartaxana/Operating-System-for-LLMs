@@ -16,3 +16,5 @@ logs/owns_registry.jsonl
 # синк Dog 07-29 (D-0082): сессионный леджер search_control_gate_next.py
 # половины A -- живой per-session трек, эфемерный, не для истории
 logs/.search-ledger/
+# handoff 07-30: Office-lock открытых у оператора xlsx (docs/~$EXAM_RESULTS.xlsx)
+~$*.xlsx
