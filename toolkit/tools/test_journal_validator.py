@@ -753,6 +753,125 @@ def test_matrix_rejected_only_needs_by_present_no_tier_check():
     assert code == 0
 
 
+# ---- designer tier addendum (AGENT_TIER += "designer": "opus"):
+# designer's deployment binding is opus (.claude/agents/designer.md),
+# same tier as critic. ----
+
+def test_matrix_designer_accepted_by_fable_passes():
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="designer",
+                            model="opus", task_id="t-001", by="fable",
+                            notes="fable accepts designer's draft"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_matrix_designer_accepted_by_opus_without_basis_fails_equal_tier():
+    # designer's own tier is opus (same as critic) -- an equal-tier
+    # acceptance with no basis at all must still fail the matrix, same
+    # class as test_matrix_scout_accepted_by_same_tier_without_basis_fails
+    # above.
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="designer",
+                            model="opus", task_id="t-001", by="opus",
+                            notes="peer accepting peer, no basis"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("role-vs-tier" in v for v in violations), violations
+
+
+def test_matrix_agent_outside_agent_tier_regression_pin():
+    # Regression pin: an agent name OUTSIDE AGENT_TIER (e.g. "analyst")
+    # is documented, pre-existing behavior -- the matrix is simply not
+    # defined for it (return None before any branch), unchanged by the
+    # designer addition above.
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="analyst",
+                            model="haiku", task_id="t-001", by="haiku",
+                            notes="agent outside AGENT_TIER -- matrix not applied"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+# ---- branch (5) queued-to-lead generalized to the upper-mid-tier CLASS
+# (QUEUED_TO_LEAD_AGENTS = {critic, designer}), not the literal name
+# "critic"; branch (1) judge narrowed to agent in {scout, builder} (a
+# critic finding: designer+judge+category=implementation used to pass
+# wrongly, since only category was checked, not agent). ----
+
+def test_matrix_designer_by_opus_queued_to_lead_passes():
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="designer",
+                            model="opus", task_id="t-001", by="opus", basis="queued-to-lead",
+                            notes="designer queued to Lead via an opus coordinator"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_matrix_designer_by_sonnet_queued_to_lead_passes():
+    # the queue is legal from ANY coordinator tier not above designer's
+    # own (sonnet here) -- same class as the existing critic/sonnet case.
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="designer",
+                            model="opus", task_id="t-001", by="sonnet", basis="queued-to-lead",
+                            notes="designer queued to Lead via a sonnet coordinator"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_matrix_designer_by_opus_critic_basis_fails():
+    # basis="critic" does NOT rescue designer -- critic (opus) is not
+    # strictly above designer's own opus tier, same as it doesn't
+    # rescue agent="critic" itself.
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="designer",
+                            model="opus", task_id="t-001", by="opus", basis="critic",
+                            notes="designer accepted by opus via critic basis -- must fail"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1
+    assert any("role-vs-tier" in v and "designer" in v for v in violations), violations
+    # the fixed message names the ACTUAL agent and the actually-legal
+    # path -- no stale advice about a literal agent='critic' path.
+    assert not any("agent='critic'" in v for v in violations), violations
+
+
+def test_matrix_designer_judge_basis_fails_regardless_of_category():
+    for category in ("recon", "implementation", "review", None):
+        kw = {} if category is None else {"category": category}
+        staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="designer",
+                                model="opus", task_id="t-001", by="opus", basis="judge",
+                                notes="designer via judge -- must fail regardless of category",
+                                **kw))
+        code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+        assert code == 1, (category, violations)
+
+
+def test_matrix_builder_judge_basis_implementation_still_passes_not_broken():
+    # regression pin: the narrowing to agent in {scout, builder} must
+    # not break the existing builder+judge+leaf-category path.
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", witness="w", by="sonnet",
+                            basis="judge", category="implementation",
+                            notes="builder via judge on implementation -- still legal"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_matrix_scout_judge_basis_recon_still_passes_not_broken():
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="scout",
+                            model="haiku", task_id="t-001", by="haiku",
+                            basis="judge", category="recon",
+                            notes="scout via judge on recon -- still legal"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_matrix_critic_judge_basis_leaf_category_now_fails():
+    # a critic finding, adjacent surface: agent="critic" itself is ALSO
+    # excluded from judge acceptance now (the review/spec class, not
+    # just designer) -- even on an otherwise-leaf category.
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="critic",
+                            model="opus", task_id="t-001", by="opus",
+                            basis="judge", category="implementation",
+                            notes="critic via judge on implementation -- now fails"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1, violations
+
+
 # ---- 11b. basis "judge" -- legal ONLY on a leaf-class dispatch
 # (category recon/implementation; this toolkit's own CLAUDE.md "Leaf
 # routing" section -- see the module docstring's rule 11 NOTE for the

@@ -17,10 +17,13 @@ deployment of the supervised-delegation routing method.
   routine edits.
 - **critic** (Opus) — code/architecture review, debugging unclear
   bugs, the acceptance gate.
+- **designer** (Opus) — spec DRAFTING from a Lead intent brief; forks
+  are returned, never decided; the draft passes Lead acceptance
+  before any dispatch uses it.
 - **Lead** (Fable) — decomposition, specs, acceptance, architecture;
   only Lead decides what gets delegated to whom.
 
-The names scout/builder/critic/Lead are canonical names of FUNCTIONS
+The names scout/builder/critic/designer/Lead are canonical names of FUNCTIONS
 (recon / spec-implementation / review / coordination), not of models:
 policy rules speak only in these terms; the function→model binding is
 a property of the deployment. The intern/junior/middle/senior grades
@@ -103,8 +106,9 @@ vocabulary; the mapping between the two vocabularies is documented in
    living only there has not actually been handed over.
    4a. A task spanning 5 or more journal events, OR 2 or more
    sessions, is tracked as a markdown DAG under docs/tasks/ (D-0080):
-   nodes/statuses/tiers as the carrier; a node's status moves in the
-   same turn as its journal event, not separately.
+   nodes/statuses/tiers as the carrier; a WRITING node also declares
+   the paths it owns; a node's status moves in the same turn as its
+   journal event, not separately.
 5. Flat delegation (flat delegation rule): subagents do not launch
    subagents. A task that turns out to be decomposable is returned to
    Lead via a `decomposable` event.
@@ -221,7 +225,13 @@ vocabulary; the mapping between the two vocabularies is documented in
    ANY tier states what "done" means, and how acceptance will check
    it — in a form suited to that tier. builder: acceptance criteria +
    a verification run, whose output becomes the witness (witness
-   rule). A task with an INTERACTIVE surface (a CLI/UI that accepts
+   rule), AND the spec NAMES ITS EDGE BEHAVIOR: for every limit/
+   truncation it introduces, every empty/absent/None input its data
+   can carry, and every pair of its own requirements that can
+   conflict, the expected behavior is stated — or the fork is
+   returned as an explicit question; a spec silent on an edge that
+   its own requirements create is a dispatcher defect, not a guess
+   left to the performer. A task with an INTERACTIVE surface (a CLI/UI that accepts
    user input) has a DoD that includes an adversarial mini-battery:
    magnitude, nesting, encoding, empty/broken input. scout: an
    explicit question(s) and a completeness criterion; "X is nowhere to
@@ -250,7 +260,9 @@ vocabulary; the mapping between the two vocabularies is documented in
    worker's judgment — executed as a FIVE-POINT CHECKLIST (D-0096)
    run against every dispatch before it goes: (1) explicit question /
    completeness criterion or acceptance keys; (2) DoD inline with
-   the exact verification run; (3) "given" enumerated AND
+   the exact verification run AND the edge behaviors NAMED —
+   limits/truncations, empty/absent inputs, conflicting requirement
+   pairs: stated, or explicitly forked up; (3) "given" enumerated AND
    sufficient — data, fixtures, paths NAMED, not implied;
    (4) writing dispatch: owns/non-goals/handoff present;
    (5) freshness — the spec's load-bearing facts checked against
@@ -431,7 +443,7 @@ marker is a bare ref right after the colon (trailing punctuation
 breaks the match — the validator takes the first non-whitespace
 token); `delegated` on a closed task is forbidden —
 no-silent-reuse rule); new accepted/rejected events carry `by` (the
-accepting model); `accepted` for scout/builder/critic is legitimate
+accepting model); `accepted` for scout/builder/critic/designer is legitimate
 when tier(by) is above the tier of `agent`, OR with a `basis` field:
 "critic" / "queued-to-lead" — the role-vs-tier acceptance matrix
 encoded — OR "judge" on a leaf-class dispatch that reproduced the
@@ -558,8 +570,11 @@ unavailability) OR an explicit operator switch to a lower tier:
 Every "custom" form of a command is a permission request to the
 operator. For all sessions and subagents in this repo:
 
-1. Tests — the canonical form, from the repo root:
-   `python -m pytest tools/ gateway/ -q` (or a narrower target).
+1. Tests — the canonical form, from the repo root, named by your
+   deployment's `contour` field (delegation.config.yaml): `python -m
+   pytest tools/ -q` (contour: subscription) / `python -m pytest
+   tools/ gateway/ -q` (contour with api-keys) — or a narrower target
+   in either case.
 2. The proxy server — run FROM gateway/ (imports are cwd-relative),
    with your provider API keys exported into the environment (litellm
    does not read gateway/.env on its own).

@@ -178,6 +178,61 @@ WARN/BLOCK on an otherwise-innocent git compound. Fixed by allowing
 regexes. Known residual gap: `-c <key>=<value>` (git config override,
 a different option from `-C`) is not recognized by this fix -- queued,
 no live evidence yet of this exact form leaking.
+
+v4 -- heredoc-body scrub for `git commit -F - <<DELIM ... DELIM`
+====================================================================
+
+`_strip_commit_messages` above only ever cut a `-m`/`--message`
+ARGUMENT; a commit message supplied via a heredoc instead
+(`git commit -F - <<EOF\n...\nEOF`, any quoting of the delimiter:
+`<<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF`) was left completely
+untouched -- prose inside that body (a journal path/substring, an
+ASCII arrow containing `>`) could still trip class (d) even though it
+is commit-message TEXT, not a real journal write.
+
+SCOPE, deliberately narrow: only the heredoc's BODY (and its closing
+delimiter line) is cut -- the opener line up through `<<DELIM` and
+anything AFTER the delimiter on that same line are preserved verbatim
+(`COMMIT_HEREDOC_RE`'s groups 1+4), so a real trailing write chained
+onto the same line via `&&`/`;` (e.g.
+`git commit -F - <<EOF\n...\nEOF && echo "{}" >> logs/routing-log.jsonl`)
+stays fully visible to class (d) -- only the heredoc BODY between the
+opener and the closing delimiter is replaced.
+
+TWO conditions gate the scrub, checked per heredoc match:
+ (1) `_is_python_heredoc_opener` -- a heredoc opened by
+     `python -...<<...` (class (c)'s own heredoc form, `PY_HEREDOC_RE`)
+     is NOT a commit message at all; scrubbing it would hide a real
+     journal write happening inside a `python - <<PY` body from the
+     existing statement-scoped machinery (`_statements`/
+     `_is_journal_bypass`). Checked by inspecting the text immediately
+     before the heredoc's own `<<` (a post-match check, not a
+     lookbehind: Python's `re` has no variable-length lookbehind for
+     `\\s+`).
+ (2) `_heredoc_belongs_to_git_commit` -- the heredoc must actually
+     belong to a STATEMENT containing `git commit`: the nearest
+     preceding chain separator (`;`/`&`/`|`) before the heredoc marks
+     where the current statement starts (or the command's own start,
+     if there is none); that prefix must match `GIT_COMMIT_RE`. A
+     heredoc belonging to some OTHER statement (e.g. a `python -
+     <<'PY'` chained after `&&`, unrelated to any `git commit`) is left
+     untouched -- its real write stays visible to the existing
+     statement-scoped machinery.
+
+Neither condition holds -> the heredoc is left byte-for-byte as-is.
+Nested heredocs (one heredoc's body containing another heredoc opener)
+are not specially handled by "nearest preceding separator" -- a
+documented residual limitation, not fixed here.
+
+RESIDUAL, DOCUMENTED, NOT FIXED BY THIS SCRUB: class (d)'s own
+detectors ((a)/(b)/(c) below and the target/write-form check itself)
+still run against the RAW, un-scrubbed command for classes (a)-(c) --
+this heredoc scrub only feeds into `_strip_commit_messages`, which
+class (d) alone consults. A literal ` 2>&1` sitting INSIDE a
+git-commit heredoc body still fires the class-(b) WARN (it is
+evaluated against the raw command) -- this is not a regression, it is
+the same "class (b)/(c) see the raw command" invariant this file
+already documents above for the `-m` argument scrub.
 """
 
 import json
@@ -235,6 +290,51 @@ COMMIT_MESSAGE_ARG_RE = re.compile(
     re.DOTALL,
 )
 
+# --- v4 -- heredoc-body scrub for `git commit -F - <<DELIM ... DELIM` --
+# See the module docstring, "v4 -- heredoc-body scrub", for the full
+# design. Group 1 is the opener up through `<<DELIM` (kept verbatim in
+# the replacement); group 2/3 are the optional quote char and the
+# delimiter name; group 4 is anything AFTER `<<DELIM` on the SAME line
+# (also kept verbatim -- a chained `&& echo ... >> journal` on that
+# line stays visible); group 5 is the body plus the closing delimiter
+# line (this is what gets cut).
+COMMIT_HEREDOC_RE = re.compile(
+    r"(<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2)([^\n]*)(\n.*?^\3\s*$)",
+    re.DOTALL | re.MULTILINE,
+)
+
+# v4: a heredoc opener belonging to class (c) (`python - <<...`) is
+# excluded from the commit scrub entirely (see COMMIT_HEREDOC_RE's
+# docstring reference above). Checked by a POST-MATCH scan (the text
+# immediately before this heredoc match's own "<<"), not a lookbehind
+# -- Python's `re` has no variable-length lookbehind for `\s+`.
+_PY_HEREDOC_PREFIX_RE = re.compile(r"python\s+-\s*$", re.IGNORECASE)
+
+
+def _is_python_heredoc_opener(text: str, match) -> bool:
+    """v4: True when the literal "<<" of this heredoc match is
+    immediately preceded by "python -" (the same form PY_HEREDOC_RE
+    matches as a whole) -- such a heredoc is not a commit message; the
+    commit scrub must not touch it."""
+    pos = match.start(1)  # the position of "<<" itself (group 1 starts there)
+    return bool(_PY_HEREDOC_PREFIX_RE.search(text[:pos]))
+
+
+def _heredoc_belongs_to_git_commit(text: str, match) -> bool:
+    """v4: True when this heredoc genuinely belongs to a STATEMENT
+    containing `git commit` -- finds the nearest preceding chain
+    separator (`;`, `&`, `|`) before the START of the heredoc match;
+    the text from there (or from the start of the command, if there is
+    no separator) up to the heredoc -- "the current statement so far"
+    -- must contain `git commit` (GIT_COMMIT_RE). Does not account for
+    heredocs nested inside one another (see the module docstring's
+    "v4" section, "residual limitation")."""
+    start = match.start()
+    prefix = text[:start]
+    sep_idx = max(prefix.rfind(";"), prefix.rfind("&"), prefix.rfind("|"))
+    statement_prefix = prefix[sep_idx + 1:] if sep_idx != -1 else prefix
+    return bool(GIT_COMMIT_RE.search(statement_prefix))
+
 # --- v2 -- port (2): mask a git statement --------------------------------
 # A statement starting with `git ` plus one of the listed subcommands
 # (at the start of the command, or right after a chain separator
@@ -282,10 +382,34 @@ def _strip_commit_messages(command: str) -> str:
     command contains `git commit`; the git add/commit paths themselves
     are untouched -- only the message argument is stripped. An unclosed
     quote does not match and is left as-is (fail-safe toward detection,
-    see the class (d) discussion in the module docstring)."""
+    see the class (d) discussion in the module docstring).
+
+    v4: AFTER the -m/--message argument is stripped, ALSO strips a
+    commit-message HEREDOC body (`git commit -F - <<EOF ... EOF`, any
+    delimiter quoting) via COMMIT_HEREDOC_RE -- see the module
+    docstring's "v4" section for the full design: (1) the remainder of
+    the opener line AFTER `<<DELIM` is preserved verbatim
+    (`_heredoc_sub` keeps groups 1+4), only the body+closing-delimiter
+    line (group 5) is cut; (2) a heredoc opened by `python -...<<...`
+    (class (c)) is excluded from the scrub (`_is_python_heredoc_opener`);
+    (3) the scrub is scoped to a heredoc that genuinely belongs to a
+    STATEMENT containing `git commit` (`_heredoc_belongs_to_git_commit`)
+    -- a heredoc of some other statement (e.g. `python - <<'PY'` after
+    `&&`) is left untouched, its real write staying visible to the
+    existing statement-scoped machinery (`_statements`/
+    `_is_journal_bypass`)."""
     if not GIT_COMMIT_RE.search(command):
         return command
-    return COMMIT_MESSAGE_ARG_RE.sub(" ", command)
+    stripped = COMMIT_MESSAGE_ARG_RE.sub(" ", command)
+
+    def _heredoc_sub(m):
+        if _is_python_heredoc_opener(stripped, m):
+            return m.group(0)
+        if not _heredoc_belongs_to_git_commit(stripped, m):
+            return m.group(0)
+        return m.group(1) + m.group(4) + " "
+
+    return COMMIT_HEREDOC_RE.sub(_heredoc_sub, stripped)
 
 
 def _mask_git_statements(command: str) -> str:

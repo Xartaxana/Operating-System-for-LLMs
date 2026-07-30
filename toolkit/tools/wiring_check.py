@@ -64,6 +64,17 @@ clean):
      named hooks check (2) already covers by name) is a WARN: it was
      never `git add`-ed, so it is invisible to a fresh clone and does
      nothing there regardless of its content or permissions.
+ (6) check_skills_casing -- every file tracked under .claude/skills/
+     (via `git ls-files`) whose basename matches "skill.md"
+     case-insensitively but is not spelled exactly "SKILL.md" is a WARN:
+     on a case-insensitive filesystem, `git add` on a case-only rename
+     silently no-ops, so a skill can be authored with the wrong casing
+     and never actually land in the index under its real name. A
+     CONTENT check (unlike check_git_hooks_path): it runs in BOTH
+     --mode installed and --mode source, since it reads the kit's own
+     committed tree, not live installation state. An untracked skill
+     file is invisible to this check by construction (git ls-files only
+     ever sees tracked paths) -- a documented limit, not a bug.
 
 Every check function is self-contained and fails OPEN: a subprocess
 call that cannot even run (git missing, timeout) or a file that cannot
@@ -78,7 +89,7 @@ report on stdout) plus the importable `check_wiring(root) -> dict`
 function -- the CLI is a thin wrapper around exactly that function,
 so the two forms can never disagree.
 
-CLI ROOT/MODE FLAGS (closes external-review P2, t-326): the CLI grew
+CLI ROOT/MODE FLAGS (the installed-vs-source root-confusion finding): the CLI grew
 --host-root/--kit-root/--mode on top of the single implicit
 `repo_root()` guess, because that guess collapses two different
 things a caller might mean by "the root to check":
@@ -118,7 +129,7 @@ mode-inapplicable flag is not an error, but prints one warning line
 naming which flag was ignored, so a caller doesn't silently believe
 an unused flag took effect.
 
-CLI MESSAGE ENCODING (fixed after critic review of t-326): every
+CLI MESSAGE ENCODING (fixed after a review of the root-confusion finding above): every
 string this module prints is plain ASCII -- no em-dash (U+2014, only
 `--`), no non-ASCII punctuation, no other-language text. A prior
 version's two new diagnostic strings used Cyrillic and an em-dash;
@@ -312,6 +323,45 @@ def check_harness_hooks(root: Path) -> list:
     return issues
 
 
+_SKILLS_DIRNAME = Path(".claude") / "skills"
+
+
+def check_skills_casing(root: Path) -> list:
+    """(6) every tracked file under .claude/skills/ whose basename
+    equals "skill.md" case-INsensitively but is NOT spelled exactly
+    "SKILL.md" is one ASCII issue string. Fact and cost this closes: on
+    a case-INsensitive filesystem (the common case on Windows/macOS),
+    `git add` on a path that differs from an already-tracked path only
+    by case is a silent no-op -- a skill authored as "Skill.md" or
+    "skill.md" can sit on disk, look correct locally, and never
+    actually reach the git index under its real name, while a
+    differently-cased entry already tracked (or simply the filesystem
+    itself) hides the mismatch. Read via `git ls-files -- .claude/skills/`
+    (the same _run_git idiom every other check here uses, timeout=5) --
+    an UNTRACKED skill file is invisible to this check by construction
+    (documented limit, same class as check_untracked_enforcement_files
+    above being scoped to .githooks/ only). Not a git repo / git
+    missing / a non-zero exit / a timeout all fail OPEN to exactly ONE
+    issue string naming the wiring as unverifiable -- never raises."""
+    result = _run_git(["ls-files", "--", str(_SKILLS_DIRNAME).replace("\\", "/")], root)
+    if result is None or result.returncode != 0:
+        return ["git ls-files failed -- cannot verify .claude/skills/ SKILL.md casing"]
+
+    issues = []
+    for line in (result.stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        basename = Path(line).name
+        if basename.lower() == "skill.md" and basename != "SKILL.md":
+            issues.append(
+                f"skill file '{line}' has non-canonical casing (expected exactly "
+                "'SKILL.md' -- a case-insensitive filesystem silently no-ops "
+                "'git add' on a case-only rename)"
+            )
+    return issues
+
+
 def check_untracked_enforcement_files(root: Path) -> list:
     """(5) a file present on disk under .githooks/ that git does not
     track at all -- never `git add`-ed, invisible to a fresh clone. No
@@ -425,6 +475,7 @@ _KNOWN_CHECK_NAMES = frozenset(
         "check_harness_hooks",
         "check_untracked_enforcement_files",
         "check_adoption_ledger",
+        "check_skills_casing",
     }
 )
 
@@ -441,9 +492,10 @@ def check_wiring(root: Path = None, skip: frozenset = frozenset()) -> dict:
     place of actually running. Default empty set: the aggregation is
     byte-identical to before this parameter existed (regression pin:
     test_check_wiring_default_skip_is_byte_identical_to_before).
-    Exists so a caller auditing a kit's own SOURCE tree (--mode
-    source, t-326) can skip exactly the checks that are genuinely
-    about live installation state, through the SAME aggregation this
+    Exists so a caller auditing a kit's own SOURCE tree (--mode source,
+    per the installed-vs-source root-confusion finding) can skip
+    exactly the checks that are genuinely about live installation
+    state, through the SAME aggregation this
     function already performs -- rather than a second, hand-inlined
     copy of this function's five lines that a future new check would
     silently not know to skip."""
@@ -455,12 +507,13 @@ def check_wiring(root: Path = None, skip: frozenset = frozenset()) -> dict:
     untracked_issues = (
         [] if "check_untracked_enforcement_files" in skip else check_untracked_enforcement_files(root)
     )
+    skills_casing_issues = [] if "check_skills_casing" in skip else check_skills_casing(root)
     ledger_issues = (
         []
         if "check_adoption_ledger" in skip
         else check_adoption_ledger(root, git_issues, harness_issues)
     )
-    issues = git_issues + harness_issues + untracked_issues + ledger_issues
+    issues = git_issues + harness_issues + untracked_issues + skills_casing_issues + ledger_issues
     return {"ok": not issues, "issues": issues}
 
 

@@ -10,6 +10,7 @@
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -717,6 +718,54 @@ def test_given_path_warn_threshold_boundary_10_vs_11():
     # Полный список НЕ печатается в сводке -- 11-й элемент отсутствует
     # дословно (только "первые 3" перечислены).
     assert "tools/fake11.py" not in warn_11
+
+
+# --- F2 (критик): {0,300}-граница тела пути вместо жадной `*` --------
+# (защита от квадратичного бэктрекинга на патологическом промпте).
+
+def test_extract_given_candidates_body_exactly_300_chars_extracted():
+    body = "a" * 300
+    prompt = f"Given: D:\\{body}.py for reference."
+    candidates = dispatch_gate.extract_given_candidates(prompt)
+    toks = [c[0] for c in candidates]
+    assert f"D:\\{body}.py" in toks
+
+
+def test_extract_given_candidates_body_301_chars_not_extracted():
+    # 301 -- усечение, задокументированное поведение (докстринг
+    # GIVEN_ABS_WIN_PATH_RE/GIVEN_REPO_REL_PATH_RE): warn по такому
+    # пути не обещан, регекс просто не находит совпадение целиком (все
+    # 301 символа -- "a", точка расширения появляется только ПОСЛЕ
+    # 301-го символа, {0,300} не может дотянуться до неё).
+    body = "a" * 301
+    prompt = f"Given: D:\\{body}.py for reference."
+    candidates = dispatch_gate.extract_given_candidates(prompt)
+    toks = [c[0] for c in candidates]
+    assert f"D:\\{body}.py" not in toks
+    assert candidates == []
+
+
+def test_extract_given_candidates_pathological_input_under_5s():
+    # Форма критика: "C:/"*20000 + "a"*20000 -- без точки-расширения
+    # вовсе (обрыв замера критика: 89.5с на 240КБ ДО фикса). Порог 5с
+    # -- запас на медленный CI; реально ожидается <1с.
+    pathological = "C:/" * 20000 + "a" * 20000
+    start = time.monotonic()
+    candidates = dispatch_gate.extract_given_candidates(pathological)
+    elapsed = time.monotonic() - start
+    assert elapsed < 5.0, f"took {elapsed:.2f}s -- quadratic regression?"
+    assert candidates == []
+
+
+def test_extract_given_candidates_1000_real_paths_previous_behavior():
+    names = [f"tools/fake{i}.py" for i in range(1000)]
+    prompt = "Given: " + ", ".join(names) + ". Read them all."
+    start = time.monotonic()
+    candidates = dispatch_gate.extract_given_candidates(prompt)
+    elapsed = time.monotonic() - start
+    assert elapsed < 5.0, f"took {elapsed:.2f}s"
+    toks = [c[0] for c in candidates]
+    assert toks == names
 
 
 def test_given_path_warn_non_task_agent_tool_no_warn():

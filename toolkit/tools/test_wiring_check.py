@@ -212,6 +212,90 @@ def test_untracked_no_githooks_dir_is_clean(repo):
 
 
 # ---------------------------------------------------------------------
+# check_skills_casing -- a case-only mismatch on "SKILL.md" (a
+# case-insensitive filesystem silently no-ops `git add` on a
+# case-only rename)
+# ---------------------------------------------------------------------
+
+
+def _add_skill(root: Path, relpath: str, content: str = "---\nname: x\n---\nbody\n"):
+    path = root / relpath
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    _git(["add", str(path.relative_to(root))], root)
+    _git(["commit", "-q", "-m", f"add {relpath}"], root)
+
+
+def test_skills_casing_no_skills_dir_is_clean(repo):
+    issues = wiring_check.check_skills_casing(repo)
+    assert issues == []
+
+
+def test_skills_casing_not_a_git_repo_one_issue_never_raises(tmp_path):
+    # A directory that is not a git repo at all -- git ls-files fails
+    # (non-zero exit), fails OPEN to exactly one issue string, never
+    # raises.
+    not_a_repo = tmp_path / "not_a_repo"
+    not_a_repo.mkdir()
+    issues = wiring_check.check_skills_casing(not_a_repo)
+    assert len(issues) == 1
+    assert "cannot verify" in issues[0]
+
+
+def test_skills_casing_git_missing_or_timeout_one_issue_never_raises(repo, monkeypatch):
+    monkeypatch.setattr(wiring_check, "_run_git", lambda args, root: None)
+    issues = wiring_check.check_skills_casing(repo)
+    assert len(issues) == 1
+    assert "cannot verify" in issues[0]
+
+
+def test_skills_casing_reference_md_and_bak_ignored(repo):
+    _add_skill(repo, ".claude/skills/onboarding/reference.md")
+    _add_skill(repo, ".claude/skills/onboarding/SKILL.md.bak")
+    _add_skill(repo, ".claude/skills/onboarding/SKILL.md")
+    issues = wiring_check.check_skills_casing(repo)
+    assert issues == []
+
+
+def test_skills_casing_correct_skill_md_no_issue(repo):
+    _add_skill(repo, ".claude/skills/onboarding/SKILL.md")
+    issues = wiring_check.check_skills_casing(repo)
+    assert issues == []
+
+
+def test_skills_casing_lowercase_skill_md_is_an_issue(repo):
+    _add_skill(repo, ".claude/skills/onboarding/skill.md")
+    issues = wiring_check.check_skills_casing(repo)
+    assert len(issues) == 1
+    assert "onboarding/skill.md" in issues[0]
+    assert "SKILL.md" in issues[0]
+
+
+def test_skills_casing_mixed_case_skill_md_is_an_issue(repo):
+    _add_skill(repo, ".claude/skills/permission-audit/Skill.md")
+    issues = wiring_check.check_skills_casing(repo)
+    assert len(issues) == 1
+    assert "permission-audit/Skill.md" in issues[0]
+
+
+def test_skills_casing_untracked_skill_is_invisible_documented_limit(repo):
+    # An untracked skill file (never git-added) is invisible to this
+    # check by construction -- git ls-files only reports tracked paths.
+    path = repo / ".claude" / "skills" / "onboarding" / "skill.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("body", encoding="utf-8")
+    issues = wiring_check.check_skills_casing(repo)
+    assert issues == []
+
+
+def test_skills_casing_issue_text_is_ascii_only(repo):
+    _add_skill(repo, ".claude/skills/onboarding/skill.md")
+    issues = wiring_check.check_skills_casing(repo)
+    assert len(issues) == 1
+    issues[0].encode("ascii")  # raises UnicodeEncodeError if not ASCII-only
+
+
+# ---------------------------------------------------------------------
 # check_adoption_ledger (D-0092) -- adopt-row-without-live-wiring
 # boundary, and the fail-open-on-corrupt-ledger boundary
 # ---------------------------------------------------------------------
@@ -353,7 +437,7 @@ def test_cli_subprocess_smoke_runs_against_real_repo():
 
 
 # ---------------------------------------------------------------------
-# check_wiring(skip=...) -- t-326 critic fix #2: source-mode auditing
+# check_wiring(skip=...) -- a review fix: source-mode auditing
 # routes through check_wiring's own aggregation instead of a hand-
 # inlined duplicate, so a future check added to check_wiring() is
 # never silently missing from --mode source.
@@ -397,7 +481,7 @@ def test_check_wiring_skip_unknown_name_is_a_silent_no_op(repo):
 
 
 # ---------------------------------------------------------------------
-# --host-root / --kit-root / --mode (t-326, closes external-review P2:
+# --host-root / --kit-root / --mode (the installed-vs-source root-confusion finding:
 # `python toolkit/tools/wiring_check.py --check` run from the staff
 # repo used to treat toolkit/ as an installed HOST root and report a
 # spurious core.hooksPath mismatch against the staff repo's OWN

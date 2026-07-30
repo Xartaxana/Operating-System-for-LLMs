@@ -3,8 +3,8 @@
     "hq": "tools/calibration_counts.py",
     "kit": "toolkit/tools/calibration_counts.py",
     "synced_hq_sha256": "7e688cf65e9561d60d776b9f23b094737e54355745d3756f2171512345360ed7",
-    "synced_kit_sha256": "74fac402077ef61aa1781422b8a6dd67f0c197009707b31fe15b7d2de71f1167",
-    "synced_at": "2026-07-24T09:08:17",
+    "synced_kit_sha256": "3667fe29b31c50360822496ef9b25f917da5f2f8cdb3fc366f0754cc540b0e7f",
+    "synced_at": "2026-07-30T02:42:13",
     "note": ""
   },
   {
@@ -26,9 +26,9 @@
   {
     "hq": "tools/dispatch_gate.py",
     "kit": "toolkit/tools/dispatch_gate.py",
-    "synced_hq_sha256": "4cfad0321d7169e7e25e8976e7f4cf637f09685c4a036c8562d62e29fd80a303",
-    "synced_kit_sha256": "6a6914b2178e4ba9da983c8660af095420e50a31120f07933a3ea7be07a25184",
-    "synced_at": "2026-07-24T09:08:17",
+    "synced_hq_sha256": "b2946adeded46f9fc705d5dc6e45298ee5144e42b93cf25021ed8ccadbed42d0",
+    "synced_kit_sha256": "c73d4d699658bb501f9d67f8a695bbb53c04063cfd4a621fda6cde17b83b95c2",
+    "synced_at": "2026-07-30T02:42:13",
     "note": ""
   },
   {
@@ -58,9 +58,9 @@
   {
     "hq": "tools/hygiene_gate.py",
     "kit": "toolkit/tools/hygiene_gate.py",
-    "synced_hq_sha256": "0990e8cb6b5f4c02f98b4ffff5d1e0c8bd3e0dfad85c9648486f01bf05c8e848",
-    "synced_kit_sha256": "2a1d94be4ae0b725b4b122c6172c7a600cef6fb2f71d7bec7fe9c2f11ec91c7f",
-    "synced_at": "2026-07-24T09:08:17",
+    "synced_hq_sha256": "e8409708feda9956a6f089253e0d6b41f7d64ac863b48f2ec242c8c9a2f9c051",
+    "synced_kit_sha256": "e2e340a3cf8239f04e720f9998d9374ebff3c8aea1ee7418316e5f3170143f0a",
+    "synced_at": "2026-07-30T02:42:14",
     "note": ""
   },
   {
@@ -74,9 +74,9 @@
   {
     "hq": "tools/journal_validator.py",
     "kit": "toolkit/tools/journal_validator.py",
-    "synced_hq_sha256": "0333e20c389ec621dc4680b51fc5af62343447ef492d683d4ad95b600e892a77",
-    "synced_kit_sha256": "242d851bfa61bbac31d1ac81105328821c8f16fb37e518e4581b3eaa562dc8d1",
-    "synced_at": "2026-07-24T11:35:51",
+    "synced_hq_sha256": "a7a5e2c428d5f8dd102d2a54df53582bc1939fdf20f3ebe576c82e94ccb291c9",
+    "synced_kit_sha256": "dce846244bbf4614330be143bd874d77b3cf22f6ce316d98209e6ba3cde4ce88",
+    "synced_at": "2026-07-30T02:42:14",
     "note": ""
   },
   {
@@ -155,8 +155,8 @@
     "hq": "tools/test_calibration_counts.py",
     "kit": "toolkit/tools/test_calibration_counts.py",
     "synced_hq_sha256": "8fa975c04239342e664bb7139ac6abfae6b02dea2c116b5b80e4b37f90989a01",
-    "synced_kit_sha256": "2599893d6e9209ffd707983e0ccec431ef137e9bd27a6439f5338dbd1f10d447",
-    "synced_at": "2026-07-24T09:08:17",
+    "synced_kit_sha256": "e5446b6c88311f7bf3184b4c8758a9690c37672fc663da4cb0a71c2b3ffc8402",
+    "synced_at": "2026-07-30T02:42:13",
     "note": ""
   },
   {
@@ -170,9 +170,9 @@
   {
     "hq": "tools/test_dispatch_gate.py",
     "kit": "toolkit/tools/test_dispatch_gate.py",
-    "synced_hq_sha256": "4e96f8e91e0fc18f3297ec06d139474cdf7491b9ecda32ae9b36b53c56fcc801",
-    "synced_kit_sha256": "10341c7dd1c4fce19d45f9cff4bf613afb142b937a8d1aa2a48493289c268fbc",
-    "synced_at": "2026-07-24T09:08:17",
+    "synced_hq_sha256": "09f4802ec9fce767599c5a333eae47f37601580057ed361ffde9b1d8b3561a12",
+    "synced_kit_sha256": "05740246dc3c4a3c8cb88cdc3a5b1baeb676cd85c6a16b31fd1bafd4e05e5085",
+    "synced_at": "2026-07-30T02:42:14",
     "note": ""
   },
   {
@@ -202,9 +202,9 @@
   {
     "hq": "tools/test_hygiene_gate.py",
     "kit": "toolkit/tools/test_hygiene_gate.py",
-    "synced_hq_sha256": "899a08c079bdefe562ca654d393da73aa7686e3c66b1209e692e8100330f9776",
-    "synced_kit_sha256": "7218ca2d42a13f01d87828d26f2c322a4c3692da890957dfa71c2f071d01bb53",
-    "synced_at": "2026-07-24T09:08:17",
+    "synced_hq_sha256": "c64473b8b6202f4dedd840aed5d63143b795c792248b513232f2813e93c5e6f3",
+    "synced_kit_sha256": "546eef7a218d2258be81680dec5d813164979def3ad95cdb888eed46b4e2a727",
+    "synced_at": "2026-07-30T02:42:14",
     "note": ""
   },
   {
@@ -234,9 +234,9 @@
   {
     "hq": "tools/test_journal_validator.py",
     "kit": "toolkit/tools/test_journal_validator.py",
-    "synced_hq_sha256": "97d48e0ff1032e812c95a86252639b9b40d4276b75f7798c75e35a21b5ee1990",
-    "synced_kit_sha256": "e378b78931835a1536ef020d44b88cf2fcfcd9a0be566f2e02feab978349ec96",
-    "synced_at": "2026-07-24T11:35:51",
+    "synced_hq_sha256": "30d57553aa217d54c475dbedc406a3340153f9cace4a01af941300c11afab4d9",
+    "synced_kit_sha256": "ef4ca4e021bb46fd89738cabe97ad15a5a3924a6d9b17447bb4cdad4b06d0fe3",
+    "synced_at": "2026-07-30T02:42:14",
     "note": ""
   },
   {
@@ -314,9 +314,9 @@
   {
     "hq": "tools/test_usage_report.py",
     "kit": "toolkit/tools/test_usage_report.py",
-    "synced_hq_sha256": "1a7839eeac206f7ffac44e6e96f44c3f2ab5de11e01a721cbc3148d0c97186d1",
-    "synced_kit_sha256": "fc40d7d689a0f0223084e931a1f2909fcb551d33c75503a61396e65dd386ad14",
-    "synced_at": "2026-07-24T09:08:17",
+    "synced_hq_sha256": "778cfad153697b125f68dd52687409ab1933712d998166509ee5d06f7966534f",
+    "synced_kit_sha256": "5fb582c871ea0bdf2864dd3feb4ec11acfb7b2cd6a515a8055adc4668f649a63",
+    "synced_at": "2026-07-30T02:42:14",
     "note": ""
   },
   {
@@ -338,9 +338,9 @@
   {
     "hq": "tools/usage_report.py",
     "kit": "toolkit/tools/usage_report.py",
-    "synced_hq_sha256": "56e6cb17a703758a93fe6e209b8cd393ece5d5830797cd19a21746be0330c31f",
-    "synced_kit_sha256": "15d84ae08bfc1e0c9360de4e6c8acb512a575d188d3bacff3c6c6ee2a9f93297",
-    "synced_at": "2026-07-24T09:08:17",
+    "synced_hq_sha256": "05f6839255f1cd257040d4269807855547ef93c449fac096e81c2c44ba083a69",
+    "synced_kit_sha256": "a1f11686945a666a56acd57d89e6a31dd07caa3178b4f852f4e31af0c43e3fd2",
+    "synced_at": "2026-07-30T02:42:15",
     "note": ""
   },
   {
@@ -386,17 +386,49 @@
   {
     "hq": "PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md",
     "kit": "toolkit/PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md",
-    "synced_hq_sha256": "f78924832abbbdea3ede1291dfa5cb8c8b5d244d7526933f5e9a9c4f43bc5b21",
-    "synced_kit_sha256": "be6fa4307de648e7b1d5b30fe5a1283fc3e9f85a204c957928c7ac6496ab3c42",
-    "synced_at": "2026-07-24T09:08:17",
+    "synced_hq_sha256": "6c0738b18c00275360494138d47541aef4dce4acbecf4965180f6d07bb07a69b",
+    "synced_kit_sha256": "ada8471cd76517f73ae444452165d0436f020c8d54c4c781d41cb94b8b6d5bdb",
+    "synced_at": "2026-07-30T02:42:15",
     "note": ""
   },
   {
     "hq": "CLAUDE.md",
     "kit": "toolkit/CLAUDE.md",
-    "synced_hq_sha256": "7e8924e44c2defe864a0f77976e0c8ec6e8a074c5b7fdef0a130cbee30aa4f0c",
-    "synced_kit_sha256": "ddf871663a782ccf493da7436249dddf3a6790bdfa498dbbffb56f07c4daee18",
-    "synced_at": "2026-07-24T09:08:17",
+    "synced_hq_sha256": "d77faab6581ad9497708c7d50b2e06e7139740d356bc1657e30a85e21bd4f406",
+    "synced_kit_sha256": "71757d84e4a6fdbb646b9ed3f1b3d914a7344091882949e05ade5137b0bd89c9",
+    "synced_at": "2026-07-30T02:42:15",
     "note": ""
+  },
+  {
+    "hq": "gateway/guard.py",
+    "kit": "toolkit/gateway/guard.py",
+    "synced_hq_sha256": "bdbb89a569f53864a174879286a902ac12dee10e38440d77a9b28e818d909149",
+    "synced_kit_sha256": "a9fd90de4ad1c53c4ac12dbf0a72ad5fb351c1496982dc0f1532a3c3d0e8acc4",
+    "synced_at": "2026-07-30T02:42:15",
+    "note": "pair added at the v0.6.0 release sync (projected-spend wall + quota pools port)"
+  },
+  {
+    "hq": "gateway/test_guard.py",
+    "kit": "toolkit/gateway/test_guard.py",
+    "synced_hq_sha256": "7500ecdd6eda5eb14ed3a62cdce3ad5eed57f75c93038aa157baa4894419754b",
+    "synced_kit_sha256": "9220aeaa4991dc6c56a657b9fb951095c85b07bb21e10c02cdd521d03cc59cb6",
+    "synced_at": "2026-07-30T02:42:15",
+    "note": "pair added at the v0.6.0 release sync"
+  },
+  {
+    "hq": "tools/enforcement_probe.py",
+    "kit": "toolkit/tools/enforcement_probe.py",
+    "synced_hq_sha256": "0c622d52517562ee8eaeb5af81a635ddeab70625d43616490a204e7e96a48f8b",
+    "synced_kit_sha256": "4833223769660fedd2fb3732d5e7efe214c109f8c86fe5c578c5ddd95310185c",
+    "synced_at": "2026-07-30T02:42:15",
+    "note": "pair added at the v0.6.0 release sync (AST-equal port)"
+  },
+  {
+    "hq": "tools/test_enforcement_probe.py",
+    "kit": "toolkit/tools/test_enforcement_probe.py",
+    "synced_hq_sha256": "73e9d1ccfc232db08a55d5246a476b4f332974827cf2b34441354d3af7354f86",
+    "synced_kit_sha256": "f73a8ac4230bb68b67822fa8a32f564629426756ace1ed9b6e1262501b4f5347",
+    "synced_at": "2026-07-30T02:42:16",
+    "note": "pair added at the v0.6.0 release sync"
   }
 ]

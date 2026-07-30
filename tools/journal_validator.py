@@ -63,7 +63,7 @@
 11. Матрица D-0058 (только для НОВЫХ строк, только для accepted --
     rejected несёт "by" без дальнейшей проверки, буквальное чтение
     спеки). Для agent=lead матрица не применяется -- "by" достаточно
-    присутствия. Для agent из {scout,builder,critic}: (batch B7,
+    присутствия. Для agent из {scout,builder,critic,designer}: (batch B7,
     2026-07-24 -- членство "basis in BASIS_VALUES" заменено на
     легальность ПО ПАРЕ (by, agent), после живой утечки AO3 07-24: два
     Sonnet-координатора приняли Sonnet-класс (builder) результат через
@@ -77,7 +77,9 @@
     принимающего:
 
     а) ok_tier -- tier(by) > tier(agent) (haiku<sonnet<opus<fable по
-       agent: scout=haiku, builder=sonnet, critic=opus) -- легально
+       agent: scout=haiku, builder=sonnet, critic=opus, designer=opus
+       (2026-07-30, designer-функция привязана к opus, тот же ярус, что
+       critic, .claude/agents/designer.md)) -- легально
        ПРИ ЛЮБОМ basis (или без него).
     б) basis=="judge" -- легально ТОЛЬКО когда СОБСТВЕННОЕ поле
        "category" этой же строки ∈ {"recon", "implementation"}
@@ -121,7 +123,8 @@
        D-0058-сообщением.
 
     СУЖЕНИЕ ПОВЕРХНОСТИ (t-323, критик 2026-07-28): энум-гейт формы by
-    действует ТОЛЬКО на accepted с agent ∈ {scout,builder,critic}; вне
+    действует ТОЛЬКО на accepted с agent ∈ {scout,builder,critic,designer}
+    (2026-07-30: designer добавлен в AGENT_TIER, тот же класс); вне
     гейта (записанные РЕШЕНИЯ, не пропуски): rejected -- by без
     матричной проверки (буквальное чтение спеки, см. начало правила
     11); agent=lead -- легален не-ярусный by (живой прецедент
@@ -190,7 +193,25 @@ MODEL_REQUIRED_EVENTS = {"delegated", "escalated", "accepted", "rejected"}
 TASK_ID_REQUIRED_EVENTS = {"delegated", "accepted", "rejected", "escalated", "defect_found"}
 FAILURE_CLASSES = {"spec", "capability", "recon", "tooling"}
 TIER_ORDER = {"haiku": 0, "sonnet": 1, "opus": 2, "fable": 3}
-AGENT_TIER = {"scout": "haiku", "builder": "sonnet", "critic": "opus"}
+AGENT_TIER = {
+    "scout": "haiku", "builder": "sonnet", "critic": "opus",
+    # designer добавлен 2026-07-30: designer-функция привязана к opus
+    # (см. .claude/agents/designer.md, model: opus) -- тот же ярус, что
+    # critic. Класс дыры до этой правки: agent="designer" был вне
+    # AGENT_TIER, матрица D-0058 молча не применялась к его accepted-
+    # строкам (см. return None у "agent not in AGENT_TIER" ниже).
+    "designer": "opus",
+}
+# Класс верхне-среднего яруса (2026-07-30, решение Lead после критика):
+# ветка (5) basis="queued-to-lead" была ключена на буквальное имя
+# agent=="critic" -- сужение по ИМЕНИ, а не по КЛАССУ. designer несёт
+# тот же ярус (opus), ту же координаторскую семантику ветки (5) --
+# очередь к Lead легальна ОБОИМ при координаторе не строго выше.
+# basis="critic" при этом НЕ распространяется на designer тем же
+# путём (ветка (4) уже и так работает по числовому сравнению ярусов,
+# не по имени -- критик того же яруса не поднимает приёмку выше opus,
+# это уже верно и для designer без отдельной правки).
+QUEUED_TO_LEAD_AGENTS = {"critic", "designer"}
 # Известные строковые значения non-judge basis -- ЧИСТЫЙ enum/справка
 # (внешние потребители: WEEKLY_CALIBRATION_PROTOCOL.md, log_append.py),
 # больше НЕ используется как проверка легальности "basis in
@@ -392,14 +413,29 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
     basis = obj.get("basis")
 
     # (1) judge -- отдельный путь, не координаторский; проверяется до
-    # tier/floor, category решает всё.
+    # tier/floor, category решает всё. СУЖЕНИЕ (2026-07-30, критик):
+    # судья принимает ТОЛЬКО лист-класс ИСПОЛНИТЕЛЕЙ (agent ∈
+    # {scout,builder}) -- спеки (designer) и ревью (critic) ему
+    # запрещены политикой независимо от category (до этой правки
+    # agent=designer + basis=judge + category=implementation ложно
+    # проходил, т.к. проверялась только category, не agent). Порядок:
+    # category-гейт проверяется ПЕРВЫМ (нелистовая category фейлит для
+    # ЛЮБОГО agent, включая scout/builder, -- регресс-пин прежних
+    # тестов), agent-гейт -- ВТОРЫМ, только когда category уже лист.
     if basis == JUDGE_BASIS_VALUE:
-        if obj.get("category") in LEAF_CATEGORIES:
-            return None
-        return (
-            f"R13/D-0087: basis \"judge\" is legal only for leaf-class "
-            f"dispatches (recon/implementation), got category={obj.get('category')!r}"
-        )
+        if obj.get("category") not in LEAF_CATEGORIES:
+            return (
+                f"R13/D-0087: basis \"judge\" is legal only for leaf-class "
+                f"dispatches (recon/implementation), got category={obj.get('category')!r}"
+            )
+        if agent not in ("scout", "builder"):
+            return (
+                f"R13/D-0087: basis \"judge\" is legal only for agent∈"
+                f"{{scout,builder}} (leaf-class EXECUTORS) -- agent={agent!r} "
+                f"is not eligible for judge acceptance regardless of category "
+                f"(specs and reviews stay outside the judge's remit by policy)"
+            )
+        return None
 
     # (2) ok_tier -- строго выше, легально при любом basis (или без него).
     if by_tier is not None and by_tier > agent_tier:
@@ -419,32 +455,37 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
         )
 
     # (4) basis=="critic" -- легален, если критик (opus) строго выше
-    # agent (agent класса scout/builder).
+    # agent (agent класса scout/builder). Числовое сравнение ярусов
+    # (не имя agent) -- уже верно закрывает designer без отдельной
+    # правки: designer тоже яруса opus, tier("opus") > tier("opus")
+    # ложно, тот же отказ, что и для agent="critic" сейчас.
     if basis == "critic":
         if TIER_ORDER["opus"] > agent_tier:
             return None
         return (
             f"D-0058: agent={agent!r} (ярус {agent_tier_name}) принят с "
             f"basis='critic', но критик (opus) не строго выше яруса "
-            f"исполнителя -- критик-вход поверх собственного класса "
-            f"критика смысла не имеет; легальный путь для agent='critic' "
+            f"исполнителя -- basis='critic' не поднимает приёмку выше "
+            f"собственного opus-яруса; легальный путь для agent={agent!r} "
             f"-- by строго выше opus (by='fable'), либо "
             f"basis='queued-to-lead' при by∈{{sonnet,opus}}"
         )
 
-    # (5) basis=="queued-to-lead" -- легален ТОЛЬКО критик-классу у
-    # by∈{sonnet,opus} (AO3-кейс: builder-класс у sonnet-координатора
-    # НЕ проходит -- легален только через basis='critic').
+    # (5) basis=="queued-to-lead" -- легален КЛАССУ верхне-среднего
+    # яруса (QUEUED_TO_LEAD_AGENTS = {critic, designer}, см. её
+    # докстринг выше) у by∈{sonnet,opus} (AO3-кейс: builder-класс у
+    # sonnet-координатора НЕ проходит -- легален только через
+    # basis='critic').
     if basis == "queued-to-lead":
-        if agent == "critic" and by in ("sonnet", "opus"):
+        if agent in QUEUED_TO_LEAD_AGENTS and by in ("sonnet", "opus"):
             return None
         return (
             f"D-0058: agent={agent!r} принят by={by!r} с "
             f"basis='queued-to-lead' -- для {agent!r}-класса у "
             f"{by!r}-координатора легален только basis='critic' (или "
-            f"judge на leaf-implementation, если category -- лист-класс); "
-            f"очередь (queued-to-lead) доступна только для critic-класса "
-            f"работ"
+            f"judge на leaf-implementation, если category -- лист-класс, "
+            f"и agent∈{{scout,builder}}); очередь (queued-to-lead) "
+            f"доступна только классу {sorted(QUEUED_TO_LEAD_AGENTS)}"
         )
 
     # (6) прочее -- общий D-0058 отказ.

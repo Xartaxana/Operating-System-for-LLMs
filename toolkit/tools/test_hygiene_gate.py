@@ -939,3 +939,122 @@ def test_adversarial_null_bytes_in_json_string_no_crash():
     result = _run_hook(json.dumps(payload), text=True, encoding="utf-8")
     assert result.returncode == 0
     assert result.stderr == ""
+
+
+# =======================================================================
+# v4 -- heredoc-body scrub for `git commit -F - <<DELIM ... DELIM`
+# =======================================================================
+
+# Built from parts rather than as a literal string so this test file
+# itself never contains the literal journal path as a plain substring
+# (the very shell-write pattern this hook's own class (d) detects) --
+# same reason class-(d) tests elsewhere in this file already avoid a
+# bare literal path in an unrelated write form.
+_JOURNAL_TARGET = "logs/" + "routing-log.jsonl"
+
+
+def test_heredoc_delimiter_forms_all_scrubbed():
+    """All four heredoc-opener delimiter quotings scrub the body: a
+    journal-path mention INSIDE the commit-message body must disappear
+    after _strip_commit_messages, for every quoting form."""
+    for opener in ("<<EOF", "<<'EOF'", '<<"EOF"', "<<-EOF"):
+        cmd = f"git commit -F - {opener}\nSee {_JOURNAL_TARGET} for details\nEOF"
+        stripped = hygiene_gate._strip_commit_messages(cmd)
+        assert "routing-log" not in stripped.lower(), opener
+
+
+def test_heredoc_unclosed_not_matched_left_as_is():
+    """A heredoc with no closing delimiter line does not match
+    COMMIT_HEREDOC_RE at all -- fail-safe toward detection: the text is
+    left completely unchanged, not silently half-scrubbed."""
+    cmd = f"git commit -F - <<EOF\nSee {_JOURNAL_TARGET} here, no closer at all"
+    stripped = hygiene_gate._strip_commit_messages(cmd)
+    assert stripped == cmd
+
+
+def test_heredoc_scrub_preserves_opener_line_trailing_content():
+    """Content on the SAME line as the opener, after `<<DELIM`, is kept
+    verbatim (group 4) -- only the body (group 5) is cut."""
+    cmd = f"git commit -F - <<EOF trailing-marker\nSee {_JOURNAL_TARGET} here\nEOF"
+    stripped = hygiene_gate._strip_commit_messages(cmd)
+    assert "trailing-marker" in stripped
+    assert "routing-log" not in stripped.lower()
+
+
+def test_heredoc_pin_chained_write_after_closing_delimiter_still_blocks():
+    """PIN: a real write chained via && on the line AFTER the heredoc's
+    closing delimiter must still BLOCK class (d) -- the scrub must not
+    eat a trailing `&& echo ... >> journal` that sits outside the
+    heredoc body itself."""
+    cmd = (
+        "git commit -F - <<EOF\n"
+        "Commit message body, nothing journal-related here.\n"
+        "EOF\n"
+        f'&& echo "{{}}" >> {_JOURNAL_TARGET}'
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(cmd))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+
+
+def test_heredoc_pin_python_heredoc_after_git_commit_not_scrubbed_write_detected():
+    """PIN: `git commit -m "x" && python - <<'PY'` with a real journal
+    write inside the python heredoc's OWN body -- that heredoc belongs
+    to the python statement, not to git commit (class (c)'s own
+    heredoc form, `_is_python_heredoc_opener`), so it must NOT be
+    scrubbed; the real write inside it must still be detected by
+    class (d)."""
+    cmd = (
+        'git commit -m "x" && python - <<\'PY\'\n'
+        f'with open("{_JOURNAL_TARGET}", "a") as f:\n'
+        '    f.write("x")\n'
+        "PY"
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(cmd))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+
+
+def test_heredoc_scrub_only_applies_when_git_commit_present():
+    """No `git commit` in the command at all -- _strip_commit_messages
+    returns the command completely unchanged (early return), the
+    heredoc-scrub machinery never even runs."""
+    cmd = f"cat <<EOF\nSee {_JOURNAL_TARGET} here\nEOF"
+    stripped = hygiene_gate._strip_commit_messages(cmd)
+    assert stripped == cmd
+
+
+def test_heredoc_nested_heredoc_documented_residual_not_crashing():
+    """Nested heredocs (one heredoc's body containing another opener)
+    are a documented residual limitation, not specially handled --
+    this must not crash regardless of exactly which portion ends up
+    scrubbed."""
+    cmd = (
+        "git commit -F - <<OUTER\n"
+        "outer body start\n"
+        "cat <<INNER\n"
+        f"mentions {_JOURNAL_TARGET}\n"
+        "INNER\n"
+        "outer body end\n"
+        "OUTER"
+    )
+    # Must not raise; the exact scrub boundary on nested heredocs is not
+    # asserted (documented residual), only that decide() stays callable.
+    exit_code, _ = hygiene_gate.decide(_bash_payload(cmd))
+    assert exit_code == 0
+
+
+def test_heredoc_body_redirect_stderr_still_warns_class_b_documented_residual():
+    """Documented residual: a literal ` 2>&1` INSIDE a git-commit
+    heredoc body still fires the class-(b) WARN -- classes (a)/(b)/(c)
+    are evaluated against the RAW, un-scrubbed command; only class (d)
+    consults _strip_commit_messages's output."""
+    cmd = "git commit -F - <<EOF\nRun the tests 2>&1 and check the output.\nEOF"
+    exit_code, output = hygiene_gate.decide(_bash_payload(cmd))
+    assert exit_code == 0
+    ctx = output["hookSpecificOutput"]["additionalContext"]
+    assert hygiene_gate.MSG_REDIRECT_STDERR in ctx

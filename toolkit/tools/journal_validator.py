@@ -65,8 +65,8 @@ log" section):
 11. The role-vs-tier acceptance matrix (NEW lines only, accepted
     only -- rejected carries "by" with no further check, a literal
     reading of the spec). For agent=lead the matrix doesn't apply --
-    presence of "by" is enough. For agent in {scout, builder, critic}
-    (batch B7, 2026-07-24 -- membership-in-set "basis in BASIS_VALUES"
+    presence of "by" is enough. For agent in {scout, builder, critic,
+    designer} (batch B7, 2026-07-24 -- membership-in-set "basis in BASIS_VALUES"
     replaced by legality-PER-(by, agent)-PAIR, after the live AO3
     07-24 leak: two different Sonnet coordinators accepted Sonnet-class
     (builder) results via basis=queued-to-lead -- membership passed
@@ -79,7 +79,9 @@ log" section):
     acceptance from an unknown acceptor:
 
     a) ok_tier -- tier(by) > tier(agent) (haiku<sonnet<opus<fable by
-       agent: scout=haiku, builder=sonnet, critic=opus) -- legal at
+       agent: scout=haiku, builder=sonnet, critic=opus, designer=opus
+       (designer's deployment binding, same tier as critic; see
+       .claude/agents/designer.md)) -- legal at
        ANY basis (or none).
     b) basis=="judge" -- legal ONLY when the line's OWN "category" is
        ∈ {"recon", "implementation"} (a leaf-class dispatch per this
@@ -121,7 +123,8 @@ log" section):
 
     SURFACE NARROWING (t-323, critic verdict 2026-07-28): the by-shape
     enum gate applies ONLY to accepted with agent ∈ {scout, builder,
-    critic}; OUTSIDE the gate (recorded DECISIONS, not oversights):
+    critic, designer} (designer added to AGENT_TIER, same class);
+    OUTSIDE the gate (recorded DECISIONS, not oversights):
     rejected -- by carries no matrix check at all (a literal reading
     of the spec, see the top of rule 11); agent=lead -- a non-tier by
     is legal (a live precedent, by="operator", in
@@ -172,7 +175,27 @@ MODEL_REQUIRED_EVENTS = {"delegated", "escalated", "accepted", "rejected"}
 TASK_ID_REQUIRED_EVENTS = {"delegated", "accepted", "rejected", "escalated", "defect_found"}
 FAILURE_CLASSES = {"spec", "capability", "recon", "tooling"}
 TIER_ORDER = {"haiku": 0, "sonnet": 1, "opus": 2, "fable": 3}
-AGENT_TIER = {"scout": "haiku", "builder": "sonnet", "critic": "opus"}
+AGENT_TIER = {
+    "scout": "haiku", "builder": "sonnet", "critic": "opus",
+    # designer added: designer's deployment binding is opus (see
+    # .claude/agents/designer.md, model: opus) -- the same tier as
+    # critic. Class of the gap before this line existed: agent=
+    # "designer" was outside AGENT_TIER, so the role-vs-tier
+    # acceptance matrix silently did not apply to its accepted lines
+    # (see the "agent not in AGENT_TIER" early return below).
+    "designer": "opus",
+}
+# The upper-mid-tier CLASS (decision, after a critic finding): branch
+# (5) basis="queued-to-lead" used to be keyed on the literal name
+# agent=="critic" -- a narrowing by NAME, not by CLASS. designer
+# carries the same tier (opus) and the same coordinator-facing
+# semantics for branch (5) -- the queue to Lead is legal for BOTH when
+# the coordinator is not strictly above. basis="critic" is NOT
+# extended to designer the same way -- branch (4) already works by a
+# NUMERIC tier comparison, not by name, so a same-tier critic input
+# already fails to legalize designer's acceptance too, without any
+# separate change (same as it already fails for agent=="critic" itself).
+QUEUED_TO_LEAD_AGENTS = {"critic", "designer"}
 # Known non-judge basis string values -- a PLAIN enum/reference (external
 # consumers: PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md, log_append.py), no
 # longer used as a legality check "basis in BASIS_VALUES" -- since batch
@@ -379,15 +402,32 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
     basis = obj.get("basis")
 
     # (1) judge -- separate path, not a coordinator resolution; category
-    # decides everything, checked before tier/floor.
+    # decides everything, checked before tier/floor. NARROWED (a
+    # critic finding): the judge accepts ONLY leaf-class EXECUTORS
+    # (agent ∈ {scout,builder}) -- specs (designer) and reviews
+    # (critic) stay outside the judge's remit by policy, regardless of
+    # category (before this fix, agent="designer" + basis="judge" +
+    # category="implementation" wrongly passed, since only category
+    # was checked, never agent). Order: the category gate runs FIRST
+    # (a non-leaf category fails for ANY agent, including scout/
+    # builder -- a regression pin for the pre-existing tests), the
+    # agent gate runs SECOND, only once category is already leaf-class.
     if basis == JUDGE_BASIS_VALUE:
-        if obj.get("category") in LEAF_CATEGORIES:
-            return None
-        return (
-            f"role-vs-tier acceptance matrix: basis \"judge\" is legal "
-            f"only for a leaf-class dispatch (category recon/"
-            f"implementation), got category={obj.get('category')!r}"
-        )
+        if obj.get("category") not in LEAF_CATEGORIES:
+            return (
+                f"role-vs-tier acceptance matrix: basis \"judge\" is legal "
+                f"only for a leaf-class dispatch (category recon/"
+                f"implementation), got category={obj.get('category')!r}"
+            )
+        if agent not in ("scout", "builder"):
+            return (
+                f"role-vs-tier acceptance matrix: basis \"judge\" is legal "
+                f"only for agent∈{{scout,builder}} (leaf-class EXECUTORS) -- "
+                f"agent={agent!r} is not eligible for judge acceptance "
+                f"regardless of category (specs and reviews stay outside "
+                f"the judge's remit by policy)"
+            )
+        return None
 
     # (2) ok_tier -- strictly above, legal at any basis (or none).
     if by_tier is not None and by_tier > agent_tier:
@@ -408,7 +448,11 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
         )
 
     # (4) basis=="critic" -- legal if the critic (opus) is strictly
-    # above agent (agent is scout/builder-class).
+    # above agent (agent is scout/builder-class). A NUMERIC tier
+    # comparison (not a name check) -- this already covers designer
+    # correctly with no separate change: designer is also opus-tier,
+    # tier("opus") > tier("opus") is false, the same rejection as for
+    # agent=="critic" itself today.
     if basis == "critic":
         if TIER_ORDER["opus"] > agent_tier:
             return None
@@ -416,25 +460,27 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
             f"role-vs-tier acceptance matrix: agent={agent!r} (tier "
             f"{agent_tier_name}) accepted with basis='critic', but the "
             f"critic (opus) is not strictly above the executor's tier -- "
-            f"a critic verdict on top of the critic's own class is not "
-            f"meaningful; the legal path for agent='critic' is by "
+            f"basis='critic' does not raise acceptance above its own "
+            f"opus tier; the legal path for agent={agent!r} is by "
             f"strictly above opus (by='fable'), or basis='queued-to-lead' "
             f"at by∈{{sonnet,opus}}"
         )
 
-    # (5) basis=="queued-to-lead" -- legal ONLY for critic-class agent
-    # at by∈{sonnet,opus} (the AO3 case: builder-class at a sonnet
-    # coordinator does NOT pass -- legal only via basis='critic').
+    # (5) basis=="queued-to-lead" -- legal for the upper-mid-tier CLASS
+    # (QUEUED_TO_LEAD_AGENTS = {critic, designer}, see its own comment
+    # above) at by∈{sonnet,opus} (the AO3 case: builder-class at a
+    # sonnet coordinator does NOT pass -- legal only via
+    # basis='critic').
     if basis == "queued-to-lead":
-        if agent == "critic" and by in ("sonnet", "opus"):
+        if agent in QUEUED_TO_LEAD_AGENTS and by in ("sonnet", "opus"):
             return None
         return (
             f"role-vs-tier acceptance matrix: agent={agent!r} accepted "
             f"by={by!r} with basis='queued-to-lead' -- for {agent!r}-class "
             f"at a {by!r} coordinator only basis='critic' is legal (or "
-            f"judge on a leaf-implementation, if category is leaf-class); "
-            f"the queue (queued-to-lead) is available only for "
-            f"critic-class work"
+            f"judge on a leaf-implementation, if category is leaf-class "
+            f"AND agent∈{{scout,builder}}); the queue (queued-to-lead) is "
+            f"available only for the class {sorted(QUEUED_TO_LEAD_AGENTS)}"
         )
 
     # (6) anything else -- generic role-vs-tier rejection.
