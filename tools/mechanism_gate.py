@@ -41,7 +41,22 @@
    (субскрипционный дефолт Lead). Декларация принимается точным
    совпадением с моделью привязки ИЛИ вхождением её ярусного семейства
    (fable/opus/sonnet/haiku, по подстроке) — для не-Claude привязки
-   семейства нет, годится только точное совпадение model id.
+   семейства нет, годится только точное совпадение model id. С 2026-08-04
+   (D-0099) декларация СЕМЕЙСТВА, чей ранг СТРОГО ВЫШЕ ранга привязки
+   (fable>opus>sonnet>haiku), тоже принимается — переходный коммит
+   перепривязки Lead коммитится ещё сессией старого, более высокого
+   яруса, тот ярус выше привязки суть полный Lead (см. tier_declared_ok).
+   D-0099 п.6 (тем же днём): ДОПОЛНИТЕЛЬНО источником рангов служит
+   ПРОВЕРЕННАЯ ЛЕСТНИЦА КОНФИГА — roles.{scout,builder,critic,lead,
+   reserve} (каждая привязка прошла входной экзамен onboarding'а, порядок
+   — функциональная иерархия координации, reserve — опциональная ступень
+   строго выше lead, представление Fable-резерва); декларация резолвится
+   в ранг лестницы точным id ИЛИ (для Claude-моделей, при единственной
+   ступени того семейства) family-матчем, принимается при ранге >= ранга
+   lead — работает и для НЕ-Claude лестниц, где семейственная эвристика
+   выше молчит (см. build_role_ladder/_resolve_ladder_rank). Обе ветки
+   (семейственная и лестничная) сосуществуют и только РАСШИРЯЮТ множество
+   принимаемых деклараций, никогда не сужая его.
    Skip-ветка («не-механизм») и merge-коммиты строку tier не требуют
    (тот же невод исключений, что и у осевого блока). Гейт НЕ проверяет
    истинность декларации — двухслойный enforcement (D-0063): код
@@ -200,13 +215,167 @@ def find_tier_declaration(msg: str) -> str | None:
     return declarations[0] if declarations else None
 
 
-def tier_declared_ok(declared: str, binding: str) -> bool:
+# D-0099 п.6 (2026-08-04): онбординг-лестница -- каждая привязанная модель
+# прошла входной экзамен (exam.mandatory), roles.{scout,builder,critic,
+# lead,reserve} в delegation.config.yaml И ЕСТЬ валидированная лестница
+# деплоя, в этом фиксированном функциональном порядке. reserve (Fable-
+# резерв) — единственная ступень СТРОГО ВЫШЕ lead; roles.judge/roles.analyst
+# не координационные роли и в лестницу не входят. B4.3 (пересдача,
+# критик-блокер): roles.designer ТОЖЕ не ступень лестницы -- designer
+# стоячая функция того же яруса, что critic (opus, .claude/agents/
+# designer.md), но НЕ координационная роль в смысле этой иерархии
+# (координирует спеки, не диспетчит работу); как и judge/analyst, её ключ
+# просто не входит в ROLE_RANKS и build_role_ladder() по построению его не
+# читает -- см. test_build_role_ladder_ignores_designer.
+ROLE_RANKS = {"scout": 0, "builder": 1, "critic": 2, "lead": 3, "reserve": 4}
+
+
+def _resolve_role_model(role_data) -> str | None:
+    """Модель ОДНОЙ роли по той же subscription/api-приоритетности, что и
+    resolve_lead_binding() -- но БЕЗ дефолта "fable": роль без модели
+    (ключа нет, или subscription.model/api.model оба пусты) просто не
+    даёт ступени лестницы, это не то же самое, что привязка Lead
+    конкретно (у которой отсутствие -- осмысленный субскрипционный
+    дефолт, D-0072)."""
+    if not isinstance(role_data, dict):
+        return None
+    model = ((role_data.get("subscription") or {}).get("model")
+             or (role_data.get("api") or {}).get("model"))
+    return model or None
+
+
+def build_role_ladder(config_text: str | None) -> list[tuple[int, str]]:
+    """D-0099 п.6: [(rank, model_id)] по ROLE_RANKS, в фиксированном
+    порядке (scout=0 ... reserve=4) -- построена из roles.* в
+    config_text, роль без сконфигурированной модели ступени не
+    порождает. Пустой/битый/отсутствующий config_text -> пустая лестница
+    (fail-open к существующей family-эвристике tier_declared_ok, которая
+    ничего не знает про лестницу и работает как раньше)."""
+    if not config_text:
+        return []
+    try:
+        data = yaml.safe_load(config_text) or {}
+    except yaml.YAMLError:
+        return []
+    roles = data.get("roles")
+    if not isinstance(roles, dict):
+        return []
+    ladder = []
+    for role_name, rank in ROLE_RANKS.items():
+        model = _resolve_role_model(roles.get(role_name))
+        if model:
+            ladder.append((rank, model))
+    return ladder
+
+
+def _resolve_ladder_rank(declared: str, config_text: str | None) -> int | None:
+    """D-0099 п.6: резолюция декларации в ранг лестницы.
+
+    B3 (пересдача, критик-блокер): лестничный путь легален ТОЛЬКО когда в
+    лестнице реально ЕСТЬ ступень "lead" (roles.lead сконфигурирована с
+    моделью) -- без неё нет опорного ранга, относительно которого вообще
+    можно сказать "выше/на уровне lead"; пустая лестница ИЛИ лестница без
+    ступени lead -> None безусловно, ни (а), ни (б) ниже не пробуются
+    (edge (ii): roles.lead отсутствует, но reserve=opus сконфигурирован --
+    "tier: opus" не резолвится лестницей вовсе, регресс-пин "выше fable
+    ничего нет" из существующих (не-лестничных) веток держится и с
+    конфигом, не только с config_text=None).
+
+    (а) ТОЧНОЕ совпадение с model_id какой-то ступени резолвится в ранг --
+        B4 (пересдача, критик-блокер): если ОДИН И ТОТ ЖЕ model_id стоит
+        на НЕСКОЛЬКИХ ступенях (админ буквально продублировал модель), из
+        всех точных совпадений берётся МАКСИМАЛЬНЫЙ ранг, не первый по
+        порядку лестницы (работает и для не-Claude ступеней -- "tier:
+        llama-3.3-70b-versatile" матчит не-Claude ступень lead точным id).
+    (б) иначе, когда declared -- Claude-модель (lead_family(declared) не
+        None), family-матч РОВНО ОДНОЙ ступени лестницы того же семейства
+        резолвится в её ранг -- АМБИГУИТЕТ (>=2 ступени того же семейства)
+        НЕ резолвится этим путём вовсе (документированная развилка,
+        спека п.6: "если такая ступень одна"). B3 (пересдача, критик-
+        блокер, edge (i)): ДОПОЛНИТЕЛЬНО кандидат-ступень должна иметь
+        family НЕ СЛАБЕЕ (по LEAD_FAMILIES ordinal, где индекс 0 -- самое
+        сильное семейство "fable") family самой ступени lead -- иначе
+        нонсенс-конфиг (напр. reserve сконфигурирован МОДЕЛЬЮ СЛАБЕЕ lead,
+        хотя позиционно reserve выше) не должен молча наследовать
+        позиционный ранг 4 через family-эвристику. Guard применяется
+        ТОЛЬКО когда family lead-ступени резолвится (Claude lead); при
+        не-Claude lead (family lead не определена) сравнивать не с чем --
+        guard не блокирует (см. edge "reserve при не-Claude lead" -- уже
+        принятый и покрытый тестами кейс).
+    None -- лестница без ступени lead, или declared не резолвится ни (а),
+    ни (б) (в т.ч. не-Claude declared без точного id-совпадения --
+    family-путь для него не определён)."""
+    ladder = build_role_ladder(config_text)
+    lead_rank = ROLE_RANKS["lead"]
+    lead_models = [model_id for rank, model_id in ladder if rank == lead_rank]
+    if not lead_models:
+        return None  # B3: нет ступени lead -- лестничный путь не резолвит НИЧЕГО
+    lead_model = lead_models[0]
+
+    exact_matches = [rank for rank, model_id in ladder if declared == model_id]
+    if exact_matches:
+        return max(exact_matches)  # B4: максимальный ранг среди совпавших
+
+    declared_fam = lead_family(declared)
+    if declared_fam is None:
+        return None
+    lead_fam = lead_family(lead_model)
+    candidates = []
+    for rank, model_id in ladder:
+        if lead_family(model_id) != declared_fam:
+            continue
+        # B3 edge (i): guard активен только когда family lead-ступени
+        # известна (Claude lead) -- рангу-кандидату запрещено быть
+        # СЛАБЕЕ lead по LEAD_FAMILIES ordinal (больший индекс = слабее).
+        if lead_fam is not None:
+            cand_fam = lead_family(model_id)
+            if LEAD_FAMILIES.index(cand_fam) > LEAD_FAMILIES.index(lead_fam):
+                continue  # нонсенс: позиционно >=lead, но семейством слабее
+        candidates.append(rank)
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
+def tier_declared_ok(declared: str, binding: str, config_text: str | None = None) -> bool:
+    """config_text (D-0099 п.6, опционально, дефолт None): онбординг-
+    лестница -- строго ДОПОЛНЯЕТ существующие пути ниже, никогда их не
+    сужает (см. докстринг _resolve_ladder_rank/build_role_ladder).
+    Ветки 1-3 (точное совпадение с binding / вхождение её семейства /
+    family строго выше ранга binding по LEAD_FAMILIES) — БЕЗ ИЗМЕНЕНИЙ.
+    Не-Claude привязка (fam(binding) is None) БОЛЬШЕ НЕ обрывает функцию
+    ранним return False -- ветки 1-3 просто молчат (семейства сравнивать
+    не с чем), но ЛЕСТНИЧНАЯ резолюция (шаг 4, ниже) всё равно
+    выполняется: не-Claude привязка с не-Claude лестницей резолвится
+    точным id (см. edge "lead: llama-3.3-70b-versatile")."""
     if declared == binding:
         return True
     fam = lead_family(binding)
-    if fam is None:
-        return False
-    return fam in declared.lower()
+    if fam is not None:
+        if fam in declared.lower():
+            return True
+        # D-0099 (2026-08-04): декларация семейства СТРОГО ВЫШЕ ранга
+        # привязки тоже легальна — матрица Role != tier: ярусы выше
+        # Lead-привязки суть полный Lead (переходный коммит самой
+        # перепривязки коммитится ещё сессией старого, более высокого
+        # яруса). Ранг — позиция в LEAD_FAMILIES (индекс 0 = высшее
+        # семейство "fable"); "строго выше" значит МЕНЬШИЙ индекс.
+        # Привязка fable — LEAD_FAMILIES.index("fable")==0, индексов
+        # меньше 0 не существует, поэтому эта ветка молчит без отдельной
+        # проверки: регресс-пин "выше fable ничего нет" сохраняется
+        # автоматически арифметикой индекса. Не-Claude ДЕКЛАРАЦИЯ
+        # (declared_fam is None) эту ветку не матчит — годится только
+        # точное совпадение (шаг 1 выше) или лестница (шаг 4 ниже).
+        declared_fam = lead_family(declared)
+        if declared_fam is not None and LEAD_FAMILIES.index(declared_fam) < LEAD_FAMILIES.index(fam):
+            return True
+    # (4) D-0099 п.6: онбординг-лестница конфига -- принимается ранг
+    # declared >= ранга ступени "lead" (ФИКСИРОВАННАЯ позиция ROLE_RANKS,
+    # не зависящая от того, какие ступени сегодня сконфигурированы).
+    declared_rank = _resolve_ladder_rank(declared, config_text)
+    if declared_rank is not None and declared_rank >= ROLE_RANKS["lead"]:
+        return True
+    return False
 
 
 def _tier_queue_note() -> str:
@@ -267,7 +436,7 @@ def decide_full(msg: str, block_extra: str, staged: list[str],
         return 1, ("коммит трогает механизмные файлы:\n  " + "\n  ".join(hits)
                     + "\nНет строки «tier: <значение>» (привязка lead: "
                     + binding + ") — " + _tier_queue_note())
-    bad = [d for d in declared_list if not tier_declared_ok(d, binding)]
+    bad = [d for d in declared_list if not tier_declared_ok(d, binding, config_text)]
     if bad:
         return 1, ("коммит трогает механизмные файлы:\n  " + "\n  ".join(hits)
                     + "\nЯрус не lead: «tier: " + bad[0]

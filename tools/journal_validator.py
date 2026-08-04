@@ -81,6 +81,23 @@
        (2026-07-30, designer-функция привязана к opus, тот же ярус, что
        critic, .claude/agents/designer.md)) -- легально
        ПРИ ЛЮБОМ basis (или без него).
+    а2) (2026-08-04, D-0099) LEAD-ПРИВЯЗКА принимает финально БЕЗ basis:
+       если привязка roles.lead (delegation.config.yaml, читается через
+       mechanism_gate.resolve_lead_binding()) разрешима в Claude-семейство
+       (mechanism_gate.lead_family(binding) is not None), И by ЛИТЕРАЛЬНО
+       равен этому семейству, И tier(by) >= tier(agent) (нестрого -- РАВНЫЙ
+       ярус тоже легален, в отличие от ok_tier выше) -- легально ПРИ ЛЮБОМ
+       basis (или без него). Мотив: D-0099 -- полный Lead определяется
+       ПРИВЯЗКОЙ, не именем "fable"; вердикт рождается в независимом
+       контексте (отдельная сессия/subagent на ярусе привязки) --
+       независимость контекста заменяет строгое численное превосходство
+       модели при равном ярусе (напр. Lead привязан к opus -- opus-сессия
+       принимает critic/designer, оба тоже opus, без критик-входа/очереди).
+       Проверяется ДО ok_tier (порядок не меняет исход там, где обе ветки
+       совпадают -- см. mechanism_gate.CONFIG_PATH/резолюцию ниже) --
+       fable-привязка эквивалентна сегодняшнему (ok_tier уже покрывает её
+       целиком), не-Claude привязка (family None) не активирует эту ветку
+       вовсе (годится только сегодняшняя семантика).
     б) basis=="judge" -- легально ТОЛЬКО когда СОБСТВЕННОЕ поле
        "category" этой же строки ∈ {"recon", "implementation"}
        (лист-классы R13/D-0087, CLAUDE.md «Leaf routing»: "Judge
@@ -182,6 +199,25 @@ import sys
 import traceback
 from pathlib import Path
 
+# D-0099: Lead-привязка (roles.lead в delegation.config.yaml) переезжает
+# с fable на другую модель -- resolve_lead_binding()/lead_family() и
+# CONFIG_PATH уже живут в mechanism_gate.py (тот же дом enforcement-цепочки,
+# D-0043 ось 1); переиспользуем их парсер, не дублируем (см. правило 11
+# ниже, ветка а2). B6 (пересдача, 2026-08-04): импорт обёрнут в
+# try/except ImportError -- mg=None -> ветка а2 молча выключена (то же
+# сегодняшнее поведение, что и без конфига вовсе). Симметрично
+# session_context.py (тот же fail-open паттерн для sibling-импорта).
+# Мотив: tools/journal_echo.py импортирует journal_validator СНАРУЖИ
+# своего собственного fail-open try/except (см. его докстринг) -- если
+# интерпретатор, из которого запускается хук, лишён PyYAML (mechanism_gate
+# требует его на верхнем уровне), падение импорта journal_validator's
+# уронило бы весь хук ДО первой же строки этого модуля, а не только
+# ветку а2.
+try:
+    import mechanism_gate as mg
+except ImportError:
+    mg = None
+
 JOURNAL_PATH = "logs/routing-log.jsonl"
 
 EVENTS = {
@@ -225,6 +261,37 @@ JUDGE_BASIS_VALUE = "judge"
 # «Leaf routing», R13/D-0087-эквивалент): "recon, or implementation to a
 # written spec".
 LEAF_CATEGORIES = {"recon", "implementation"}
+
+# D-0099: сентинел "config_text не передан явно" -- decide() отличает
+# "вызывающий явно передал config_text=None" (нет конфига/парсер вернёт
+# дефолт "fable" -- используется тестами) от "вызывающий вообще не знает
+# про config_text" (реальные CLI-входы: main()/_run_standalone()/
+# journal_echo.py, все зовут decide() тремя позиционными аргументами) --
+# только второй случай лениво читает delegation.config.yaml с диска.
+_CONFIG_TEXT_UNSET = object()
+# Кэш реального чтения -- "один раз за процесс" (спека: "лениво/кэшировано").
+# Не участвует в инъекции тестов: тест, которому нужен конкретный
+# config_text, передаёт его явно и никогда не задевает этот кэш.
+_cached_real_config_text = _CONFIG_TEXT_UNSET
+
+
+def _read_real_config_text() -> str | None:
+    """Ленивое кэшированное чтение REPO/delegation.config.yaml -- та же
+    форма, что mechanism_gate.main() использует для CONFIG_PATH (файла нет
+    -> None -> mg.resolve_lead_binding(None) == "fable", регресс-пин).
+    B6: mg is None (mechanism_gate недоступен -- см. top-level try/except
+    выше) -> None без попытки чтения -- ветка а2 молча выключена, то же
+    сегодняшнее поведение, что и при отсутствии файла."""
+    global _cached_real_config_text
+    if mg is None:
+        return None
+    if _cached_real_config_text is _CONFIG_TEXT_UNSET:
+        path = mg.CONFIG_PATH
+        _cached_real_config_text = (
+            path.read_text(encoding="utf-8", errors="replace") if path.exists() else None
+        )
+    return _cached_real_config_text
+
 
 TASK_ID_RE = re.compile(r"^t-(\d{3,})$")
 # Маркер замены умершего воркера (2026-07-15, правило 9в2): literal
@@ -362,7 +429,8 @@ def check_append_only(staged_lines: list[str], head_lines: list[str]):
     return True, ""
 
 
-def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None:
+def _matrix_d0058_violation(event: str, agent, by: str, obj: dict,
+                             config_text: str | None = None) -> str | None:
     """Правило 11 (batch B7, 2026-07-24: пары-легальности вместо
     членства-в-множестве). Возвращает текст нарушения или None.
     Применяется ТОЛЬКО к accepted (буквальное чтение спеки: "accepted
@@ -382,7 +450,13 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
     3) FLOOR: tier(by) известен и СТРОГО ниже sonnet (т.е. by=="haiku")
        -- FAIL безусловно, ни один basis (кроме уже отработавшего
        "judge") не спасает ("below Sonnet: no coordination is provided
-       for").
+       for"). B2 (пересдача, критик-блокер): Lead-привязка (ветка 3b
+       ниже) проверяется ПОСЛЕ floor, не до -- floor в матрице CLAUDE.md
+       безусловен, привязка на haiku (гипотетическая) не спасает
+       haiku-by от floor ни в каком случае.
+    3b) (D-0099, была "1b"/"а2") Lead-привязка принимает финально БЕЗ
+       basis, даже на РАВНОМ ярусе -- полный Lead определяется
+       ПРИВЯЗКОЙ, не именем "fable"; ПОСЛЕ floor -- см. правку B2 выше.
     4) basis=="critic": легален, только если tier("opus") строго выше
        tier(agent) -- т.е. agent класса scout/builder, не critic.
     5) basis=="queued-to-lead": легален ТОЛЬКО для agent класса critic
@@ -445,7 +519,10 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
     # не предусмотрена ни при каком basis (Role != tier matrix: "below
     # Sonnet: no coordination is provided for"). Развилка с буквой ядра
     # ("carries a higher tier's input") документирована и решена в
-    # пользу floor -- см. правило 11 модульного докстринга.
+    # пользу floor -- см. правило 11 модульного докстринга. B2
+    # (пересдача, критик-блокер): floor БЕЗУСЛОВЕН и стоит ДО ветки 3b
+    # (Lead-привязка) -- гипотетическая привязка Lead на haiku не спасает
+    # haiku-by от floor, ветка 3b его больше не перехватывает.
     if by_tier is not None and by_tier < TIER_ORDER["sonnet"]:
         return (
             f"D-0058: by={by!r} -- ярус ниже sonnet, координация не "
@@ -453,6 +530,26 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
             f"matrix: 'below Sonnet: no coordination is provided for'); "
             f"agent={agent!r} не может быть принят этим by"
         )
+
+    # (3b, D-0099, была "1b"/"а2", 2026-08-04, B2 переставлена ПОСЛЕ floor
+    # в пересдаче): Lead-привязка принимает финально БЕЗ basis, даже на
+    # РАВНОМ ярусе -- полный Lead определяется ПРИВЯЗКОЙ (delegation.
+    # config.yaml), не именем "fable": by ДОЛЖЕН литерально совпасть с
+    # ярусным семейством привязки (mg.lead_family -- None для не-Claude
+    # привязки, тогда эта ветка не активируется вовсе), И tier(by) >=
+    # tier(agent) НЕСТРОГО -- именно нестрогость и есть отличие от
+    # ok_tier: вердикт рождается в независимом контексте (отдельная
+    # сессия/subagent на ярусе привязки), независимость контекста
+    # заменяет строгое численное превосходство модели при равном ярусе.
+    # По конструкции (floor уже отработал выше) by_tier здесь либо None,
+    # либо >= tier(sonnet) -- гипотетическая привязка на haiku никогда не
+    # долетает досюда с известным by_tier < sonnet, floor её уже отсёк.
+    # B6: mg is None (mechanism_gate недоступен) -- ветка молча выключена.
+    if mg is not None:
+        binding = mg.resolve_lead_binding(config_text)
+        lead_binding_family = mg.lead_family(binding)
+        if lead_binding_family is not None and by == lead_binding_family and by_tier >= agent_tier:
+            return None
 
     # (4) basis=="critic" -- легален, если критик (opus) строго выше
     # agent (agent класса scout/builder). Числовое сравнение ярусов
@@ -498,7 +595,8 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
 
 
 def validate_new_lines(new_lines: list[str], head_lines: list[str],
-                        now: datetime.datetime) -> list[str]:
+                        now: datetime.datetime,
+                        config_text: str | None = None) -> list[str]:
     violations: list[str] = []
     seen_task_ids = extract_task_ids(head_lines)
     max_num = max_task_num(seen_task_ids)
@@ -583,7 +681,7 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
             if not isinstance(by, str) or not by:
                 violations.append(f"{tag}: 'by' обязателен (непустой) для {event} (матрица D-0058)")
             else:
-                mv = _matrix_d0058_violation(event, agent, by, obj)
+                mv = _matrix_d0058_violation(event, agent, by, obj, config_text)
                 if mv:
                     violations.append(f"{tag}: {mv}")
 
@@ -668,16 +766,30 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
 
 
 def decide(staged_text: str | None, head_text: str | None,
-           now: datetime.datetime | None = None) -> tuple[int, list[str]]:
-    """Чистое решение гейта -- тестируется без git (см. tools/test_journal_validator.py)."""
+           now: datetime.datetime | None = None,
+           config_text=_CONFIG_TEXT_UNSET) -> tuple[int, list[str]]:
+    """Чистое решение гейта -- тестируется без git (см. tools/test_journal_validator.py).
+
+    config_text (D-0099): текст delegation.config.yaml для резолюции
+    Lead-привязки (правило 11, ветка а2) -- ИНЪЕКТИРУЕМ явно (в т.ч.
+    явный None -- "нет конфига", тот же дефолт парсера, что и раньше).
+    Когда параметр вообще НЕ передан (сентинел _CONFIG_TEXT_UNSET -- все
+    реальные CLI-вызовы: main()/_run_standalone()/tools/journal_echo.py,
+    все зовут decide() тремя позиционными аргументами и НЕ знают про
+    config_text), читает REPO/delegation.config.yaml с диска один раз за
+    процесс (см. _read_real_config_text) -- файла нет сегодня ->
+    resolve_lead_binding(None) == "fable", регресс-пин, а после того как
+    Lead создаст файл, эти вызовы подхватят привязку без правки."""
     now = now or datetime.datetime.now()
+    if config_text is _CONFIG_TEXT_UNSET:
+        config_text = _read_real_config_text()
     staged_lines = split_lines(staged_text)
     head_lines = split_lines(head_text)
     ok, msg = check_append_only(staged_lines, head_lines)
     if not ok:
         return 1, [msg]
     new_lines = staged_lines[len(head_lines):]
-    violations = validate_new_lines(new_lines, head_lines, now)
+    violations = validate_new_lines(new_lines, head_lines, now, config_text)
     if violations:
         return 1, violations
     return 0, []

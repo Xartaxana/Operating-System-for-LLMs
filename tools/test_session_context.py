@@ -633,18 +633,76 @@ def test_extract_model_id_missing_returns_none():
 
 
 def test_model_tier_mapping_all_known_tiers():
-    assert sc.model_tier("claude-fable-5") == "Lead(top)"
-    assert sc.model_tier("claude-opus-4") == "critic-tier"
-    assert sc.model_tier("claude-sonnet-5") == "builder-tier"
-    assert sc.model_tier("claude-haiku-3") == "scout-tier"
+    # B1(a) (пересдача, блокер): config_text=None ЯВНО -- изоляция от
+    # реального delegation.config.yaml, который скоро появится в корне
+    # (иначе привязка к opus молча превратила бы это в другую метку).
+    assert sc.model_tier("claude-fable-5", config_text=None) == "Lead(top)"
+    assert sc.model_tier("claude-opus-4", config_text=None) == "critic-tier"
+    assert sc.model_tier("claude-sonnet-5", config_text=None) == "builder-tier"
+    assert sc.model_tier("claude-haiku-3", config_text=None) == "scout-tier"
 
 
 def test_model_tier_mapping_unknown_string():
     assert sc.model_tier("some-other-model") == "unknown"
 
 
+# ---- D-0099 (2026-08-04): binding-aware label -- config_text is ALWAYS
+# injected here (never the real delegation.config.yaml, which does not
+# exist in this repo yet -- CLAUDE.md/dispatch instruction: tests must
+# inject config_text/path, not rely on the real file). ----
+
+_LEAD_BINDING_OPUS_YAML = """
+roles:
+  lead:
+    subscription:
+      model: claude-opus-5
+"""
+
+
+def test_model_tier_binding_aware_no_config_regression_pin():
+    # "нет конфига" -- injected None (same signal as a real absent file,
+    # by design) -> today's static label, unchanged.
+    assert sc.model_tier("claude-fable-5", config_text=None) == "Lead(top)"
+
+
+def test_model_tier_binding_aware_opus_binding_labels_opus_session_bound():
+    assert sc.model_tier("claude-opus-4", config_text=_LEAD_BINDING_OPUS_YAML) == "Lead(bound)"
+
+
+def test_model_tier_binding_aware_opus_binding_labels_fable_session_top_reserve():
+    assert sc.model_tier("claude-fable-5", config_text=_LEAD_BINDING_OPUS_YAML) == "top-reserve"
+
+
+def test_model_tier_binding_aware_opus_binding_other_sessions_unchanged():
+    # "остальные -- как сегодня": sonnet/haiku sessions under an opus
+    # binding are neither the bound family nor fable -- static label.
+    assert sc.model_tier("claude-sonnet-5", config_text=_LEAD_BINDING_OPUS_YAML) == "builder-tier"
+    assert sc.model_tier("claude-haiku-3", config_text=_LEAD_BINDING_OPUS_YAML) == "scout-tier"
+
+
+def test_model_tier_binding_aware_unknown_model_ignores_binding():
+    # ГРАНИЦА: no session family to compare at all -- "unknown" regardless
+    # of what the binding resolves to.
+    assert sc.model_tier("some-other-model", config_text=_LEAD_BINDING_OPUS_YAML) == "unknown"
+
+
+def test_model_tier_binding_aware_fail_open_on_resolver_exception(monkeypatch):
+    # ЛЮБОЕ исключение при резолюции привязки (не только отсутствие файла)
+    # -- fail-open к статической метке, SessionStart-хук не должен падать.
+    import mechanism_gate as mg
+
+    def _boom(_config_text):
+        raise RuntimeError("simulated resolver crash")
+
+    monkeypatch.setattr(mg, "resolve_lead_binding", _boom)
+    assert sc.model_tier("claude-fable-5", config_text=_LEAD_BINDING_OPUS_YAML) == "Lead(top)"
+
+
 def test_model_line_found_string_form():
-    line = sc.model_line({"model": "claude-fable-5"})
+    # B1(a)/(b) (пересдача, блокер): config_text=None ЯВНО через модельный
+    # шов -- изоляция от реального delegation.config.yaml (иначе "Lead
+    # tier = fable" (B5) стало бы "Lead tier = opus" под реальной привязкой).
+    line = sc.model_line({"model": "claude-fable-5"}, config_text=None)
     # F-37: the payload id is a harness declaration, not a measurement --
     # the line must say so (present-but-stale stated confidently is the
     # failure mode this marker exists to prevent).
@@ -655,7 +713,9 @@ def test_model_line_found_string_form():
 
 
 def test_model_line_found_dict_form():
-    line = sc.model_line({"model": {"id": "claude-sonnet-5"}})
+    # B1(a)/(b): same isolation as above -- the "Lead tier = fable" clause
+    # is B5-dynamic now, not a hardcoded literal.
+    line = sc.model_line({"model": {"id": "claude-sonnet-5"}}, config_text=None)
     assert line == (
         "MODEL: claude-sonnet-5 -> tier builder-tier"
         " (declared by harness, not measured -- F-37; Lead tier = fable)"
@@ -707,8 +767,11 @@ def test_model_line_whitespace_only_falls_back_to_not_provided():
 
 
 def test_model_line_long_model_id_is_truncated():
+    # R9 (класс B1(a)/(b), пересдача): та же изоляция от реального
+    # конфига -- exact-match на "Lead tier = fable" (B5) точно так же
+    # уязвим, хоть координатор явно не назвал эту строку.
     long_id = "sonnet-" + ("a" * 100)
-    line = sc.model_line({"model": long_id})
+    line = sc.model_line({"model": long_id}, config_text=None)
     assert line.isascii()
     assert "\n" not in line
     # "MODEL: " prefix + sanitized (<=80 chars) + " -> tier ... " suffix
@@ -758,9 +821,12 @@ def test_read_stdin_payload_returns_none_on_empty_input(monkeypatch):
 
 
 def test_build_context_lines_model_line_placed_right_after_now(tmp_path):
+    # B1(b) (пересдача, блокер): config_text=None ЯВНО через
+    # build_context_lines()'s собственный шов -- та же изоляция.
     root = _seed_repo(tmp_path, events=[])
     now = datetime.datetime(2026, 7, 11, 9, 0, 0)
-    lines = sc.build_context_lines(root, now, stdin_payload={"model": "claude-fable-5"})
+    lines = sc.build_context_lines(
+        root, now, stdin_payload={"model": "claude-fable-5"}, config_text=None)
     assert lines[0].startswith("NOW:")
     assert lines[1] == (
         "MODEL: claude-fable-5 -> tier Lead(top)"

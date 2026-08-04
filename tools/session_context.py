@@ -606,12 +606,86 @@ def extract_model_id(payload):
     return None
 
 
-def model_tier(model_id: str) -> str:
+# D-0099 (2026-08-04): sentinel "config_text не передан явно" -- model_tier()
+# reads the REAL delegation.config.yaml (via mechanism_gate.CONFIG_PATH)
+# only when the caller does not override config_text at all; an explicit
+# config_text=None means "нет конфига" (regression pin below) regardless
+# of whether that None came from a real absent file or a test injecting
+# it on purpose -- the two are deliberately the SAME signal, matching how
+# tools/journal_validator.py / tools/mechanism_gate.py already treat an
+# injected None (see their own test suites).
+_LEAD_BINDING_CONFIG_UNSET = object()
+
+
+def _lead_binding_family_for_label(config_text) -> str | None:
+    """D-0099 binding-aware label resolution: returns the Lead-binding's
+    tier family (fable/opus/sonnet/haiku), or None when there is genuinely
+    no binding info to compare against -- "нет конфига" (config_text is
+    None, whether real-disk-absent or explicitly injected) OR ANY
+    exception while resolving it (missing yaml, a broken mechanism_gate
+    import, a corrupt file read -- see model_tier()'s own docstring for
+    the full fail-open contract). Both collapse to the same None signal on
+    purpose: model_tier() treats None here as "today's static label,
+    unchanged" either way. The mechanism_gate import happens HERE, inside
+    the try, not at this module's top level -- this hook must never fail
+    to import over a sibling tool being broken/missing (same discipline as
+    the local `import wiring_check as _wc` inside wiring_lines() above)."""
+    if config_text is None:
+        return None
+    try:
+        import mechanism_gate as mg
+        if config_text is _LEAD_BINDING_CONFIG_UNSET:
+            config_text = (mg.CONFIG_PATH.read_text(encoding="utf-8", errors="replace")
+                           if mg.CONFIG_PATH.exists() else None)
+            if config_text is None:
+                return None
+        binding = mg.resolve_lead_binding(config_text)
+        return mg.lead_family(binding)
+    except Exception:
+        return None
+
+
+def model_tier(model_id: str, config_text=_LEAD_BINDING_CONFIG_UNSET) -> str:
+    """D-0099 (2026-08-04): binding-aware tier label. The base label is
+    still the static fable/opus/sonnet/haiku -> Lead(top)/critic-tier/
+    builder-tier/scout-tier mapping (unchanged, still the fallback on any
+    failure below -- fail-open, this is a SessionStart hook, D-0056a).
+    On top of that, when the Lead-binding (roles.lead in
+    delegation.config.yaml, resolved via mechanism_gate) is known:
+      - the session's OWN family equals the binding's family -> "Lead(bound)"
+        (D-0099: the full Lead is defined by the BINDING, not the name
+        "fable" -- a session running the model the binding names IS the
+        full Lead, whatever that model's static substring label would say).
+      - the session is fable but the binding is NOT fable -> "top-reserve"
+        (fable is still the standing top-tier MODEL, but Lead-function
+        authority has moved to the binding; fable stays available as a
+        reserve, not the acting Lead).
+      - anything else -> the static label, unchanged.
+    config_text is injectable for tests (explicit override, incl. explicit
+    None for "нет конфига"); the default sentinel reads the REAL
+    delegation.config.yaml lazily via mechanism_gate.CONFIG_PATH (absent
+    file -> None -> "нет конфига" -> static label, same as before this
+    change existed)."""
     low = model_id.lower()
+    session_family = None
+    static_label = "unknown"
     for substr, tier in _MODEL_TIER_SUBSTRINGS:
         if substr in low:
-            return tier
-    return "unknown"
+            session_family = substr
+            static_label = tier
+            break
+    if session_family is None:
+        return static_label  # "unknown" -- nothing to compare a binding against
+
+    binding_family = _lead_binding_family_for_label(config_text)
+    if binding_family is None:
+        return static_label  # "нет конфига" (real or injected) / any failure -- regression pin
+
+    if session_family == binding_family:
+        return "Lead(bound)"
+    if session_family == "fable":  # binding_family here is known != "fable" (equality already handled above)
+        return "top-reserve"
+    return static_label
 
 
 def _ascii_sanitize(s: str, max_len: int = 80) -> str:
@@ -629,7 +703,7 @@ def _ascii_sanitize(s: str, max_len: int = 80) -> str:
     return s[:max_len]
 
 
-def model_line(stdin_payload=None) -> str:
+def model_line(stdin_payload=None, config_text=_LEAD_BINDING_CONFIG_UNSET) -> str:
     """F-37 (2026-07-12): the payload model is the harness's SessionStart
     DECLARATION, not a measurement -- it can be stale (observed live:
     payload said sonnet-4-6 while the session actually ran opus-4-8;
@@ -642,7 +716,16 @@ def model_line(stdin_payload=None) -> str:
     recorded limitation, not an oversight. The measured verification
     duty stays where it already lives: D-0056 (first-Lead-action check
     in-session) and calibration check 5 (transcripts vs windows);
-    liveness of this line -- check 13(zh)."""
+    liveness of this line -- check 13(zh).
+
+    config_text (B1(b)/B5, пересдача D-0099, 2026-08-04): threaded
+    straight through to model_tier() -- SAME sentinel default
+    (_LEAD_BINDING_CONFIG_UNSET, reads the real delegation.config.yaml
+    lazily) and same explicit-None-means-"нет конфига" semantics. Also
+    drives the trailing "Lead tier = <...>" clause below (B5): no longer
+    a hardcoded "fable" literal -- the ACTUAL bound family (or "fable"
+    when there is no resolvable binding, same fallback model_tier() itself
+    uses, regression pin for "без конфига -- как сегодня")."""
     model_id = extract_model_id(stdin_payload)
     if not model_id:
         return "MODEL: not provided by hook input -- verify tier yourself (D-0056a)"
@@ -651,10 +734,15 @@ def model_line(stdin_payload=None) -> str:
         # whitespace-only (or entirely-stripped) model id: same fallback
         # as "no model id at all" -- there is nothing left to report.
         return "MODEL: not provided by hook input -- verify tier yourself (D-0056a)"
-    tier = model_tier(sanitized)
+    tier = model_tier(sanitized, config_text)
+    # B5: binding-aware "Lead tier" clause -- same resolution/fail-open
+    # helper model_tier() itself uses; unresolvable (no config, non-Claude
+    # binding, or any exception) falls back to the literal "fable", byte-
+    # for-byte the same text this line always carried (regression pin).
+    lead_tier_display = _lead_binding_family_for_label(config_text) or "fable"
     return (
         f"MODEL: {sanitized} -> tier {tier}"
-        " (declared by harness, not measured -- F-37; Lead tier = fable)"
+        f" (declared by harness, not measured -- F-37; Lead tier = {lead_tier_display})"
     )
 
 
@@ -1526,14 +1614,21 @@ def build_context_lines(
     root: Path = None,
     now: datetime.datetime = None,
     stdin_payload=None,
+    config_text=_LEAD_BINDING_CONFIG_UNSET,
 ) -> list:
+    """config_text (B1(b), пересдача D-0099, 2026-08-04): threaded straight
+    through to model_line() -- same sentinel/None-means-"нет конфига"
+    contract as model_tier()/model_line() themselves; tests isolating
+    themselves from the real (soon-to-exist) delegation.config.yaml pass
+    config_text=None explicitly through this seam, not by monkeypatching
+    mechanism_gate.CONFIG_PATH."""
     root = Path(root) if root else repo_root()
     now = now or datetime.datetime.now()
     gateway_root = root / "gateway"
 
     events = read_journal_events(root)
 
-    lines = [now_line(now), model_line(stdin_payload), last_event_line(events)]
+    lines = [now_line(now), model_line(stdin_payload, config_text), last_event_line(events)]
 
     drift_line = clock_drift_line(events, now)
     if drift_line:

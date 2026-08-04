@@ -16,10 +16,16 @@ deployment of the routing MVP; the pilot deployment is D:\AO3_tests.
 | builder | Sonnet | implementation to a written spec, tests, routine edits | diff report + witness run |
 | critic | Opus | code/architecture review, unclear bugs, acceptance gate | verdict + its own trail |
 | designer | Opus | spec DRAFTING from a Lead intent brief (forks returned, never decided) | draft spec in the R11 form + fork list |
-| Lead | Fable | decomposition, specs, acceptance, architecture, mechanisms | — |
+| Lead | Opus | decomposition, specs, acceptance, architecture, mechanisms | — |
 
 Policy rules speak ONLY these function names; the function→model
-binding is a deployment property. Grades intern/junior/middle/senior
+binding is a deployment property; it LIVES in delegation.config.yaml
+(roles.lead) at the repo root — code gates (mechanism_gate,
+journal_validator, session_context) resolve it from there, defaulting
+to fable when the file is absent. D-0099 (2026-08-04, operator's
+word, cost motive): Lead rebound Fable→Opus 5; Fable is the RESERVE
+tier ABOVE the Lead binding, summoned only by the operator's word for
+the hardest cases. Grades intern/junior/middle/senior
 (API contour) are model price/capability vocabulary for accounting and
 DELEGATION_TABLE.md, never used in rules (bridge: ARCHITECTURE.md
 "Two Vocabularies").
@@ -341,9 +347,10 @@ statuses move only on this data (Update Rule 1).
 Three definitions that are NOT synonyms:
 
 - A session's TIER = its ACTUAL model (verified at entry — D-0056).
-  Fable is the MODEL NAME of the top tier; "Lead" is the
-  tier-function (decomposition, specs, acceptance, mechanisms), not a
-  role in the dialog.
+  Opus is the MODEL NAME of the Lead tier (binding
+  delegation.config.yaml, D-0099); Fable is the reserve tier ABOVE
+  the binding; "Lead" is the tier-function (decomposition, specs,
+  acceptance, mechanisms), not a role in the dialog.
 - The COORDINATOR role = ROUTING, not execution. Any model leading
   the dialog with the operator carries it, from any tier, and it does
   NOT make the session a Lead. The coordinator DISTRIBUTES work
@@ -351,47 +358,57 @@ Three definitions that are NOT synonyms:
   critic, Lead-class → Lead or its queue) and PASSES UP everything
   the matrix below puts above its own tier — instead of doing it
   itself.
-- The full Lead = a coordinator whose actual tier is Fable; only it
-  changes mechanisms, DECISIONS, table statuses and gates.
+- The full Lead = a coordinator whose actual tier is AT or ABOVE the
+  Lead binding (Opus; the Fable reserve included); only it changes
+  mechanisms, DECISIONS, table statuses and gates.
 
 Acceptance only FROM ABOVE: `accepted` is legal when the acceptor's
 tier is strictly above the performer's, OR the decision carries a
 higher tier's input (a critic verdict), OR it carries a
 calibrated-judge verdict on a leaf-class dispatch (basis "judge",
 R13/D-0087), OR acceptance is explicitly queued to the full Lead
-(note in notes). Equal/higher-tier acceptance
-without such input = session self-certification (F-22; class
-F-6/F-14). The matrix by the coordinator's ACTUAL tier:
+(note in notes), OR the acceptor IS the full Lead (tier == the Lead
+binding) accepting critic/designer output: the verdict was produced
+in an INDEPENDENT context (separate background session), and at the
+top of the ladder that independence substitutes for strict model
+superiority (D-0099; encoded as the lead-binding branch of
+journal_validator — by == binding family accepts agent tiers <=
+itself). Equal/higher-tier acceptance without such input = session
+self-certification (F-22; class F-6/F-14). The matrix by the
+coordinator's ACTUAL tier:
 
 | Coordinator | Accepts | Does not |
 |---|---|---|
-| Fable | everything; "critic: skipped" concession available | — |
-| Opus | scout and builder (skip concession available — stands above both) | critic-class work → Lead queue; mechanisms/DECISIONS/statuses |
+| Fable (reserve, on operator's word) | everything; "critic: skipped" concession available | — |
+| Opus (the Lead binding — full Lead) | everything incl. critic/designer output (independent-context clause, D-0099); "critic: skipped" concession available | — |
 | Sonnet | scout; builder diffs ONLY with a critic input (skip concession unavailable) | critic-class and Lead-class → queue |
 | below Sonnet | no coordination is provided for | — |
 
-The standing mode "operator coordinates with Sonnet, Fable runs in
-batches over the Lead queue" is the same matrix; degradation (below)
-is an unplanned entry into it.
+The standing mode "operator coordinates with Sonnet, the Lead tier
+(Opus) runs in batches over the Lead queue" is the same matrix;
+degradation (below) is an unplanned entry into it.
 
 ## Lead degradation (D-0039, D-0042, D-0056)
 
-Triggers: Fable refusal (safety/dual-use, subscription limit,
-unavailability) OR the operator explicitly switching to a lower tier.
+Triggers: refusal of the Lead-binding model (Opus: safety/dual-use,
+subscription limit, unavailability) OR the operator explicitly
+switching to a lower tier.
 
 ```mermaid
 stateDiagram-v2
-    Fable --> Degraded: trigger → lead_degraded (cause, scope)\nBEFORE the first Lead action
+    Lead(Opus) --> Degraded: trigger → lead_degraded (cause, scope)\nBEFORE the first Lead action
     Degraded --> Degraded: coordination and authorized tasks — yes;\ntable statuses, gates — no; new DECISIONS → queue;\nacceptance per the Role≠tier matrix
-    Degraded --> Fable: default at task/session boundary → lead_restored\n+ acceptance of the window (journal + diffs of ALL repos\ntouched by the session, D-0044) in the event's notes;\nan empty window is noted explicitly
+    Degraded --> Lead(Opus): default at task/session boundary → lead_restored\n+ acceptance of the window (journal + diffs of ALL repos\ntouched by the session, D-0044) in the event's notes;\nan empty window is noted explicitly
 ```
 
 The tier is verified at BOTH ends (D-0056, F-21) — either alone is
 insufficient: (а) ENTRY — before the FIRST Lead action of a session
 (dispatch, acceptance, mechanism commit, status change): check your
-actual model by the last visible signal against the Lead tier
-(Fable); lower, with no window opened in the journal →
-`lead_degraded` BEFORE the action. (б) EXIT — a visible ascent is by
+actual model by the last visible signal against the Lead binding
+(Opus, delegation.config.yaml); lower, with no window opened in the
+journal → `lead_degraded` BEFORE the action; a session ABOVE the
+binding (Fable reserve) is a full Lead with margin — no window
+needed, its use is the operator's word (D-0099). (б) EXIT — a visible ascent is by
 itself PROOF of a window, regardless of the journal: in the same
 move, a retroactive `lead_degraded` (mark + actual bounds), window
 acceptance per the diagram, `lead_restored`. (в) EXTERNAL NET —

@@ -891,11 +891,14 @@ def test_matrix_designer_accepted_by_opus_without_basis_fails_equal_tier():
     # designer's own tier is opus (same as critic) -- an equal-tier
     # acceptance with no basis at all must still fail the matrix, same
     # class as test_matrix_scout_accepted_by_same_tier_without_basis_fails
-    # above.
+    # above. B1(a) (пересдача, блокер): config_text=None ЯВНО -- изоляция
+    # от реального delegation.config.yaml, который скоро появится в корне
+    # (без этого пина конфиг, привязывающий Lead к opus, тайно превратил
+    # бы этот регресс-пин в проходящий кейс через ветку 3b).
     staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="designer",
                             model="opus", task_id="t-001", by="opus",
                             notes="peer accepting peer, no basis"))
-    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW, config_text=None)
     assert code == 1
     assert any("D-0058" in v for v in violations)
 
@@ -940,11 +943,13 @@ def test_matrix_designer_by_sonnet_queued_to_lead_passes():
 def test_matrix_designer_by_opus_critic_basis_fails():
     # basis="critic" does NOT rescue designer -- critic (opus) is not
     # strictly above designer's own opus tier, same as it doesn't
-    # rescue agent="critic" itself.
+    # rescue agent="critic" itself. B1(a): config_text=None ЯВНО (см.
+    # test_matrix_designer_accepted_by_opus_without_basis_fails_equal_tier
+    # выше за мотив).
     staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="designer",
                             model="opus", task_id="t-001", by="opus", basis="critic",
                             notes="designer accepted by opus via critic basis -- must fail"))
-    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW, config_text=None)
     assert code == 1
     assert any("D-0058" in v and "designer" in v for v in violations), violations
     # the fixed message names the ACTUAL agent and the actually-legal
@@ -993,6 +998,124 @@ def test_matrix_critic_judge_basis_leaf_category_now_fails():
                             notes="critic via judge on implementation -- now fails"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1, violations
+
+
+# ---- D-0099 (2026-08-04): матрица правило 11, ветка а2 -- Lead-привязка
+# принимает финально БЕЗ basis, даже на равном ярусе. Конфиги ИНЪЕКТИРУЮТСЯ
+# явно через config_text (спека: тесты не полагаются на реальный
+# delegation.config.yaml -- его сегодня нет в корне репо, и это не должно
+# быть load-bearing фактом теста). ----
+
+CONFIG_LEAD_OPUS = """
+roles:
+  lead:
+    subscription:
+      model: claude-opus-5
+"""
+
+CONFIG_LEAD_SONNET = """
+roles:
+  lead:
+    subscription:
+      model: claude-sonnet-5
+"""
+
+CONFIG_LEAD_NON_CLAUDE = """
+roles:
+  lead:
+    subscription:
+      model:
+    api:
+      provider: groq
+      model: llama-3.3-70b-versatile
+"""
+
+
+def test_matrix_lead_binding_opus_accepts_critic_by_opus_without_basis():
+    # D-0099: Lead привязан к opus -- critic (тоже opus, РАВНЫЙ ярус) принят
+    # by="opus" БЕЗ basis: независимость контекста (отдельная opus-сессия)
+    # заменяет строгое численное превосходство.
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="critic",
+                            model="opus", task_id="t-001", by="opus",
+                            notes="opus Lead-binding accepts its own peer, no basis"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW, config_text=CONFIG_LEAD_OPUS)
+    assert code == 0, violations
+
+
+def test_matrix_lead_binding_opus_accepts_designer_by_opus_without_basis():
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="designer",
+                            model="opus", task_id="t-001", by="opus",
+                            notes="opus Lead-binding accepts designer, no basis"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW, config_text=CONFIG_LEAD_OPUS)
+    assert code == 0, violations
+
+
+def test_matrix_lead_binding_absent_config_same_case_still_fails():
+    # Регресс-пин: тот же самый critic-by-opus-без-basis случай, но БЕЗ
+    # привязки (config_text=None, явно инъектировано -- не файл с диска) --
+    # сегодняшнее поведение: FAIL (D-0058, равный ярус без basis).
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="critic",
+                            model="opus", task_id="t-001", by="opus",
+                            notes="no lead binding -- peer accepting peer, no basis"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW, config_text=None)
+    assert code == 1
+    assert any("D-0058" in v for v in violations)
+
+
+def test_matrix_lead_binding_non_claude_same_case_fails():
+    # Не-Claude привязка -> lead_family() is None -> ветка а2 не
+    # активируется вовсе -- сегодняшнее поведение (FAIL).
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="critic",
+                            model="opus", task_id="t-001", by="opus",
+                            notes="non-Claude lead binding -- peer accepting peer, no basis"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW, config_text=CONFIG_LEAD_NON_CLAUDE)
+    assert code == 1
+    assert any("D-0058" in v for v in violations)
+
+
+def test_matrix_lead_binding_sonnet_does_not_accept_critic():
+    # Привязка sonnet (гипотетическая): by=sonnet принимает ТОЛЬКО agent
+    # ярусов <= sonnet -- critic (opus, ВЫШЕ sonnet) не принят: tier(by)=1
+    # >= tier(critic)=2 ложно.
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="critic",
+                            model="opus", task_id="t-001", by="sonnet",
+                            notes="sonnet lead-binding does not reach critic, no basis"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW, config_text=CONFIG_LEAD_SONNET)
+    assert code == 1
+    assert any("D-0058" in v for v in violations)
+
+
+def test_matrix_lead_binding_sonnet_accepts_builder_at_equal_tier_boundary():
+    # ГРАНИЦА (правило 6а): agent ЯРУСА, РАВНОГО привязке (builder=sonnet,
+    # tier(by)=1 >= tier(builder)=1) -- принимается. Пара с предыдущим
+    # тестом (critic, ярус ВЫШЕ привязки) закрывает границу с обеих сторон.
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", witness="w", by="sonnet",
+                            notes="sonnet lead-binding accepts its own peer, no basis"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW, config_text=CONFIG_LEAD_SONNET)
+    assert code == 0, violations
+
+
+CONFIG_LEAD_HAIKU = """
+roles:
+  lead:
+    subscription:
+      model: claude-haiku-5
+"""
+
+
+def test_matrix_lead_binding_haiku_floor_wins_over_branch_3b():
+    # B2 (пересдача, критик-блокер): floor («below Sonnet: no coordination
+    # is provided for») БЕЗУСЛОВЕН и проверяется ДО ветки 3b -- даже
+    # гипотетическая привязка Lead на haiku НЕ спасает haiku-by от floor.
+    # Тот же результат, что и БЕЗ конфига вовсе (см.
+    # test_matrix_scout_accepted_by_same_tier_without_basis_fails).
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="scout",
+                            model="haiku", task_id="t-001", by="haiku",
+                            notes="haiku lead-binding, scout peer, no basis -- floor wins"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW, config_text=CONFIG_LEAD_HAIKU)
+    assert code == 1
+    assert any("D-0058" in v and "ярус ниже sonnet" in v for v in violations), violations
 
 
 # ---- HEAD empty (first-ever commit / fresh deploy) ----

@@ -37,6 +37,19 @@ roles:
       api_key_env: GROQ_API_KEY
 """
 
+# D-0099 (2026-08-04): конфиг с Lead-привязкой на opus -- сценарий
+# переезда Fable -> Opus 5.
+CONFIG_SAMPLE_OPUS = """
+roles:
+  lead:
+    subscription:
+      model: claude-opus-5
+    api:
+      provider:
+      model:
+      api_key_env:
+"""
+
 
 def test_parse_axes_follows_the_map_not_a_constant():
     # D-0048/D-0055: число и номера осей приходят из карты при каждом
@@ -372,3 +385,381 @@ def test_decide_full_non_claude_lead_requires_exact_match():
         config_text=CONFIG_SAMPLE_NON_CLAUDE)
     assert code == 1
     assert "не lead" in reason
+
+
+# --- D-0099 (2026-08-04): декларация яруса ВЫШЕ привязки легальна (П2) ---
+
+
+def test_tier_declared_ok_family_above_binding_passes():
+    # Привязка opus, декларация fable (голое семейство и полный model id) --
+    # ранг fable (0) СТРОГО ВЫШЕ ранга opus (1) -- принимается.
+    assert mg.tier_declared_ok("fable", "claude-opus-5")
+    assert mg.tier_declared_ok("claude-fable-5", "claude-opus-5")
+
+
+def test_tier_declared_ok_family_below_binding_fails():
+    # Та же opus-привязка, декларация НИЖЕ (sonnet/haiku) -- не проходит.
+    assert not mg.tier_declared_ok("sonnet", "claude-opus-5")
+    assert not mg.tier_declared_ok("haiku", "claude-opus-5")
+
+
+def test_tier_declared_ok_fable_binding_nothing_above_regression_pin():
+    # ГРАНИЦА: привязка fable — регресс-пин "выше fable ничего нет", ранг
+    # fable уже 0 (индексов меньше не существует) -- декларация opus/любая
+    # другая по-прежнему не проходит новой веткой (сегодняшнее поведение).
+    assert not mg.tier_declared_ok("opus", "claude-fable-5")
+    assert not mg.tier_declared_ok("sonnet", "claude-fable-5")
+
+
+def test_tier_declared_ok_non_claude_binding_unaffected_by_new_branch():
+    # Привязка не-Claude (fam(binding) is None) -- функция возвращает False
+    # ДО новой ветки в принципе, регресс-пин.
+    assert not mg.tier_declared_ok("fable", "llama-3.3-70b-versatile")
+
+
+def test_tier_declared_ok_non_claude_declaration_does_not_match_higher_family():
+    # ГРАНИЦА новой ветки с другой стороны: привязка opus (Claude), но
+    # ДЕКЛАРАЦИЯ не-Claude (declared_fam is None) -- новая ветка не
+    # матчит вовсе, fail-closed (годится только точное совпадение).
+    assert not mg.tier_declared_ok("llama-3.3-70b-versatile", "claude-opus-5")
+
+
+def test_decide_full_lead_binding_opus_tier_fable_passes():
+    code, _ = mg.decide_full(
+        msg="feat: механизм X\n\nось 1: покрыта\ntier: fable",
+        block_extra="", staged=["CLAUDE.md"], map_text="## Ось 1 —\n",
+        config_text=CONFIG_SAMPLE_OPUS)
+    assert code == 0
+
+
+def test_decide_full_lead_binding_opus_tier_sonnet_fails():
+    code, reason = mg.decide_full(
+        msg="feat: механизм X\n\nось 1: покрыта\ntier: sonnet",
+        block_extra="", staged=["CLAUDE.md"], map_text="## Ось 1 —\n",
+        config_text=CONFIG_SAMPLE_OPUS)
+    assert code == 1
+    assert "не lead" in reason
+
+
+def test_decide_full_lead_binding_fable_tier_opus_fails():
+    # Регресс-пин: привязка fable -- "выше" ничего нет, tier: opus (ниже
+    # fable) по-прежнему отклонён.
+    code, reason = mg.decide_full(
+        msg="feat: механизм X\n\nось 1: покрыта\ntier: opus",
+        block_extra="", staged=["CLAUDE.md"], map_text="## Ось 1 —\n",
+        config_text=CONFIG_SAMPLE)
+    assert code == 1
+    assert "не lead" in reason
+
+
+def test_decide_full_lead_binding_non_claude_tier_fable_fails():
+    # Регресс-пин: не-Claude привязка -- декларация выше по рангу не
+    # спасает (ветка молчит для fam(binding) is None).
+    code, reason = mg.decide_full(
+        msg="feat: механизм X\n\nось 1: покрыта\ntier: fable",
+        block_extra="", staged=["CLAUDE.md"], map_text="## Ось 1 —\n",
+        config_text=CONFIG_SAMPLE_NON_CLAUDE)
+    assert code == 1
+    assert "не lead" in reason
+
+
+# --- D-0099 п.6 (2026-08-04): онбординг-лестница конфига (build_role_ladder /
+# _resolve_ladder_rank / tier_declared_ok config_text) -----------------------
+
+CONFIG_LADDER_NON_CLAUDE = """
+roles:
+  critic:
+    subscription:
+      model: gpt-x
+  lead:
+    subscription:
+      model: llama-3.3-70b-versatile
+"""
+
+CONFIG_LADDER_NON_CLAUDE_WITH_RESERVE = """
+roles:
+  lead:
+    subscription:
+      model: llama-3.3-70b-versatile
+  reserve:
+    subscription:
+      model: claude-fable-5
+"""
+
+CONFIG_LADDER_OPUS_LEAD_FABLE_RESERVE = """
+roles:
+  lead:
+    subscription:
+      model: claude-opus-5
+  reserve:
+    subscription:
+      model: claude-fable-5
+"""
+
+CONFIG_LADDER_AMBIGUOUS_FAMILY = """
+roles:
+  critic:
+    subscription:
+      model: claude-critic-opus-x
+  reserve:
+    subscription:
+      model: claude-reserve-opus-y
+  lead:
+    subscription:
+      model: llama-3.3-70b-versatile
+"""
+
+CONFIG_LADDER_WITH_NON_COORD_ROLES = """
+roles:
+  scout:
+    subscription:
+      model: claude-haiku-3
+  builder:
+    subscription:
+      model: claude-sonnet-5
+  critic:
+    subscription:
+      model: claude-opus-4
+  lead:
+    subscription:
+      model: claude-opus-5
+  judge:
+    subscription:
+      model: claude-judge-model
+  analyst:
+    subscription:
+      model: claude-analyst-model
+  designer:
+    subscription:
+      model: claude-designer-model
+"""
+
+
+def test_build_role_ladder_fixed_order_and_ranks():
+    ladder = mg.build_role_ladder(CONFIG_LADDER_WITH_NON_COORD_ROLES)
+    assert ladder == [
+        (0, "claude-haiku-3"),
+        (1, "claude-sonnet-5"),
+        (2, "claude-opus-4"),
+        (3, "claude-opus-5"),
+    ]
+
+
+def test_build_role_ladder_ignores_judge_and_analyst():
+    ladder = mg.build_role_ladder(CONFIG_LADDER_WITH_NON_COORD_ROLES)
+    ids = [model_id for _rank, model_id in ladder]
+    assert "claude-judge-model" not in ids
+    assert "claude-analyst-model" not in ids
+
+
+def test_build_role_ladder_ignores_designer():
+    # B4.3 (пересдача, критик-блокер): designer -- стоячая функция того же
+    # яруса, что critic (opus), НО НЕ координационная ступень лестницы
+    # (roles.designer не в ROLE_RANKS) -- по образцу judge/analyst выше.
+    ladder = mg.build_role_ladder(CONFIG_LADDER_WITH_NON_COORD_ROLES)
+    ids = [model_id for _rank, model_id in ladder]
+    assert "claude-designer-model" not in ids
+    assert len(ladder) == 4  # scout/builder/critic/lead only
+
+
+def test_build_role_ladder_role_without_model_no_rung():
+    # roles.reserve присутствует ключом, но без модели -- ступени нет.
+    config = """
+roles:
+  lead:
+    subscription:
+      model: claude-opus-5
+  reserve:
+    subscription:
+      model:
+"""
+    assert mg.build_role_ladder(config) == [(3, "claude-opus-5")]
+
+
+def test_build_role_ladder_empty_without_config():
+    assert mg.build_role_ladder(None) == []
+    assert mg.build_role_ladder("") == []
+    assert mg.build_role_ladder("not: yaml: [broken\n") == []
+
+
+def test_tier_declared_ok_non_claude_ladder_exact_id_lead_passes():
+    # ЛЕСТНИЦА не-Claude: lead=llama-3.3-70b-versatile, critic=gpt-x --
+    # декларация ТОЧНЫМ id ступени lead проходит.
+    assert mg.tier_declared_ok(
+        "llama-3.3-70b-versatile", "llama-3.3-70b-versatile", CONFIG_LADDER_NON_CLAUDE)
+
+
+def test_tier_declared_ok_non_claude_ladder_lower_rung_fails():
+    # Та же лестница -- декларация ступени critic (ранг НИЖЕ lead) не
+    # проходит.
+    assert not mg.tier_declared_ok(
+        "gpt-x", "llama-3.3-70b-versatile", CONFIG_LADDER_NON_CLAUDE)
+
+
+def test_tier_declared_ok_reserve_exact_id_passes_at_non_claude_lead():
+    # reserve=claude-fable-5 при не-Claude lead -- декларация ТОЧНЫМ id
+    # ступени reserve (ранг СТРОГО ВЫШЕ lead) проходит.
+    assert mg.tier_declared_ok(
+        "claude-fable-5", "llama-3.3-70b-versatile", CONFIG_LADDER_NON_CLAUDE_WITH_RESERVE)
+
+
+def test_tier_declared_ok_reserve_family_match_passes_at_non_claude_lead():
+    # Тот же конфиг -- декларация "fable" (голое семейство, family-матч
+    # РОВНО одной ступени reserve) тоже проходит.
+    assert mg.tier_declared_ok(
+        "fable", "llama-3.3-70b-versatile", CONFIG_LADDER_NON_CLAUDE_WITH_RESERVE)
+
+
+def test_tier_declared_ok_real_shape_opus_lead_fable_reserve_passes():
+    # Реальный вид (lead: claude-opus-5, reserve: claude-fable-5) --
+    # "tier: fable" проходит (через П2-ветку И/ИЛИ лестницу -- обе
+    # сосуществуют, оба пути дают True для этой конфигурации).
+    assert mg.tier_declared_ok(
+        "fable", "claude-opus-5", CONFIG_LADDER_OPUS_LEAD_FABLE_RESERVE)
+
+
+def test_tier_declared_ok_no_reserve_tier_fable_still_passes_via_p2():
+    # ГРАНИЦА: roles.reserve отсутствует -- лестница без ступени 4 (у неё
+    # просто нет ранга 4 вовсе), "tier: fable" при opus-lead всё равно
+    # проходит через П2-ветку (семейство строго выше привязки) -- обе
+    # ветки сосуществуют, отсутствие ступени 4 не ломает П2.
+    ladder = mg.build_role_ladder(CONFIG_SAMPLE_OPUS)
+    assert all(rank != 4 for rank, _model in ladder)
+    assert mg.tier_declared_ok("fable", "claude-opus-5", CONFIG_SAMPLE_OPUS)
+
+
+def test_tier_declared_ok_ambiguous_family_match_does_not_resolve():
+    # ГРАНИЦА (документированная развилка п.6): ДВЕ ступени одного
+    # Claude-семейства (critic и reserve, обе "opus") -- голое семейство
+    # "opus" НЕ резолвится лестницей (амбигуитет), а привязка (lead)
+    # не-Claude, так что П2-ветка тоже молчит -- итог FAIL.
+    assert not mg.tier_declared_ok(
+        "opus", "llama-3.3-70b-versatile", CONFIG_LADDER_AMBIGUOUS_FAMILY)
+
+
+def test_tier_declared_ok_no_config_regression_pin_explicit_none():
+    # Регресс-пин (первая сдача, config_text=None ЯВНО, не полагаемся на
+    # реальный файл): поведение как до п.6.
+    assert mg.tier_declared_ok("claude-fable-5", "claude-fable-5", None)
+    assert mg.tier_declared_ok("fable", "claude-fable-5", None)
+    assert not mg.tier_declared_ok("sonnet", "claude-fable-5", None)
+
+
+def test_decide_full_ladder_non_claude_lead_tier_exact_id_passes():
+    code, _ = mg.decide_full(
+        msg="feat: механизм X\n\nось 1: покрыта\ntier: llama-3.3-70b-versatile",
+        block_extra="", staged=["CLAUDE.md"], map_text="## Ось 1 —\n",
+        config_text=CONFIG_LADDER_NON_CLAUDE)
+    assert code == 0
+
+
+def test_decide_full_ladder_non_claude_lead_tier_lower_rung_fails():
+    code, reason = mg.decide_full(
+        msg="feat: механизм X\n\nось 1: покрыта\ntier: gpt-x",
+        block_extra="", staged=["CLAUDE.md"], map_text="## Ось 1 —\n",
+        config_text=CONFIG_LADDER_NON_CLAUDE)
+    assert code == 1
+    assert "не lead" in reason
+
+
+# --- B3/B4 (пересдача, критик-блокеры, 2026-08-04) --------------------------
+
+CONFIG_LADDER_NONSENSE_RESERVE_BELOW_LEAD = """
+roles:
+  lead:
+    subscription:
+      model: claude-opus-5
+  reserve:
+    subscription:
+      model: claude-sonnet-5
+"""
+
+CONFIG_LADDER_NO_LEAD_RESERVE_OPUS = """
+roles:
+  reserve:
+    subscription:
+      model: claude-opus-5
+"""
+
+CONFIG_LADDER_DUPLICATE_MODEL_ID = """
+roles:
+  builder:
+    subscription:
+      model: claude-fable-5
+  lead:
+    subscription:
+      model: llama-3.3-70b-versatile
+  reserve:
+    subscription:
+      model: claude-fable-5
+"""
+
+
+def test_resolve_ladder_rank_nonsense_reserve_below_lead_family_does_not_resolve():
+    # B3 edge (i) (критик-блокер): reserve сконфигурирован МОДЕЛЬЮ СЛАБЕЕ
+    # lead (sonnet < opus по LEAD_FAMILIES) -- позиционно reserve выше
+    # (ранг 4), но семейством слабее -- family-матч НЕ резолвится вовсе.
+    assert mg._resolve_ladder_rank("sonnet", CONFIG_LADDER_NONSENSE_RESERVE_BELOW_LEAD) is None
+
+
+def test_tier_declared_ok_nonsense_reserve_below_lead_tier_sonnet_fails():
+    assert not mg.tier_declared_ok(
+        "sonnet", "claude-opus-5", CONFIG_LADDER_NONSENSE_RESERVE_BELOW_LEAD)
+
+
+def test_decide_full_nonsense_reserve_below_lead_tier_sonnet_fails():
+    code, reason = mg.decide_full(
+        msg="feat: механизм X\n\nось 1: покрыта\ntier: sonnet",
+        block_extra="", staged=["CLAUDE.md"], map_text="## Ось 1 —\n",
+        config_text=CONFIG_LADDER_NONSENSE_RESERVE_BELOW_LEAD)
+    assert code == 1
+    assert "не lead" in reason
+
+
+def test_resolve_ladder_rank_no_lead_rung_returns_none_even_with_reserve():
+    # B3 edge (ii) (критик-блокер): roles.lead ОТСУТСТВУЕТ, reserve=opus
+    # сконфигурирован -- лестничный путь не резолвит НИЧЕГО (нет опорного
+    # ранга lead), несмотря на то что "opus" точным id совпал бы с reserve.
+    assert mg._resolve_ladder_rank("claude-opus-5", CONFIG_LADDER_NO_LEAD_RESERVE_OPUS) is None
+    assert mg._resolve_ladder_rank("opus", CONFIG_LADDER_NO_LEAD_RESERVE_OPUS) is None
+
+
+def test_tier_declared_ok_no_lead_reserve_opus_tier_opus_fails():
+    # Регресс-пин «выше fable ничего нет» держится и С конфигом (не только
+    # с config_text=None): roles.lead отсутствует -> resolve_lead_binding
+    # дефолтится в "fable" (D-0072) -- ничего не бьёт fable, ни лестницей,
+    # ни family-веткой.
+    binding = mg.resolve_lead_binding(CONFIG_LADDER_NO_LEAD_RESERVE_OPUS)
+    assert binding == "fable"
+    assert not mg.tier_declared_ok("opus", binding, CONFIG_LADDER_NO_LEAD_RESERVE_OPUS)
+
+
+def test_decide_full_no_lead_reserve_opus_tier_opus_fails():
+    code, reason = mg.decide_full(
+        msg="feat: механизм X\n\nось 1: покрыта\ntier: opus",
+        block_extra="", staged=["CLAUDE.md"], map_text="## Ось 1 —\n",
+        config_text=CONFIG_LADDER_NO_LEAD_RESERVE_OPUS)
+    assert code == 1
+    assert "не lead" in reason
+
+
+def test_resolve_ladder_rank_duplicate_model_id_takes_max_rank():
+    # B4 (пересдача, критик-блокер): один и тот же model_id на НЕСКОЛЬКИХ
+    # ступенях (builder=1 И reserve=4, оба "claude-fable-5") -- резолюция
+    # берёт МАКСИМАЛЬНЫЙ ранг среди точных совпадений (4), не первый по
+    # порядку лестницы (1).
+    assert mg._resolve_ladder_rank(
+        "claude-fable-5", CONFIG_LADDER_DUPLICATE_MODEL_ID) == 4
+
+
+def test_tier_declared_ok_duplicate_model_id_passes_via_max_rank():
+    assert mg.tier_declared_ok(
+        "claude-fable-5", "llama-3.3-70b-versatile", CONFIG_LADDER_DUPLICATE_MODEL_ID)
+
+
+def test_decide_full_duplicate_model_id_tier_fable_passes():
+    code, _ = mg.decide_full(
+        msg="feat: механизм X\n\nось 1: покрыта\ntier: claude-fable-5",
+        block_extra="", staged=["CLAUDE.md"], map_text="## Ось 1 —\n",
+        config_text=CONFIG_LADDER_DUPLICATE_MODEL_ID)
+    assert code == 0

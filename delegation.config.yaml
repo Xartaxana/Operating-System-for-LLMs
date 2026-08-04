@@ -1,0 +1,66 @@
+# delegation.config.yaml — привязка функция→модель ЭТОГО деплоя (штаб).
+#
+# Единственный носитель привязки (D-0099, 2026-08-04): правила политики
+# говорят именами функций (CLAUDE.md, D-0062), модели живут здесь.
+# Читатели: tools/mechanism_gate.py (tier-декларации механизменных
+# коммитов, лестница рангов D-0099 п.6), tools/journal_validator.py
+# (lead-binding ветка матрицы D-0058), tools/session_context.py (метка
+# яруса SessionStart). Файл отсутствует → все трое дефолтятся в fable
+# (поведение до D-0099, fail-closed).
+#
+# Лестница рангов: scout(0) < builder(1) < critic(2) < lead(3) <
+# reserve(4). designer — стоячая функция яруса critic, НЕ ступень
+# координационной лестницы (ключ ниже — реестровая запись привязки).
+# Валидность лестницы держат экзамены ярусов (ось 8 SIBLING_MAP), не
+# гейт: гейт доверяет этому файлу как слову оператора.
+
+contour: both   # subscription — координация; api-keys — gateway-воркеры
+
+roles:
+  # Координация: декомпозиция, спеки, приёмка, механизмы (D-0099:
+  # перепривязан с claude-fable-5 по мотиву стоимости).
+  lead:
+    subscription:
+      model: claude-opus-5
+
+  # Резерв ВЫШЕ Lead — вызывается только словом оператора под самые
+  # тяжёлые задачи (D-0099 п.2).
+  reserve:
+    subscription:
+      model: claude-fable-5
+
+  # Обязательный гейт приёмки builder-диффов (R3); отдельная фоновая
+  # сессия — независимый контекст (клаузула D-0099 п.3).
+  critic:
+    subscription:
+      model: claude-opus-5
+
+  # Драфт спек по интент-брифу Lead (R2, промоция калибровкой №5).
+  # Реестровая запись: НЕ ступень лестницы (см. шапку).
+  designer:
+    subscription:
+      model: claude-opus-5
+
+  # Реализация по написанной спеке (R2).
+  builder:
+    subscription:
+      model: claude-sonnet-5
+
+  # Разведка (R1).
+  scout:
+    subscription:
+      model: claude-haiku-4-5
+
+  # API-контур (gateway): судья Shadow Evaluation и аналитик Ledger —
+  # воркеры, не координационные роли; их привязки живут в
+  # gateway/config.yaml алиасами (judge-gemini и т.д.), здесь не
+  # дублируются (ось 2: один носитель на факт).
+
+exam:
+  mandatory: true
+  override_allowed: true
+  # D-0099: opus-как-Lead привязан словом оператора 2026-08-04 (запись
+  # в DECISIONS.md); прогон PROCESS/LEAD_RANKING_EXAM.md на
+  # claude-opus-5 — в очереди CURRENT_CONTEXT (честный путь вместо
+  # постоянного override).
+  on_failure: "warning + decision-log entry (operator override recorded)"
