@@ -69,6 +69,7 @@ METHODOLOGY = [
     "— Модель без известной цены даёт «н/д» в столбце стоимости (никогда молчаливый $0); фикс — строка цены в usage_report.py.",
     "— Сессий — уникальные сессии периода, коснувшиеся модели; одна сессия может использовать несколько моделей, поэтому строка ИТОГО — уникальные сессии периода, не сумма строк выше.",
     "— Cache read, % — доля кэш-чтений в токенах строки; Output/запрос — средний выход на запрос; $/запрос и $/сессию — стоимость строки на её запросы/сессии; Доля стоимости, % — от итога периода.",
+    "— Доля использования, % — доля строки в токенах периода (по столбцу «Токены всего»).",
     "— Лист projects — та же статистика в разрезе проектов (каталогов ~/.claude/projects), отсортировано по стоимости.",
     "— Данные начинаются с 2026-06-13 21:06 (локальное); первое окно 14.05.2026-14.06.2026 из-за этого неполное (только вечер 13.06).",
 ]
@@ -76,15 +77,16 @@ METHODOLOGY = [
 USAGE_HEADER = ["Период", "Модель", "Запросов", "Сессий", "Input", "Output",
                 "Cache write", "Cache read", "Токены всего", "Cache read, %",
                 "Output/запрос", "Стоимость по API, $", "$/запрос", "$/сессию",
-                "Доля стоимости, %"]
-USAGE_WIDTHS = [22, 12, 10, 9, 12, 12, 14, 16, 16, 13, 14, 18, 10, 10, 16]
+                "Доля стоимости, %", "Доля использования, %"]
+USAGE_WIDTHS = [22, 12, 10, 9, 12, 12, 14, 16, 16, 13, 14, 18, 10, 10, 16, 19]
 # columns C..I and K hold token/request counts -> #,##0
 USAGE_INT_COLS = range(3, 9 + 1)
 
 PROJECTS_HEADER = ["Период", "Проект", "Запросов", "Сессий", "Input", "Output",
                    "Cache write", "Cache read", "Токены всего",
-                   "Стоимость по API, $", "Доля стоимости, %"]
-PROJECTS_WIDTHS = [22, 48, 10, 9, 12, 12, 14, 16, 16, 18, 16]
+                   "Стоимость по API, $", "Доля стоимости, %",
+                   "Доля использования, %"]
+PROJECTS_WIDTHS = [22, 48, 10, 9, 12, 12, 14, 16, 16, 18, 16, 19]
 PROJECTS_INT_COLS = range(3, 9 + 1)
 
 
@@ -189,6 +191,7 @@ def usage_rows(label, groups, period_session_count):
     summed = {name: _sum_group(groups[name]) for name in names}
     total_cost = sum(cost for _s, cost, unpriced in summed.values() if not unpriced)
     all_priced = all(not unpriced for _s, _c, unpriced in summed.values())
+    total_tokens = sum(s["tokens"] for s, _c, _u in summed.values())
 
     rows = []
     total = defaultdict(int)
@@ -208,7 +211,8 @@ def usage_rows(label, groups, period_session_count):
                      s["output"], s["cache_write"], s["cache_read"], s["tokens"],
                      _ratio(100 * s["cache_read"], s["tokens"], 1),
                      _ratio(s["output"], s["requests"], 0), cost_c, per_req,
-                     per_sess, share])
+                     per_sess, share,
+                     _ratio(100 * s["tokens"], total_tokens, 1)])
     if all_priced:
         cost_c = round(total_cost, 2)
         per_req = _ratio(total_cost, total["requests"], 4)
@@ -222,7 +226,7 @@ def usage_rows(label, groups, period_session_count):
                  total["cache_read"], total["tokens"],
                  _ratio(100 * total["cache_read"], total["tokens"], 1),
                  _ratio(total["output"], total["requests"], 0), cost_c, per_req,
-                 per_sess, share])
+                 per_sess, share, 100.0])
     return rows
 
 
@@ -231,6 +235,7 @@ def project_rows(label, groups, period_session_count):
     summed = {name: _sum_group(g) for name, g in groups.items()}
     total_cost = sum(cost for _s, cost, unpriced in summed.values() if not unpriced)
     all_priced = all(not unpriced for _s, _c, unpriced in summed.values())
+    total_tokens = sum(s["tokens"] for s, _c, _u in summed.values())
 
     def sort_key(item):
         _name, (_s, cost, _u) = item
@@ -248,12 +253,13 @@ def project_rows(label, groups, period_session_count):
             share = _ratio(100 * cost, total_cost, 1) if total_cost else 0
         rows.append([label, name, s["requests"], s["sessions"], s["input"],
                      s["output"], s["cache_write"], s["cache_read"], s["tokens"],
-                     cost_c, share])
+                     cost_c, share,
+                     _ratio(100 * s["tokens"], total_tokens, 1)])
     rows.append([label, TOTAL_LABEL, total["requests"], period_session_count,
                  total["input"], total["output"], total["cache_write"],
                  total["cache_read"], total["tokens"],
                  round(total_cost, 2) if all_priced else f">= {round(total_cost, 2)} (есть модели без цены)",
-                 100.0 if all_priced else "н/д"])
+                 100.0 if all_priced else "н/д", 100.0])
     return rows
 
 
