@@ -1,16 +1,20 @@
 # Current Context
 
-## Maintenance Rule (D-0038)
+## Maintenance Rule (D-0038; pointer lifecycle 2026-08-05)
 
-This file holds LIVE state only: the current milestone, the single
-authoritative task (D-0025), the queue, condensed system state,
-strategic guidance still steering decisions, and operational
-environment notes. When a task or workstream CLOSES (review ACCEPTED
-or Architect sign-off), the session that closes it moves the spec,
-execution report and review VERBATIM to docs/task_reports/ and leaves
-a one-line pointer here. Evidence is never deleted, only relocated.
-Rationale: this file is loaded on every boot (BOOT.md); boot context
-is a paid resource — the project's own subject.
+This file holds LIVE state only: the queue, the single authoritative
+task (D-0025), and undecided questions. When a task or workstream
+CLOSES, the closing session moves the spec, report and review VERBATIM
+to docs/task_reports/ and leaves a one-line pointer here — but the
+pointer is SCAFFOLDING for that session's handoff, not a resident: once
+the archive index (docs/task_reports/README.md, the single owner of
+archive descriptions) carries the entry, the pointer here is a
+DUPLICATE and the next boot-diet removes it. Every queue item's budget
+is a few lines: the undecided decision + the owner of its full text;
+retellings of closures, of other documents, or of another deploy's
+implementation belong to their owners. Evidence is never deleted, only
+relocated. Rationale: this file is loaded on every boot (BOOT.md);
+boot context is a paid resource — the project's own subject.
 
 ## Current Milestone
 
@@ -78,13 +82,11 @@ Opus-сессией), следующая ~08-12 (staleness — Boot Report, D-00
   чист; кодификации того же дня — коммиты 4de6178..f768821). ЖИВОЕ:
   замер экономии перепривязки — на калибровке после 14.09.
 
-- **BOOT-БЮДЖЕТ: ГЛУБОКИЕ СРЕЗЫ — РЕШЕНИЕ LEAD+АРХИТЕКТОР** (шаг 6
-  скилла boot-diet). Диета 08-05 отработала все дешёвые обратимые ходы;
-  механические срезы исчерпаны честно, пробой стоит. Три кандидата
-  (CLAUDE.md, DECISIONS.md, пересмотр самого порога), их риски, урок
-  замера F-30 и естественный левер без срезов — VERBATIM:
-  docs/task_reports/2026-08-05_calibration6-closures.md §boot-бюджет.
-  Числа — в отчёте коммита диеты (1f819fb + поправка 273027c).
+- Пункт «глубокие срезы boot-бюджета» СНЯТ 08-05 (слово оператора):
+  бюджет восстановлен полными проходами владения БЕЗ резки
+  операционных домов (130014 → 90930), порог 100000 стоит; разбор
+  кандидатов остаётся в архиве 08-05 §boot-бюджет на случай
+  будущего пробоя иной природы.
 
 - **НАХОДКИ КАЛИБРОВКИ №6 — ЖИВОЙ ОСТАТОК** (закрытые — VERBATIM в
   архиве 2026-08-05_calibration6-closures.md). Неисполненное:
