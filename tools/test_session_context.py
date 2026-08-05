@@ -722,6 +722,22 @@ def test_model_line_found_dict_form():
     )
 
 
+def test_model_line_found_string_form_lead_binding_opus_positive():
+    # П2 добора t-353 (2026-08-05): ПОЗИТИВНАЯ сторона пина B5, в паре с
+    # test_model_line_found_string_form выше (та пинует "нет конфига ->
+    # Lead tier = fable"). Тот же шов инъекции (config_text=...), что уже
+    # используют test_model_tier_binding_aware_* -- _LEAD_BINDING_OPUS_YAML
+    # (переиспользован, второй способ не изобретён). Дословная подстрока
+    # (не regex "opus где-то есть") сравнивается ПОЛНОЙ строкой '==',
+    # включая маркер F-37 "declared by harness, not measured" в ТОЙ ЖЕ
+    # строке -- пропажа маркера тоже уронит этот тест.
+    line = sc.model_line({"model": "claude-opus-5"}, config_text=_LEAD_BINDING_OPUS_YAML)
+    assert line == (
+        "MODEL: claude-opus-5 -> tier Lead(bound)"
+        " (declared by harness, not measured -- F-37; Lead tier = opus)"
+    )
+
+
 def test_model_line_missing_payload():
     assert sc.model_line(None) == (
         "MODEL: not provided by hook input -- verify tier yourself (D-0056a)"

@@ -95,7 +95,85 @@ Task-диспатча -- снимок остался от ПЕРВОГО (исх
  её") и, будь она включена, подпадает под D-0069/CLAUDE.md правило 2
  (самоактивирующийся enforcement-файл размещает Lead при приёмке, не
  builder) -- решение и размещение оставлены координатору.
-"""
+
+П2 (батч мелочей после калибровки №6, D-0081) -- ГРОМКИЙ fail-open
+=====================================================================
+Мотив (находка калибровки №6): 2026-08-04 в 16:32 был критик-диспатч
+(subagent_type=critic), но .claude/critic_snapshot.json НЕ обновился
+(стоял с 07-30 01:49) -- причина проглочена голым `except Exception:
+return 0` в main(): следа отказа не было ВООБЩЕ, "снимок не взят"
+неотличимо от "снимок просто старый". Проба 08-05 (400 читаемых
+файлов) причину не воспроизвела -- кандидат: файл дерева, залоченный
+внешним приложением, в момент обхода.
+
+FAIL-OPEN СОХРАНЁН (хук по-прежнему НИКОГДА не роняет диспатч ни при
+каком исключении, exit код всегда 0 -- инвариант, пин-тест обязателен
+у стороны, кому дан owns на test_critic_snapshot.py, см. отчёт
+билдера), но отказ теперь ВИДИМ ДВУМЯ независимыми каналами:
+ 1. Диагностическая строка в stderr (`critic_snapshot.py: FAILED to
+    take snapshot (<ExceptionType>: <msg>)`) -- см. _write_failure_
+    snapshot().
+ 2. Запись факта отказа В САМ .claude/critic_snapshot.json -- поля
+    `error`/`error_ts` (БЕЗ обычных ts/tree_hash/files_count/
+    skipped_files -- отказ ЗАМЕЩАЕТ обычный снимок, не смешивается с
+    ним: смешанный документ с ОБОИМИ шейпами усложнил бы грейдеру
+    различение "снимок взят, но с оговоркой" от "снимок НЕ взят
+    вовсе" -- собственное решение, задокументировано, не угадано
+    молча), чтобы "снимок не взят" отличалось от "снимок старый"
+    (старый снимок несёт РЕАЛЬНЫЙ ts предыдущего успешного вызова;
+    отказный несёт error_ts момента отказа -- две разные, не
+    смешиваемые формы документа).
+Если и запись файла отказа невозможна (напр. каталог .claude/ тоже
+недоступен для записи) -- ТОЛЬКО stderr, exit 0 всё равно (see
+main()/_write_failure_snapshot(): внутренний try/except вокруг
+самой записи файла отказа -- belt-and-suspenders поверх
+belt-and-suspenders, тот же принцип, что уже был в этом файле).
+
+ПЕРЕСДАЧА (не-блокер (б), критик, 2026-08-05): отказный документ
+раньше ЗАТИРАЛ предыдущий успешный снимок целиком -- будущий грейдер
+терял ЛЮБУЮ базовую линию сверки "финал не ревьюился" (устаревший, но
+РЕАЛЬНЫЙ снимок был бы полезнее полного отсутствия tree_hash). ФИКС:
+если файл на snap уже содержал НАСТОЯЩИЙ успешный снимок (несёт ключ
+"tree_hash", не сам был отказом), его ts/tree_hash копируются в
+отказный документ ОТДЕЛЬНЫМИ ключами `prev_ts`/`prev_tree_hash` --
+_read_prior_snapshot_fields(). Инвариант "отказ не выглядит валидным
+снимком" сохранён: отказный документ НЕ несёт ключ "tree_hash" сам
+(только "prev_tree_hash" -- явно другое имя), грейдер по-прежнему
+однозначно отличает "снимок взят" от "снимок НЕ взят, но был
+предыдущий -- вот его данные".
+
+ДВЕ РАЗЛИЧНЫЕ ТОЧКИ ОТКАЗА, ОБЕ ПОКРЫТЫ: main() теперь оборачивает
+(а) обход дерева (compute_tree_hash()) и (б) запись снимка
+(snap.write_text) в ОТДЕЛЬНЫЕ try/except -- ЛЮБАЯ из двух веток ведёт
+к _write_failure_snapshot(), но семантически они разные ("не смогли
+посчитать хэш" vs "посчитали, но не смогли записать") -- докстринг
+_write_failure_snapshot() и main() называют обе явно.
+
+НЕЧИТАЕМЫЙ ОДИН ФАЙЛ ДЕРЕВА -- РЕШЕНИЕ (спека явно оставляла выбор
+"пропускать со счётчиком или падать", задокументировано, не угадано
+молча): compute_tree_hash() ПРОПУСКАЕТ файл, чей read_bytes() кинул
+исключение (PermissionError/OSError/что угодно), инкрементируя
+НОВЫЙ счётчик `skipped_files` -- НЕ роняет обход целиком. Обоснование:
+снимок дерева БЕЗ одного нечитаемого файла (напр. залоченного внешним
+приложением, как в живой находке 08-04) полезнее ПОЛНОГО отказа
+снимка из-за ЕДИНСТВЕННОГО файла -- тот же fail-open принцип, что уже
+пронизывает весь этот модуль (снимок -- измеритель, не гейт).
+compute_tree_hash() теперь возвращает ТРОЙКУ (tree_hash, files_count,
+skipped_files) вместо прежней пары -- единственный вызывающий код в
+этом репозитории (main() этого же файла; grep подтвердил -- 0 других
+мест в репо импортируют compute_tree_hash) обновлён вместе; twin
+toolkit/tools/critic_snapshot.py НЕ тронут (мораторий D-0074, порт --
+отдельным батчем). `skipped_files` пишется в НОРМАЛЬНЫЙ (успешный)
+снимок тоже (даже когда 0) -- та же дисциплина "не молчаливый 0", что
+Rule #1 требует для денежных величин в других механизмах этого кита,
+применённая здесь к телеметрии обхода.
+
+DoD/owns ЭТОЙ ПРАВКИ: манифест исходного батча НЕ давал owns на
+tools/test_critic_snapshot.py (файла с тестами critic_snapshot.py в
+репозитории не было ВООБЩЕ) -- возвращено координатору явным частичным
+статусом при первой сдаче. Пересдача (2026-08-05) явно расширила owns
+на "их тесты" -- tools/test_critic_snapshot.py заведён этим коммитом
+(см. отчёт билдера)."""
 
 import hashlib
 import json
@@ -108,8 +186,13 @@ EXCLUDED_REL_FILES = {Path("logs") / "routing-log.jsonl"}
 SNAPSHOT_REL_PATH = Path(".claude") / "critic_snapshot.json"
 
 
-def compute_tree_hash(root: Path) -> tuple[str, int]:
+def compute_tree_hash(root: Path) -> tuple[str, int, int]:
+    """Возвращает (tree_hash, files_count, skipped_files). Нечитаемый
+    ОДИН файл (read_bytes() кидает исключение) НЕ роняет весь обход --
+    пропускается, инкрементируя skipped_files -- см. докстринг модуля,
+    "П2", "НЕЧИТАЕМЫЙ ОДИН ФАЙЛ ДЕРЕВА"."""
     entries = []
+    skipped_files = 0
     for p in sorted(root.rglob("*")):
         if not p.is_file():
             continue
@@ -118,10 +201,68 @@ def compute_tree_hash(root: Path) -> tuple[str, int]:
             continue
         if rel in EXCLUDED_REL_FILES:
             continue
-        digest = hashlib.sha256(p.read_bytes()).hexdigest()
+        try:
+            digest = hashlib.sha256(p.read_bytes()).hexdigest()
+        except Exception:
+            skipped_files += 1
+            continue
         entries.append(f"{rel.as_posix()}:{digest}")
     tree = hashlib.sha256("\n".join(entries).encode("utf-8")).hexdigest()
-    return tree, len(entries)
+    return tree, len(entries), skipped_files
+
+
+def _read_prior_snapshot_fields(snap: Path) -> dict:
+    """Пересдача (не-блокер (б), критик): читает ts/tree_hash ПРЕДЫДУЩЕГО
+    документа снимка (если он существует, парсится И это НАСТОЯЩИЙ
+    успешный снимок -- несёт ключ "tree_hash", не сам был отказом) --
+    fail-open: отсутствие файла / битый JSON / отказный документ без
+    tree_hash -- {} (баз prev_* полей в результирующем отказе, ничего
+    не выдумываем). Не бросает исключений наружу."""
+    try:
+        prev = json.loads(snap.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(prev, dict) or "tree_hash" not in prev:
+        return {}
+    return {"prev_ts": prev.get("ts"), "prev_tree_hash": prev.get("tree_hash")}
+
+
+def _write_failure_snapshot(snap: Path, exc: Exception) -> None:
+    """П2 (батч после калибровки №6): fail-open остаётся (хук никогда
+    не роняет диспатч), но отказ теперь ГРОМКИЙ -- см. докстринг
+    модуля, "П2". Отказный документ ЗАМЕЩАЕТ обычный (не несёт
+    ts/tree_hash/files_count/skipped_files) -- две формы документа не
+    смешиваются -- инвариант "отказ не выглядит валидным снимком"
+    сохранён БУКВАЛЬНО (нет ключа "tree_hash" в отказном документе).
+
+    Пересдача (не-блокер (б), критик): ДО этой правки отказный документ
+    ЗАТИРАЛ последний успешный снимок целиком -- будущий грейдер терял
+    ЛЮБУЮ базовую линию сверки "финал не ревьюился" (прежнее поведение
+    без этого хука оставляло УСТАРЕВШИЙ, но РЕАЛЬНЫЙ снимок с настоящим
+    tree_hash). ФИКС: если СУЩЕСТВУЮЩИЙ файл на snap -- настоящий
+    успешный снимок (несёт "tree_hash"), его ts/tree_hash копируются в
+    отказный документ ОТДЕЛЬНЫМИ ключами `prev_ts`/`prev_tree_hash`
+    (шейпы НЕ смешиваются -- отказный документ по-прежнему не несёт
+    "tree_hash" САМ, только "prev_tree_hash", различимый ключ) -- см.
+    _read_prior_snapshot_fields(). Если запись файла отказа тоже
+    невозможна -- только stderr (исключение здесь проглатывается молча,
+    НАМЕРЕННО -- это последний рубеж fail-open, сообщение уже ушло в
+    stderr выше)."""
+    diag = f"critic_snapshot.py: FAILED to take snapshot ({type(exc).__name__}: {exc})"
+    print(diag, file=sys.stderr)
+    try:
+        doc = {
+            "error": f"{type(exc).__name__}: {exc}",
+            "error_ts": datetime.now().isoformat(),
+        }
+        doc.update(_read_prior_snapshot_fields(snap))
+        snap.parent.mkdir(parents=True, exist_ok=True)
+        snap.write_text(
+            json.dumps(doc, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass  # только stderr -- см. докстринг модуля, "П2"
 
 
 def main() -> int:
@@ -144,9 +285,17 @@ def main() -> int:
         return 0
 
     cwd = Path(payload.get("cwd") or ".")
+    snap = cwd / SNAPSHOT_REL_PATH
+
+    # П2: две РАЗЛИЧНЫЕ точки отказа -- обход дерева и запись снимка --
+    # см. докстринг модуля, "ДВЕ РАЗЛИЧНЫЕ ТОЧКИ ОТКАЗА".
     try:
-        tree_hash, files_count = compute_tree_hash(cwd)
-        snap = cwd / SNAPSHOT_REL_PATH
+        tree_hash, files_count, skipped_files = compute_tree_hash(cwd)
+    except Exception as exc:
+        _write_failure_snapshot(snap, exc)
+        return 0
+
+    try:
         snap.parent.mkdir(parents=True, exist_ok=True)
         snap.write_text(
             json.dumps(
@@ -154,14 +303,15 @@ def main() -> int:
                     "ts": datetime.now().isoformat(),
                     "tree_hash": tree_hash,
                     "files_count": files_count,
+                    "skipped_files": skipped_files,
                 },
                 ensure_ascii=False,
             )
             + "\n",
             encoding="utf-8",
         )
-    except Exception:
-        return 0  # снимок -- измеритель, не гейт: не роняем диспатч
+    except Exception as exc:
+        _write_failure_snapshot(snap, exc)
     return 0
 
 

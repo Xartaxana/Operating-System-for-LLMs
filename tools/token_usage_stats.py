@@ -33,7 +33,44 @@ The xlsx lands in the repo working tree; it is committed by the next
 session's normal batch (axis 9: acceptance vs durability -- the
 catch-up logic above makes a lost/uncommitted file recoverable from
 transcripts/cc_usage at any time).
+
+OUTPUT PATH OVERRIDE + FAIL-CLOSED GUARD (батч мелочей после
+калибровки №6, D-0081, п.1 -- инцидент 2026-08-04 16:52: рабочая
+копия logs/token_usage.xlsx была перезаписана неизвестным писателем
+с сигнатурой "пересборка со свежей БД", период 14.05 исчез).
+Механизм: db_path() (импортирован из usage_report) уважает
+GATEWAY_DB_PATH, но XLSX_PATH ниже была НЕИЗМЕНЯЕМОЙ модульной
+константой от __file__ -- ВСЕГДА боевой файл репозитория. Тестовый
+контекст с подменённой БД, импортировавший модуль и вызвавший
+main(), писал в БОЕВОЙ xlsx.
+
+ЕДИНСТВЕННЫЙ механизм переопределения пути вывода -- CLI-флаг
+`--output PATH` (не переменная окружения: один механизм, выбор
+задокументирован здесь, не угадан молча). Дефолт БЕЗ флага --
+прежний XLSX_PATH (logs/token_usage.xlsx) -- штатный запуск
+планировщика не меняется.
+
+FAIL-CLOSED GUARD (_is_safe_to_write): если РАЗРЕШЁННЫЙ (resolved)
+путь db_path() НЕ равен разрешённому пути дефолтной БД репозитория
+(gateway/requests.db от __file__, БЕЗ учёта GATEWAY_DB_PATH -- см.
+_default_db_path()), А разрешённый путь вывода равен разрешённому
+XLSX_PATH -- main() ОТКАЗЫВАЕТСЯ писать: печатает причину в stderr
+и возвращает 1, ДО любого обращения к open_or_create_workbook()
+(гвард -- самая первая проверка main(), раньше даже импорта
+транскриптов) -- отказ происходит одинаково что при отсутствующем,
+что при существующем xlsx (файл никогда не открывается и не
+создаётся в обеих ветках). Сравнение -- по РАЗРЕШЁННЫМ АБСОЛЮТНЫМ
+ПУТЯМ (Path.resolve()), не по сырым строкам: GATEWAY_DB_PATH,
+явно выставленный в тот же дефолтный путь репозитория, -- НЕ
+тестовый контекст (пути совпадут после resolve()), запись
+разрешена. Обойти guard в законном альтернативном/тестовом прогоне
+можно только явным --output, указывающим на ДРУГОЙ (не совпадающий
+после resolve() с XLSX_PATH) путь -- сам факт передачи флага
+значения не имеет, имеет значение только итоговый разрешённый путь
+(--output, буквально равный XLSX_PATH, guard НЕ обходит -- это
+единообразнее и безопаснее спец-случая "флаг был передан").
 """
+import argparse
 import sys
 from collections import defaultdict
 from datetime import datetime
@@ -278,12 +315,13 @@ def _init_sheet(ws, header, widths, methodology=None):
         ws.column_dimensions[get_column_letter(i)].width = w
 
 
-def open_or_create_workbook():
+def open_or_create_workbook(output_path: Path = None):
     from openpyxl import Workbook, load_workbook
-    if XLSX_PATH.exists():
-        wb = load_workbook(XLSX_PATH)
+    output_path = output_path or _default_xlsx_path()
+    if output_path.exists():
+        wb = load_workbook(output_path)
         return wb, wb[USAGE_SHEET], wb[PROJECTS_SHEET]
-    XLSX_PATH.parent.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     wb = Workbook()
     ws_u = wb.active
     ws_u.title = USAGE_SHEET
@@ -309,7 +347,79 @@ def _append_rows(ws, rows, int_cols):
             ws[ws.max_row][idx - 1].number_format = "#,##0"
 
 
-def main():
+def _default_db_path() -> Path:
+    """Дефолтная БД репозитория, БЕЗ учёта GATEWAY_DB_PATH -- эталон, с
+    которым сравнивается db_path() (которая env-переменную учитывает)
+    в guard'е ниже. См. докстринг модуля "FAIL-CLOSED GUARD"."""
+    return Path(__file__).parent.parent / "gateway" / "requests.db"
+
+
+def _default_xlsx_path() -> Path:
+    """Дефолтный боевой xlsx, ВСЕГДА свежевычисленный от __file__ --
+    симметрично _default_db_path(), НЕ читает модульную переменную
+    XLSX_PATH. ПОЧЕМУ (пересдача, блокер 1 критика, живая проба
+    2026-08-05): guard и выбор дефолтного пути вывода раньше читали
+    XLSX_PATH -- ИЗМЕНЯЕМЫЙ модульный глобал. Контекст, патчащий
+    XLSX_PATH ради ИЗОЛЯЦИИ СВОИХ путей вывода (ровно то, что делала
+    autouse-фикстура старой версии test_token_usage_stats.py), тем
+    самым переопределял и то, ЧТО ГВАРД СЧИТАЕТ "боевым путём" --
+    патч глобала в одном контексте снимал защиту с РЕАЛЬНОГО файла
+    для explicit --output, указывающего буквально на него (живая
+    проба критика: guard() -> True после патча XLSX_PATH, main(
+    --output <живой logs/token_usage.xlsx>) реально дописал
+    выдуманный период, 9172->9456 байт). Guard/дефолт вывода ниже
+    ТЕПЕРЬ читают ЭТУ функцию (не глобал) -- патч XLSX_PATH (или
+    любого другого атрибута модуля) больше НЕ влияет на то, что
+    считается "боевым" файлом."""
+    return Path(__file__).parent.parent / "logs" / "token_usage.xlsx"
+
+
+def _is_safe_to_write(output_path: Path) -> bool:
+    """False -- ТОЛЬКО когда db_path() (уважает GATEWAY_DB_PATH)
+    указывает НЕ на дефолтную БД репозитория, А output_path
+    разрешается в тот же путь, что _default_xlsx_path() (боевой файл,
+    ИММУТАБЕЛЬНЫЙ эталон от __file__ -- см. её докстринг за полное
+    обоснование симметрии с _default_db_path(), пересдача блокера 1).
+    Сравнение -- по Path.resolve(), не по сырым строкам (см. докстринг
+    модуля). resolve() на несуществующем пути безопасен на
+    Windows/POSIX (не требует существования файла)."""
+    current_db = db_path().resolve()
+    default_db = _default_db_path().resolve()
+    out = output_path.resolve()
+    default_out = _default_xlsx_path().resolve()
+    if current_db != default_db and out == default_out:
+        return False
+    return True
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Monthly token-usage statistics -> xlsx (append-only)."
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help=(
+            "Путь вывода xlsx (по умолчанию logs/token_usage.xlsx). "
+            "ЕДИНСТВЕННЫЙ механизм переопределения пути -- см. докстринг "
+            "модуля 'OUTPUT PATH OVERRIDE + FAIL-CLOSED GUARD'."
+        ),
+    )
+    args = parser.parse_args(argv)
+    output_path = Path(args.output) if args.output else _default_xlsx_path()
+
+    if not _is_safe_to_write(output_path):
+        print(
+            "REFUSED: GATEWAY_DB_PATH указывает НЕ на дефолтную БД "
+            f"репозитория ({_default_db_path()}), а путь вывода -- "
+            f"дефолтный боевой файл ({_default_xlsx_path()}) -- guard против "
+            "записи тестовым/подменённым контекстом в боевой xlsx (батч "
+            "мелочей после калибровки №6, D-0081, п.1). Укажи --output "
+            "<path> явно, если это осознанный альтернативный прогон.",
+            file=sys.stderr,
+        )
+        return 1
+
     imported, sessions, warnings = import_transcripts(transcript_glob(), db_path())
     print(f"imported {imported} new rows from {len(sessions)} sessions")
     conn = _connect(db_path())
@@ -324,7 +434,7 @@ def main():
     for w in warnings:
         print(w)
 
-    wb, ws_u, ws_p = open_or_create_workbook()
+    wb, ws_u, ws_p = open_or_create_workbook(output_path)
     now = datetime.now().astimezone()
     appended = []
     for wkey in sorted(by_family):
@@ -340,11 +450,12 @@ def main():
             _append_rows(ws_p, project_rows(label, by_project[wkey], n_sessions),
                          PROJECTS_INT_COLS)
     if appended:
-        wb.save(XLSX_PATH)
-        print(f"appended periods: {', '.join(appended)} -> {XLSX_PATH}")
+        wb.save(output_path)
+        print(f"appended periods: {', '.join(appended)} -> {output_path}")
     else:
         print("no new completed periods to append")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

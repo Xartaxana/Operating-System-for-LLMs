@@ -252,6 +252,274 @@ def test_extract_owns_paths_leading_star_glob_is_stripped_known_limitation():
     assert owns_gate.extract_owns_paths("owns: */tools/*") == ["/tools/*"]
 
 
+# --- П3 (батч мелочей после калибровки №6): многострочный owns-блок --
+
+
+def test_extract_owns_paths_multiline_bullet_block():
+    prompt = (
+        "Дано: репо целиком.\n"
+        "owns:\n"
+        "- D:/repo/tools/a.py\n"
+        "- D:/repo/tools/b.py\n"
+        "Правь файлы."
+    )
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "D:/repo/tools/a.py",
+        "D:/repo/tools/b.py",
+    ]
+
+
+def test_extract_owns_paths_multiline_star_and_middot_bullets():
+    prompt = "owns:\n* D:/a.py\n\u2022 D:/b.py\n"
+    assert owns_gate.extract_owns_paths(prompt) == ["D:/a.py", "D:/b.py"]
+
+
+def test_extract_owns_paths_multiline_bare_path_lines_no_bullets():
+    prompt = "owns:\nD:/repo/tools/a.py\nD:/repo/tools/b.py\n"
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "D:/repo/tools/a.py",
+        "D:/repo/tools/b.py",
+    ]
+
+
+def test_extract_owns_paths_marker_line_with_paths_takes_priority_over_block_below():
+    # Строка маркера УЖЕ дала путь -- блок ниже НЕ подмешивается
+    # (обязательный край спеки, не меняет семантику принятых диспатчей).
+    prompt = "owns: D:/repo/tools/only_this.py\n- D:/repo/tools/should_not_appear.py\n"
+    assert owns_gate.extract_owns_paths(prompt) == ["D:/repo/tools/only_this.py"]
+
+
+def test_extract_owns_paths_empty_line_immediately_after_marker_ends_block():
+    prompt = "owns:\n\n- D:/repo/tools/a.py\n"
+    assert owns_gate.extract_owns_paths(prompt) == []
+
+
+def test_extract_owns_paths_non_goals_section_right_after_marker_ends_block():
+    prompt = (
+        "owns:\n"
+        "non-goals: toolkit/**\n"
+        "- D:/repo/tools/a.py\n"
+    )
+    assert owns_gate.extract_owns_paths(prompt) == []
+
+
+def test_extract_owns_paths_handoff_section_right_after_marker_ends_block():
+    prompt = "owns:\nhandoff: см. отчёт\n- D:/repo/tools/a.py\n"
+    assert owns_gate.extract_owns_paths(prompt) == []
+
+
+def test_extract_owns_paths_given_ru_section_right_after_marker_ends_block():
+    prompt = "owns:\nдано: репо целиком\n- D:/repo/tools/a.py\n"
+    assert owns_gate.extract_owns_paths(prompt) == []
+
+
+def test_extract_owns_paths_continuation_stops_at_first_non_path_line():
+    prompt = (
+        "owns:\n"
+        "- D:/repo/tools/a.py\n"
+        "прозаическая строка без пути\n"
+        "- D:/repo/tools/should_not_appear.py\n"
+    )
+    assert owns_gate.extract_owns_paths(prompt) == ["D:/repo/tools/a.py"]
+
+
+def test_decide_multiline_owns_block_writes_declared_paths_to_sidecar(tmp_path):
+    registry = tmp_path / "owns_registry.jsonl"
+    prompt = (
+        "DoD: тест зелёный, witness приложен.\n"
+        "Дано: репо целиком.\n"
+        "owns:\n"
+        "- D:/repo/tools/a.py\n"
+        "- D:/repo/tools/b.py\n"
+        "Правь файлы."
+    )
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "builder", "prompt": prompt, "description": "sonnet: write"},
+        "session_id": "s-1",
+        "cwd": "D:\\repo",
+    }
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=datetime(2026, 7, 28, 12, 0, 0))
+    assert exit_code == 0
+    assert output is None
+    written = [json.loads(ln) for ln in registry.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert written[0]["owns"] == ["D:/repo/tools/a.py", "D:/repo/tools/b.py"]
+
+
+def test_extract_owns_paths_multiline_block_via_fallback_pass():
+    # Фоллбек-проход (маркер БЕЗ границы слова) тоже получает
+    # многострочную поддержку -- тот же helper переиспользован.
+    prompt = (
+        "manifest_owns_блок\n"
+        "- D:/repo/tools/a.py\n"
+        "- D:/repo/tools/b.py\n"
+    )
+    assert owns_gate.OWNS_WORD_RE.search(prompt) is None
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "D:/repo/tools/a.py",
+        "D:/repo/tools/b.py",
+    ]
+
+
+# --- П3: предел 40 строк продолжения (правило 6а -- обе стороны) -----
+
+
+def test_extract_owns_paths_continuation_exactly_40_lines_returns_all():
+    lines = ["owns:"] + [f"- D:/repo/tools/f{i}.py" for i in range(40)]
+    prompt = "\n".join(lines) + "\n"
+    result = owns_gate.extract_owns_paths(prompt)
+    assert len(result) == 40
+    assert result[0] == "D:/repo/tools/f0.py"
+    assert result[-1] == "D:/repo/tools/f39.py"
+
+
+def test_extract_owns_paths_continuation_41_lines_hits_limit_returns_empty():
+    lines = ["owns:"] + [f"- D:/repo/tools/f{i}.py" for i in range(41)]
+    prompt = "\n".join(lines) + "\n"
+    # Упор в предел (41-я строка ЕЩЁ продолжала бы блок) -- пустой
+    # список, не тихое усечение до первых 40.
+    assert owns_gate.extract_owns_paths(prompt) == []
+
+
+def test_decide_continuation_limit_hit_gives_blind_owns_warn(tmp_path):
+    registry = tmp_path / "owns_registry.jsonl"
+    lines = ["owns:"] + [f"- D:/repo/tools/f{i}.py" for i in range(41)]
+    prompt = (
+        "DoD: тест зелёный, witness приложен.\nДано: репо целиком.\n"
+        + "\n".join(lines) + "\nПравь файлы."
+    )
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "builder", "prompt": prompt, "description": "sonnet: write"},
+        "session_id": "s-1",
+        "cwd": "D:\\repo",
+    }
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=datetime(2026, 7, 28, 12, 0, 0))
+    assert exit_code == 0
+    assert output is not None
+    assert "слепа" in output["hookSpecificOutput"]["additionalContext"]
+    assert not registry.exists()
+
+
+# --- Пересдача (блокер 2, критик, живая проба 2026-08-05) -----------
+
+
+def test_p3_regression_prose_owns_word_does_not_hijack_declaration_below():
+    # ОБЯЗАТЕЛЬНЫЙ ПИН, вход критика ДОСЛОВНО: "owns" -- обычное слово
+    # ПОСРЕДИ прозы (не декларация), затем строка, стартующая с
+    # "D:/..." (тоже НЕ декларация, просто бытовая заметка), затем
+    # ПУСТАЯ строка, затем НАСТОЯЩАЯ декларация -- паритет с HEAD:
+    # РОВНО ['D:/repo/real_target.py'], не хайджек прозы.
+    prompt = (
+        "Задача: правка гейта.\n"
+        "Не выходи за owns этой задачи.\n"
+        "D:/repo/readme.md -- прочитать перед началом\n"
+        "\n"
+        "owns: D:/repo/real_target.py\n"
+    )
+    assert owns_gate.extract_owns_paths(prompt) == ["D:/repo/real_target.py"]
+
+
+def test_p3_decide_regression_prose_owns_word_sidecar_gets_real_target(tmp_path):
+    # Тот же вход СКВОЗНЫМ decide(): в sidecar должен попасть НАСТОЯЩИЙ
+    # пишущий путь, а не прозаическая строка read-only заметки.
+    registry = tmp_path / "owns_registry.jsonl"
+    prompt = (
+        "DoD: тест зелёный, witness приложен.\n"
+        "Дано: репо целиком.\n"
+        "Задача: правка гейта.\n"
+        "Не выходи за owns этой задачи.\n"
+        "D:/repo/readme.md -- прочитать перед началом\n"
+        "\n"
+        "owns: D:/repo/real_target.py\n"
+        "Правь файлы."
+    )
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "builder", "prompt": prompt, "description": "sonnet: write"},
+        "session_id": "s-1",
+        "cwd": "D:\\repo",
+    }
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=datetime(2026, 7, 28, 12, 0, 0))
+    assert exit_code == 0
+    written = [json.loads(ln) for ln in registry.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert written[0]["owns"] == ["D:/repo/real_target.py"]
+
+
+def test_p3_prose_owns_word_mid_sentence_alone_gives_blind_warn_not_silence(tmp_path):
+    # Если НИКАКОЙ настоящей декларации нигде дальше в промпте нет,
+    # прозаическое "owns" по-прежнему НЕ должно тихо хайджекать чужой
+    # read-only путь -- итог [] уходит в диагностику пустого owns
+    # (write-индикатор здесь -- сам "owns"-marker через WRITE_INDICATORS_RE).
+    registry = tmp_path / "owns_registry.jsonl"
+    prompt = (
+        "DoD: тест зелёный, witness приложен.\nДано: репо целиком.\n"
+        "Не выходи за owns этой задачи.\n"
+        "D:/repo/readme.md -- прочитать перед началом\n"
+        "Правь файлы."
+    )
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "builder", "prompt": prompt, "description": "sonnet: write"},
+        "session_id": "s-1",
+        "cwd": "D:\\repo",
+    }
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=datetime(2026, 7, 28, 12, 0, 0))
+    assert exit_code == 0
+    assert output is not None
+    assert "слепа" in output["hookSpecificOutput"]["additionalContext"]
+    assert not registry.exists()
+
+
+# --- Пересдача (не-блокеры (а), той же пробой) -----------------------
+
+
+def test_p3_markdown_bold_junk_line_under_marker_does_not_pollute_block():
+    prompt = (
+        "owns:\n"
+        "**Внимание**: пиши только сюда\n"
+        "- D:/repo/tools/a.py\n"
+    )
+    # Первая строка блока -- мусор (не путь) -> блок обрывается на ней,
+    # ничего не собрано (та же строгая семантика "первая непарсящаяся
+    # строка -- конец блока").
+    assert owns_gate.extract_owns_paths(prompt) == []
+
+
+def test_p3_dod_line_under_marker_does_not_get_swallowed_whole():
+    prompt = (
+        "owns:\n"
+        "DoD: прогнать pytest tools/test_*.py -q\n"
+        "- D:/repo/tools/a.py\n"
+    )
+    assert owns_gate.extract_owns_paths(prompt) == []
+
+
+def test_p3_numbered_list_recognized_as_bullet_form():
+    prompt = "owns:\n1. D:/repo/tools/a.py\n2) D:/repo/tools/b.py\n"
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "D:/repo/tools/a.py",
+        "D:/repo/tools/b.py",
+    ]
+
+
+def test_p3_prose_tail_after_bullet_path_is_cut_not_swallowed_whole():
+    prompt = "owns:\n- D:/repo/tools/a.py -- главный файл\n"
+    paths = owns_gate.extract_owns_paths(prompt)
+    assert paths == ["D:/repo/tools/a.py"]
+    # paths_overlap теперь распознаёт ту же строку как настоящий путь
+    # (регресс критика: раньше вся строка целиком не совпадала).
+    assert owns_gate.paths_overlap(paths[0], "D:/repo/tools/a.py") is True
+
+
+def test_p3_is_continuation_path_token_rejects_bare_star_without_slash():
+    # Юнит на ужесточённую проверку: "*" без слэша -- НЕ путь-подобный
+    # токен продолжения (markdown "**...**:" не должен матчить).
+    assert owns_gate._is_continuation_path_token("**Внимание**:") is False
+    assert owns_gate._is_continuation_path_token("tools/test_*.py") is True
+    assert owns_gate._is_continuation_path_token("D:/repo/a.py") is True
+
+
 def test_strip_owns_marker_junk_50kb_paren_groups_completes_under_5s():
     # N3, ГРАНИЧНЫЙ ТЕСТ ВЕЛИЧИНЫ на РЕАЛИСТИЧНОМ потолке: срез мусора
     # квадратичен по числу скобочных групп (замер критика: 240К групп

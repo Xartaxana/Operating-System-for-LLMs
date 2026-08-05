@@ -1118,6 +1118,83 @@ def test_matrix_lead_binding_haiku_floor_wins_over_branch_3b():
     assert any("D-0058" in v and "ярус ниже sonnet" in v for v in violations), violations
 
 
+# ---- B6 (доборный батч t-353, 2026-08-05): mechanism_gate недоступен
+# (mg is None, top-level импорт упал) -- ветка 3b (Lead-привязка) молча
+# выключается; весь остальной валидатор работает без изменений. Шов
+# инъекции -- monkeypatch.setattr(jv, "mg", None): journal_validator.py
+# держит "mg" как module-level имя (top-level try/except ImportError
+# вокруг "import mechanism_gate as mg", см. его докстринг "B6"), поэтому
+# monkeypatch на этот атрибут модуля -- предусмотренный код-путь, а НЕ
+# удаление модуля из sys.modules (которое затронуло бы соседние тесты в
+# том же прогоне, т.к. sys.modules общий на процесс) -- monkeypatch сам
+# откатывает атрибут после теста, соседние тесты не задеты. ----
+
+def test_b6_mg_none_disables_lead_binding_branch_same_case_now_fails(monkeypatch):
+    # Тот же кейс, что test_matrix_lead_binding_opus_accepts_critic_by_opus_without_basis
+    # (opus-привязка принимает critic по opus без basis, code==0 при
+    # рабочем mg) -- с mg=None ветка 3b выключена: результат совпадает с
+    # "нет привязки вовсе" (см. test_matrix_lead_binding_absent_config_same_case_still_fails).
+    monkeypatch.setattr(jv, "mg", None)
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="critic",
+                            model="opus", task_id="t-001", by="opus",
+                            notes="B6: mg is None -- branch 3b disabled, must fail like no binding"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW, config_text=CONFIG_LEAD_OPUS)
+    assert code == 1
+    assert any("D-0058" in v for v in violations), violations
+
+
+def test_b6_mg_present_positive_control_same_case_still_passes():
+    # Позитивный контроль в паре с тестом выше (край (ii) DoD доборного
+    # батча): тот же кейс БЕЗ monkeypatch -- mg реальный (мод. импорт
+    # mechanism_gate удался в этом тестовом окружении) -- ветка 3b
+    # активна, результат code==0 (то же, что уже пинует
+    # test_matrix_lead_binding_opus_accepts_critic_by_opus_without_basis
+    # выше; повторено здесь явно рядом с негативной стороной, чтобы пара
+    # mg=None/mg=реальный была видна в одном месте).
+    assert jv.mg is not None, "mechanism_gate must be importable in this test env"
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="critic",
+                            model="opus", task_id="t-001", by="opus",
+                            notes="B6: mg present (real) -- branch 3b active, same case passes"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW, config_text=CONFIG_LEAD_OPUS)
+    assert code == 0, violations
+
+
+def test_b6_mg_none_rest_of_validator_unaffected_floor_still_wins(monkeypatch):
+    # "Весь остальной валидатор работает без изменений" -- floor (правило
+    # 11-в, "below sonnet: no coordination") не завязан на mg вовсе и
+    # должен вести себя ИДЕНТИЧНО test_matrix_lead_binding_haiku_floor_wins_over_branch_3b
+    # (тот тест держит mg реальным) даже когда mg=None.
+    monkeypatch.setattr(jv, "mg", None)
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="scout",
+                            model="haiku", task_id="t-001", by="haiku",
+                            notes="B6: mg=None, floor branch unaffected -- must still fail with floor message"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW, config_text=CONFIG_LEAD_HAIKU)
+    assert code == 1
+    assert any("D-0058" in v and "ярус ниже sonnet" in v for v in violations), violations
+
+
+def test_b6_mg_none_rest_of_validator_unaffected_basis_critic_still_passes(monkeypatch):
+    # Ветка (4) basis="critic" тоже не завязана на mg -- тот же кейс, что
+    # test_b7_1_sonnet_by_builder_agent_critic_basis_ok, под mg=None.
+    monkeypatch.setattr(jv, "mg", None)
+    staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
+                            model="sonnet", task_id="t-001", witness="w", by="sonnet",
+                            basis="critic", notes="B6: mg=None, basis=critic branch unaffected"))
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_b6_mg_none_rest_of_validator_unaffected_basic_delegated_line(monkeypatch):
+    # Базовая проверка формата (delegated-событие, никакой матрицы
+    # D-0058 вовсе) -- не завязана на mg, должна пройти одинаково что с
+    # mg=None, что без monkeypatch.
+    monkeypatch.setattr(jv, "mg", None)
+    staged = _line(event="delegated", ts="2026-07-10T08:00:00", model="sonnet", task_id="t-002",
+                    notes="B6: mg=None, plain delegated line unaffected") + "\n"
+    code, violations = jv.decide(HEAD_TEXT + staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
 # ---- HEAD empty (first-ever commit / fresh deploy) ----
 
 def test_empty_head_first_delegated_must_be_t001():

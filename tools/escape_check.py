@@ -115,6 +115,131 @@ found in gateway/shadow_eval.py (the fixed default source+symbol for this
 repo), the same "compute what a human pastes into the pin" role --hash
 D-XXXX plays for decision sections.
 
+JUDGE ROLE FILE PIN (VG-3): a THIRD, independent pin class, added alongside
+the decision-section pin and the judge_prompt_pin (VG-2) above. Motive
+(calibration finding #6): R13's subscription judge form (a .claude/agents/
+role file carrying the calibrated prompt VERBATIM) has no carrier at all --
+today the prompt is hand-copied into an ad hoc dispatch each time it is
+used, nothing to diff a copy against, and a silent corruption of that copy
+(a truncated last sentence, a softened clause) invalidates the t-254
+13/13 equivalence point (D-0031) without anyone noticing. This pin does
+NOT hash-pin a stored digest the way VG-2 does; it does a DIRECT live
+comparison, because both sides of the comparison (the role file's fenced
+block, the source module's constant) are read from the SAME commit at
+validation time -- there is nothing to pre-compute and paste, unlike the
+DECISIONS_FULL.md sections VG-1 protects (a separately-affirmed carrier
+text) or JUDGE_SYSTEM_PROMPT's own VG-2 pin (added before this class
+existed, kept as-is, not migrated -- two independent pin classes for two
+independent things: VG-2 pins the constant's OWN drift across commits,
+VG-3 pins whether the role file's COPY of it still agrees with the
+constant right now).
+
+Two role-file blocks are pinned, because R13's subscription judge carries
+TWO different prompts for two different calls (verified by reading both
+source files, not assumed): gateway/shadow_eval.py's JUDGE_SYSTEM_PROMPT
+(the CREDENTIAL block -- compares two anonymized answers to one task,
+verdict is the last line's exact word EQUIVALENT/WORSE; this is the prompt
+the t-254 13/13 equivalence point was actually measured against) and
+tools/judge_client.py's JUDGE_INSTRUCTION (the ACCEPTANCE block -- a
+leaf-class dispatch's acceptance call, strict JSON {"accept": ..., "feedback":
+...}; this is what tools/judge_accept.py's gateway-alias path actually
+sends). Pinning only one would leave the other silently uncovered.
+
+MANDATORY (t-356 critic finding; supersedes an earlier, now-EXPIRED,
+OPTIONAL-UNTIL-CONFIGURED design -- history kept here on purpose, not
+deleted, because the reason it changed matters as much as the rule
+itself). At the time this pin class was first ADDED (t-354 builder pass),
+the subscription role file was delivered at
+.claude/agents/judge.md.candidate (a ".candidate" suffix, D-0069 class --
+a self-activating role file is never placed on its live path by its own
+builder) and was NOT yet wired into escape_allowlist.json, so making a
+bare "judge_role_pin" section mandatory at that moment would have broken
+the tree for no reason (the target it would check literally did not exist
+on the live path yet) -- the check was written to treat the section's
+absence as silent, matching the state of the world at that instant.
+That justification EXPIRED the moment the Lead renamed the file to
+.claude/agents/judge.md and wrote the "judge_role_pin" section into
+escape_allowlist.json (2026-08-05): from that point on, "the target
+doesn't exist yet" was simply false, and the surviving OPTIONAL contract
+stopped being a deliberate design choice and became an undetected hole --
+deleting the "judge_role_pin" section from a live, fully-wired allowlist
+silently turned VG-3 OFF (proven by the critic's own probe: removing
+judge_role_pin from a live-allowlist copy left run_validate() green,
+while removing judge_prompt_pin from the same copy correctly failed
+closed with "missing required section: judge_prompt_pin" -- two pins in
+the SAME file with opposite contracts, no detector for the drift, R10(в)
+unanswered for this class). Fix: check_judge_role_pin() now treats the
+section's absence exactly like check_judge_prompt_pin() does -- it is
+itself the FIRST violation appended ("missing required section:
+judge_role_pin", the identical wording pattern VG-2 already uses,
+verified distinguishable in text from every mismatch/drift message this
+function can also emit, e.g. "does not match ... byte-for-byte" or
+"frontmatter model ... does not match expected_model ..." -- an absent
+section and a present-but-wrong section are never the same diagnostic
+string, so whoever is fixing it knows which repair to make). There is no
+remaining "not configured, skip the check" path for this pin, for any
+future state, full stop.
+
+Structural fields (role_file, credential_source/credential_symbol,
+acceptance_source/acceptance_symbol, expected_model, evidence) mirror
+judge_prompt_pin's shape but hold no sha256: this pin compares the role
+file's block content directly against the freshly-extracted source
+constant on every run (see check_judge_role_pin()/`_check_role_pin_block()`),
+not against a value someone pasted in earlier -- so there is nothing to
+keep in sync by hand and no separate "recompute the hash" step. Extraction
+of both named constants reuses extract_judge_prompt() unchanged (same
+function VG-2 uses, called with a second symbol name) -- no second AST
+walker was written for this. DEFAULT_JUDGE_ROLE_FILE_REL/_ABS and
+DEFAULT_JUDGE_ACCEPTANCE_SOURCE_REL/_ABS are documentation-level module
+constants (naming the paths this mechanism is FOR) mirroring the
+DEFAULT_JUDGE_PROMPT_SOURCE_* constants already in this file; the actual
+test seam for check_judge_role_pin() is the same (pin_dict, repo_root)
+parameter pair every other check_* function in this module already takes
+-- most tests build a tmp_path tree with their own role-file fixture and
+pin dict, never touching the real tree at all; ONE dedicated test exercises
+the real, now-live .claude/agents/judge.md against REPO_ROOT (the "green
+path against the real role file" case), matching the pattern
+judge_prompt_pin's own live-repo tests already use.
+
+Fenced-block markers (CREDENTIAL_BLOCK_MARKER = "judge-credential-block",
+ACCEPTANCE_BLOCK_MARKER = "judge-acceptance-block") are matched as a
+whole-line, whitespace-trimmed "```<marker>" opening fence and a
+whole-line, whitespace-trimmed bare "```" closing fence -- see
+extract_fenced_block(). Newlines are normalized (CRLF/CR -> LF, the same
+_normalize_newlines() used everywhere else in this module) BEFORE line
+splitting, so a CRLF checkout of the role file (this repo converts *.md to
+CRLF on checkout, observed directly) still locates the fences and compares
+content correctly. TRAILING-NEWLINE DECISION (deliberate, tested both
+ways): block content is the exact list of lines strictly between the
+opening and closing fence lines, joined with "\n", with NOTHING added or
+stripped afterward. Both pinned constants (JUDGE_SYSTEM_PROMPT,
+JUDGE_INSTRUCTION) are themselves single-line strings with no embedded
+"\n", so a correctly-copied block is exactly one line and compares equal
+with no trailing newline on either side; a stray blank line left before
+the closing fence becomes a real trailing "\n" in the extracted content
+(via "\n".join([..., ""])) and therefore fails the comparison -- this is
+intentional strictness (byte-exact means byte-exact), not a bug to work
+around. A block with nothing at all between its fences (open immediately
+followed by close, or a single blank line -- both join to "") is reported
+as the distinct "empty" status rather than silently compared against a
+non-empty constant and failing with a less specific message. A fence that
+opens but is never closed before end of file is the distinct
+"unterminated" status, also fail-closed.
+
+Frontmatter model check: extract_frontmatter_model() reads the block
+between the FIRST line that is exactly "---" and the next line that is
+exactly "---" (both compared after the same newline normalization,
+whitespace-trimmed), then looks for a line matching the regex
+r"^model:\\s*(\\S+)\\s*$" (see _FRONTMATTER_MODEL_RE) -- the same shape
+every existing role file
+(.claude/agents/{critic,scout,builder,designer}.md) already uses. No
+frontmatter block at all and a frontmatter block with no "model:" line are
+reported as two distinct statuses ("no_frontmatter" vs "missing_model")
+with two distinct diagnostic strings, per the spec's explicit "frontmatter
+without model -- a separate clear error" requirement; a model value that
+does not match the pin's "expected_model" field is a third, separate
+diagnostic (a value mismatch, not an absence).
+
 Leg (a) contract -- whitespace-folded substring match (coordinator decision,
 N4 report follow-up, open question #1): leg (a) is a LIVENESS detector for
 the escape clause in its carrier (has the clause been deleted, or rewritten
@@ -152,6 +277,23 @@ DEFAULT_JUDGE_PROMPT_SOURCE_REL = os.path.join("gateway", "shadow_eval.py")
 DEFAULT_JUDGE_PROMPT_SOURCE_ABS = os.path.join(REPO_ROOT, DEFAULT_JUDGE_PROMPT_SOURCE_REL)
 DEFAULT_JUDGE_PROMPT_SYMBOL = "JUDGE_SYSTEM_PROMPT"
 
+# VG-3 (judge role file pin) documentation-level defaults -- see module
+# docstring "JUDGE ROLE FILE PIN (VG-3)". Not consumed directly by
+# check_judge_role_pin() (which reads paths from the allowlist's
+# judge_role_pin section, same pattern as judge_prompt_pin's "source"
+# field) -- these name the paths the mechanism is FOR, mirroring the
+# DEFAULT_JUDGE_PROMPT_SOURCE_* constants above. Live path (t-354, updated
+# 2026-08-05 after the Lead's .candidate -> .md rename): judge.md, not
+# judge.md.candidate.
+DEFAULT_JUDGE_ROLE_FILE_REL = os.path.join(".claude", "agents", "judge.md")
+DEFAULT_JUDGE_ROLE_FILE_ABS = os.path.join(REPO_ROOT, DEFAULT_JUDGE_ROLE_FILE_REL)
+DEFAULT_JUDGE_ACCEPTANCE_SOURCE_REL = os.path.join("tools", "judge_client.py")
+DEFAULT_JUDGE_ACCEPTANCE_SOURCE_ABS = os.path.join(REPO_ROOT, DEFAULT_JUDGE_ACCEPTANCE_SOURCE_REL)
+DEFAULT_JUDGE_ACCEPTANCE_SYMBOL = "JUDGE_INSTRUCTION"
+
+CREDENTIAL_BLOCK_MARKER = "judge-credential-block"
+ACCEPTANCE_BLOCK_MARKER = "judge-acceptance-block"
+
 REQUIRED_FIELDS = (
     "id",
     "carrier_file",
@@ -165,6 +307,16 @@ OPTIONAL_FIELDS = ("note",)
 ALL_FIELDS = REQUIRED_FIELDS + OPTIONAL_FIELDS
 
 JUDGE_PROMPT_PIN_FIELDS = ("source", "symbol", "sha256", "evidence")
+
+JUDGE_ROLE_PIN_FIELDS = (
+    "role_file",
+    "credential_source",
+    "credential_symbol",
+    "acceptance_source",
+    "acceptance_symbol",
+    "expected_model",
+    "evidence",
+)
 
 _DECISION_ID_RE = re.compile(r"^D-\d{4}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -297,6 +449,69 @@ def judge_prompt_sha256(text, symbol):
         return None, status
     digest = hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
     return digest, "ok"
+
+
+def extract_fenced_block(text, marker):
+    """Return (content, status) for the fenced code block opened by the
+    exact line "```<marker>" (whitespace-trimmed) and closed by the next
+    exact bare "```" line. status is one of: "ok", "not_found",
+    "duplicate", "empty", "unterminated". content is None unless
+    status=="ok". See module docstring "JUDGE ROLE FILE PIN (VG-3)" for
+    the marker format, the CRLF-normalization and trailing-newline
+    decisions (both documented there, not repeated here)."""
+    normalized = _normalize_newlines(text)
+    lines = normalized.split("\n")
+    open_marker = "```" + marker
+    open_indices = [i for i, line in enumerate(lines) if line.strip() == open_marker]
+
+    if not open_indices:
+        return None, "not_found"
+    if len(open_indices) > 1:
+        return None, "duplicate"
+
+    start = open_indices[0]
+    end = None
+    for j in range(start + 1, len(lines)):
+        if lines[j].strip() == "```":
+            end = j
+            break
+    if end is None:
+        return None, "unterminated"
+
+    content = "\n".join(lines[start + 1:end])
+    if content == "":
+        return None, "empty"
+    return content, "ok"
+
+
+_FRONTMATTER_MODEL_RE = re.compile(r"^model:\s*(\S+)\s*$")
+
+
+def extract_frontmatter_model(text):
+    """Return (model, status) for the YAML-ish frontmatter block between the
+    first line that is exactly "---" and the next line that is exactly
+    "---" (both whitespace-trimmed, after CRLF/CR->LF normalization).
+    status is one of: "ok", "no_frontmatter" (no opening/closing "---"
+    pair found), "missing_model" (frontmatter found, no "model:" line in
+    it). model is None unless status=="ok"."""
+    normalized = _normalize_newlines(text)
+    lines = normalized.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return None, "no_frontmatter"
+
+    end = None
+    for j in range(1, len(lines)):
+        if lines[j].strip() == "---":
+            end = j
+            break
+    if end is None:
+        return None, "no_frontmatter"
+
+    for line in lines[1:end]:
+        match = _FRONTMATTER_MODEL_RE.match(line)
+        if match:
+            return match.group(1), "ok"
+    return None, "missing_model"
 
 
 # ---------------------------------------------------------------------------
@@ -537,6 +752,158 @@ def check_judge_prompt_pin(root, repo_root):
     return errors
 
 
+def _check_role_pin_block(role_text, marker, label, repo_root, source_rel, symbol):
+    """One block's worth of check_judge_role_pin() work (credential or
+    acceptance): extract the fenced block from the role file, extract the
+    named constant from its source module (via extract_judge_prompt(),
+    the SAME AST extractor judge_prompt_pin uses), compare directly.
+    Returns a list of ASCII violation strings (empty means the block
+    holds)."""
+    errors = []
+    block_text, status = extract_fenced_block(role_text, marker)
+    if status == "not_found":
+        errors.append(
+            "judge_role_pin: %s block (marker '%s') not found in role file"
+            % (label, marker)
+        )
+        return errors
+    if status == "duplicate":
+        errors.append(
+            "judge_role_pin: %s block (marker '%s') appears more than once in role file"
+            % (label, marker)
+        )
+        return errors
+    if status == "unterminated":
+        errors.append(
+            "judge_role_pin: %s block (marker '%s') fence is not closed"
+            % (label, marker)
+        )
+        return errors
+    if status == "empty":
+        errors.append(
+            "judge_role_pin: %s block (marker '%s') is empty"
+            % (label, marker)
+        )
+        return errors
+
+    source_path = os.path.join(repo_root, source_rel)
+    source_text, err = read_text_file(source_path)
+    if source_text is None:
+        errors.append("judge_role_pin: %s source leg failed: %s" % (label, err))
+        return errors
+
+    value, sym_status = extract_judge_prompt(source_text, symbol)
+    if sym_status == "not_found":
+        errors.append(
+            "judge_role_pin: %s symbol %s not found in %s"
+            % (label, _ascii_safe(symbol), _ascii_safe(source_rel))
+        )
+        return errors
+    if sym_status == "duplicate":
+        errors.append(
+            "judge_role_pin: %s symbol %s assigned more than once in %s"
+            % (label, _ascii_safe(symbol), _ascii_safe(source_rel))
+        )
+        return errors
+    if sym_status == "not_a_string":
+        errors.append(
+            "judge_role_pin: %s symbol %s in %s is not a string literal"
+            % (label, _ascii_safe(symbol), _ascii_safe(source_rel))
+        )
+        return errors
+    if sym_status == "syntax_error":
+        errors.append(
+            "judge_role_pin: %s source file %s has a syntax error"
+            % (label, _ascii_safe(source_rel))
+        )
+        return errors
+
+    if block_text != value:
+        errors.append(
+            "judge_role_pin: %s block in role file does not match %s in %s "
+            "byte-for-byte (re-copy verbatim, no reformatting)"
+            % (label, _ascii_safe(symbol), _ascii_safe(source_rel))
+        )
+
+    return errors
+
+
+def check_judge_role_pin(root, repo_root):
+    """Validate the top-level "judge_role_pin" section (VG-3). Returns a
+    list of ASCII violation strings; empty means the pin holds. MANDATORY,
+    same fail-closed class as check_judge_prompt_pin() (VG-2): the
+    section's ABSENCE is itself a violation -- there is no "not
+    configured, skip the check" path. See module docstring "JUDGE ROLE
+    FILE PIN (VG-3)", section "MANDATORY (t-356 critic finding)" for why
+    this was ever anything else and why that reason expired."""
+    errors = []
+    if not isinstance(root, dict) or "judge_role_pin" not in root:
+        errors.append("missing required section: judge_role_pin")
+        return errors
+
+    pin = root["judge_role_pin"]
+    if not isinstance(pin, dict):
+        errors.append(
+            "section 'judge_role_pin' is not an object (type: %s)"
+            % type(pin).__name__
+        )
+        return errors
+
+    for field in JUDGE_ROLE_PIN_FIELDS:
+        if field not in pin:
+            errors.append("judge_role_pin: missing required field: %s" % field)
+    if errors:
+        return errors
+
+    def _is_nonempty_str(v):
+        return isinstance(v, str) and len(v) > 0
+
+    for field in JUDGE_ROLE_PIN_FIELDS:
+        if not _is_nonempty_str(pin.get(field)):
+            errors.append(
+                "judge_role_pin: field '%s' must be a non-empty string" % field
+            )
+    if errors:
+        return errors
+
+    role_path = os.path.join(repo_root, pin["role_file"])
+    role_text, err = read_text_file(role_path)
+    if role_text is None:
+        errors.append("judge_role_pin: role file leg failed: %s" % err)
+        return errors
+
+    model, model_status = extract_frontmatter_model(role_text)
+    if model_status == "no_frontmatter":
+        errors.append(
+            "judge_role_pin: role file has no frontmatter block "
+            "(missing leading '---' delimiters)"
+        )
+    elif model_status == "missing_model":
+        errors.append(
+            "judge_role_pin: role file frontmatter has no 'model' field"
+        )
+    elif model != pin["expected_model"]:
+        errors.append(
+            "judge_role_pin: frontmatter model %s does not match expected_model %s"
+            % (_ascii_safe(model), _ascii_safe(pin["expected_model"]))
+        )
+
+    errors.extend(
+        _check_role_pin_block(
+            role_text, CREDENTIAL_BLOCK_MARKER, "credential",
+            repo_root, pin["credential_source"], pin["credential_symbol"],
+        )
+    )
+    errors.extend(
+        _check_role_pin_block(
+            role_text, ACCEPTANCE_BLOCK_MARKER, "acceptance",
+            repo_root, pin["acceptance_source"], pin["acceptance_symbol"],
+        )
+    )
+
+    return errors
+
+
 def run_validate(allowlist_path, repo_root):
     """Return (ok, errors, entry_count)."""
     text, err = read_text_file(allowlist_path)
@@ -555,6 +922,9 @@ def run_validate(allowlist_path, repo_root):
     if isinstance(root, dict):
         all_errors.extend(
             "allowlist: %s" % e for e in check_judge_prompt_pin(root, repo_root)
+        )
+        all_errors.extend(
+            "allowlist: %s" % e for e in check_judge_role_pin(root, repo_root)
         )
 
     if entries is None:

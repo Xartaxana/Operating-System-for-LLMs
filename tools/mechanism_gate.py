@@ -287,6 +287,26 @@ def _resolve_ladder_rank(declared: str, config_text: str | None) -> int | None:
         всех точных совпадений берётся МАКСИМАЛЬНЫЙ ранг, не первый по
         порядку лестницы (работает и для не-Claude ступеней -- "tier:
         llama-3.3-70b-versatile" матчит не-Claude ступень lead точным id).
+        П5(a) (батч мелочей после калибровки №6, D-0081, остаток
+        критик-ревью t-350): family-strength guard (тот же, что уже
+        стоял на ветке (б) ниже) теперь ПРИМЕНЯЕТСЯ И ЗДЕСЬ -- до этой
+        правки точное id-совпадение обходило guard целиком (напр.
+        `tier: claude-sonnet-5`, а не голое `tier: sonnet`, резолвился
+        бы через reserve-ступень СЛАБЕЕ lead безо всякой проверки,
+        симметрично уже закрытому B3 edge (i), но НЕ покрытому там,
+        т.к. B3 edge (i) проверялся только на family-пути). Развилка
+        решена Lead (см. CURRENT_CONTEXT.md, битва "family-strength
+        guard на exact-id пути"): СРАВНИМЫЕ семейства (и ранг lead-
+        ступени, и ранг ступени-кандидата резолвятся в непустое
+        LEAD_FAMILIES-значение) -> guard активен, кандидат СЛАБЕЕ lead
+        по ordinal -- отбрасывается; НЕРЕЗОЛВИМОЕ семейство СТУПЕНИ-
+        КАНДИДАТА (lead_family(model_id) is None -- напр. не-Claude
+        model_id, точно совпавший с declared) -> guard молчит, ДОВЕРИЕ
+        ПОЗИЦИИ ЛЕСТНИЦЫ (конфиг = слово оператора: раз админ поставил
+        именно этот id на эту ступень, сравнивать не с чем -- позиция
+        авторитетна). Аналогично, если family lead-ступени НЕ резолвится
+        (не-Claude lead) -- guard тоже молчит (сравнивать не с чем,
+        та же логика, что уже была на ветке (б)).
     (б) иначе, когда declared -- Claude-модель (lead_family(declared) не
         None), family-матч РОВНО ОДНОЙ ступени лестницы того же семейства
         резолвится в её ранг -- АМБИГУИТЕТ (>=2 ступени того же семейства)
@@ -311,15 +331,27 @@ def _resolve_ladder_rank(declared: str, config_text: str | None) -> int | None:
     if not lead_models:
         return None  # B3: нет ступени lead -- лестничный путь не резолвит НИЧЕГО
     lead_model = lead_models[0]
+    lead_fam = lead_family(lead_model)
 
-    exact_matches = [rank for rank, model_id in ladder if declared == model_id]
+    # П5(a): family-strength guard, теперь И на точном id-совпадении --
+    # см. докстринг выше, "(а) ТОЧНОЕ совпадение", за полный разбор
+    # развилки (сравнимые семейства -> guard; нерезолвимое семейство
+    # ступени-кандидата -> доверие позиции лестницы).
+    exact_matches = []
+    for rank, model_id in ladder:
+        if declared != model_id:
+            continue
+        cand_fam = lead_family(model_id)
+        if lead_fam is not None and cand_fam is not None:
+            if LEAD_FAMILIES.index(cand_fam) > LEAD_FAMILIES.index(lead_fam):
+                continue  # нонсенс: ступень слабее lead семейством, отбрасываем
+        exact_matches.append(rank)
     if exact_matches:
         return max(exact_matches)  # B4: максимальный ранг среди совпавших
 
     declared_fam = lead_family(declared)
     if declared_fam is None:
         return None
-    lead_fam = lead_family(lead_model)
     candidates = []
     for rank, model_id in ladder:
         if lead_family(model_id) != declared_fam:

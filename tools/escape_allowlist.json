@@ -5,6 +5,15 @@
     "sha256": "179b700690a76bfad799123b1e70dc7d9d59d9a845886682acf77e63e56ae9e1",
     "evidence": "t-254 2026-07-21 13/13 vs manual (D-0031)"
   },
+  "judge_role_pin": {
+    "role_file": ".claude/agents/judge.md",
+    "credential_source": "gateway/shadow_eval.py",
+    "credential_symbol": "JUDGE_SYSTEM_PROMPT",
+    "acceptance_source": "tools/judge_client.py",
+    "acceptance_symbol": "JUDGE_INSTRUCTION",
+    "expected_model": "sonnet",
+    "evidence": "t-356 2026-08-05 liveness probe of the placed role file on the D-0031 set; credential point t-254 2026-07-21 13/13"
+  },
   "entries": [
     {
       "id": "critic-skipped-concession",

@@ -743,6 +743,86 @@ def test_decide_full_no_lead_reserve_opus_tier_opus_fails():
     assert "не lead" in reason
 
 
+# --- П5(a) (батч мелочей после калибровки №6, D-0081, остаток
+# критик-ревью t-350): family-strength guard теперь и на пути
+# ТОЧНОГО id-совпадения _resolve_ladder_rank -----------------------
+
+CONFIG_LADDER_EXACT_WEAKER_FAMILY_AT_RESERVE = """
+roles:
+  lead:
+    subscription:
+      model: claude-opus-5
+  reserve:
+    subscription:
+      model: claude-sonnet-5
+"""
+
+CONFIG_LADDER_EXACT_STRONGER_FAMILY_AT_RESERVE = """
+roles:
+  lead:
+    subscription:
+      model: claude-sonnet-5
+  reserve:
+    subscription:
+      model: claude-opus-5
+"""
+
+CONFIG_LADDER_EXACT_NON_CLAUDE_STEP_AT_RESERVE = """
+roles:
+  lead:
+    subscription:
+      model: claude-opus-5
+  reserve:
+    subscription:
+      model: llama-3.3-70b-versatile
+"""
+
+
+def test_resolve_ladder_rank_exact_match_weaker_family_at_reserve_does_not_resolve():
+    # Нонсенс-конфиг: reserve (позиционно ранг 4, ВЫШЕ lead) сконфигу-
+    # рирован МОДЕЛЬЮ СЛАБЕЕ lead семейством (sonnet < opus) -- ТОЧНОЕ
+    # id-совпадение с ней БОЛЬШЕ не резолвится вовсе (guard теперь и
+    # на этом пути, симметрично уже существующему B3 edge (i) на
+    # family-пути).
+    assert mg._resolve_ladder_rank(
+        "claude-sonnet-5", CONFIG_LADDER_EXACT_WEAKER_FAMILY_AT_RESERVE) is None
+
+
+def test_tier_declared_ok_exact_match_weaker_family_at_reserve_fails():
+    assert not mg.tier_declared_ok(
+        "claude-sonnet-5", "claude-opus-5", CONFIG_LADDER_EXACT_WEAKER_FAMILY_AT_RESERVE)
+
+
+def test_decide_full_exact_match_weaker_family_at_reserve_rejects():
+    code, reason = mg.decide_full(
+        msg="feat: механизм X\n\nось 1: покрыта\ntier: claude-sonnet-5",
+        block_extra="", staged=["CLAUDE.md"], map_text="## Ось 1 —\n",
+        config_text=CONFIG_LADDER_EXACT_WEAKER_FAMILY_AT_RESERVE)
+    assert code == 1
+    assert "не lead" in reason
+
+
+def test_resolve_ladder_rank_exact_match_stronger_family_at_reserve_still_resolves():
+    # Контрольная позитивная сторона того же guard'а: кандидат СИЛЬНЕЕ
+    # (не слабее) lead семейством -- guard НЕ отбрасывает, точное
+    # совпадение резолвится как раньше.
+    assert mg._resolve_ladder_rank(
+        "claude-opus-5", CONFIG_LADDER_EXACT_STRONGER_FAMILY_AT_RESERVE) == 4
+
+
+def test_resolve_ladder_rank_exact_match_non_claude_step_trusts_ladder_position():
+    # Развилка (решение Lead): семейство СТУПЕНИ-КАНДИДАТА нерезолвимо
+    # (не-Claude model_id) -- guard молчит, ДОВЕРИЕ ПОЗИЦИИ ЛЕСТНИЦЫ --
+    # точное совпадение резолвится (ранг 4), как и до правки.
+    assert mg._resolve_ladder_rank(
+        "llama-3.3-70b-versatile", CONFIG_LADDER_EXACT_NON_CLAUDE_STEP_AT_RESERVE) == 4
+
+
+def test_tier_declared_ok_exact_match_non_claude_step_trusts_ladder_position_passes():
+    assert mg.tier_declared_ok(
+        "llama-3.3-70b-versatile", "claude-opus-5", CONFIG_LADDER_EXACT_NON_CLAUDE_STEP_AT_RESERVE)
+
+
 def test_resolve_ladder_rank_duplicate_model_id_takes_max_rank():
     # B4 (пересдача, критик-блокер): один и тот же model_id на НЕСКОЛЬКИХ
     # ступенях (builder=1 И reserve=4, оба "claude-fable-5") -- резолюция

@@ -376,13 +376,69 @@ open-write-mode) проверяются на исходном, немаскир�
 содержащий буквальный `;`/`&`/`|` ВНУТРИ кавычек (напр. `echo "a;b" >
 logs/foo.jsonl`), был бы ошибочно разрезан на разные "statement'ы"
 этим более ранним слоем; для порт-очереди/будущего evidence.
+
+v4 (П4, батч мелочей после калибровки №6, D-0081) -- Set-Location +
+2>&1-в-commit-сообщении
+==================================================================
+
+Мотив спеки (чек 25, второе окно подряд): окно дало 2>&1 ×10,
+cd/Set-Location ×8, python -c ×7 при нулевом классе «журнал мимо
+Edit/Write». РАСХОЖДЕНИЕ СПЕКИ С РЕАЛЬНОСТЬЮ (правило 3, зафиксировано
+эмпирически, не домыслено): классы (а) cd-префикс и (б) 2>&1 УЖЕ
+существовали как машинный WARN-сторож в этом файле (и УЖЕ
+зарегистрированы в .claude/settings.json, PreToolUse/Bash|PowerShell)
+ДО этой правки -- "класс держался дисциплиной без сторожа" не
+подтвердилось буквально для cd/2>&1: сторож БЫЛ. РЕАЛЬНЫЙ, эмпирически
+подтверждённый пробел -- ДВА конкретных: (1) `_is_cd_prefix`
+распознавала ТОЛЬКО литерал "cd", НЕ "Set-Location" (PowerShell-форма
+того же класса, отсюда "cd/Set-Location" как одна пара в мотиве); (2)
+класс (б) проверял ` 2>&1` по СЫРОЙ команде без вырезания -m/--message
+текста git commit -- "2>&1" внутри ТЕКСТА commit-сообщения ложно
+триггерил WARN (а не про реальный shell-редирект stderr вовсе).
+
+ФИКС (1) -- CD_PREFIX_START_RE расширена на `cd|Set-Location`
+(регистронезависимо, `\\S` после обязателен для обеих форм -- как и
+раньше, "cd"/"Set-Location" БЕЗ аргумента не матчит). `_is_cd_prefix`
+и MSG_CD_PREFIX ПЕРЕИСПОЛЬЗОВАНЫ БЕЗ ИЗМЕНЕНИЙ (никакой второй копии
+хелпера/сообщения, D-0043) -- расширение живёт ЦЕЛИКОМ в регексе.
+Одиночный "Set-Location foo" (без &&/; ) остаётся НЕ триггером -- то
+же прежнее поведение хелпера (спека прямо запрещает расширять эту
+часть).
+
+ФИКС (2) -- новый хелпер _strip_commit_message_arg_only(): вырезает
+ТОЛЬКО значение -m/--message (COMMIT_MESSAGE_ARG_RE, ПЕРЕИСПОЛЬЗОВАН
+БЕЗ КОПИИ -- тот же регекс, что уже несёт _strip_commit_messages()
+ниже; тот же GIT_COMMIT_RE-гард: применяется, только если команда
+содержит "git commit"), НЕ трогая heredoc-тело (`-F - <<EOF`) --
+НАРОЧНО не переиспользован сам _strip_commit_messages() целиком, у
+которого heredoc-скраб УЖЕ ЕСТЬ: спека этого пункта называет буквально
+только форму `git commit -m "... 2>&1 ..."`, а heredoc-тело с "2>&1"
+внутри -- уже задокументированный, ОТДЕЛЬНЫЙ, НЕ трогаемый этой
+правкой остаток (см. F1 выше, тест
+test_f1_heredoc_body_2_greater_and_1_still_warns_class_b_raw_command_check
+-- существующее ожидание, аддитивность требует его не ослаблять).
+Используется ТОЛЬКО для проверки класса (б) внутри _collect_warn_classes
+-- классы (а)/(в) по-прежнему смотрят на СЫРУЮ команду (non-goals VG-5
+"не менять прочие WARN-классы" остаётся в силе везде, КРОМЕ этого
+одного, явно поручённого спекой П4 края).
+
+ИНВАРИАНТ (обязателен спекой, пин-тест в ОБЕ стороны): новый триггер
+(cd/Set-Location-префикс, 2>&1) -- ТОЛЬКО WARN, permissionDecision в
+его ответе НЕ появляется никогда (проходит через тот же
+_collect_warn_classes -> "Командная гигиена (WARN, не блокирует): ...",
+БЕЗ permissionDecision-ключа, ровно как классы (а)/(б)/(в) уже
+работали); класс (г) (журнал мимо Edit/Write) остаётся БЛОКИРУЮЩИМ
+без изменений -- при одновременном срабатывании блок ПОБЕЖДАЕТ (уже
+существующая семантика _collect_warn_classes-как-довесок к deny,
+см. F-53 выше), новый триггер лишь ДОБАВЛЯЕТСЯ рядом в
+additionalContext, не подменяет и не снимает deny.
 """
 
 import json
 import re
 import sys
 
-CD_PREFIX_START_RE = re.compile(r"^\s*cd\s+\S", re.IGNORECASE)
+CD_PREFIX_START_RE = re.compile(r"^\s*(?:cd|Set-Location)\s+\S", re.IGNORECASE)
 PY_DASH_C_RE = re.compile(r"\bpython\s+-c\b", re.IGNORECASE)
 PY_HEREDOC_RE = re.compile(r"\bpython\s+-\s*<<", re.IGNORECASE)
 PRINTF_ECHO_RE = re.compile(r"\b(printf|echo)\b", re.IGNORECASE)
@@ -566,6 +622,20 @@ def _is_python_dash_c(command: str) -> bool:
     return bool(PY_DASH_C_RE.search(command) or PY_HEREDOC_RE.search(command))
 
 
+def _strip_commit_message_arg_only(command: str) -> str:
+    """v4 (П4): вырезает ТОЛЬКО значение -m/--message git commit
+    (COMMIT_MESSAGE_ARG_RE, ПЕРЕИСПОЛЬЗОВАН -- тот же регекс, что и
+    _strip_commit_messages() ниже; тот же GIT_COMMIT_RE-гард), НЕ
+    трогая heredoc-тело -- см. докстринг раздела v4 выше, "ФИКС (2)"
+    за полное обоснование, почему heredoc намеренно НЕ задет здесь.
+    Используется ТОЛЬКО для проверки " 2>&1" класса (б) в
+    _collect_warn_classes -- классы (а)/(в) по-прежнему смотрят на
+    СЫРУЮ команду."""
+    if not GIT_COMMIT_RE.search(command):
+        return command
+    return COMMIT_MESSAGE_ARG_RE.sub(" ", command)
+
+
 def _strip_commit_messages(command: str) -> str:
     """v2 порт (1) -- вырезает -m/--message аргументы git commit ДО
     проверок (а)/(б): текст commit-сообщения (пути/подстроки журнала
@@ -695,7 +765,10 @@ def _collect_warn_classes(command: str) -> list[str]:
     triggered = []
     if _is_cd_prefix(command):
         triggered.append(MSG_CD_PREFIX)
-    if " 2>&1" in command:
+    # v4 (П4): "2>&1" внутри вырезаемого текста -m/--message commit-
+    # сообщения не должно триггерить -- см. докстринг раздела v4,
+    # "ФИКС (2)".
+    if " 2>&1" in _strip_commit_message_arg_only(command):
         triggered.append(MSG_REDIRECT_STDERR)
     if _is_python_dash_c(command):
         triggered.append(MSG_PYTHON_DASH_C)

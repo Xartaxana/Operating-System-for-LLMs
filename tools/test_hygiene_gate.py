@@ -155,6 +155,109 @@ def test_decide_word_boundary_mypython_does_not_trigger():
     assert output is None
 
 
+# ---------------------------------------------------------------------
+# v4 (П4, батч мелочей после калибровки №6) -- Set-Location-префикс +
+# 2>&1-в-commit-сообщении.
+# ---------------------------------------------------------------------
+
+
+def test_p4_set_location_prefix_and_amp_triggers():
+    exit_code, output = hygiene_gate.decide(_bash_payload("Set-Location gateway && python x.py"))
+    assert exit_code == 0
+    ctx = output["hookSpecificOutput"]["additionalContext"]
+    assert hygiene_gate.MSG_CD_PREFIX in ctx
+
+
+def test_p4_set_location_prefix_with_semicolon_triggers():
+    exit_code, output = hygiene_gate.decide(_bash_payload("Set-Location gateway; python x.py"))
+    assert exit_code == 0
+    ctx = output["hookSpecificOutput"]["additionalContext"]
+    assert hygiene_gate.MSG_CD_PREFIX in ctx
+
+
+def test_p4_bare_set_location_without_continuation_does_not_trigger():
+    # То же прежнее поведение хелпера, что и bare "cd" -- не расширяем.
+    exit_code, output = hygiene_gate.decide(_bash_payload("Set-Location gateway"))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_p4_set_location_case_insensitive():
+    exit_code, output = hygiene_gate.decide(_bash_payload("set-location gateway && ls"))
+    assert exit_code == 0
+    ctx = output["hookSpecificOutput"]["additionalContext"]
+    assert hygiene_gate.MSG_CD_PREFIX in ctx
+
+
+def test_p4_2_greater_and_1_inside_commit_message_does_not_trigger():
+    # Край спеки: "2>&1" ВНУТРИ текста -m/--message -- не про реальный
+    # shell-редирект, не должен триггерить класс (б).
+    command = 'git commit -m "note about pytest 2>&1 output redirection"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_p4_2_greater_and_1_outside_commit_message_still_triggers():
+    # Контроль: РЕАЛЬНЫЙ 2>&1 (не внутри -m-сообщения) по-прежнему
+    # триггерит -- фикс не ослабляет истинный позитив.
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload('git commit -m "clean message" && python x.py 2>&1')
+    )
+    assert exit_code == 0
+    ctx = output["hookSpecificOutput"]["additionalContext"]
+    assert hygiene_gate.MSG_REDIRECT_STDERR in ctx
+
+
+def test_p4_heredoc_body_2_greater_and_1_still_warns_regression():
+    # Регресс: heredoc-тело (-F - <<EOF) намеренно НЕ тронуто этим
+    # фиксом -- см. существующий test_f1_heredoc_body_2_greater_and_1_
+    # still_warns_class_b_raw_command_check выше (не дублируем, только
+    # подтверждаем через новый хелпер напрямую).
+    command = "git commit -F - <<EOF\nsome text with 2>&1 inside\nEOF"
+    stripped = hygiene_gate._strip_commit_message_arg_only(command)
+    assert "2>&1" in stripped
+
+
+# --- инвариант (обязателен спекой): новый класс -- ТОЛЬКО warn -------
+
+
+def test_p4_new_class_never_carries_permission_decision():
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload('Set-Location gateway && python x.py 2>&1')
+    )
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_PREFIX in hso["additionalContext"]
+    assert hygiene_gate.MSG_REDIRECT_STDERR in hso["additionalContext"]
+
+
+def test_p4_journal_block_class_still_carries_permission_decision_regression():
+    # Старый класс (г) по-прежнему БЛОК -- инвариант в ДРУГУЮ сторону,
+    # регресс не задет этой правкой.
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("echo done >> logs/routing-log.jsonl")
+    )
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+
+
+def test_p4_new_class_plus_journal_block_block_wins_new_class_added_alongside():
+    # "команда, попадающая И в новый класс, И в блокирующий журнальный:
+    # блок побеждает" -- И новый триггер (Set-Location) присутствует
+    # РЯДОМ в additionalContext, не подменяя причину блока.
+    command = "Set-Location gateway && echo evil >> logs/routing-log.jsonl"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+    assert hygiene_gate.MSG_CD_PREFIX in hso["additionalContext"]
+    assert hygiene_gate.MSG_JOURNAL_BLOCK in hso["additionalContext"]
+
+
 def test_decide_journal_bypass_redirect_blocks():
     # VG-5: класс (г) теперь БЛОК, не WARN -- permissionDecision="deny"
     # + permissionDecisionReason (ДОСЛОВНО MSG_JOURNAL_BLOCK), НЕ
