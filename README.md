@@ -42,6 +42,13 @@ docs/RULE_COVERAGE.md is the living rule-to-enforcer coverage map
 Routing policy for
 this repository lives in CLAUDE.md (auto-loaded) with tiered subagents
 in .claude/agents/ and the delegation journal in logs/routing-log.jsonl.
+docs/OPERATIONAL_NOTES.md holds the on-demand operational reference —
+system state (judge, traffic_kind, canonical test form), this machine's
+environment (proxy convention, litellm pin, deploy lessons) and the
+Claude Code cost baseline with the Architect's correction on the success
+metric. It is deliberately OFF the boot path (2026-08-05): every session
+paid for it, few needed it; read it before touching the proxy/gateway,
+the judge, or an argument about frontier share.
 delegation.config.yaml at the repo root is the single carrier of this
 deployment's function→model binding (D-0099): policy rules name only
 functions, the models live there, and the code gates
