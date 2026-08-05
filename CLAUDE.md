@@ -476,3 +476,21 @@ all sessions and subagents of this repo:
    case-insensitive) finding a known-present sample; a control with a
    different pattern proves the pipe, not absence; no control →
    emptiness = a call miss.
+7. **Temporary corruption is rolled back by a BYTE COPY, never by
+   `git checkout`** (2026-08-05; AO3 cross-point of 08-02 confirmed on
+   our side by a live case: our own critic corrupted the MONEY table
+   `logs/token_usage.xlsx` to prove a guard hole — the probe itself was
+   right and valuable — and rolled it back with `git checkout -- <file>`,
+   the idiom that wipes ANOTHER session's uncommitted changes to that
+   file along with the corruption). For any mutation/red probe, at
+   every tier: (а) take a byte copy BEFORE corrupting and restore FROM
+   IT; (б) `git checkout`/`git restore` is legal only when
+   `git status --porcelain -- <file>` was EMPTY before the corruption
+   — check it, never assume; (в) the rollback's witness is the
+   VERBATIM output of the comparison (hash or diff), not the word
+   "restored"; (г) do NOT corrupt a live artifact at all when a
+   function's verdict proves the same thing — corrupt a COPY of the
+   tree instead (precedent the same day: the judge-pin liveness probe
+   ran on corrupted COPIES, the live role file untouched). Detector:
+   calibration check 25 — its transcript scan covers this command
+   class.
