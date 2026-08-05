@@ -42,6 +42,11 @@ docs/RULE_COVERAGE.md is the living rule-to-enforcer coverage map
 Routing policy for
 this repository lives in CLAUDE.md (auto-loaded) with tiered subagents
 in .claude/agents/ and the delegation journal in logs/routing-log.jsonl.
+delegation.config.yaml at the repo root is the single carrier of this
+deployment's function→model binding (D-0099): policy rules name only
+functions, the models live there, and the code gates
+(tools/mechanism_gate.py, tools/journal_validator.py,
+tools/session_context.py) resolve the binding from it.
 
 ## Gateway
 

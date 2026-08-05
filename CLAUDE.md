@@ -182,6 +182,17 @@ own requirements that can conflict, the expected behavior is STATED
 — or the fork is explicitly handed down as a question; a spec
 silent on an edge its own requirements create is a dispatcher
 defect (check-23 attribution), not the performer's guess to make.
+Two sub-classes of that edge, both dispatcher defects when silent
+(2026-08-05, calibration #6, cases t-350 B1/B2): (i) TEMPORAL — an
+artifact the change itself brings into existence (a config, file or
+flag absent at spec time, present after): the behavior is stated for
+BOTH worlds, before and after it exists, and the spec says which
+move creates it; (ii) POSITIONAL — when the spec prescribes WHERE in
+existing logic a branch goes (order, precedence, before/after which
+check), it states the INVARIANT that position must preserve (what
+stays unreachable, what must still be refused), not the location
+alone: a position without its invariant is the dispatcher's guess
+handed to the performer as fact.
 A task with an INTERACTIVE surface (CLI/UI taking user input) adds an
 adversarial mini-battery to the DoD — size, nesting, encoding,
 empty/broken input; every limit/boundary the code introduces gets a
