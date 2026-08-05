@@ -60,6 +60,19 @@ content or under a sibling name, and the Lead places it at acceptance
 (2026-07-29, provisionally_validated): spec DRAFTING from a Lead
 intent brief, forks returned and never decided silently; the draft
 passes the Lead's acceptance before any dispatch uses it (D-0037).
+DRAFTING → designer BY DEFAULT (2026-08-05, operator's word after
+the calibration-#6 measurement: 5 designer dispatches all-time
+against 480 builder and 340 scout — the function existed but was
+never routed to): a WRITING dispatch whose spec carries ≥3 numbered
+items, or touches ≥3 files, is DRAFTED by the designer from a Lead
+intent brief; the Lead self-drafting it anyway is legal ONLY with a
+`dispatch_skipped` event (agent = designer, reason mandatory) — the
+same form R1 gives scout. This skip obligation holds even though
+designer is NOT a cheaper tier than the Lead (both Opus under the
+D-0099 binding): the routing motive here is CONTEXT ISOLATION and an
+independent drafting context, not model price, and R8's obligation
+follows the MOTIVE, not the price gap. Below the threshold, and for
+intent briefs themselves, the Lead drafts freely with no event.
 Pilot protocol and evidence:
 docs/tasks/2026-07-14_opus-designer-pilot.md.
 
@@ -124,7 +137,12 @@ as that tier's word (relaunch / honest record with basis / escalate).
 
 R8. **Universal skip rule (F-9)**: a task mapping to a cheaper tier,
 executed by the Lead itself, is legal ONLY with `dispatch_skipped`
-(agent = the skipped tier, reason mandatory) — at any tier. BATCHING
+(agent = the skipped tier, reason mandatory) — at any tier. The rule
+follows the ROUTING MOTIVE, not the price gap (2026-08-05): where a
+function is routed to for CONTEXT ISOLATION or an independent
+context rather than for a cheaper model, the skip event is owed just
+the same — a same-tier function absorbed by the coordinator is still
+an absorbed function. Standing case: designer drafting (R2). BATCHING
 (D-0081): a small builder-class edit NOT blocking the next step is
 never self-executed piecemeal by the coordinator — it accumulates in
 the session's list and goes to builder as ONE batched dispatch at a
