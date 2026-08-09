@@ -519,7 +519,26 @@ _GATE_MSG_TO_LABEL = {
 
 def _gate_attribution(cmd: str) -> set[str]:
     """Атрибуция классов НАПРЯМУЮ от hygiene_gate (не через classify_hygiene) --
-    эталон для сравнения в тесте равенства."""
+    эталон для сравнения в тесте равенства.
+
+    ПЕРЕСДАЧА 3 (координатор, БЛОКЕР П6): ветвится по `hygiene_gate.
+    V5_ENABLED` -- ОРАКУЛ теста теперь ТОЖЕ знает о выключателе (иначе
+    тест сравнивал бы V5-ветку classify_hygiene с V4-only оракулом,
+    структурно не способным поймать дрейф). `V5_ENABLED=True` -- зовёт
+    `hygiene_gate._collect_v5_signals` НАПРЯМУЮ (не через
+    classify_hygiene -- иначе тест сравнивал бы функцию саму с собой)."""
+    if hygiene_gate.V5_ENABLED:
+        signals = hygiene_gate._collect_v5_signals(cmd)
+        labels = set()
+        if signals["redirect"]:
+            labels.add("2>&1")
+        if signals["cd"]:
+            labels.add("cd/Set-Location")
+        if signals["pyc"]:
+            labels.add("python -c/heredoc")
+        if signals["journal"]:
+            labels.add("журнал мимо Edit/Write")
+        return labels
     labels = {_GATE_MSG_TO_LABEL[msg] for msg in hygiene_gate._collect_warn_classes(cmd)}
     if hygiene_gate._is_journal_bypass(cmd):
         labels.add("журнал мимо Edit/Write")
@@ -538,12 +557,59 @@ _GATE_ATTRIBUTION_MATRIX = [
     'grep -c ">" logs/routing-log.jsonl',                           # известный FP -- кавычённый >
     'cd tools && python -c "print(1)" 2>&1',                        # компаунд: а+б+в
     'cd tools && echo x >> logs/routing-log.jsonl && python -c "1" 2>&1',  # компаунд: а+б+в+г
+    # V5-задача (маскировка вложенных payload'ов, tools/hygiene_gate.py):
+    # три команды класса "паттерн лежит ДАННЫМИ внутри -c/heredoc payload'а".
+    # ПЕРЕСДАЧА 3 (П6): classify_hygiene() теперь ВЕТВИТСЯ по V5_ENABLED
+    # (см. её докстринг) -- тест равенства (параметризован по ОБОИМ
+    # состояниям выключателя, см. ниже) проверяет СОГЛАСИЕ
+    # classify_hygiene() с прямой атрибуцией hygiene_gate НА КАЖДОМ
+    # состоянии отдельно (оракул `_gate_attribution` тоже ветвится) -- не
+    # то, что паттерн-как-данные распознан ОДИНАКОВО в обеих ветках (он
+    # НЕ распознаётся одинаково, см.
+    # test_classify_hygiene_diverges_between_switch_states_pattern_as_data
+    # ниже -- это и есть регресс-детектор дрейфа П6).
+    'python -c "cd fake && echo x >> logs/routing-log.jsonl 2>&1"',  # паттерн как данные внутри -c
+    "python - <<EOF\ncd fake && echo x >> logs/routing-log.jsonl 2>&1\nEOF",  # то же внутри heredoc
+    'echo "python -c not real" && python -c "print(1)" 2>&1',        # паттерн ВНЕ payload'а -- код
 ]
 
 
 @pytest.mark.parametrize("cmd", _GATE_ATTRIBUTION_MATRIX)
-def test_classify_hygiene_matches_gate_attribution(cmd):
+@pytest.mark.parametrize("v5", [False, True])
+def test_classify_hygiene_matches_gate_attribution(monkeypatch, v5, cmd):
+    # ПЕРЕСДАЧА 3 (координатор, БЛОКЕР П6): параметризовано по ОБОИМ
+    # состояниям выключателя -- было (пересдачи 1/2) неявно только
+    # V5_ENABLED=False (модульный default на диске), тест НИКОГДА не
+    # проверял V5-ветку classify_hygiene вовсе.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", v5)
     assert set(pa.classify_hygiene(cmd)) == _gate_attribution(cmd)
+
+
+def test_classify_hygiene_diverges_between_switch_states_newline_cd(monkeypatch):
+    # П6 (координатор, БЛОКЕР) -- РЕГРЕСС-ДЕТЕКТОР ДРЕЙФА, ловит ПО
+    # ПОСТРОЕНИЮ класс "измеритель не знает о выключателе". ПЕРЕСДАЧА 4
+    # (перепроектировка, слово оператора): прежний пример этого теста
+    # (" 2>&1" как данные внутри `-c` payload'а, часть 1) БОЛЬШЕ НЕ
+    # РАЗЛИЧАЕТ ветки -- часть 1 (маскировка) удалена целиком, V5 больше
+    # НЕ прячет payload'ы от классов, V4 и V5 теперь СОГЛАСНЫ на этом
+    # примере (см. коммит истории для прежней формы теста). Новый
+    # различитель -- В3 (newline ТРЕТИЙ разделитель cd-префикса, ТОЛЬКО
+    # V5): `cd <корень>\ngit status` (перевод строки, БЕЗ `&&`/`;`) --
+    # V4-ветка (`_is_cd_prefix`, не тронута) НЕ засчитывает класс
+    # "cd/Set-Location" (требует `&&`/`;` ГДЕ-ТО в команде, перевода
+    # строки не видит вовсе); V5-ветка (`_is_cd_prefix_v5`, newline
+    # третий разделитель) -- ЗАСЧИТЫВАЕТ. Если classify_hygiene()
+    # когда-либо ПЕРЕСТАНЕТ реально ветвиться по V5_ENABLED, оба набора
+    # совпадут и этот тест провалится -- structural, не полагается на
+    # то, что кто-то не забудет обновить оракул вручную.
+    command = f"cd {hygiene_gate._REPO_ROOT_NAME}\ngit status"
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", False)
+    v4_classes = set(pa.classify_hygiene(command))
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    v5_classes = set(pa.classify_hygiene(command))
+    assert v4_classes != v5_classes
+    assert "cd/Set-Location" not in v4_classes
+    assert "cd/Set-Location" in v5_classes
 
 
 # --- П6: main() --summary -- новый блок, D3 (нули всегда), позиция, заголовок ---

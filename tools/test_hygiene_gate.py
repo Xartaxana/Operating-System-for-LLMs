@@ -40,6 +40,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import hygiene_gate  # noqa: E402
@@ -71,12 +73,22 @@ def test_decide_non_bash_tool_is_silent_pass():
     assert output is None
 
 
+# M9 (t-378, ВЫКЛЮЧАТЕЛЬ ВКЛЮЧЁН координатором 2026-08-09 -- ДЕФОЛТ ДИСКА
+# ТЕПЕРЬ True, гейт в проде): пин ПЕРЕВЁРНУТ на новое дефолтное поведение.
+# ПРИЧИНА (записана ещё в пересдаче 3, П3): target "foo" -- НЕ корень
+# репозитория -- под моделью cd-в-корень (П3) ЛЮБАЯ non-root цель -- WARN
+# (MSG_CD_NON_ROOT_WARN), не MSG_CD_PREFIX (тот резервирован ТОЛЬКО за
+# целью-корнем, деньги). Раньше (до включения) это было "предсказанной
+# инверсией при будущем гипотетическом V5_ENABLED=True"; теперь это --
+# фактическое поведение диска по умолчанию, не гипотеза.
 def test_decide_powershell_tool_checked_too():
     payload = {"tool_name": "PowerShell", "tool_input": {"command": "cd foo && ls"}}
     exit_code, output = hygiene_gate.decide(payload)
     assert exit_code == 0
     assert output is not None
-    assert hygiene_gate.MSG_CD_PREFIX in output["hookSpecificOutput"]["additionalContext"]
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
 
 
 def test_decide_clean_command_is_silent_pass():
@@ -85,18 +97,29 @@ def test_decide_clean_command_is_silent_pass():
     assert output is None
 
 
+# M9 (t-378, ВЫКЛЮЧАТЕЛЬ ВКЛЮЧЁН координатором 2026-08-09 -- ДЕФОЛТ ДИСКА
+# ТЕПЕРЬ True): пин ПЕРЕВЁРНУТ. ПРИЧИНА: target "gateway" -- НЕ корень
+# репозитория -- под моделью cd-в-корень (П3) остаётся WARN
+# (MSG_CD_NON_ROOT_WARN), не MSG_CD_PREFIX (тот теперь ТОЛЬКО для цели =
+# корень репозитория).
 def test_decide_cd_prefix_and_amp_triggers():
     exit_code, output = hygiene_gate.decide(_bash_payload("cd gateway && python x.py"))
     assert exit_code == 0
-    ctx = output["hookSpecificOutput"]["additionalContext"]
-    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
 
 
+# M9 (t-378, ВЫКЛЮЧАТЕЛЬ ВКЛЮЧЁН координатором 2026-08-09 -- ДЕФОЛТ ДИСКА
+# ТЕПЕРЬ True): пин ПЕРЕВЁРНУТ, та же причина, что у
+# test_decide_cd_prefix_and_amp_triggers выше -- target "gateway" не
+# корень -> WARN (MSG_CD_NON_ROOT_WARN), не MSG_CD_PREFIX.
 def test_decide_cd_prefix_with_semicolon_triggers():
     exit_code, output = hygiene_gate.decide(_bash_payload("cd gateway; python x.py"))
     assert exit_code == 0
-    ctx = output["hookSpecificOutput"]["additionalContext"]
-    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
 
 
 def test_decide_bare_cd_without_continuation_does_not_trigger():
@@ -161,18 +184,27 @@ def test_decide_word_boundary_mypython_does_not_trigger():
 # ---------------------------------------------------------------------
 
 
+# M9 (t-378, ВЫКЛЮЧАТЕЛЬ ВКЛЮЧЁН координатором 2026-08-09 -- ДЕФОЛТ ДИСКА
+# ТЕПЕРЬ True): пин ПЕРЕВЁРНУТ, та же причина, что у
+# test_decide_cd_prefix_and_amp_triggers выше: target "gateway" не
+# корень -> WARN (MSG_CD_NON_ROOT_WARN), не MSG_CD_PREFIX.
 def test_p4_set_location_prefix_and_amp_triggers():
     exit_code, output = hygiene_gate.decide(_bash_payload("Set-Location gateway && python x.py"))
     assert exit_code == 0
-    ctx = output["hookSpecificOutput"]["additionalContext"]
-    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
 
 
+# M9 (t-378, ВЫКЛЮЧАТЕЛЬ ВКЛЮЧЁН координатором 2026-08-09 -- ДЕФОЛТ ДИСКА
+# ТЕПЕРЬ True): пин ПЕРЕВЁРНУТ, та же PowerShell-форма точка-с-запятой,
+# та же причина (target "gateway" не корень -> WARN).
 def test_p4_set_location_prefix_with_semicolon_triggers():
     exit_code, output = hygiene_gate.decide(_bash_payload("Set-Location gateway; python x.py"))
     assert exit_code == 0
-    ctx = output["hookSpecificOutput"]["additionalContext"]
-    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
 
 
 def test_p4_bare_set_location_without_continuation_does_not_trigger():
@@ -182,11 +214,16 @@ def test_p4_bare_set_location_without_continuation_does_not_trigger():
     assert output is None
 
 
+# M9 (t-378, ВЫКЛЮЧАТЕЛЬ ВКЛЮЧЁН координатором 2026-08-09 -- ДЕФОЛТ ДИСКА
+# ТЕПЕРЬ True): пин ПЕРЕВЁРНУТ, та же причина: target "gateway"
+# (регистронезависимо) не корень -> WARN (MSG_CD_NON_ROOT_WARN), не
+# MSG_CD_PREFIX.
 def test_p4_set_location_case_insensitive():
     exit_code, output = hygiene_gate.decide(_bash_payload("set-location gateway && ls"))
     assert exit_code == 0
-    ctx = output["hookSpecificOutput"]["additionalContext"]
-    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
 
 
 def test_p4_2_greater_and_1_inside_commit_message_does_not_trigger():
@@ -222,14 +259,22 @@ def test_p4_heredoc_body_2_greater_and_1_still_warns_regression():
 # --- инвариант (обязателен спекой): новый класс -- ТОЛЬКО warn -------
 
 
+# M9 (t-378, ВЫКЛЮЧАТЕЛЬ ВКЛЮЧЁН координатором 2026-08-09 -- ДЕФОЛТ ДИСКА
+# ТЕПЕРЬ True): пин ПЕРЕВЁРНУТ. ПРИЧИНА -- сама СУТЬ финального дизайна:
+# класс (б) " 2>&1" здесь ОПРЕДЕЛЁННЫЙ (нет кавычек/heredoc вокруг него в
+# "python x.py 2>&1") -> DENY; cd(gateway) -- не корень -> WARN
+# (MSG_CD_NON_ROOT_WARN, не MSG_CD_PREFIX). "Новый класс НИКОГДА не несёт
+# permissionDecision" перестало быть верным -- это и есть цель промоции
+# класса 2>&1 (deny требует определённости, но этот 2>&1 определён).
 def test_p4_new_class_never_carries_permission_decision():
     exit_code, output = hygiene_gate.decide(
         _bash_payload('Set-Location gateway && python x.py 2>&1')
     )
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
-    assert "permissionDecision" not in hso
-    assert hygiene_gate.MSG_CD_PREFIX in hso["additionalContext"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
     assert hygiene_gate.MSG_REDIRECT_STDERR in hso["additionalContext"]
 
 
@@ -244,6 +289,10 @@ def test_p4_journal_block_class_still_carries_permission_decision_regression():
     assert hso["permissionDecision"] == "deny"
 
 
+# M9 (t-378, ВЫКЛЮЧАТЕЛЬ ВКЛЮЧЁН координатором 2026-08-09 -- ДЕФОЛТ ДИСКА
+# ТЕПЕРЬ True): пин ПЕРЕВЁРНУТ -- target "gateway" не корень -> текст
+# MSG_CD_NON_ROOT_WARN, не MSG_CD_PREFIX, рядом с блоком журнала (блок
+# журнала сам остаётся первой причиной, не задет).
 def test_p4_new_class_plus_journal_block_block_wins_new_class_added_alongside():
     # "команда, попадающая И в новый класс, И в блокирующий журнальный:
     # блок побеждает" -- И новый триггер (Set-Location) присутствует
@@ -254,7 +303,7 @@ def test_p4_new_class_plus_journal_block_block_wins_new_class_added_alongside():
     hso = output["hookSpecificOutput"]
     assert hso["permissionDecision"] == "deny"
     assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
-    assert hygiene_gate.MSG_CD_PREFIX in hso["additionalContext"]
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
     assert hygiene_gate.MSG_JOURNAL_BLOCK in hso["additionalContext"]
 
 
@@ -326,6 +375,36 @@ def test_vg5_sed_without_dash_i_does_not_block():
     assert output is None
 
 
+# M9 (пересдача 1, ЗАДОКУМЕНТИРОВАНО -- W3-сценарий спеки): под
+# V5_ENABLED=True (пересдачи 1-2, ДО фикса П2) `permissionDecision`
+# оставался "deny", но `permissionDecisionReason` ИНВЕРТИРОВАЛСЯ: ЧАСТЬ 1
+# маскировала тело -c ПЕРЕД проверкой класса (г) -- "routing-log.jsonl"
+# внутри payload'а не было видно _is_journal_bypass(masked),
+# journal_hit=False; ЧАСТЬ 3 (write-намерение, читает СЫРОЕ тело)
+# находила `open(...,'a')` и денала САМА, но через MSG_PYTHON_DASH_C, не
+# MSG_JOURNAL_BLOCK.
+#
+# ПЕРЕСДАЧА 3 (координатор, БЛОКЕР П2, ЭТОТ ПИН СНОВА ЗЕЛЁНЫЙ, УЖЕ НЕ
+# ИНВЕРТИРУЕТСЯ -- подтверждено эмпирически, безопасный in-process
+# красный прогон): П2 прогоняет _is_journal_bypass ПОВТОРНО по СЫРОМУ
+# телу payload'а (см. докстринг _collect_v5_signals в hygiene_gate.py) --
+# `open('logs/routing-log.jsonl','a')` уже входит в набор _has_write_form
+# (OPEN_WRITE_MODE_RE), значит journal_hit СНОВА становится True для
+# ЭТОГО конкретного примера, и permissionDecisionReason возвращается к
+# MSG_JOURNAL_BLOCK -- ВСЕ ТРИ ассерции этого теста, как написаны,
+# ПРОХОДЯТ под V5_ENABLED=True без изменений тела.
+#
+# ПЕРЕСДАЧА 4 (перепроектировка, слово оператора): части 1/3 УДАЛЕНЫ
+# ЦЕЛИКОМ -- этот пин ОСТАЁТСЯ зелёным (не инвертируется), ПРИЧИНА ТА ЖЕ
+# -- `_is_journal_bypass` всегда читала СЫРУЮ команду напрямую (не через
+# маскировку), класс (г) никогда не зависел от масковки/write-намерения
+# вовсе (см. tools/hygiene_gate.py -- В4). Ссылки на
+# `test_v5_write_intent_inside_dashc_denies_via_python_class_not_journal_
+# class`/`test_v5_p2_open_write_mode_inside_dashc_denies_via_journal_
+# class_after_blocker_fix` выше -- ИСТОРИЧЕСКИЕ (эти тесты удалены/
+# переименованы в пересдаче 4 вместе с частью 3 -- см. текущий
+# `test_v5_open_write_mode_inside_dashc_denies_via_journal_class` за тот
+# же пример).
 def test_vg5_block_python_open_append_mode():
     command = "python -c \"open('logs/routing-log.jsonl','a').write('x')\""
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
@@ -470,6 +549,9 @@ def test_f53_block_carries_both_deny_fields_and_matching_additional_context():
     )
 
 
+# M9 (t-378, ВЫКЛЮЧАТЕЛЬ ВКЛЮЧЁН координатором 2026-08-09 -- ДЕФОЛТ ДИСКА
+# ТЕПЕРЬ True): пин ПЕРЕВЁРНУТ -- target "gateway" не корень -> WARN-текст
+# MSG_CD_NON_ROOT_WARN, не MSG_CD_PREFIX, рядом с блоком журнала.
 def test_f53_block_plus_other_warn_class_both_texts_present_not_overwritten():
     # DoD п.2: при одновременном срабатывании WARN-класса (а)/(б)/(в)
     # его текст присутствует В additionalContext РЯДОМ с причиной
@@ -482,20 +564,26 @@ def test_f53_block_plus_other_warn_class_both_texts_present_not_overwritten():
     assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
     ctx = hso["additionalContext"]
     assert hygiene_gate.MSG_JOURNAL_BLOCK in ctx
-    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in ctx
 
 
+# M9 (t-378, ВЫКЛЮЧАТЕЛЬ ВКЛЮЧЁН координатором 2026-08-09 -- ДЕФОЛТ ДИСКА
+# ТЕПЕРЬ True): пин ПЕРЕВЁРНУТ. ПРИЧИНА -- сама СУТЬ финального дизайна:
+# " 2>&1" (класс б) в "python x.py 2>&1" ОПРЕДЕЛЁННЫЙ (нет кавычек/
+# heredoc) -> DENY; cd(gateway) -- не корень -> WARN
+# (MSG_CD_NON_ROOT_WARN). "Пустой WARN-only вызов" перестал быть
+# пустым-от-deny -- вызов теперь ДЕЙСТВИТЕЛЬНО несёт deny-поля (та же
+# причина, что test_p4_new_class_never_carries_permission_decision
+# выше) -- имя теста ("has_no_deny_fields") теперь описывает то, что
+# БОЛЬШЕ НЕ ВЕРНО для этой команды; функция сохранена (не переименована)
+# для непрерывности M9-отслеживания, тело перевёрнуто.
 def test_f53_pure_warn_call_has_no_deny_fields_regression():
-    # DoD п.2 (регресс существующего поведения): вызов, который
-    # триггерит ТОЛЬКО WARN-классы (а)/(б)/(в) -- БЕЗ класса (г) --
-    # НЕ несёт ни permissionDecision, ни permissionDecisionReason;
-    # additionalContext остаётся в прежнем WARN-формате.
     exit_code, output = hygiene_gate.decide(_bash_payload("cd gateway && python x.py 2>&1"))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
-    assert "permissionDecision" not in hso
-    assert "permissionDecisionReason" not in hso
-    assert hygiene_gate.MSG_CD_PREFIX in hso["additionalContext"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
     assert hygiene_gate.MSG_REDIRECT_STDERR in hso["additionalContext"]
 
 
@@ -1003,6 +1091,42 @@ def test_f1_critic_repro2_python_heredoc_after_git_commit_still_blocks():
     assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+# M9 (пересдача 1, ЗАДОКУМЕНТИРОВАНО, РАСХОЖДЕНИЕ СПЕКИ С РЕАЛЬНОСТЬЮ
+# правило 3): инвертируется при V5_ENABLED=True (КРАСНЫЙ прогон,
+# эмпирика). Спека M9 атрибутирует этот класс инверсии МАСКИРОВКЕ
+# ("маскировка это отменяет намеренно") -- ЭМПИРИЧЕСКИ НЕ подтвердилось:
+# `git commit -F - <<EOF` -- НЕ python/python3/py-heredoc,
+# _mask_nested_payloads его вообще не трогает (нет литерала
+# "python"/"py" перед "-...<<"), `masked` здесь идентичен исходной
+# команде. РЕАЛЬНАЯ причина (пересдача 1) -- сама промоция класса (б)
+# WARN->deny (часть 2) поверх УЖЕ СУЩЕСТВОВАВШЕГО (до этой задачи, см.
+# докстринг COMMIT_HEREDOC_RE выше) остатка: " 2>&1" внутри
+# git-commit-heredoc-тела не вырезался `_strip_commit_message_arg_only`
+# (та вырезает только -m/--message, НЕ heredoc-тело `-F - <<EOF`) --
+# уже раньше давало ложный WARN, тогда давало бы ложный DENY.
+#
+# ПЕРЕСДАЧА 2 (координатор, БЛОКЕР 1, ФИКС): класс (б) внутри
+# `_decide_v5` тогда стал читать `_strip_commit_messages` (не
+# `_strip_commit_message_arg_only`) -- heredoc-тело commit-сообщения
+# ПОЛНОСТЬЮ вырезалось ДО проверки " 2>&1". ЭТОТ ПИН ПРОДОЛЖАЛ быть
+# инвертированным (пересдачи 2-4) -- вырезание убирало саму ВИДИМОСТЬ
+# " 2>&1" классу (б) СОВСЕМ, команда становилась ПОЛНОСТЬЮ тихой
+# (`output is None`), а не "остаётся WARN, просто не денаит", как
+# ожидали старые ассерции этого теста.
+#
+# ПЕРЕСДАЧА 5 (координатор, финальный фикс, третий критик-вход, Ф2,
+# ЭТОТ ПИН СНОВА ЗЕЛЁНЫЙ, УЖЕ НЕ ИНВЕРТИРУЕТСЯ -- подтверждено
+# эмпирически, безопасный in-process красный прогон): класс (б)
+# полностью заменён на `_collect_redirect_signal` (кавычки через
+# `_mask_quoted_segments`, НЕ git-специфичное вырезание) -- heredoc
+# теперь трактуется ЕДИНООБРАЗНО (любой `<<` вне кавычек на
+# маскированном тексте -> WARN, не тишина, не deny). Для ЭТОЙ команды:
+# " 2>&1" видим (heredoc-тело -- НЕ кавычки), "<<" тоже видим (сам
+# heredoc-опенер) -> WARN с MSG_REDIRECT_STDERR -- ВСЕ ассерции этого
+# теста, как написаны, СНОВА проходят под V5_ENABLED=True без изменений
+# тела (V4 и V5 теперь СОГЛАСНЫ на этом примере). См.
+# test_v5_git_commit_heredoc_2_greater_1_now_warns_uniform_heredoc_rule
+# ниже за тот же пример явно, под monkeypatch.
 def test_f1_heredoc_body_2_greater_and_1_still_warns_class_b_raw_command_check():
     # Критик t-339: фикс закрывает ТОЛЬКО класс (г) -- классы (а)/(б)/(в)
     # считаются по СЫРОЙ команде (_collect_warn_classes), скраб их не
@@ -1119,16 +1243,36 @@ def test_echo_json_v2_regress_evidence_exit0_no_stdout():
     assert result.stderr == b""
 
 
+# M9 (t-378, ВЫКЛЮЧАТЕЛЬ ВКЛЮЧЁН координатором 2026-08-09 -- ДЕФОЛТ ДИСКА
+# ТЕПЕРЬ True): пин ПЕРЕВЁРНУТ -- target "gateway" не корень -> WARN-текст
+# MSG_CD_NON_ROOT_WARN, не MSG_CD_PREFIX; " 2>&1" здесь ОПРЕДЕЛЁННЫЙ (вне
+# кавычек -c-аргумента, heredoc нет) -> реально ДЕНАЕТ теперь (не только
+# WARN); python -c остаётся отдельным WARN (класс в никогда не денает).
 def test_decide_multiple_classes_all_listed():
     command = 'cd gateway && python -c "print(1)" 2>&1'
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
-    ctx = output["hookSpecificOutput"]["additionalContext"]
-    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+    ctx = hso["additionalContext"]
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in ctx
     assert hygiene_gate.MSG_REDIRECT_STDERR in ctx
     assert hygiene_gate.MSG_PYTHON_DASH_C in ctx
 
 
+# M9 (пересдача 1, ЗАДОКУМЕНТИРОВАНО): под V5_ENABLED=True (пересдачи
+# 1-2, ДО П3) инвертировался -- target "x" НЕ являлся "gateway" (B4
+# исключение неприменимо в СТАРОЙ модели), значит cd-префикс денался как
+# ОБЫЧНЫЙ (MSG_CD_PREFIX). ПЕРЕСДАЧА 3 (координатор, БЛОКЕР П3, ЭТОТ ПИН
+# СНОВА ЗЕЛЁНЫЙ, УЖЕ НЕ ИНВЕРТИРУЕТСЯ -- подтверждено эмпирически,
+# безопасный in-process красный прогон): условие ИНВЕРТИРОВАНО -- денает
+# ТОЛЬКО target == корень репозитория; "x" НЕ является корнем (та же
+# причина, что и не был "gateway"), значит под НОВОЙ моделью "cd x && y"
+# -- WARN (MSG_CD_NON_ROOT_WARN), permissionDecision СНОВА отсутствует --
+# ассерция теста, как написана, СНОВА проходит без изменений тела (два
+# независимых инверсии условия "компенсировали" друг друга для ЭТОГО
+# конкретного примера чисто случайно, не по замыслу).
 def test_decide_hook_specific_output_shape():
     exit_code, output = hygiene_gate.decide(_bash_payload("cd x && y"))
     assert exit_code == 0
@@ -1178,6 +1322,23 @@ def test_echo_json_clean_command_exit0_no_stdout():
     assert result.stderr == ""
 
 
+# M9 (t-378, ВЫКЛЮЧАТЕЛЬ ВКЛЮЧЁН координатором 2026-08-09 -- ДЕФОЛТ ДИСКА
+# ТЕПЕРЬ True): пин ПЕРЕВЁРНУТ -- та же причина, что
+# test_f53_pure_warn_call_has_no_deny_fields_regression выше: cd(gateway)
+# не корень -> WARN, но " 2>&1" -- реальный (определённый) DENY.
+#
+# СМОК-ТЕСТ УРОВНЯ SUBPROCESS -- ЗАВЯЗАН НА ДЕФОЛТ ДИСКА (задокументировано
+# явно, как потребовал координатор): этот тест спавнит `hygiene_gate.py`
+# ОТДЕЛЬНЫМ процессом (`_run_hook`), который читает `V5_ENABLED` из
+# РЕАЛЬНОГО файла на диске -- monkeypatch здесь НЕ работает (другой
+# процесс, своя копия модуля). Тест пинует ПОВЕДЕНИЕ ПРОДА В ТОЧНОСТИ,
+# каким его увидит реальный харнесс -- в этом его ценность (единственная
+# форма в этом файле, которая ловит "выключатель откатили на диске, а
+# код забыли"). Он ОБЯЗАН упасть, если константу когда-либо откатят на
+# `False` -- это ПРАВИЛЬНОЕ поведение (откат обязан быть виден по
+# красным тестам, не пройти молча); НЕ чинить его при откате
+# добавлением monkeypatch или изменением ожиданий -- красный цвет здесь
+# и есть детектор регресса выключателя.
 def test_echo_json_dirty_command_exit0_with_stdout_json():
     payload = _bash_payload("cd gateway && python x.py 2>&1")
     result = _run_hook(json.dumps(payload), text=True, encoding="utf-8")
@@ -1185,8 +1346,9 @@ def test_echo_json_dirty_command_exit0_with_stdout_json():
     data = json.loads(result.stdout)
     hso = data["hookSpecificOutput"]
     assert hso["hookEventName"] == "PreToolUse"
-    assert "permissionDecision" not in hso
-    assert hygiene_gate.MSG_CD_PREFIX in hso["additionalContext"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
     assert hygiene_gate.MSG_REDIRECT_STDERR in hso["additionalContext"]
 
 
@@ -1214,6 +1376,24 @@ def test_adversarial_malformed_json():
     assert result.stderr == ""
 
 
+# M9 (t-378, ВЫКЛЮЧАТЕЛЬ ВКЛЮЧЁН координатором 2026-08-09 -- ДЕФОЛТ ДИСКА
+# ТЕПЕРЬ True): пин ПЕРЕВЁРНУТ. НЕ входил в предсказанный in-process
+# список 11 пунктов (безопасный in-process прогон физически не мог его
+# увидеть -- он спавнит хук ОТДЕЛЬНЫМ процессом через `_run_hook`,
+# читающим `V5_ENABLED` с ДИСКА, а не из уже-импортированного объекта
+# модуля; monkeypatch не долетает до дочернего процесса). Найден
+# координатором на живой пробе включения, не мной. ПРИЧИНА -- ТА ЖЕ, что
+# у test_echo_json_dirty_command_exit0_with_stdout_json: target "репо"
+# не корень -> WARN (MSG_CD_NON_ROOT_WARN); " 2>&1" здесь определённый
+# (кириллица не мешает -- маскировка кавычек не находит их вовсе, весь
+# текст виден как есть) -> реальный DENY.
+#
+# СМОК-ТЕСТ УРОВНЯ SUBPROCESS -- ЗАВЯЗАН НА ДЕФОЛТ ДИСКА (та же оговорка,
+# что у test_echo_json_dirty_command_exit0_with_stdout_json выше): пинует
+# ПОВЕДЕНИЕ ПРОДА через реальный дочерний процесс, читающий диск, а НЕ
+# monkeypatch-состояние. ОБЯЗАН упасть при откате `V5_ENABLED` на `False`
+# -- это ПРАВИЛЬНОЕ поведение (детектор регресса выключателя, откат
+# обязан быть виден по красным тестам).
 def test_adversarial_cyrillic_command_raw_utf8_bytes():
     # Сырые UTF-8-байты на stdin, БЕЗ text=True -- ровно та форма,
     # которой харнесс реально кормит дочерний процесс (см. докстринг
@@ -1224,8 +1404,11 @@ def test_adversarial_cyrillic_command_raw_utf8_bytes():
     assert result.returncode == 0
     stdout_text = result.stdout.decode("utf-8")
     data = json.loads(stdout_text)
-    ctx = data["hookSpecificOutput"]["additionalContext"]
-    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    hso = data["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+    ctx = hso["additionalContext"]
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in ctx
     assert hygiene_gate.MSG_REDIRECT_STDERR in ctx
 
 
@@ -1252,3 +1435,882 @@ def test_adversarial_null_bytes_in_json_string_no_crash():
     result = _run_hook(json.dumps(payload), text=True, encoding="utf-8")
     assert result.returncode == 0
     assert result.stderr == ""
+
+
+# =========================================================================
+# V5 (эта задача, D-0069 выключатель) -- ВСЁ новое поведение ниже включено
+# ТОЛЬКО через monkeypatch(hygiene_gate, "V5_ENABLED", True). Тесты
+# СТАРОГО поведения выше эту константу НЕ трогают (она читается на каждый
+# вызов decide() как модульный global -- см. её докстринг в hygiene_gate.py).
+# =========================================================================
+
+
+# --- ЧАСТЬ 1 (маскировка) УДАЛЕНА ЦЕЛИКОМ, ПЕРЕПРОЕКТИРОВКА (слово
+# оператора): `_mask_nested_payloads`/`_split_nested_payloads`/
+# `_nested_payload_bodies` и их юнит-тесты (test_mask_*) удалены вместе с
+# кодом -- см. tools/hygiene_gate.py, докстринг раздела на месте бывшей
+# части 1. Четыре теста decide()-уровня ниже переживают редизайн (логика
+# по-прежнему верна БЕЗ масковки, по другим причинам) -- комментарии
+# обновлены, чтобы не ссылаться на удалённый механизм.
+
+
+def test_v5_python_c_body_mentioning_journal_path_as_prose_not_classified(monkeypatch):
+    # Чистая проза внутри -c, упоминающая путь журнала, БЕЗ формы записи
+    # (`>`/printf/echo/sed -i/tee/open-write/PS-командлет) -- журнальный
+    # класс требует ОБЕИХ (target И форма) в одном statement (_is_journal_
+    # bypass), только упоминания пути мало. cd/2>&1 тут вовсе нет в тексте.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = 'python -c "print(\'see routing-log.jsonl for details\')"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+    assert hygiene_gate.MSG_CD_PREFIX not in hso["additionalContext"]
+    assert hygiene_gate.MSG_REDIRECT_STDERR not in hso["additionalContext"]
+    assert hygiene_gate.MSG_JOURNAL_BLOCK not in hso["additionalContext"]
+
+
+def test_v5_python_c_heredoc_body_mentioning_journal_path_as_prose_not_classified(monkeypatch):
+    # То же для heredoc-формы.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = "python - <<EOF\nprint('see routing-log.jsonl for details')\nEOF"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+    assert hygiene_gate.MSG_CD_PREFIX not in hso["additionalContext"]
+    assert hygiene_gate.MSG_REDIRECT_STDERR not in hso["additionalContext"]
+    assert hygiene_gate.MSG_JOURNAL_BLOCK not in hso["additionalContext"]
+
+
+def test_v5_real_cd_root_denies_regardless_of_quoted_text_elsewhere(monkeypatch):
+    # Реальный cd-код (первый statement, корень репозитория) денает
+    # независимо от того, что где-то дальше в команде лежит текст,
+    # похожий на редирект внутри кавычек -c-аргумента -- `" 2>&1"` (с
+    # ведущим пробелом) как ЛИТЕРАЛЬНАЯ подстрока здесь физически не
+    # встречается (текст -- `'2>&1`, без пробела перед цифрой), поэтому
+    # класс 2>&1 и без ambiguity-логики не сработал бы на этом конкретном
+    # тексте -- регресс-контроль, что cd денает НЕЗАВИСИМО.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = f'cd {hygiene_gate._REPO_ROOT_NAME} && python -c "print(\'2>&1 as data only\')"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_CD_PREFIX
+    assert hygiene_gate.MSG_REDIRECT_STDERR not in hso["additionalContext"]
+
+
+def test_v5_python_dash_c_message_appears_once_even_with_nested_mention(monkeypatch):
+    # `_is_python_dash_c` -- булев флаг (не счётчик) -- сборка ответа
+    # добавляет MSG_PYTHON_DASH_C в контекст НЕ БОЛЕЕ одного раза,
+    # независимо от того, сколько раз паттерн "python -c" фактически
+    # встречается в сыром тексте команды (напр. один раз как реальный
+    # опенер, ещё раз как упоминание внутри heredoc-тела).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = (
+        "python - <<EOF\n"
+        "text mentions python -c \"nested as data\" here\n"
+        "EOF"
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    ctx = hso["additionalContext"]
+    assert ctx.count(hygiene_gate.MSG_PYTHON_DASH_C) == 1
+
+
+# --- ЧАСТЬ 2: блоки cd/Set-Location, 2>&1, gateway-исключение (B4) -----
+
+
+def test_v5_cd_prefix_denies_with_replacement_text(monkeypatch):
+    # ПЕРЕСДАЧА 3 (координатор, П3): денает ТОЛЬКО цель-корень репозитория
+    # теперь -- "cd tools" (подкаталог) сам по себе НЕ денает больше, см.
+    # test_v5_p3_cd_to_subdirectory_warns_not_denies ниже за контроль
+    # ЭТОГО отдельно.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = f"cd {hygiene_gate._REPO_ROOT_NAME} && python x.py"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_CD_PREFIX
+
+
+def test_v5_redirect_stderr_denies_with_replacement_text(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload("python x.py 2>&1"))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+
+
+# ПЕРЕСДАЧА 3 (координатор/критик, П3, ИНВЕРСИЯ УСЛОВИЯ -- чинить КЛАСС,
+# не экземпляр): исключение gateway УДАЛЕНО как отдельный случай --
+# gateway теперь просто ОДИН ИЗ МНОГИХ non-root целей, попадающих в
+# ОБЩИЙ WARN (MSG_CD_NON_ROOT_WARN), наравне с D:\AO3_tests/экзаменационными
+# китами/toolkit/scratchpad (замер критика по истории). Тесты
+# переименованы, чтобы имя отражало ТЕКУЩУЮ семантику (не "gateway
+# exception" -- такого больше нет как отдельного механизма).
+
+
+def test_v5_p3_gateway_falls_into_generic_non_root_warn_no_special_case(monkeypatch):
+    # Координатор явно попросил проверить: литерал "gateway" после
+    # инверсии условия НЕ нужен как отдельное исключение -- CONFIRMED,
+    # эмпирически: "gateway" просто не совпадает с именем корня
+    # репозитория, попадает в ОБЩУЮ WARN-ветку автоматически.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload("cd gateway && python x.py"))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
+    assert not hasattr(hygiene_gate, "MSG_CD_GATEWAY_EXCEPTION")
+    assert not hasattr(hygiene_gate, "_is_cd_to_gateway")
+
+
+def test_v5_p3_non_root_cd_target_variants_all_warn_not_deny(monkeypatch):
+    # Замер критика по истории (сиблинги того же класса, что gateway):
+    # другое дерево (AO3_tests), экзаменационный кит, toolkit/, scratchpad
+    # -- все НЕ являются корнем ЭТОГО репозитория, все остаются WARN.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    for command in [
+        "cd gateway && ls",
+        "Set-Location gateway; ls",
+        "cd ./gateway && ls",
+        'cd "gateway" && ls',
+        "cd D:\\repo\\gateway && ls",
+        "cd D:\\AO3_tests && ls",
+        "cd D:\\Improving_AI\\exam_fullgates_kit && ls",
+        "cd toolkit && ls",
+        "cd scratchpad && ls",
+    ]:
+        exit_code, output = hygiene_gate.decide(_bash_payload(command))
+        assert exit_code == 0
+        hso = output["hookSpecificOutput"]
+        assert "permissionDecision" not in hso, command
+        assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"], command
+
+
+def test_v5_p3_cd_to_subdirectory_of_repo_warns_not_denies(monkeypatch):
+    # Контроль: cd В ПОДКАТАЛОГ этого же репозитория (не корень САМ) --
+    # WARN, не блок; координатор явно назвал случаем "цель — корень",
+    # не "любой путь внутри репозитория".
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload("cd tools && python x.py"))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
+
+
+def test_v5_p3_repo_root_target_denies(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = f"cd {hygiene_gate._REPO_ROOT_NAME} && python x.py"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_CD_PREFIX
+
+
+def test_v5_p3_repo_root_target_case_insensitive_denies(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = f"cd {hygiene_gate._REPO_ROOT_NAME.upper()} && python x.py"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_v5_p3_set_location_dash_path_flag_target_parsed_correctly(monkeypatch):
+    # Координатор: "Set-Location -Path gateway — цель разбирается как
+    # -Path" -- фикс _extract_cd_prefix_target должен пропускать флаг.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = "Set-Location -Path gateway && ls"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
+
+
+def test_v5_p3_set_location_dash_path_flag_repo_root_denies(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = f"Set-Location -Path {hygiene_gate._REPO_ROOT_NAME} && ls"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_v5_p3_quoted_path_with_spaces_parsed_correctly_not_truncated(monkeypatch):
+    # Координатор: "путь с пробелами в кавычках — цель обрезается по
+    # первому пробелу" -- фикс должен читать ДО парной закрывающей кавычки.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = 'cd "some dir with spaces" && ls'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
+
+
+def test_v5_p3_extract_cd_prefix_target_unit_quoted_with_spaces():
+    target = hygiene_gate._extract_cd_prefix_target('cd "some dir with spaces" && ls')
+    assert target == '"some dir with spaces"'
+
+
+def test_v5_p3_extract_cd_prefix_target_unit_dash_path_flag_skipped():
+    target = hygiene_gate._extract_cd_prefix_target("Set-Location -Path gateway && ls")
+    assert target == "gateway"
+
+
+def test_v5_p3_extract_cd_prefix_target_unit_literal_path_flag_skipped():
+    target = hygiene_gate._extract_cd_prefix_target("Set-Location -LiteralPath gateway && ls")
+    assert target == "gateway"
+
+
+def test_v5_p3_extract_cd_prefix_target_unit_bare_no_flag():
+    target = hygiene_gate._extract_cd_prefix_target("cd gateway && ls")
+    assert target == "gateway"
+
+
+def test_v5_p3_extract_cd_prefix_target_unit_no_target_returns_none():
+    assert hygiene_gate._extract_cd_prefix_target("cd") is None
+    assert hygiene_gate._extract_cd_prefix_target("echo hi") is None
+
+
+def test_v5_three_blocking_classes_all_listed_fixed_order(monkeypatch):
+    # DoD: "три блокирующих класса разом -> перечислены все"; B5 --
+    # фиксированный порядок журнал -> cd -> 2>&1. ПЕРЕСДАЧА 3 (П3): cd
+    # должен реально ДЕНАТЬ здесь -- цель теперь корень репозитория, не
+    # "tools" (подкаталог, который после П3 сам по себе только WARN).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = (
+        f"cd {hygiene_gate._REPO_ROOT_NAME} && echo x >> logs/routing-log.jsonl "
+        "&& python y.py 2>&1"
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+    ctx = hso["additionalContext"]
+    assert hygiene_gate.MSG_JOURNAL_BLOCK in ctx
+    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    assert hygiene_gate.MSG_REDIRECT_STDERR in ctx
+    assert (
+        ctx.index(hygiene_gate.MSG_JOURNAL_BLOCK)
+        < ctx.index(hygiene_gate.MSG_CD_PREFIX)
+        < ctx.index(hygiene_gate.MSG_REDIRECT_STDERR)
+    )
+
+
+# =========================================================================
+# ПЕРЕПРОЕКТИРОВКА (слово оператора) -- В1 (_is_ambiguous), В2 (2>&1
+# требует определённости), В3 (newline закрывает cd-обход).
+# =========================================================================
+
+
+# --- Ф1/Ф2 (координатор, финальный фикс, заменяет В1/В2): список
+# интерпретаторов `_is_ambiguous` удалён целиком -- класс 2>&1 решается
+# через `_mask_quoted_segments` (кавычки), см. `_collect_redirect_signal`
+# в hygiene_gate.py. Юнит-тесты на функцию -- на НОВУЮ точку входа.
+
+
+def test_f2_collect_redirect_signal_unit_absent():
+    assert hygiene_gate._collect_redirect_signal("git status") == {
+        "present": False, "certain": False,
+    }
+
+
+def test_f2_collect_redirect_signal_unit_certain_deny():
+    assert hygiene_gate._collect_redirect_signal("make 2>&1") == {
+        "present": True, "certain": True,
+    }
+
+
+def test_f2_collect_redirect_signal_unit_ambiguous_heredoc_warn():
+    command = "python - <<'PY'\nbody\nPY\nls 2>&1"
+    signal = hygiene_gate._collect_redirect_signal(command)
+    assert signal["present"] is True
+    assert signal["certain"] is False
+
+
+def test_f2_collect_redirect_signal_unit_quoted_2_greater_1_silent():
+    command = "python -c \"print('ran 2>&1 here')\""
+    assert hygiene_gate._collect_redirect_signal(command) == {
+        "present": False, "certain": False,
+    }
+
+
+# --- Ф2: класс 2>&1 денает ТОЛЬКО при определённости (кавычки, не список) --
+
+
+def test_f2_redirect_denies_when_no_quotes_no_heredoc(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload("python foo.py 2>&1"))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+
+
+def test_f2_redirect_fully_silent_when_quoted(monkeypatch):
+    # Координатор, проба определённости, дословно: `python -c "print('ran
+    # 2>&1 here')"` -- ТИШИНА (не warn, не deny) -- " 2>&1" ЦЕЛИКОМ внутри
+    # кавычек -c-аргумента, `_mask_quoted_segments` маскирует его прежде
+    # проверки; класс 2>&1 НЕ срабатывает вовсе (класс (в) python -c/heredoc
+    # -- ОТДЕЛЬНЫЙ, независимый WARN, он остаётся).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = "python -c \"print('ran 2>&1 here')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_REDIRECT_STDERR not in hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+def test_f2_redirect_fully_silent_when_quoted_chain(monkeypatch):
+    # Координатор, проба определённости, дословно: критик получал ложный
+    # DENY на этой цепочке ДО фикса -- ОБА " 2>&1" здесь ВНУТРИ кавычек
+    # (`"a"`/`"b 2>&1"`), маскируются, ТИШИНА по классу 2>&1 (класс (в)
+    # остаётся -- python -c встречается дважды, но это ОДИН булев флаг).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = 'python -c "a" ; python -c "b 2>&1"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_REDIRECT_STDERR not in hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+def test_f2_redirect_warns_when_heredoc_present_unquoted(monkeypatch):
+    # Координатор: `python - <<'PY' … PY … 2>&1` (редирект ВНЕ кавычек,
+    # heredoc ЕСТЬ) -> WARN. Делимитер `'PY'` сам в кавычках (маскируется),
+    # но токен `<<` СНАРУЖИ кавычек остаётся видимым.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = "python - <<'PY'\nbody\nPY\nmake 2>&1"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_REDIRECT_STDERR in hso["additionalContext"]
+
+
+def test_f2_redirect_denies_when_shift_operator_quoted_real_redirect_outside(monkeypatch):
+    # Координатор: `python -c "print(1 << 3)" && ls 2>&1` -> DENY --
+    # сдвиг `<<` ВНУТРИ кавычек -c-аргумента замаскирован, редирект ВНЕ
+    # кавычек -- настоящий. Случай, где список интерпретаторов ошибался
+    # (posчитал бы всю команду неоднозначной из-за самого факта "-c").
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = 'python -c "print(1 << 3)" && ls 2>&1'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+
+
+def test_f2_redirect_denies_plain_make(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload("make 2>&1"))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+
+
+def test_f2_redirect_warn_uses_verbatim_v4_text(monkeypatch):
+    # "прежний V4-warn с прежним текстом" -- ТА ЖЕ константа, не новая.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = "python - <<'PY'\nbody\nPY\nx 2>&1"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert hygiene_gate.MSG_REDIRECT_STDERR == "не добавляй 2>&1 (гигиена п.3)"
+    assert hygiene_gate.MSG_REDIRECT_STDERR in output["hookSpecificOutput"]["additionalContext"]
+
+
+def test_f2_cmd_slash_c_quoted_redirect_fully_silent(monkeypatch):
+    # Координатор, форма 1 из шести: `cmd /c "pi ... 2>&1"` -- тишина.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = 'cmd /c "pi some_pipeline 2>&1"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_f2_powershell_command_quoted_redirect_fully_silent(monkeypatch):
+    # Координатор, форма 2 из шести: `powershell -Command "Set-Location
+    # ...; pytest ... 2>&1 | ..."` -- тишина.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = 'powershell -Command "Set-Location tools; pytest . 2>&1 | tee out.txt"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_f2_gate_smoke_probe_json_line_fully_silent(monkeypatch):
+    # Координатор, форма 3 из шести: смок-проба самого гейта -- команда
+    # (echo | python tools/hygiene_gate.py), несущая JSON-строку с
+    # "2>&1" ВНУТРИ значения "command" (двойные кавычки, экранированные
+    # изнутри одинарными снаружи) -- тишина.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = (
+        "echo '{...\"command\":\"cd gateway && ls 2>&1\"}' "
+        "| python tools/hygiene_gate.py"
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+# --- В3: newline закрывает cd-обход ---------------------------------
+
+
+def test_v3_newline_separated_cd_root_denies(monkeypatch):
+    # Координатор, проба закрытия newline-обхода, дословно:
+    # `cd "<корень>"\ngit status` -- перевод строки, БЕЗ `&&` -- DENY.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = f'cd "{hygiene_gate._REPO_ROOT_NAME}"\ngit status'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_CD_PREFIX
+
+
+def test_v3_newline_separated_cd_non_root_warns_not_denies(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = "cd gateway\ngit status"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
+
+
+def test_v3_newline_bypass_unfixed_at_v4_regression(monkeypatch):
+    # V4 (без исправления, И1 байт-в-байт): newline-обход по-прежнему НЕ
+    # закрыт -- `_is_cd_prefix` (V4) не считает перевод строки
+    # разделителем; этот пробел -- задокументированный, НЕ трогается
+    # (закрыт ТОЛЬКО в V5).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", False)
+    command = f'cd "{hygiene_gate._REPO_ROOT_NAME}"\ngit status'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_v3_is_cd_prefix_v5_unit_newline_true():
+    assert hygiene_gate._is_cd_prefix_v5("cd gateway\nls") is True
+
+
+def test_v3_is_cd_prefix_v5_unit_bare_no_continuation_false():
+    assert hygiene_gate._is_cd_prefix_v5("cd gateway") is False
+
+
+def test_v3_is_cd_prefix_v5_unit_not_at_start_false():
+    assert hygiene_gate._is_cd_prefix_v5("echo hi\ncd gateway") is False
+
+
+# --- Ф3 (координатор, финальный фикс): trailing newline БЕЗ продолжения --
+# ОДНА семантика с bare cd (не отдельная).
+
+
+def test_f3_trailing_newline_no_continuation_is_none_not_deny(monkeypatch):
+    # ДО фикса: `cd <корень>\n` (перевод строки в конце, НИЧЕГО после)
+    # давал DENY -- "\n" in command истинно, хотя реального продолжения
+    # нет. ПОСЛЕ фикса -- та же семантика, что bare `cd <корень>` (NONE).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = f"cd {hygiene_gate._REPO_ROOT_NAME}\n"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_f3_trailing_newline_no_continuation_unit_false():
+    assert hygiene_gate._is_cd_prefix_v5("cd gateway\n") is False
+
+
+def test_f3_bare_cd_root_still_none_same_semantics(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = hygiene_gate._REPO_ROOT_NAME
+    exit_code, output = hygiene_gate.decide(_bash_payload(f"cd {command}"))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_f3_trailing_double_ampersand_no_continuation_is_none():
+    # То же для `&&` без реального продолжения (пробел/ничего после).
+    assert hygiene_gate._is_cd_prefix_v5("cd gateway && ") is False
+
+
+def test_f3_real_continuation_after_newline_still_true_regression():
+    # Регресс: РЕАЛЬНОЕ продолжение после перевода строки по-прежнему
+    # детектится (фикс не ослабляет истинный позитив В3).
+    assert hygiene_gate._is_cd_prefix_v5("cd gateway\nls") is True
+
+
+# --- B6: шесть отрицательных случаев (3 сценария x 2 состояния выключателя) ---
+
+
+@pytest.mark.parametrize("v5", [False, True])
+def test_b6_bare_cd_gateway_without_continuation_not_block_not_warn(monkeypatch, v5):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", v5)
+    exit_code, output = hygiene_gate.decide(_bash_payload("cd gateway"))
+    assert exit_code == 0
+    assert output is None
+
+
+@pytest.mark.parametrize("v5", [False, True])
+def test_b6_cd_not_at_start_not_trigger(monkeypatch, v5):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", v5)
+    exit_code, output = hygiene_gate.decide(_bash_payload("echo hi && cd gateway"))
+    assert exit_code == 0
+    assert output is None
+
+
+@pytest.mark.parametrize("v5", [False, True])
+def test_b6_redirect_inside_commit_message_not_trigger(monkeypatch, v5):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", v5)
+    command = 'git commit -m "note about pytest 2>&1 output redirection"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+# --- ЧАСТЬ 3 (write-намерение) УДАЛЕНА ЦЕЛИКОМ, ПЕРЕПРОЕКТИРОВКА (слово
+# оператора): `_has_write_intent` и весь её набор регексов удалены вместе
+# с кодом -- класс (в) (python -c/heredoc) ВСЕГДА warn теперь, как в V4
+# (никогда не денает -- промоции, которую вносило write-намерение,
+# больше нет). Журнальный класс (г) НЕ участвует в удалённой части (её
+# признаки были СВОИ, независимые от _is_journal_bypass) -- продолжает
+# ловить встроенные записи ЕСТЕСТВЕННО (см. ниже), т.к. никогда не
+# зависел от маскировки/write-намерения вовсе.
+
+
+def test_v5_python_c_always_warn_never_denies_class_v_removed(monkeypatch):
+    # Класс (в) НИКОГДА не денает после удаления части 3 -- ровно V4-роль.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1)"'))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+def test_v5_python_c_with_open_write_mode_stays_warn_class_v_no_longer_denies(monkeypatch):
+    # Регресс, задокументированный явно: ДО перепроектировки (пересдачи
+    # 1-3) write-намерение промотировало `open(...,'w')` внутри -c в
+    # DENY через класс (в); ПОСЛЕ удаления части 3 -- ТОЛЬКО WARN (класс
+    # в никогда не денает). Реальная запись в ЖУРНАЛ по-прежнему ловится
+    # -- НО через класс (г), см. тесты "denies_via_journal_class" ниже
+    # (target+форма записи -- открытый текст в СЫРОЙ команде, journal
+    # class никогда не зависел от write-намерения).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = "python -c \"open('f.txt','w').write('x')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+# --- журнальный класс (г) ловит встроенные записи ЕСТЕСТВЕННО (никогда
+# не зависел от масковки/write-намерения -- _is_journal_bypass всегда
+# читала СЫРУЮ команду) -- регресс-набор, бывший "П2" прошлой пересдачи,
+# теперь просто прямое следствие того, что часть 1 удалена.
+
+
+def test_v5_os_system_inside_dashc_body_denies_via_journal_class(monkeypatch):
+    # `os.system("echo x >> logs/routing-log.jsonl")` внутри heredoc-тела
+    # -- target+форма записи лежат в ОТКРЫТОМ тексте СЫРОЙ команды,
+    # _is_journal_bypass видит их напрямую (нет масковки, которая могла
+    # бы их спрятать) -- ЕСТЕСТВЕННО денает через класс (г), без
+    # специального механизма.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = (
+        "python - <<PY\n"
+        "import os\n"
+        'os.system("echo x >> logs/routing-log.jsonl")\n'
+        "PY"
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+
+
+def test_v5_subprocess_shell_true_inside_dashc_body_denies_via_journal_class(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = (
+        'python -c "import subprocess; '
+        "subprocess.run('echo x >> logs/routing-log.jsonl', shell=True)\""
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+
+
+def test_v5_open_write_mode_inside_dashc_denies_via_journal_class(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = "python -c \"open('logs/routing-log.jsonl','a').write('x')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+
+
+def test_v5_os_system_without_journal_target_no_false_flood(monkeypatch):
+    # Контроль: os.system/subprocess САМИ ПО СЕБЕ НЕ признаки (координатор
+    # явно запретил их добавлять как таковые -- шквал) -- БЕЗ журнальной
+    # цели+формы в аргументе класс (г) НЕ денает.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = 'python -c "import os; os.system(\'ls -la\')"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+
+
+def test_v5_subprocess_diagnostic_without_journal_target_no_false_flood(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = 'python -c "import subprocess; subprocess.run([\'pytest\', \'tools/\'])"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+
+
+# --- ВЫКЛЮЧАТЕЛЬ: V5_ENABLED=False -> ни блоков, ни маскировки -----------
+
+
+def test_v5_disabled_no_new_blocks_stays_warn(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", False)
+    exit_code, output = hygiene_gate.decide(_bash_payload("cd tools && python x.py 2>&1"))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_PREFIX in hso["additionalContext"]
+    assert hygiene_gate.MSG_REDIRECT_STDERR in hso["additionalContext"]
+
+
+def test_v5_disabled_no_masking_journal_write_inside_dashc_still_journal_class(monkeypatch):
+    # V5_ENABLED=False -> нет масковки части 1 -- журнальная запись внутри
+    # -c payload'а ОСТАЁТСЯ видна классу (г), как в V4 (единственный БЛОК
+    # V4-мира).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", False)
+    command = "python -c \"open('logs/routing-log.jsonl','a').write('x')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+
+
+# --- Fail-open с видимым маркером (F1/F2), обе ветки ---------------------
+
+
+def test_v5_fail_open_on_helper_exception(monkeypatch):
+    # ФИНАЛЬНЫЙ ФИКС: `_is_ambiguous` удалена вместе со списком
+    # интерпретаторов -- подменяем `_collect_redirect_signal` (Ф2, новая
+    # точка входа классификации класса 2>&1, вызывается на каждом
+    # вызове `_collect_v5_signals`) вместо неё.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+
+    def _boom(_command):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(hygiene_gate, "_collect_redirect_signal", _boom)
+    exit_code, output = hygiene_gate.decide(_bash_payload("cd tools && python x.py"))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert "hygiene_gate: внутренняя ошибка классификатора" in hso["additionalContext"]
+    assert "RuntimeError" in hso["additionalContext"]
+    assert "гигиена НЕ проверена" in hso["additionalContext"]
+
+
+def test_v4_fail_open_on_helper_exception_too(monkeypatch):
+    # F1 -- ОБЩИЙ для обеих веток (V4 и V5), не только новой.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", False)
+
+    def _boom(_command):
+        raise ValueError("kaboom")
+
+    monkeypatch.setattr(hygiene_gate, "_is_journal_bypass", _boom)
+    exit_code, output = hygiene_gate.decide(_bash_payload("echo x >> logs/routing-log.jsonl"))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert "ValueError" in hso["additionalContext"]
+    assert "гигиена НЕ проверена" in hso["additionalContext"]
+
+
+# =========================================================================
+# ПЕРЕСДАЧА 2 (координатор, БЛОКЕР 1 + БЛОКЕР 2) -- дополнение к тому же
+# диспатчу t-372. Оба фикса ЗА выключателем V5_ENABLED, см. докстринги
+# _decide_v5 (БЛОКЕР 1) и _has_write_form (БЛОКЕР 2) в hygiene_gate.py.
+# =========================================================================
+
+
+# --- БЛОКЕР 1: heredoc-форма commit-сообщения для класса (б) -----------
+
+
+def test_v5_git_commit_heredoc_2_greater_1_now_warns_uniform_heredoc_rule(monkeypatch):
+    # ИСТОРИЯ (пересдачи 2-4, БЛОКЕР 1): heredoc-тело commit-сообщения
+    # вырезалось СПЕЦИАЛЬНЫМ, git-специфичным механизмом
+    # (`_strip_commit_messages`) ПЕРЕД проверкой класса (б), давая
+    # ПОЛНУЮ ТИШИНУ здесь. ФИНАЛЬНЫЙ ФИКС (Ф2, координатор, третий
+    # критик-вход): класс (б) больше НЕ зовёт `_strip_commit_messages`
+    # вовсе -- git-commit-heredoc теперь трактуется ЕДИНООБРАЗНО с ЛЮБЫМ
+    # heredoc (`_collect_redirect_signal` не различает "git commit" от
+    # прочих форм) -- "<<" виден на маскированном (кавычки скрыты, но
+    # heredoc-опенер САМ вне кавычек) тексте, " 2>&1" тоже виден (тело
+    # heredoc -- НЕ кавычки) -> WARN, НЕ тишина. ИЗМЕНЕНИЕ ПОВЕДЕНИЯ
+    # ОТНОСИТЕЛЬНО пересдач 2-4, ЗАДОКУМЕНТИРОВАНО явно (не молчаливый
+    # регресс) -- задокументированный компромисс упрощения: единое
+    # правило "heredoc -> неоднозначность" ценой git-специфичной
+    # точности для ЭТОЙ узкой формы.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = "git commit -F - <<EOF\nsome text with 2>&1 inside\nEOF"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_REDIRECT_STDERR in hso["additionalContext"]
+
+
+def test_v5_blocker1_real_redirect_outside_commit_message_still_denies(monkeypatch):
+    # Контроль: РЕАЛЬНЫЙ 2>&1 (не внутри commit-сообщения) по-прежнему
+    # денаит. МЕХАНИЗМ (пересдача 5, Ф2): не через вырезание -m-текста
+    # (которое здесь уже не участвует), а через квотирование -- "clean
+    # message" в кавычках маскируется, реальный " 2>&1" вне кавычек цел.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = 'git commit -m "clean message" && python x.py 2>&1'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+
+
+def test_v5_blocker1_cd_inside_commit_heredoc_body_never_triggers_class_a(monkeypatch):
+    # Координатор явно попросил проверить, нужен ли тот же вырез классу
+    # (а) -- эмпирически НЕ нужен: `_is_cd_prefix` анкерена к
+    # АБСОЛЮТНОМУ НАЧАЛУ всей команды (`.match()`, не `.search()`);
+    # текст heredoc-тела git-commit-сообщения физически не может стоять
+    # на позиции 0 всей команды (перед ним всегда идёт
+    # "git commit -F - <<DELIM\n" или аналог).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = "git commit -F - <<EOF\ncd x && y\nEOF"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_v5_blocker1_dash_m_message_2_greater_1_still_fully_silent_regression(monkeypatch):
+    # Регресс: -m/--message форма продолжает не триггерить. МЕХАНИЗМ
+    # (пересдача 5, Ф2): значение -m ВСЕГДА в кавычках -- квотирование
+    # (`_mask_quoted_segments`) маскирует его целиком, отдельный
+    # git-специфичный механизм для ЭТОЙ формы больше не нужен.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = 'git commit -m "note about pytest 2>&1 output redirection"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+# --- БЛОКЕР 2: PowerShell-формы записи класса (г), за выключателем -----
+
+
+@pytest.mark.parametrize(
+    "cmdlet,args",
+    [
+        ("Add-Content", "-Path logs/routing-log.jsonl -Value x"),
+        ("Set-Content", "-Path logs/routing-log.jsonl -Value x"),
+        ("Out-File", "-FilePath logs/routing-log.jsonl"),
+    ],
+)
+def test_v5_blocker2_ps_write_cmdlet_with_journal_target_denies(monkeypatch, cmdlet, args):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = f"{cmdlet} {args}"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+
+
+@pytest.mark.parametrize(
+    "cmdlet,args",
+    [
+        ("Add-Content", "-Path logs/routing-log.jsonl -Value x"),
+        ("Set-Content", "-Path logs/routing-log.jsonl -Value x"),
+        ("Out-File", "-FilePath logs/routing-log.jsonl"),
+    ],
+)
+def test_v5_blocker2_ps_write_cmdlet_gated_off_at_v5_disabled(monkeypatch, cmdlet, args):
+    # M8-инвариант для класса (г): при V5_ENABLED=False НЕ денаит по
+    # НОВОЙ PowerShell-форме -- класс (г) уже живой в V4, но его
+    # bash-детектор этих командлетов не знает вовсе (сегодняшнее
+    # поведение байт-в-байт).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", False)
+    command = f"{cmdlet} {args}"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+@pytest.mark.parametrize("v5", [False, True])
+@pytest.mark.parametrize(
+    "cmdlet,args",
+    [
+        ("Add-Content", "-Path notes.txt -Value x"),
+        ("Set-Content", "-Path notes.txt -Value x"),
+        ("Out-File", "-FilePath notes.txt"),
+    ],
+)
+def test_v5_blocker2_ps_write_cmdlet_non_journal_target_never_blocks(monkeypatch, v5, cmdlet, args):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", v5)
+    command = f"{cmdlet} {args}"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_v5_blocker2_statement_scope_preserved_target_and_ps_form_in_different_statements(monkeypatch):
+    # Стейтмент-скоуп (тот же принцип, что уже несёт _is_journal_bypass
+    # для bash-форм): журнальная ЦЕЛЬ в одном statement, PS-форма записи
+    # в ДРУГОМ statement, пишущая в НЕжурнальный файл -- не блок.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = "cat logs/routing-log.jsonl; Add-Content -Path notes.txt -Value x"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_v5_blocker2_tee_object_already_covered_by_existing_tee_re_both_states(monkeypatch):
+    # Эмпирическая находка ПЕРЕД реализацией (scratchpad/check_tee_re.py,
+    # см. отчёт): "Tee-Object" УЖЕ матчится существующим TEE_RE (`\btee\b`)
+    # БЕЗ выключателя -- уже в V4, случайно (подстрока "Tee" + `\b` на
+    # дефисе). Поэтому НЕ добавлен в _PS_WRITE_CMDLET_RE (не дублировать
+    # детектор, D-0043) -- поведение ОДИНАКОВО в обоих состояниях.
+    for v5 in (False, True):
+        monkeypatch.setattr(hygiene_gate, "V5_ENABLED", v5)
+        command = "Tee-Object -FilePath logs/routing-log.jsonl"
+        exit_code, output = hygiene_gate.decide(_bash_payload(command))
+        assert exit_code == 0, v5
+        hso = output["hookSpecificOutput"]
+        assert hso["permissionDecision"] == "deny", v5
+        assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK, v5
