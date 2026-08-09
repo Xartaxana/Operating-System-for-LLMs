@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import dispatch_gate  # noqa: E402
+import owns_gate  # noqa: E402 -- t-384: эталон истинности для теста равенства
 
 SCRIPT = Path(__file__).resolve().parent / "dispatch_gate.py"
 
@@ -341,8 +342,12 @@ def test_c_readonly_dispatch_mentioning_owns_gate_filename_in_given_not_blocked(
     # (в) обратная грань класса (проверено эмпирически, факт кода -- НЕ
     # по гипотезе спеки): read-only builder-промпт БЕЗ write-слов,
     # упоминающий owns_gate.py в корзине "дано" -- НЕ классифицируется
-    # пишущим (WRITE_INDICATORS_RE уже несёт `\bowns\b` с retry t-152,
-    # "owns_gate.py" её не триггерит), проверка 2 пропускается целиком.
+    # пишущим. ОБНОВЛЕНО F-59 подкласс 2 (2026-08-10): owns УДАЛЁН из
+    # WRITE_INDICATORS_RE целиком (см. докстринг dispatch_gate.py,
+    # "F-59 ПОДКЛАСС 2") -- "owns_gate.py" её тем более не триггерит
+    # (регекс больше не несёт owns-альтернативу вовсе, не только по
+    # границе слова, как было с retry t-152), проверка 2 пропускается
+    # целиком.
     prompt = (
         "Прочитай tools/owns_gate.py и tools/dispatch_gate.py, опиши логику "
         "extract_owns_paths. DoD: явный ответ да/нет."
@@ -372,6 +377,160 @@ def test_e_owns_word_boundary_regex_direct():
     assert dispatch_gate.OWNS_WORD_RE.search("owns_gate.py") is None
     assert dispatch_gate.OWNS_WORD_RE.search("owns:") is not None
     assert dispatch_gate.OWNS_WORD_RE.search("**owns**:") is not None
+
+
+# ---------------------------------------------------------------------
+# F-59 подкласс 2 (2026-08-10, T1): owns УДАЛЁН из WRITE_INDICATORS_RE
+# целиком -- owns остаётся манифест-маркером (OWNS_WORD_RE, тест выше),
+# но больше НЕ write-признак сам по себе. См. докстринг модуля,
+# "F-59 ПОДКЛАСС 2".
+# ---------------------------------------------------------------------
+
+
+def test_f59_owns_no_longer_in_write_indicators_re_direct():
+    # Прямая проверка регекса (симметрично test_e выше, но для
+    # WRITE_INDICATORS_RE): "owns" НИ В КАКОЙ форме больше не совпадает
+    # с write-индикатором -- ни голым словом, ни с двоеточием, ни
+    # markdown-жирным.
+    assert dispatch_gate.WRITE_INDICATORS_RE.search("owns") is None
+    assert dispatch_gate.WRITE_INDICATORS_RE.search("owns:") is None
+    assert dispatch_gate.WRITE_INDICATORS_RE.search("**owns**:") is None
+    # Позитивный контроль (правило 6 гигиены -- негатив без контроля не
+    # доказателен): остальные альтернативы по-прежнему совпадают.
+    assert dispatch_gate.WRITE_INDICATORS_RE.search("правь файл x.py") is not None
+    assert dispatch_gate.WRITE_INDICATORS_RE.search("создай файл x.py") is not None
+    assert dispatch_gate.WRITE_INDICATORS_RE.search("запиши результат") is not None
+    assert dispatch_gate.WRITE_INDICATORS_RE.search("измени файл x.py") is not None
+
+
+def test_f59_pin_a_readonly_recon_discussing_owns_as_topic_not_blocked():
+    # Пин (а), реконструкция живого образца сессии F-59: read-only
+    # builder-разведка, ОБСУЖДАЮЩАЯ owns КАК ТЕМУ (точку правки
+    # подкласса owns №2 в WRITE_INDICATORS_RE), без единого пути
+    # записи и без write-глагола -- ДО фикса owns-подстрока/слово
+    # триггерила write-признак и требовала манифест ложно; ПОСЛЕ --
+    # молчит (check2 не включается вовсе, манифест read-only не нужен,
+    # правило 11 CLAUDE.md кита).
+    prompt = (
+        "Найди точку правки подкласса owns №2 в WRITE_INDICATORS_RE и "
+        "опиши, где она живёт и как влияет на owns_gate.py. "
+        "DoD: явный ответ да/нет по расположению."
+    )
+    exit_code, message = dispatch_gate.decide(
+        _builder_payload(prompt, description="sonnet: recon")
+    )
+    assert exit_code == 0, message
+
+
+def test_f59_pin_b_critic_review_quoting_owns_norm_text_not_blocked():
+    # Пин (б), реконструкция живого образца сессии F-59: critic-ревью,
+    # ЦИТИРУЮЩЕЕ норму правила 11 CLAUDE.md кита дословно ("owns
+    # (ABSOLUTE write paths): <path>") как иллюстрацию требования, БЕЗ
+    # реального write-глагола в теле ревью-промпта -- subagent_type
+    # != "builder", поэтому проверки 1/2 не применяются НИ В КАКОМ
+    # случае (пункт 4 спеки хука), но подтверждаем эмпирически, что
+    # даже гипотетически (если бы применялись) owns-цитата одна не
+    # триггерит write-признак после фикса.
+    prompt = (
+        "Ревью диффа: спека требует owns (ABSOLUTE write paths): <path> "
+        "по правилу 11 CLAUDE.md кита -- проверь, что диспатч несёт этот "
+        "маркер дословно."
+    )
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {
+            "subagent_type": "critic",
+            "prompt": prompt,
+            "description": "opus: review",
+        },
+    }
+    exit_code, message = dispatch_gate.decide(payload)
+    assert exit_code == 0, message
+    # Позитивный контроль: даже если бы subagent_type был "builder" (не
+    # критик), тот же промпт не даёт write-признака (owns-цитата без
+    # write-глагола) -- DoD-маркер отсутствует в этом тексте, добавляем
+    # его отдельно, чтобы изолировать именно проверку 2.
+    exit_code2, message2 = dispatch_gate.decide(
+        _builder_payload(prompt + " DoD: явный ответ.", description="sonnet: review")
+    )
+    assert exit_code2 == 0, message2
+
+
+def test_f59_owns_declaration_relative_path_only_still_no_manifest_required():
+    # ПЕРЕСМОТРЕНО t-384 (прежнее имя/докстринг заявляли "owns без
+    # глагола больше НЕ пишущий" как НАМЕРЕННОЕ общее следствие -- это
+    # было СНЯТО критиком как эмпирически ложное, см. докстринг модуля
+    # "T-384 ИСПРАВЛЕНИЕ": канонические owns-манифесты БЕЗ глагола
+    # ОБЯЗАНЫ распознаваться пишущими -- см. test_f59_t384_owns_
+    # absolute_path_without_verb_requires_manifest_again ниже). ЭТОТ
+    # конкретный промпт остаётся exit 0 по ДРУГОЙ причине: "tools/x.py"
+    # -- ОТНОСИТЕЛЬНЫЙ путь (нет буквы диска/ведущего слэша/глоба),
+    # owns_declaration_has_path_token() его не признаёт path-подобным
+    # (R11 CLAUDE.md кита требует АБСОЛЮТНЫЕ owns-пути) -- совпадение
+    # формы теста, не общее правило "owns без глагола не пишущий".
+    prompt = "DoD: witness есть. owns: tools/x.py."
+    exit_code, message = dispatch_gate.decide(
+        _builder_payload(prompt, description="sonnet: write x")
+    )
+    assert exit_code == 0, message
+
+
+def test_f59_t384_owns_absolute_path_without_verb_requires_manifest_again():
+    # t-384 ГЛАВНЫЙ ПИН (критик, живой корпус): канонический owns-
+    # манифест с АБСОЛЮТНЫМ путём и БЕЗ единого write-глагола -- ИМЕННО
+    # класс, который критик замерил как 78 из 87 живых манифестов --
+    # ОБЯЗАН СНОВА распознаваться проверкой 2 как пишущий и требовать
+    # given.
+    prompt = "DoD: witness есть. owns (ABSOLUTE write paths): D:/repo/tools/x.py."
+    exit_code, message = dispatch_gate.decide(
+        _builder_payload(prompt, description="sonnet: write x")
+    )
+    assert exit_code == 2, message
+    assert "манифеста" in message
+
+
+def test_f59_t384_owns_absolute_path_with_given_no_verb_passes():
+    # Позитивный контроль в паре: тот же owns+путь, given ЕСТЬ -- манифест
+    # полный, exit 0 (без единого write-глагола в тексте вовсе).
+    prompt = (
+        "DoD: witness есть.\n"
+        "Дано: репо целиком.\n"
+        "owns (ABSOLUTE write paths): D:/repo/tools/x.py."
+    )
+    exit_code, message = dispatch_gate.decide(
+        _builder_payload(prompt, description="sonnet: write x")
+    )
+    assert exit_code == 0, message
+
+
+def test_f59_t384_historical_class_b6_escalation_guard_e1_blocked_again():
+    # ГОЛОВНОЙ ПИН критика (t-384, реконструкция описанного примера):
+    # "sonnet: B6 эскалационный страж E1" -- манифест owns+путь, БЕЗ
+    # given, БЕЗ глагола -- ДО t-384 (после T1, ДО этой правки) давал
+    # ложный exit 0 (потерянный блок, один из 14 исторических); ПОСЛЕ
+    # t-384 -- снова exit 2, "манифеста" in message.
+    prompt = (
+        "DoD: критерии приёмки -- тест зелёный, witness приложен.\n"
+        "owns (ABSOLUTE write paths): D:/repo/tools/escalation_guard.py\n"
+        "Реализуй эскалационный страж E1 по спеке."
+    )
+    exit_code, message = dispatch_gate.decide(
+        _builder_payload(prompt, description="sonnet: B6 escalation guard E1")
+    )
+    assert exit_code == 2, message
+    assert "манифеста" in message
+
+    # Позитивный контроль -- тот же манифест С given проходит.
+    prompt_with_given = (
+        "DoD: критерии приёмки -- тест зелёный, witness приложен.\n"
+        "Дано: репо целиком.\n"
+        "owns (ABSOLUTE write paths): D:/repo/tools/escalation_guard.py\n"
+        "Реализуй эскалационный страж E1 по спеке."
+    )
+    exit_code2, message2 = dispatch_gate.decide(
+        _builder_payload(prompt_with_given, description="sonnet: B6 escalation guard E1")
+    )
+    assert exit_code2 == 0, message2
 
 
 def test_manifest_given_word_boundary_prodano_false_positive_fixed():
@@ -1453,3 +1612,117 @@ def test_role_type_warn_silent_on_existing_dispatch_gate_own_test_suite_labels()
         _builder_payload("Почини. DoD: тест зелёный.", description="sonnet: fix")
     )
     assert warn == ""
+
+
+# ---------------------------------------------------------------------
+# t-384 (2026-08-10, критик, живой корпус 454 диспатчей): дискриминатор
+# "owns-декларация с path-подобным токеном" -- is_path_like_token() и
+# owns_declaration_has_path_token(). См. докстринг модуля,
+# "T-384 ИСПРАВЛЕНИЕ" / "ОБЩИЙ ПРЕДИКАТ".
+# ---------------------------------------------------------------------
+
+
+def test_t384_is_path_like_token_direct():
+    assert dispatch_gate.is_path_like_token("D:/repo/tools/a.py") is True
+    assert dispatch_gate.is_path_like_token("D:\\repo\\tools\\a.py") is True
+    assert dispatch_gate.is_path_like_token("/repo/tools/a.py") is True
+    assert dispatch_gate.is_path_like_token("tools/*.py") is True
+    # F6: голая "*" без слэша (markdown-decoration) -- НЕ путь.
+    assert dispatch_gate.is_path_like_token("**Внимание**:") is False
+    assert dispatch_gate.is_path_like_token("обратная сторона.**") is False
+    # Относительный путь без диска/слэша -- не путь (R11: ABSOLUTE).
+    assert dispatch_gate.is_path_like_token("tools/x.py") is False
+    assert dispatch_gate.is_path_like_token("") is False
+    assert dispatch_gate.is_path_like_token(None) is False
+
+
+def test_t384_owns_declaration_has_path_token_canonical_forms():
+    assert dispatch_gate.owns_declaration_has_path_token(
+        "owns (ABSOLUTE write paths): D:/repo/tools/x.py"
+    ) is True
+    assert dispatch_gate.owns_declaration_has_path_token(
+        "owns (АБСОЛЮТНЫЕ пути записи): D:/repo/tools/x.py"
+    ) is True
+    assert dispatch_gate.owns_declaration_has_path_token(
+        "**owns (ABSOLUTE write paths):**\n- D:/a.py\n- D:/b.py\n"
+    ) is True
+    assert dispatch_gate.owns_declaration_has_path_token("owns: tools/x.py.") is False
+    assert dispatch_gate.owns_declaration_has_path_token("owns:") is False
+    assert dispatch_gate.owns_declaration_has_path_token("") is False
+    assert dispatch_gate.owns_declaration_has_path_token(None) is False
+
+
+def test_owns_declaration_has_path_token_agrees_with_owns_gate_extract_on_matrix():
+    # T3/t-384 (спека handoff): эталон истинности -- owns_gate.
+    # extract_owns_paths(prompt) непустой. Матрица: девять живых
+    # образцов сессии (реконструкции, см. отчёт билдера) + канонические
+    # манифесты + голое слово в прозе -- ОБЯЗАНЫ давать ОДИНАКОВЫЙ
+    # булев вердикт на обоих независимых предикатах.
+    matrix = [
+        ("canonical_en", "owns (ABSOLUTE write paths): D:/repo/tools/x.py"),
+        (
+            "canonical_ru",
+            "owns (АБСОЛЮТНЫЕ пути записи): D:/repo/tools/x.py",
+        ),
+        (
+            "bold_bullet_continuation",
+            "**owns (ABSOLUTE write paths):**\n- D:/a.py\n- D:/b.py\n",
+        ),
+        (
+            "prose_topic_no_path",
+            "Найди точку правки подкласса owns №2 в WRITE_INDICATORS_RE.",
+        ),
+        (
+            "prose_then_real_declaration_below",
+            "Задача: правка гейта.\n"
+            "Не выходи за owns этой задачи.\n"
+            "D:/repo/readme.md -- прочитать перед началом\n"
+            "\n"
+            "owns: D:/repo/real_target.py\n",
+        ),
+        (
+            "prose_mid_sentence_alone",
+            "Задача: правка гейта.\n"
+            "Не выходи за owns этой задачи.\n"
+            "D:/repo/readme.md -- прочитать перед началом\n",
+        ),
+        (
+            "f6_bold_no_slash",
+            "owns: обратная сторона.** Пишущий диспатч",
+        ),
+        (
+            "owns_filename_substring_then_real_below",
+            "Дано: D:/x/tools/owns_gate.py, D:/x/tools/dispatch_gate.py, D:/x/CLAUDE.md\n"
+            "owns (ABSOLUTE write paths): D:/x/tools/owns_gate.py\n",
+        ),
+        ("relative_path_only", "owns: tools/x.py."),
+        ("owns_bare_no_content", "owns:"),
+        ("backtick_single_line", "owns: `D:/repo/tools/a.py`"),
+    ]
+    mismatches = []
+    for name, prompt in matrix:
+        dg_result = dispatch_gate.owns_declaration_has_path_token(prompt)
+        og_result = bool(owns_gate.extract_owns_paths(prompt))
+        if dg_result != og_result:
+            mismatches.append((name, dg_result, og_result))
+    assert mismatches == [], f"path-token predicate disagreement: {mismatches}"
+
+
+def test_t384_dispatch_gate_check2_recognizes_owns_with_path_without_verb():
+    # Критик: 78 из 87 живых манифестов не несут ни одного write-глагола
+    # -- write-признак ОБЯЗАН срабатывать через owns+путь напрямую.
+    prompt = "DoD: witness есть. owns (ABSOLUTE write paths): D:/repo/tools/x.py."
+    exit_code, message = dispatch_gate.decide(
+        _builder_payload(prompt, description="sonnet: write x")
+    )
+    assert exit_code == 2
+    assert "манифеста" in message
+
+    prompt_with_given = (
+        "DoD: witness есть.\nДано: репо целиком.\n"
+        "owns (ABSOLUTE write paths): D:/repo/tools/x.py."
+    )
+    exit_code2, message2 = dispatch_gate.decide(
+        _builder_payload(prompt_with_given, description="sonnet: write x")
+    )
+    assert exit_code2 == 0, message2

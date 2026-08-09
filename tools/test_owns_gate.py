@@ -151,6 +151,233 @@ def test_extract_owns_paths_prose_tail_cut_preserves_path_with_space():
     ]
 
 
+# ---------------------------------------------------------------------
+# F-59 подкласс 3 (2026-08-10, T2): backtick-обёрнутые пути, пути с
+# пробелами в кавычках/backtick в многострочном продолжении, и
+# регресс-пин на markdown-жирный маркер + буллет-блок ниже (спека
+# требовала инвертировать пин "markdown-жирное -> []" -- эмпирически
+# эта КОНКРЕТНАЯ форма УЖЕ разбиралась верно до правки, см. докстринг
+# модуля "F-59 ПОДКЛАСС 3"; ниже -- регресс-пин, ЛОКИРУЮЩИЙ это, плюс
+# фактически найденный и зафиксированный баг того же класса -- backtick).
+# ---------------------------------------------------------------------
+
+
+def test_f59_backtick_wrapped_path_single_line_recognized():
+    # Однострочная форма: путь в одинарных гравис-кавычках (markdown
+    # "код-шрифт") -- ДО фикса backtick не входил в _EDGE_TRIM_CHARS,
+    # `_WINDOWS_ABS_RE` не матчил токен, начинающийся с "`".
+    prompt = "owns: `D:/repo/tools/a.py`, `D:/repo/tools/b.py`"
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "D:/repo/tools/a.py",
+        "D:/repo/tools/b.py",
+    ]
+
+
+def test_f59_backtick_wrapped_path_continuation_recognized():
+    # Многострочная форма (буллет + backtick) -- та же правка
+    # (_EDGE_TRIM_CHARS) закрывает continuation через общий _clean_token.
+    prompt = "owns:\n- `D:/repo/tools/a.py`\n- `D:/repo/tools/b.py`\n"
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "D:/repo/tools/a.py",
+        "D:/repo/tools/b.py",
+    ]
+
+
+def test_f59_quoted_path_with_space_continuation_preserved():
+    # T5 краевая форма: путь с пробелом в двойных кавычках в
+    # продолжении -- ДО фикса _first_token_path резал по первому
+    # пробелу ("D:/my), теряя хвост пути.
+    prompt = 'owns:\n- "D:/repo/my folder/a.py"\n'
+    assert owns_gate.extract_owns_paths(prompt) == ["D:/repo/my folder/a.py"]
+
+
+def test_f59_backtick_path_with_space_continuation_preserved():
+    prompt = "owns:\n- `D:/repo/my folder/a.py`\n"
+    assert owns_gate.extract_owns_paths(prompt) == ["D:/repo/my folder/a.py"]
+
+
+def test_f59_unclosed_quote_continuation_falls_back_to_whitespace_split():
+    # Незакрытая кавычка -- _first_raw_token не находит парный символ,
+    # фоллбек на прежнее поведение (разбиение по пробелу); путь без
+    # пробела внутри распознаётся как раньше, кавычка обрезается
+    # _clean_token с ОДНОЙ стороны (та же логика edge-trim).
+    prompt = 'owns:\n- "D:/repo/tools/a.py\n'
+    assert owns_gate.extract_owns_paths(prompt) == ["D:/repo/tools/a.py"]
+
+
+def test_f59_pin_v_bold_marker_with_bulleted_continuation_below_parses_paths():
+    # Пин (в) спеки, реконструкция живого образца -- маркер
+    # "**owns (АБСОЛЮТНЫЕ пути записи):**" ОДНОЙ строкой (жирный,
+    # скобочное уточнение внутри "**") + пути реального репозитория
+    # буллетами НИЖЕ -- ОБЯЗАН разбираться в точный список. РЕГРЕСС-ПИН
+    # (не новый фикс, см. докстринг модуля "F-59 ПОДКЛАСС 3" --
+    # эмпирически эта форма уже работала до правки этой задачи).
+    prompt = (
+        "DoD: критерии приёмки — тест зелёный, witness приложен.\n"
+        "Дано: репо целиком.\n"
+        "**owns (АБСОЛЮТНЫЕ пути записи):**\n"
+        "- D:\\Improving_AI\\Operating-System-for-LLMs\\tools\\dispatch_gate.py\n"
+        "- D:\\Improving_AI\\Operating-System-for-LLMs\\tools\\owns_gate.py\n"
+        "- D:\\Improving_AI\\Operating-System-for-LLMs\\tools\\test_dispatch_gate.py\n"
+        "- D:\\Improving_AI\\Operating-System-for-LLMs\\tools\\test_owns_gate.py\n"
+        "Правь файлы по спеке."
+    )
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "D:\\Improving_AI\\Operating-System-for-LLMs\\tools\\dispatch_gate.py",
+        "D:\\Improving_AI\\Operating-System-for-LLMs\\tools\\owns_gate.py",
+        "D:\\Improving_AI\\Operating-System-for-LLMs\\tools\\test_dispatch_gate.py",
+        "D:\\Improving_AI\\Operating-System-for-LLMs\\tools\\test_owns_gate.py",
+    ]
+
+
+def test_f59_pin_v_decide_bold_marker_writes_declared_paths_to_sidecar(tmp_path):
+    # Тот же пин СКВОЗНЫМ decide() -- в sidecar попадает ОБЪЯВЛЕННЫЙ
+    # список путей манифеста (в), не read-only-предположение.
+    registry = tmp_path / "owns_registry.jsonl"
+    prompt = (
+        "DoD: критерии приёмки — тест зелёный, witness приложен.\n"
+        "Дано: репо целиком.\n"
+        "**owns (АБСОЛЮТНЫЕ пути записи):**\n"
+        "- D:\\Improving_AI\\Operating-System-for-LLMs\\tools\\dispatch_gate.py\n"
+        "- D:\\Improving_AI\\Operating-System-for-LLMs\\tools\\owns_gate.py\n"
+        "Правь файлы по спеке."
+    )
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "builder", "prompt": prompt, "description": "sonnet: write"},
+        "session_id": "s-1",
+        "cwd": "D:\\repo",
+    }
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=datetime(2026, 8, 10, 12, 0, 0))
+    assert exit_code == 0
+    assert output is None
+    written = [json.loads(ln) for ln in registry.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert written[0]["owns"] == [
+        "D:\\Improving_AI\\Operating-System-for-LLMs\\tools\\dispatch_gate.py",
+        "D:\\Improving_AI\\Operating-System-for-LLMs\\tools\\owns_gate.py",
+    ]
+
+
+def test_f59_pin_v_two_bold_marker_manifests_with_overlap_detected(tmp_path):
+    # T4: два синтетических манифеста markdown-жирной формы с
+    # ПЕРЕСЕКАЮЩИМСЯ путём -- OVERLAP обязан сработать (доказывает, что
+    # разобранные из markdown-формы пути реально участвуют в сверке,
+    # не только извлекаются).
+    registry = tmp_path / "owns_registry.jsonl"
+    now = datetime(2026, 8, 10, 12, 0, 0)
+    prompt1 = (
+        "DoD: witness приложен. Дано: репо целиком.\n"
+        "**owns (ABSOLUTE write paths):**\n"
+        "- D:/repo/tools/shared.py\n"
+        "Правь файлы."
+    )
+    payload1 = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "builder", "prompt": prompt1, "description": "sonnet: write A"},
+        "session_id": "s-A",
+        "cwd": "D:\\repo",
+    }
+    exit_code1, output1 = owns_gate.decide(payload1, registry_path=registry, now=now)
+    assert exit_code1 == 0
+    assert output1 is None
+
+    prompt2 = (
+        "DoD: witness приложен. Дано: репо целиком.\n"
+        "**owns (ABSOLUTE write paths):**\n"
+        "- D:/repo/tools/shared.py\n"
+        "Правь файлы."
+    )
+    payload2 = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "builder", "prompt": prompt2, "description": "sonnet: write B"},
+        "session_id": "s-B",
+        "cwd": "D:\\repo",
+    }
+    exit_code2, output2 = owns_gate.decide(payload2, registry_path=registry, now=now)
+    assert exit_code2 == 0
+    assert output2 is not None
+    assert "OWNS OVERLAP" in output2["hookSpecificOutput"]["additionalContext"]
+
+
+def test_f59_owns_bare_marker_without_any_paths_stays_empty():
+    # T5 краевая форма: "owns: без путей вовсе" -- маркер есть, тела
+    # нет вовсе (конец промпта сразу после маркера) -- пустой список,
+    # уходит в диагностику B2 на уровне decide(), не крашится.
+    assert owns_gate.extract_owns_paths("**owns:**\n") == []
+    assert owns_gate.extract_owns_paths("owns:") == []
+
+
+def test_f59_fenced_code_block_marker_not_specially_parsed_documented_non_goal():
+    # T5 краевая форма: маркер в fenced-блоке (тройной backtick) --
+    # ЯВНЫЙ НЕ-ЦЕЛЬ (см. докстринг модуля "F-59 ПОДКЛАСС 3",
+    # "ФЕНСИРОВАННЫЙ БЛОК"): ограничители "```" сами не path-подобны,
+    # блок продолжения обрывается на них -- безопасный пустой результат,
+    # не попытка распарсить содержимое фенса как декларацию.
+    prompt = "**owns (ABSOLUTE write paths):**\n```\nD:/repo/tools/a.py\n```\n"
+    assert owns_gate.extract_owns_paths(prompt) == []
+
+
+# ---------------------------------------------------------------------
+# F6 (t-384, критик, 2026-08-10): is_path_token() больше не засчитывает
+# ГОЛОЕ "*" (markdown-decoration) как путь -- живой sidecar owns_gate
+# зарегистрировал прозу с "**" как owns-путь на диспатче того же
+# ревью. Реконструкция (см. handoff отчёта): строка "owns: обратная
+# сторона.** Пишущий диспатч" -- ДО фикса is_path_token() матчила её
+# ЦЕЛИКОМ как ОДИН "путь" (split по `;`/`,`/переводу строки не режет
+# по пробелу, весь текст -- один токен; "*" внутри "**" засчитывался
+# голой проверкой `"*" in tok`).
+# ---------------------------------------------------------------------
+
+
+def test_f6_markdown_bold_decoration_no_slash_not_a_path_single_line():
+    prompt = "owns: обратная сторона.** Пишущий диспатч без реального пути."
+    assert owns_gate.extract_owns_paths(prompt) == []
+
+
+def test_f6_is_path_token_rejects_bare_star_without_slash_direct():
+    # Прямая проверка регекса (симметрично _is_continuation_path_token,
+    # которая эту строгость уже несла ДО F6, см. докстринг "F6").
+    assert owns_gate.is_path_token("**Пишущий") is False
+    assert owns_gate.is_path_token("обратная сторона.**") is False
+    # Позитивный контроль (правило 6 гигиены): глоб СО слэшем по-прежнему
+    # путь-подобен -- негатив выше не доказывал бы отсутствие функции.
+    assert owns_gate.is_path_token("tools/*.py") is True
+    assert owns_gate.is_path_token("D:/repo/tools/a.py") is True
+
+
+def test_f6_decide_prose_with_bare_star_does_not_register_in_sidecar(tmp_path):
+    # Сквозным decide(): прозаический диспатч (owns-слово + write-
+    # индикатор "правь", БЕЗ реального пути) больше не пишет
+    # ложную "прозу-как-путь" запись в sidecar -- уходит в диагностику
+    # B2 (owns объявлен, путей не разобрано), sidecar не растёт.
+    registry = tmp_path / "owns_registry.jsonl"
+    prompt = (
+        "DoD: тест зелёный, witness приложен.\n"
+        "Дано: репо целиком.\n"
+        "owns: обратная сторона.** Пишущий диспатч без реального пути.\n"
+        "Правь файлы."
+    )
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "builder", "prompt": prompt, "description": "sonnet: write"},
+        "session_id": "s-1",
+        "cwd": "D:\\repo",
+    }
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=datetime(2026, 8, 10, 12, 0, 0))
+    assert exit_code == 0
+    assert output is not None
+    assert "слепа" in output["hookSpecificOutput"]["additionalContext"]
+    assert not registry.exists()
+
+
+def test_f6_is_continuation_path_token_now_delegates_to_shared_predicate():
+    # D-0043: is_path_token() и _is_continuation_path_token() теперь
+    # ОБА делегируют dispatch_gate.is_path_like_token() -- поведение
+    # идентично на одних и тех же формах (регресс-пин единства).
+    for tok in ("**Внимание**:", "tools/test_*.py", "D:/repo/a.py", "обратная.**", "/repo/a.py"):
+        assert owns_gate.is_path_token(tok) == owns_gate._is_continuation_path_token(tok), tok
+
+
 def test_extract_owns_paths_marker_false_positive_line_skipped_for_valid_line_below():
     # "owns_gate.py" на Given-строке -- ложное срабатывание подстрочного
     # маркера, НЕ дающее path-токенов. Разбирается настоящая owns-строка

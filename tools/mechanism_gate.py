@@ -111,6 +111,64 @@ MECHANISM_PREFIXES = (
     ".githooks/",
     # t-027 (critic B2): хуки харнесса = обязанности будущих сессий.
     ".claude/settings.json",
+    # F-56 (2026-08-10, критерий принят от AO3): невод расширен на САМИ
+    # гейты/валидаторы, на которые проводка (.claude/settings.json,
+    # .githooks/) ПОКАЗЫВАЕТ -- правка любого из них раньше проходила
+    # commit-msg без осевого блока. Критерий: в неводе -- то, чей отказ
+    # или пропуск МЕНЯЕТ, что обязано случиться (код стоит на пути
+    # исполнения вызова/коммита/сессии); генераторы/свиперы/измерители
+    # остаются вне (полный аудит tools/*.py -- отчёт билдера, T1).
+    # Поимённо, не каталогом tools/ -- широкий каталог по-прежнему вне
+    # невода сознательно (п.6 выше, D-0055).
+    "tools/session_context.py",      # SessionStart hook
+    "tools/dispatch_gate.py",        # PreToolUse Task|Agent hook
+    "tools/critic_snapshot.py",      # PreToolUse Task|Agent hook
+    "tools/owns_gate.py",            # PreToolUse Task|Agent hook
+    "tools/hygiene_gate.py",         # PreToolUse Bash|PowerShell hook
+    "tools/claim_control_gate.py",   # PreToolUse Edit|Write hook
+    "tools/dod_track.py",            # PostToolUse hook
+    "tools/journal_echo.py",         # PostToolUse hook
+    "tools/search_control_gate.py",  # PostToolUse hook
+    "tools/negative_lint.py",        # PostToolUse Task|Agent hook
+    "tools/dod_gate.py",             # SubagentStop hook
+    "tools/main_gate.py",            # Stop hook
+    "tools/journal_validator.py",    # .githooks/pre-commit
+    "tools/escape_check.py",         # .githooks/pre-commit
+    "tools/enforcement_probe.py",    # .githooks/pre-commit
+    # tools/wiring_check.py -- НЕ названо явно в спеке T2, найдено этим
+    # аудитом (T1): subprocess-вызывается tools/enforcement_probe.py
+    # (строка выше, уже в неводе) на пути pre-commit, ПЛЮС импортируется
+    # tools/session_context.py внутри wiring_lines() для SessionStart --
+    # двойная проводка на execution path, бесспорный случай критерия.
+    "tools/wiring_check.py",
+    # t-382 (2026-08-10, критик пробой опроверг билдерский вердикт этой
+    # же задачи): AST-замыкание живой проводки нашло ДВА модуля,
+    # достигнутых ТРАНЗИТИВНЫМ импортом из уже-механизменных хуков —
+    # сам факт импорта делает их отказ/порчу способной изменить, что
+    # обязано случиться, тем же критерием, что и прямые hook-команды.
+    # tools/journal_echo.py:151 `import tier_echo` (живой PostToolUse-хук,
+    # строка 130 выше) + tier_echo.KNOWN_TIER_WORDS (:592),
+    # iter_transcript_models (:635), count_models (:636) -- замер яруса
+    # D-0083; порча/обнуление этих имён в памяти гасит MISMATCH-warn хука.
+    # СНЯТО этой правкой: прежний вердикт билдера "tier_echo.py — вне
+    # невода / пограничный случай, проводки не найдено" — был основан на
+    # неполном грепе (head_limit оборвал совпадения до строки 151, живого
+    # `import tier_echo`) и опровергнут критиком эмпирически. ОТДЕЛЬНАЯ,
+    # ДО СИХ ПОР ОТКРЫТАЯ находка (не решается этой правкой, в очередь):
+    # собственный докстринг tier_echo.py по-прежнему называет его
+    # "SubagentStop-хук Claude Code" -- но фактическая проводка на
+    # execution path идёт ЧЕРЕЗ импорт из journal_echo.py (PostToolUse),
+    # НЕ через собственную регистрацию в .claude/settings.json (там
+    # tier_echo вообще не упомянут, см. builder-аудит) -- докстринг и
+    # реальность расходятся, чинить эту запись здесь не входит в scope.
+    "tools/tier_echo.py",
+    # tools/session_context.py:138 `from preflight_quota import (...)`
+    # (живой SessionStart-хук, строка 123 выше) -- падение импорта валит
+    # session_context на старте КАЖДОЙ сессии (см. N4/critic t-027 в
+    # session_context.py: ImportError/SyntaxError здесь намеренно НЕ
+    # ловится локально и должно дойти до main()'s единственной fail-open
+    # границы).
+    "tools/preflight_quota.py",
 )
 
 AXIS_HEADING_RE = re.compile(r"^##\s+Ось\s+(\d+)", re.MULTILINE)

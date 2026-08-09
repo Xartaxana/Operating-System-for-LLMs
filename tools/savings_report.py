@@ -22,12 +22,32 @@ docs/task_reports/2026-07-11_savings-analysis.md. Оговорки метода
 НЕ: импортируются оттуда — единственный владелец цен (ось 2).
 """
 import argparse
-import io
 import sqlite3
 import sys
 from pathlib import Path
 
 from usage_report import CACHE_READ_MULTIPLIER, CACHE_WRITE_MULTIPLIER, PRICES_PER_TOKEN_USD
+
+# Оба потока: отчёт печатает кириллицу в stdout (заголовки секций, ИТОГО);
+# без reconfigure Windows-консоль искажает её (класс найден в AO3-твине,
+# их задача e4-impact-selection 2026-07-14; ось 1 SIBLING_MAP -- фикс парный,
+# эталон -- tools/mechanism_gate.py). errors="replace" (порт AO3 «Мелкое
+# хозяйство» п.1, 2026-07-18): голый encoding="utf-8" оставлял
+# errors="strict" -- replace убирает последний шанс ValueError на
+# повторной кодировке без потери диагностируемости (отчёт печатает текст,
+# не бинарные данные). Заменяет прежний ad hoc `sys.stdout =
+# io.TextIOWrapper(...)` под `if __name__ == "__main__":` -- тот чинил
+# только stdout, только при прямом запуске скриптом (не при импорте
+# модуля), и без errors="replace" (голый strict); оставлять оба
+# механизма разом было бы конфликтом: TextIOWrapper без errors="replace"
+# СНАЧАЛА переопределил бы sys.stdout заново на strict, отменяя эффект
+# reconfigure ниже -- один канонический механизм, тот же, что и везде
+# по SIBLING_MAP ось 1.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 FABLE_MODEL = "claude-fable-5"
 
@@ -141,5 +161,4 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     sys.exit(main())

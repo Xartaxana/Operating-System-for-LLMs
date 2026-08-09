@@ -40,8 +40,40 @@
        (continuation-диспатч другого яруса, напр. critic-вход приёмки);
     в) task_id существует, задача открыта, agent совпадает с одним из
        предыдущих delegated -- легально ТОЛЬКО с полем attempt (целое
-       >=2) И существующим выше rejected с тем же task_id (ретрай
-       после отклонения);
+       >=2) И ОДНИМ ИЗ (i)/(ii) ниже (2026-08-10, дыра B3 -- порт
+       AO3 AT-BUG-034, независимая сверка AO3 подтвердила: старая форма
+       "retry_ok = valid_attempt and task_id in rejected_tasks"
+       легализовала повторный delegated ЛЮБОГО agent по ЛЮБОМУ rejected
+       на задаче -- ревьюер (напр. critic) мог войти второй раз на
+       ЧУЖОЙ rejected (исполнителя) БЕЗ того, чтобы исполнитель что-то
+       переделал -- см. также правило 11 модульного докстринга и
+       тесты test_b3_* в tools/test_journal_validator.py):
+       (i) SELF -- выше по файлу существует rejected С ЭТИМ ЖЕ agent
+          (rejected.agent -- исполнитель, чей результат отклонён, R6) на
+          этом task_id -- легализует собственный ретрай БЕЗ
+          дополнительных условий (форма "как раньше", сужена ровно до
+          "своего" rejected -- self-retry не требует никакого сигнала
+          между rejected и повторным delegated);
+       (ii) FOREIGN -- на task_id есть rejected, но НИ ОДИН не несёт
+          agent, совпадающий со входящим ("чужой" rejected) -- легализует
+          вход ТОЛЬКО если СТРОГО ПОСЛЕ ПОСЛЕДНЕГО delegated ИМЕННО
+          ЭТОГО agent на этом task_id (не где-либо в истории вообще --
+          сигнал из БОЛЕЕ РАННЕГО раунда протух и следующий раунд не
+          легализует) появился хотя бы один сигнал новой версии объекта
+          ревью:
+            (1) новый delegated ДРУГОГО agent на этом task_id;
+            (2) новый rejected с agent=lead на этом task_id (Lead-правка
+               без своего delegated -- сам факт правки и есть сигнал);
+            (3) новый escalated ДРУГОГО agent на этом task_id (2026-08-10,
+               Ф5, критик-проба H2 пересдачи t-383: escalated ТОГО ЖЕ
+               agent, что входит повторно, -- самолегализация петлёй,
+               НЕ считается, симметрично сигналу (1); у AO3 сигнал
+               завязан на эскалацию к конкретной модели полного Lead,
+               здесь адаптирован на ФАКТ события escalated ДРУГОГО agent
+               под тем же task_id, без привязки к ярусу/модели --
+               delegation.config.yaml знает только ярусы, не модели
+               внутри яруса).
+          Нет ни (i), ни валидного (ii)-сигнала -> FAIL (см. (г)).
     в2) (2026-07-15, замена умершего воркера) ТОТ ЖЕ случай (agent
        совпадает, задача открыта, rejected НЕ обязателен, attempt НЕ
        растёт -- это не ретрай правила 6) -- легально, если notes
@@ -52,9 +84,9 @@
        фиктивной замены: хэндл, не встречающийся ни в одном предыдущем
        delegated этого task_id, -- FAIL (см. extract_replaces_worker).
     г) всё остальное -- FAIL (дубль-паттерн t-029: тот же agent, без
-       attempt, без rejected, без валидного replaces_worker; и
-       delegated на ЗАКРЫТУЮ задачу -- reopen запрещён, коллизия = две
-       задачи, D-0060).
+       attempt, без легального (i)/(ii) выше, без валидного
+       replaces_worker; и delegated на ЗАКРЫТУЮ задачу -- reopen
+       запрещён, коллизия = две задачи, D-0060).
     Для нового accepted/rejected/escalated/defect_found -- ссылается на
     task_id, уже встреченный выше в файле (HEAD или ранее в этом же
     коммите); без изменений.
@@ -198,6 +230,20 @@ import subprocess
 import sys
 import traceback
 from pathlib import Path
+
+# Оба потока: тексты отказа гейта -- кириллица и в stdout, и в stderr;
+# без reconfigure Windows-консоль искажает их (класс найден в AO3-твине,
+# их задача e4-impact-selection 2026-07-14; ось 1 SIBLING_MAP -- фикс парный,
+# эталон -- tools/mechanism_gate.py). errors="replace" (порт AO3 «Мелкое
+# хозяйство» п.1, 2026-07-18): голый encoding="utf-8" оставлял
+# errors="strict" -- replace убирает последний шанс ValueError на
+# повторной кодировке без потери диагностируемости (гейт печатает текст,
+# не бинарные данные).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 # D-0099: Lead-привязка (roles.lead в delegation.config.yaml) переезжает
 # с fable на другую модель -- resolve_lead_binding()/lead_family() и
@@ -362,42 +408,96 @@ def extract_replaces_worker(notes) -> str | None:
     return m.group(1) if m else None
 
 
-def _harvest_line_into(event, task_id, agent, worker_ref, delegated_agents: dict, closed_tasks: set,
-                        rejected_tasks: set, task_worker_refs: dict) -> None:
+def _harvest_line_into(idx: int, event, task_id, agent, worker_ref, delegated_agents: dict, closed_tasks: set,
+                        rejected_tasks: set, task_worker_refs: dict, rejected_by_agent: dict,
+                        last_delegated_idx: dict, signal_log: dict) -> None:
     """Правило 9(б/в/в2) state: обновляет per-task_id историю ОДНОЙ строкой
     (используется и для затравки из HEAD, и построчно для новых строк --
     порядок вызовов = порядок появления строк в файле, так что состояние
     на момент проверки строки N отражает ровно "всё выше по файлу").
     task_worker_refs копит ВСЕ worker_ref всех delegated (любого agent)
     этого task_id -- правило 9в2 ищет заявленный прежний worker_ref именно
-    в этом множестве, не только среди строк того же agent."""
+    в этом множестве, не только среди строк того же agent.
+
+    idx -- 0-based позиция строки В ПОЛНОМ ФАЙЛЕ (HEAD-строки: 0..len(head)-1
+    по порядку; новые строки продолжают счёт -- см. вызов в
+    validate_new_lines: len(head_lines)+idx-в-new_lines). Дыра B3
+    (2026-08-10, порт AO3 AT-BUG-034, правило 9в): rejected_by_agent
+    (task_id -> множество agent, чей результат отклонён на этой задаче)
+    и signal_log (task_id -> список (idx, kind, agent) сигналов новой
+    версии: kind="delegated" на КАЖДЫЙ delegated, kind="lead_rejected" на
+    rejected с agent=lead, kind="escalated" на escalated) -- вместе с
+    last_delegated_idx (task_id, agent) -> idx ПОСЛЕДНЕГО delegated этого
+    agent на этом task_id -- дают _has_new_version_signal() материал для
+    различения "свой" (i) и "чужой" (ii) rejected из правила 9в."""
     if not (isinstance(task_id, str) and TASK_ID_RE.match(task_id)):
         return
     if event == "delegated" and isinstance(agent, str) and agent:
         delegated_agents.setdefault(task_id, set()).add(agent)
         if isinstance(worker_ref, str) and worker_ref.strip():
             task_worker_refs.setdefault(task_id, set()).add(worker_ref.strip())
+        last_delegated_idx[(task_id, agent)] = idx
+        signal_log.setdefault(task_id, []).append((idx, "delegated", agent))
     elif event == "accepted":
         closed_tasks.add(task_id)
     elif event == "rejected":
         rejected_tasks.add(task_id)
+        if isinstance(agent, str) and agent:
+            rejected_by_agent.setdefault(task_id, set()).add(agent)
+            if agent == "lead":
+                signal_log.setdefault(task_id, []).append((idx, "lead_rejected", agent))
+    elif event == "escalated":
+        signal_log.setdefault(task_id, []).append((idx, "escalated", agent))
 
 
 def harvest_task_state(lines: list[str]):
     """Затравка состояния правила 9(б/в/в2) из HEAD-версии (или любого
     префикса строк) -- (delegated_agents, closed_tasks, rejected_tasks,
-    task_worker_refs)."""
+    task_worker_refs, rejected_by_agent, last_delegated_idx, signal_log).
+    idx внутри lines -- 0-based позиция В ЭТОМ СПИСКЕ (для HEAD-затравки
+    это позиция в head_lines, ровно 0..len(head_lines)-1 -- см. докстринг
+    _harvest_line_into про продолжение счёта для новых строк)."""
     delegated_agents: dict[str, set] = {}
     closed_tasks: set = set()
     rejected_tasks: set = set()
     task_worker_refs: dict[str, set] = {}
-    for line in lines:
+    rejected_by_agent: dict[str, set] = {}
+    last_delegated_idx: dict[tuple, int] = {}
+    signal_log: dict[str, list] = {}
+    for idx, line in enumerate(lines):
         obj = _try_parse_obj(line)
         if obj is None:
             continue
-        _harvest_line_into(obj.get("event"), obj.get("task_id"), obj.get("agent"), obj.get("worker_ref"),
-                           delegated_agents, closed_tasks, rejected_tasks, task_worker_refs)
-    return delegated_agents, closed_tasks, rejected_tasks, task_worker_refs
+        _harvest_line_into(idx, obj.get("event"), obj.get("task_id"), obj.get("agent"), obj.get("worker_ref"),
+                           delegated_agents, closed_tasks, rejected_tasks, task_worker_refs,
+                           rejected_by_agent, last_delegated_idx, signal_log)
+    return (delegated_agents, closed_tasks, rejected_tasks, task_worker_refs,
+            rejected_by_agent, last_delegated_idx, signal_log)
+
+
+def _has_new_version_signal(task_id: str, agent, after_idx: int, signal_log: dict) -> bool:
+    """Правило 9(в-ii), дыра B3 (порт AO3 AT-BUG-034): True, если в
+    signal_log[task_id] есть сигнал СТРОГО ПОСЛЕ after_idx (= idx
+    последнего delegated ИМЕННО этого agent на этом task_id) одного из
+    трёх видов -- (1) delegated ДРУГОГО agent (kind_agent != agent), (2)
+    rejected agent=lead (kind="lead_rejected"), (3) escalated ДРУГОГО
+    agent (kind="escalated", kind_agent != agent -- Ф5, 2026-08-10, дыра
+    B3 пересдача, критик-проба H2: без этого сужения агент мог сам
+    записать escalated на СВОЮ же задачу и тем же ходом легализовать
+    свой же повторный вход -- самолегализация петлёй; симметрично
+    сигналу (1), у AO3 сигнал заякорен на эскалацию к полному Lead,
+    здесь якорь -- "другой agent", не "другая модель"). idx <= after_idx
+    -- сигнал из БОЛЕЕ РАННЕГО раунда (до последнего собственного
+    delegated входящего agent) -- протух, не считается (см. тесты
+    test_b3_stale_*)."""
+    for idx, kind, kind_agent in signal_log.get(task_id, ()):
+        if idx <= after_idx:
+            continue
+        if kind in ("delegated", "escalated") and kind_agent != agent:
+            return True
+        if kind == "lead_rejected":
+            return True
+    return False
 
 
 def _last_head_ts(head_lines: list[str]):
@@ -602,7 +702,8 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
     max_num = max_task_num(seen_task_ids)
     last_ts = _last_head_ts(head_lines)
     now_limit = now + datetime.timedelta(minutes=10)
-    delegated_agents, closed_tasks, rejected_tasks, task_worker_refs = harvest_task_state(head_lines)
+    (delegated_agents, closed_tasks, rejected_tasks, task_worker_refs,
+     rejected_by_agent, last_delegated_idx, signal_log) = harvest_task_state(head_lines)
 
     for idx, line in enumerate(new_lines):
         line_no = len(head_lines) + idx + 1
@@ -709,7 +810,20 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
                     attempt = obj.get("attempt")
                     valid_attempt = (isinstance(attempt, int) and not isinstance(attempt, bool)
                                       and attempt >= 2)
-                    retry_ok = valid_attempt and task_id in rejected_tasks
+                    # Дыра B3 (2026-08-10, порт AO3 AT-BUG-034): "чужой" rejected
+                    # (agent, чей результат отклонён, ОТЛИЧАЕТСЯ от входящего agent)
+                    # легализует вход ТОЛЬКО с сигналом новой версии ПОСЛЕ последнего
+                    # delegated этого agent (правило 9в-ii) -- см. _has_new_version_signal.
+                    own_rejected = isinstance(agent, str) and agent in rejected_by_agent.get(task_id, set())
+                    foreign_rejected = task_id in rejected_tasks and not own_rejected
+                    if valid_attempt and own_rejected:
+                        retry_ok = True  # (в-i) self-retry -- как раньше, без доп. условий
+                    elif valid_attempt and foreign_rejected:
+                        last_own_idx = last_delegated_idx.get((task_id, agent))
+                        retry_ok = (last_own_idx is not None
+                                    and _has_new_version_signal(task_id, agent, last_own_idx, signal_log))
+                    else:
+                        retry_ok = False
                     replaces_handle = extract_replaces_worker(notes)
                     if retry_ok:
                         pass  # (в) легальный ретрай после rejected
@@ -724,10 +838,35 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
                                 "замена запрещена (правило 9в2)"
                             )
                     else:
-                        # (в) не выполнены условия ретрая, маркера замены нет -> (г) дубль-паттерн t-029
+                        # (в) не выполнены условия ретрая, маркера замены нет -> (г) дубль-паттерн t-029.
+                        # Ф3 (2026-08-10, дыра B3 пересдача, критик-проба J/J'): valid_attempt
+                        # проверяется ПЕРВЫМ -- если attempt сам по себе отсутствует/невалиден,
+                        # сообщение обязано называть ИМЕННО ЭТО, а не рассуждать о rejected/сигналах
+                        # (даже если foreign_rejected формально True и свежий сигнал ЕСТЬ -- отсутствие
+                        # attempt само по себе достаточная и единственная причина отказа здесь, текст
+                        # не должен утверждать ложь "сигнала нет", когда сигнал есть). Тексты отказа
+                        # этого гейта читает человек в момент отказа -- тот же мотив, что и у кодировки.
+                        if not valid_attempt:
+                            reason = (
+                                "поле 'attempt' отсутствует или невалидно (обязано быть целым >=2 "
+                                "для повторного delegated по существующему открытому task_id) -- "
+                                "остальные условия (наличие/чуждость rejected, сигнал новой версии) "
+                                "не проверяются, пока сам attempt некорректен"
+                            )
+                        elif foreign_rejected:
+                            reason = (
+                                "на task_id есть rejected, но НЕ agent'а, который входит повторно "
+                                "(\"чужой\" rejected, правило 9в-ii) -- легален только если ПОСЛЕ "
+                                "последнего delegated ЭТОГО agent появился сигнал новой версии "
+                                "(новый delegated другого agent / rejected agent=lead / escalated "
+                                "на этот task_id); сигнала нет, либо он из более раннего раунда и "
+                                "протух -- дыра B3 (порт AO3 AT-BUG-034)"
+                            )
+                        else:
+                            reason = "attempt валиден, но rejected для этого task_id нет вовсе (ни своего, ни чужого)"
                         violations.append(
                             f"{tag}: повторный delegated тем же agent={agent!r} по task_id={task_id!r} "
-                            "без attempt>=2 и существующего выше rejected -- запрещённый дубль "
+                            f"{reason} -- запрещённый дубль "
                             "(класс t-029, D-0060); легальная альтернатива -- маркер "
                             "'replaces_worker:<прежний worker_ref>' в notes при замене умершего "
                             "воркера без вердикта (правило 9в2)"
@@ -738,8 +877,9 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
                     f"{tag}: task_id {task_id!r} не ссылается ни на что существующее выше в файле"
                 )
 
-        _harvest_line_into(event, task_id, agent, obj.get("worker_ref"), delegated_agents, closed_tasks,
-                           rejected_tasks, task_worker_refs)
+        _harvest_line_into(line_no - 1, event, task_id, agent, obj.get("worker_ref"), delegated_agents,
+                           closed_tasks, rejected_tasks, task_worker_refs, rejected_by_agent,
+                           last_delegated_idx, signal_log)
 
         parsed_ts = parse_ts(ts) if isinstance(ts, str) else None
         if isinstance(ts, str) and ts and parsed_ts is None:

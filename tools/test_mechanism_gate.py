@@ -1,6 +1,13 @@
 """Тесты tools/mechanism_gate.py — гейт осевого блока правила 10(б), D-0055."""
 from __future__ import annotations
 
+import ast
+import json
+import re
+from pathlib import Path
+
+import pytest
+
 import mechanism_gate as mg
 
 MAP_SAMPLE = """# Sibling Map
@@ -843,3 +850,319 @@ def test_decide_full_duplicate_model_id_tier_fable_passes():
         block_extra="", staged=["CLAUDE.md"], map_text="## Ось 1 —\n",
         config_text=CONFIG_LADDER_DUPLICATE_MODEL_ID)
     assert code == 0
+
+
+# --- F-56 (2026-08-10): самозамыкающийся тест -- невод должен покрывать
+# ВСЁ, на что реально показывает живая проводка (.claude/settings.json,
+# .githooks/pre-commit, .githooks/commit-msg), а не только список,
+# который кто-то переписал в MECHANISM_PREFIXES вручную. Тест читает
+# ЖИВЫЕ файлы репозитория (не копии, не фикстуры) -- расхождение между
+# проводкой и неводом есть РЕАЛЬНЫЙ дрейф, который должен уронить тест,
+# а не тихо пройти мимо (класс F-56: тишина неотличима от покрытия).
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+LIVE_SETTINGS_PATH = REPO_ROOT / ".claude" / "settings.json"
+LIVE_GITHOOKS_DIR = REPO_ROOT / ".githooks"
+
+# tools/<...>.py -- одинаково матчит forward- и backslash-форму пути
+# (T4: адверсариальная батарея по слэшам), останавливается на первом
+# небуквенном разделителе (пробел/кавычка) -- не жуёт хвост CLI-аргументов.
+_TOOL_CMD_RE = re.compile(r"tools[/\\][A-Za-z0-9_.\\/-]+\.py")
+
+
+def _load_settings(path):
+    # Отсутствие/битость живого файла -- НЕ повод скипнуть проверку
+    # (см. докстринг блока выше): assert/исключение роняют тест громко.
+    assert path.exists(), (
+        f"живой {path} не найден -- самозамыкающийся тест обязан упасть "
+        "громко, а не молчать (F-56: тишина неотличима от покрытия)"
+    )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_text(path):
+    assert path.exists(), (
+        f"живой {path} не найден -- самозамыкающийся тест обязан упасть "
+        "громко, а не молчать (F-56: тишина неотличима от покрытия)"
+    )
+    return path.read_text(encoding="utf-8")
+
+
+def _iter_hook_commands(settings_data):
+    """Каждая command-строка из КАЖДОЙ группы КАЖДОГО события hooks --
+    терпимо к пустому массиву на любом уровне (T4: «хук-массив пустой»)
+    и к отсутствующим ключам (settings_data.get с дефолтами)."""
+    hooks = settings_data.get("hooks", {}) or {}
+    for _event, groups in hooks.items():
+        for group in groups or []:
+            for hook in group.get("hooks", []) or []:
+                if hook.get("type") == "command" and "command" in hook:
+                    yield hook["command"]
+
+
+def _tool_paths_in_text(text):
+    """Каждое вхождение `tools/<name>.py` в *text* (команда хука или
+    целиком содержимое .githooks/*-скрипта), backslash нормализован
+    на forward slash перед сверкой с MECHANISM_PREFIXES."""
+    return [m.group(0).replace("\\", "/") for m in _TOOL_CMD_RE.finditer(text)]
+
+
+def _uncovered_tool_paths(texts):
+    uncovered = []
+    for text in texts:
+        for tool_path in _tool_paths_in_text(text):
+            if not any(mg._matches(tool_path, pref) for pref in mg.MECHANISM_PREFIXES):
+                uncovered.append(tool_path)
+    return uncovered
+
+
+def test_every_live_settings_hook_command_is_covered_by_mechanism_prefixes():
+    data = _load_settings(LIVE_SETTINGS_PATH)
+    commands = list(_iter_hook_commands(data))
+    assert commands, ("живой .claude/settings.json не содержит ни одной "
+                       "hook-команды -- пусто подозрительно, не считается покрытием")
+    uncovered = _uncovered_tool_paths(commands)
+    assert not uncovered, (
+        f"hook-команды .claude/settings.json вне невода MECHANISM_PREFIXES: "
+        f"{sorted(set(uncovered))}")
+
+
+def test_every_githooks_script_reference_is_covered_by_mechanism_prefixes():
+    pre_commit_text = _load_text(LIVE_GITHOOKS_DIR / "pre-commit")
+    commit_msg_text = _load_text(LIVE_GITHOOKS_DIR / "commit-msg")
+    referenced = _tool_paths_in_text(pre_commit_text) + _tool_paths_in_text(commit_msg_text)
+    assert referenced, ("ни .githooks/pre-commit, ни .githooks/commit-msg не "
+                         "ссылаются ни на один tools/*.py -- пусто подозрительно")
+    uncovered = _uncovered_tool_paths([pre_commit_text, commit_msg_text])
+    assert not uncovered, (
+        f"скрипты, вызываемые из .githooks/, вне невода MECHANISM_PREFIXES: "
+        f"{sorted(set(uncovered))}")
+
+
+# --- t-382 (2026-08-10): ТРАНЗИТИВНОЕ импорт-замыкание живой проводки ----
+# Прямых hook-команд/.githooks-скриптов недостаточно (см. критик-пробой):
+# tools/journal_echo.py импортирует tier_echo (не hook-команда сама по
+# себе), tools/session_context.py импортирует preflight_quota -- отказ
+# ЛЮБОГО из них меняет, что обязано случиться, тем же критерием F-56, но
+# прямая проверка команд их не видит. Этот блок собирает AST-импорты
+# tools/*-модулей РЕКУРСИВНО от каждого живого стартового скрипта и
+# утверждает: каждый достигнутый модуль покрыт MECHANISM_PREFIXES.
+
+TOOLS_DIR = REPO_ROOT / "tools"
+
+
+def _tools_module_names(tools_dir=TOOLS_DIR):
+    """Множество имён модулей (без .py), реально существующих файлами
+    в *tools_dir* -- граница резолюции: импорт, чьё имя НЕ входит сюда,
+    не tools/-модуль (стандартная библиотека, gateway/, что угодно ещё)
+    и в замыкание не попадает (T4 «импорт вне tools/ — не считается»)."""
+    return {p.stem for p in tools_dir.glob("*.py")}
+
+
+def _ast_tool_imports(source_text, tools_module_names):
+    """Реальные (AST, не строковый греп) `import X` / `from X import
+    ...` верхнего уровня в *source_text*, X резолвится ТОЛЬКО против
+    *tools_module_names* -- импорт стандартной библиотеки/gateway/etc.
+    просто не входит в это множество и молча исключается (не ошибка).
+    Относительный импорт (`from . import X`, node.level > 0) не
+    резолвится этим же путём -- отдельно НЕ раскрывается этой функцией
+    (в этом репозитории relative-импорты между tools/*.py не приняты
+    стилистически; документированное сужение, не угаданное молчком).
+    ast.parse() поднимает SyntaxError на битом синтаксисе -- НЕ
+    перехватывается здесь: вызывающая сторона решает, падать громко или
+    нет (T4 «битый синтаксис файла -- тест падает громко, не скипается»)."""
+    tree = ast.parse(source_text)
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".")[0]
+                if top in tools_module_names:
+                    found.add(top)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0 and node.module:
+                top = node.module.split(".")[0]
+                if top in tools_module_names:
+                    found.add(top)
+    return found
+
+
+def _transitive_tool_module_closure(start_modules, tools_module_names, tools_dir=TOOLS_DIR):
+    """BFS-замыкание tools/*-модулей, достижимых РЕАЛЬНЫМ импортом от
+    *start_modules* (голые имена модулей, без .py) -- терминирует на
+    цикле через множество `seen` (T4 «циклический импорт — не
+    зацикливается»): модуль добавляется в seen ДО чтения его исходника,
+    так что повторная встреча с уже виденным именем (в т.ч. по кругу)
+    просто не порождает новую работу. Модуль без файла на диске
+    молча пропускается (best-effort, та же осанка, что у остальных
+    читателей проводки этого репо, напр. tools/enforcement_probe.py)."""
+    seen = set()
+    frontier = list(start_modules)
+    while frontier:
+        name = frontier.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        path = tools_dir / f"{name}.py"
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for imported in _ast_tool_imports(text, tools_module_names):
+            if imported not in seen:
+                frontier.append(imported)
+    return seen
+
+
+def _live_wiring_start_tool_paths():
+    """Каждый tools/*.py, названный НАПРЯМУЮ живой проводкой -- та же
+    команда/скрипт-множина, что уже проверяют прямые T3-тесты выше."""
+    settings_data = _load_settings(LIVE_SETTINGS_PATH)
+    commands = list(_iter_hook_commands(settings_data))
+    pre_commit_text = _load_text(LIVE_GITHOOKS_DIR / "pre-commit")
+    commit_msg_text = _load_text(LIVE_GITHOOKS_DIR / "commit-msg")
+    paths = set()
+    for command in commands:
+        paths |= set(_tool_paths_in_text(command))
+    paths |= set(_tool_paths_in_text(pre_commit_text))
+    paths |= set(_tool_paths_in_text(commit_msg_text))
+    return paths
+
+
+def test_transitive_import_closure_of_live_wiring_is_covered_by_mechanism_prefixes():
+    start_paths = _live_wiring_start_tool_paths()
+    assert start_paths, "живая проводка не назвала ни одного стартового tools/*.py"
+    start_modules = {Path(p).stem for p in start_paths}
+    tools_module_names = _tools_module_names()
+    closure = _transitive_tool_module_closure(start_modules, tools_module_names)
+    reached_paths = sorted(f"tools/{m}.py" for m in closure)
+    uncovered = [p for p in reached_paths
+                 if not any(mg._matches(p, pref) for pref in mg.MECHANISM_PREFIXES)]
+    assert not uncovered, (
+        "транзитивное импорт-замыкание живой проводки достигает модулей вне "
+        f"невода MECHANISM_PREFIXES: {uncovered}\nполное замыкание: {reached_paths}")
+
+
+# --- T4 (транзитивная ось): адверсариальная батарея на закрытие замыкания -
+
+
+def test_ast_tool_imports_ignores_import_outside_tools():
+    src = "import json\nimport os.path\nfrom pathlib import Path\n"
+    assert _ast_tool_imports(src, {"tier_echo", "preflight_quota"}) == set()
+
+
+def test_ast_tool_imports_finds_plain_and_from_import_forms():
+    src = "import tier_echo\nfrom preflight_quota import load_config\n"
+    names = {"tier_echo", "preflight_quota", "other_mod"}
+    assert _ast_tool_imports(src, names) == {"tier_echo", "preflight_quota"}
+
+
+def test_ast_tool_imports_ignores_relative_import():
+    # Документированное сужение (см. докстринг _ast_tool_imports) --
+    # relative-импорт не резолвится этим путём, не считается достижением.
+    src = "from . import tier_echo\n"
+    assert _ast_tool_imports(src, {"tier_echo"}) == set()
+
+
+def test_ast_tool_imports_broken_syntax_raises_not_silently_skipped():
+    # T4: «битый синтаксис файла — тест падает громко, не скипается».
+    with pytest.raises(SyntaxError):
+        _ast_tool_imports("def broken(:\n", {"tier_echo"})
+
+
+def test_transitive_closure_terminates_on_circular_import(tmp_path):
+    # T4: «циклический импорт — не зацикливается». Если бы алгоритм
+    # зациклился, этот тест не завершился бы (обычным pytest-таймаутом
+    # окружения) -- само его завершение с верным результатом ЕСТЬ
+    # доказательство обрыва цикла, не только итоговое множество.
+    (tmp_path / "mod_a.py").write_text("import mod_b\n", encoding="utf-8")
+    (tmp_path / "mod_b.py").write_text("import mod_a\n", encoding="utf-8")
+    names = {"mod_a", "mod_b"}
+    closure = _transitive_tool_module_closure({"mod_a"}, names, tools_dir=tmp_path)
+    assert closure == {"mod_a", "mod_b"}
+
+
+def test_transitive_closure_missing_module_file_skipped_not_raising(tmp_path):
+    closure = _transitive_tool_module_closure(
+        {"does_not_exist_mod"}, {"does_not_exist_mod"}, tools_dir=tmp_path)
+    assert closure == {"does_not_exist_mod"}
+
+
+def test_transitive_closure_self_import_does_not_loop(tmp_path):
+    # Вырожденный цикл длины 1 (модуль импортирует сам себя) -- тот же
+    # seen-барьер обязан оборвать и эту форму.
+    (tmp_path / "mod_self.py").write_text("import mod_self\n", encoding="utf-8")
+    closure = _transitive_tool_module_closure(
+        {"mod_self"}, {"mod_self"}, tools_dir=tmp_path)
+    assert closure == {"mod_self"}
+
+
+# --- T4: адверсариальная батарея на парсер самозамыкающегося теста -------
+
+
+def test_tool_cmd_re_command_form_with_extra_cli_arguments():
+    cmd = "python tools/hygiene_gate.py --strict --config=foo.yaml"
+    assert _tool_paths_in_text(cmd) == ["tools/hygiene_gate.py"]
+
+
+def test_tool_cmd_re_forward_slash_path():
+    assert _tool_paths_in_text("python tools/hygiene_gate.py") == ["tools/hygiene_gate.py"]
+
+
+def test_tool_cmd_re_backslash_path_normalised_to_forward_slash():
+    assert _tool_paths_in_text("python tools\\hygiene_gate.py") == ["tools/hygiene_gate.py"]
+
+
+def test_tool_cmd_re_quoted_arg_after_path_does_not_leak_into_match():
+    # .githooks/commit-msg форма: `python tools/mechanism_gate.py "$1"`.
+    cmd = 'python tools/mechanism_gate.py "$1"'
+    assert _tool_paths_in_text(cmd) == ["tools/mechanism_gate.py"]
+
+
+def test_iter_hook_commands_tolerates_empty_hooks_array():
+    # T4: «хук-массив пустой» -- на уровне группы и на уровне события.
+    data = {"hooks": {"PreToolUse": [{"matcher": "X", "hooks": []}], "Stop": []}}
+    assert list(_iter_hook_commands(data)) == []
+
+
+def test_iter_hook_commands_tolerates_missing_hooks_key_entirely():
+    assert list(_iter_hook_commands({})) == []
+
+
+def test_uncovered_tool_paths_catches_drift_of_nonexistent_referenced_script():
+    # T4: «несуществующий скрипт в settings — тест обязан упасть». Здесь
+    # проверяется САМ детектор на синтетическом входе (не живой файл) --
+    # он обязан НАЙТИ путь, которого нет в MECHANISM_PREFIXES, а не
+    # молча проглотить дрейф проводки.
+    drifted = "python tools/definitely_not_wired_anywhere_xyz.py --flag"
+    uncovered = _uncovered_tool_paths([drifted])
+    assert uncovered == ["tools/definitely_not_wired_anywhere_xyz.py"]
+
+
+def test_uncovered_tool_paths_empty_for_a_fully_covered_command_set():
+    # Граница напротив: набор команд, целиком лежащих в неводе -> пусто.
+    covered = ["python tools/main_gate.py", "python tools/journal_validator.py"]
+    assert _uncovered_tool_paths(covered) == []
+
+
+# --- T3: settings.json/.githooks отсутствуют или биты -> тест ПАДАЕТ, а
+# не скипается (проверяется на синтетических путях, живые файлы этой
+# батареей не портятся -- п.10 гигиены, порча копий/синтетики, не боевых).
+
+
+def test_load_settings_missing_file_fails_loudly_not_skipped(tmp_path):
+    missing = tmp_path / "settings.json"
+    with pytest.raises(AssertionError):
+        _load_settings(missing)
+
+
+def test_load_settings_broken_json_fails_loudly_not_skipped(tmp_path):
+    broken = tmp_path / "settings.json"
+    broken.write_text("{not valid json", encoding="utf-8")
+    with pytest.raises(json.JSONDecodeError):
+        _load_settings(broken)
+
+
+def test_load_text_missing_githook_file_fails_loudly_not_skipped(tmp_path):
+    missing = tmp_path / "pre-commit"
+    with pytest.raises(AssertionError):
+        _load_text(missing)

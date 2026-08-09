@@ -421,6 +421,309 @@ def test_9v2_replaces_worker_self_reference_fails():
     assert any("replaces_worker" in v for v in violations)
 
 
+# ---- дыра B3 (2026-08-10, порт AO3 AT-BUG-034, независимая сверка AO3):
+# retry_ok = valid_attempt and task_id in rejected_tasks легализовал
+# повторный delegated ЛЮБОГО agent по ЛЮБОМУ rejected на задаче -- ревьюер
+# мог войти второй раз на ЧУЖОЙ rejected (исполнителя) без того, чтобы
+# исполнитель что-то переделал. Форма фикса (правило 9в-i/в-ii, см.
+# модульный докстринг): (i) СВОЙ rejected легализует retry как раньше;
+# (ii) ЧУЖОЙ rejected легализует вход только если ПОСЛЕ последнего
+# delegated ИМЕННО этого agent появился сигнал новой версии -- новый
+# delegated другого agent / rejected agent=lead / escalated на task_id;
+# сигнал из более раннего раунда (до последнего собственного delegated)
+# протух и следующий раунд не легализует. 8 адаптированных имён из формы
+# AO3, см. дispatch. ----
+
+def test_b3_second_critic_entry_without_executor_rework_between_is_dup():
+    # critic входит в review (case b, первая запись), затем отклоняет
+    # результат builder'а (rejected agent=builder) -- и пытается войти
+    # ВТОРОЙ раз БЕЗ того, чтобы builder что-либо переделал (нет нового
+    # delegated builder, нет lead-правки, нет escalated). Дыра B3: старая
+    # форма легализовала бы этот вход просто по наличию rejected на
+    # задаче -- новая форма обязана FAIL.
+    staged = _staged(
+        _line(event="delegated", ts="2026-07-10T08:05:00", agent="critic", model="opus",
+              task_id="t-001", notes="critic entry 1, case b"),
+        _line(event="rejected", ts="2026-07-10T08:10:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=1, failure_class="spec", by="critic",
+              notes="critic rejects builder's work"),
+        _line(event="delegated", ts="2026-07-10T08:15:00", agent="critic", model="opus",
+              task_id="t-001", attempt=2, notes="critic entry 2, NO rework between -- must FAIL"),
+    )
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1, violations
+    assert any("чужой" in v and "AT-BUG-034" in v for v in violations), violations
+
+
+def test_b3_stale_rework_signal_from_earlier_round_does_not_legalize_next_round():
+    # Round 1: builder reworks (own retry) AFTER critic's entry 1 -- this
+    # IS a valid "delegated of a different agent" signal, legalizing
+    # critic's entry 2. Round 2: builder rejected AGAIN, critic tries a
+    # THIRD entry citing the SAME (now stale, round-1) rework signal --
+    # the signal predates critic's entry-2 delegated (its own LAST
+    # delegated), so it must NOT legalize round 2 -- FAIL.
+    staged = _staged(
+        _line(event="delegated", ts="2026-07-10T08:05:00", agent="critic", model="opus",
+              task_id="t-001", notes="critic entry 1"),
+        _line(event="rejected", ts="2026-07-10T08:10:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=1, failure_class="spec", by="critic",
+              notes="round 1 reject"),
+        _line(event="delegated", ts="2026-07-10T08:15:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=2, notes="builder self-retry -- also a rework SIGNAL for critic"),
+        _line(event="delegated", ts="2026-07-10T08:20:00", agent="critic", model="opus",
+              task_id="t-001", attempt=2, notes="critic entry 2, legal via round-1 rework signal"),
+        _line(event="rejected", ts="2026-07-10T08:25:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=2, failure_class="spec", by="critic",
+              notes="round 2 reject, no new rework signal since entry 2"),
+        _line(event="delegated", ts="2026-07-10T08:30:00", agent="critic", model="opus",
+              task_id="t-001", attempt=2, notes="critic entry 3, citing STALE round-1 signal -- must FAIL"),
+    )
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1, violations
+    assert any("чужой" in v and "AT-BUG-034" in v for v in violations), violations
+
+
+def test_b3_self_retry_still_legal_without_any_other_agent_delegated_between():
+    # (i) self-retry: builder rejected, then builder retries -- no other
+    # agent delegated anywhere in between. Must stay legal (unchanged
+    # class, regression pin for the "as before" self-retry form).
+    staged = _staged(
+        _line(event="rejected", ts="2026-07-10T08:05:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=1, failure_class="spec", by="opus",
+              notes="builder rejected"),
+        _line(event="delegated", ts="2026-07-10T08:10:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=2, notes="builder self-retry, nothing else happened between"),
+    )
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_b3_new_delegated_of_different_agent_after_own_rejected_not_required():
+    # (i) self-retry doesn't NEED signal (1) -- even though critic is
+    # ALREADY present in this task's delegated_agents (entry 1), builder's
+    # own retry after its OWN rejected does not require a fresh critic
+    # delegated between the reject and the retry.
+    staged = _staged(
+        _line(event="delegated", ts="2026-07-10T08:05:00", agent="critic", model="opus",
+              task_id="t-001", notes="critic entry 1"),
+        _line(event="rejected", ts="2026-07-10T08:10:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=1, failure_class="spec", by="critic",
+              notes="critic rejects builder's work"),
+        _line(event="delegated", ts="2026-07-10T08:15:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=2,
+              notes="builder self-retry -- own rejected is enough, no fresh critic-delegated needed"),
+    )
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_b3_lead_self_fix_rejected_signal_legalizes_review_round():
+    # (ii) signal (2): a rejected event with agent=lead (Lead self-fix
+    # without its own delegated) counts as a new-version signal -- it
+    # legalizes critic's second entry even though nobody issued a fresh
+    # delegated.
+    staged = _staged(
+        _line(event="delegated", ts="2026-07-10T08:05:00", agent="critic", model="opus",
+              task_id="t-001", notes="critic entry 1"),
+        _line(event="rejected", ts="2026-07-10T08:10:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=1, failure_class="spec", by="critic",
+              notes="critic rejects builder's work"),
+        _line(event="rejected", ts="2026-07-10T08:15:00", agent="lead", model="fable",
+              task_id="t-001", attempt=1, failure_class="spec", by="critic",
+              notes="Lead self-fixed the code directly, no own delegated -- the fix itself is the signal"),
+        _line(event="delegated", ts="2026-07-10T08:20:00", agent="critic", model="opus",
+              task_id="t-001", attempt=2, notes="critic entry 2, legal via lead-self-fix signal"),
+    )
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_b3_stale_lead_self_fix_signal_from_earlier_round():
+    # Same staleness class as the rework-signal test, but with a
+    # lead-self-fix signal: round 1's lead-fix legalizes entry 2, but
+    # round 2's third entry cannot reuse that same, now-stale signal.
+    staged = _staged(
+        _line(event="delegated", ts="2026-07-10T08:05:00", agent="critic", model="opus",
+              task_id="t-001", notes="critic entry 1"),
+        _line(event="rejected", ts="2026-07-10T08:10:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=1, failure_class="spec", by="critic",
+              notes="round 1 reject"),
+        _line(event="rejected", ts="2026-07-10T08:15:00", agent="lead", model="fable",
+              task_id="t-001", attempt=1, failure_class="spec", by="critic",
+              notes="Lead self-fix, round 1 signal"),
+        _line(event="delegated", ts="2026-07-10T08:20:00", agent="critic", model="opus",
+              task_id="t-001", attempt=2, notes="critic entry 2, legal via round-1 lead-fix signal"),
+        _line(event="rejected", ts="2026-07-10T08:25:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=2, failure_class="spec", by="critic",
+              notes="round 2 reject, no new lead-fix signal since entry 2"),
+        _line(event="delegated", ts="2026-07-10T08:30:00", agent="critic", model="opus",
+              task_id="t-001", attempt=2, notes="critic entry 3, citing STALE round-1 lead-fix -- must FAIL"),
+    )
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1, violations
+    assert any("чужой" in v and "AT-BUG-034" in v for v in violations), violations
+
+
+def test_b3_escalated_signal_legalizes_review_round():
+    # (ii) signal (3): a new escalated event on the task_id -- adapted
+    # from AO3's model-specific escalation to the bare FACT of the event
+    # under our tiered matrix (delegation.config.yaml has no per-model
+    # granularity within a tier).
+    staged = _staged(
+        _line(event="delegated", ts="2026-07-10T08:05:00", agent="critic", model="opus",
+              task_id="t-001", notes="critic entry 1"),
+        _line(event="rejected", ts="2026-07-10T08:10:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=1, failure_class="spec", by="critic",
+              notes="critic rejects builder's work"),
+        _line(event="escalated", ts="2026-07-10T08:15:00", agent="builder", model="opus",
+              task_id="t-001", notes="task escalated one tier up"),
+        _line(event="delegated", ts="2026-07-10T08:20:00", agent="critic", model="opus",
+              task_id="t-001", attempt=2, notes="critic entry 2, legal via escalated signal"),
+    )
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_b3_stale_escalated_signal_from_earlier_round():
+    # Staleness class for the escalated signal: round 1's escalated
+    # legalizes entry 2, round 2's entry 3 cannot reuse it.
+    staged = _staged(
+        _line(event="delegated", ts="2026-07-10T08:05:00", agent="critic", model="opus",
+              task_id="t-001", notes="critic entry 1"),
+        _line(event="rejected", ts="2026-07-10T08:10:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=1, failure_class="spec", by="critic",
+              notes="round 1 reject"),
+        _line(event="escalated", ts="2026-07-10T08:15:00", agent="builder", model="opus",
+              task_id="t-001", notes="round 1 escalated signal"),
+        _line(event="delegated", ts="2026-07-10T08:20:00", agent="critic", model="opus",
+              task_id="t-001", attempt=2, notes="critic entry 2, legal via round-1 escalated signal"),
+        _line(event="rejected", ts="2026-07-10T08:25:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=2, failure_class="spec", by="critic",
+              notes="round 2 reject, no new escalated signal since entry 2"),
+        _line(event="delegated", ts="2026-07-10T08:30:00", agent="critic", model="opus",
+              task_id="t-001", attempt=2, notes="critic entry 3, citing STALE round-1 escalated -- must FAIL"),
+    )
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1, violations
+    assert any("чужой" in v and "AT-BUG-034" in v for v in violations), violations
+
+
+# ---- B3 boundary/adversarial: signal scope must not leak across task_id ----
+
+def test_b3_boundary_signal_on_different_task_id_does_not_legalize_this_one():
+    # A rework signal (delegated of a different agent) fired on t-002
+    # must NOT legalize a chuzhoi retry on t-001 -- signal_log is keyed
+    # per task_id; this pins that isolation against a future refactor
+    # that might accidentally flatten the scope.
+    staged = _staged(
+        _line(event="delegated", ts="2026-07-10T08:05:00", agent="critic", model="opus",
+              task_id="t-002", notes="unrelated task t-002, NOT t-001 -- signal must not leak"),
+        _line(event="delegated", ts="2026-07-10T08:10:00", agent="critic", model="opus",
+              task_id="t-001", notes="critic entry 1 on t-001"),
+        _line(event="rejected", ts="2026-07-10T08:15:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=1, failure_class="spec", by="critic",
+              notes="critic rejects builder's work on t-001"),
+        _line(event="delegated", ts="2026-07-10T08:20:00", agent="critic", model="opus",
+              task_id="t-001", attempt=2,
+              notes="critic entry 2 on t-001, only signal available is on t-002 -- must FAIL"),
+    )
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1, violations
+    assert any("чужой" in v and "AT-BUG-034" in v for v in violations), violations
+
+
+# ---- t-383 пересдача (критик, дыра B3): Ф3 (текст отказа не должен
+# утверждать "сигнала нет", когда сигнал ЕСТЬ и свеж, а реальный дефект --
+# отсутствующий/невалидный attempt) и Ф5 (escalated легализует ТОЛЬКО от
+# ДРУГОГО agent -- самолегализация петлёй через собственный escalated
+# запрещена). ----
+
+def test_f3_foreign_rejected_fresh_signal_but_missing_attempt_names_attempt_not_signal():
+    # J: чужой rejected ЕСТЬ, свежий валидный сигнал (escalated ДРУГОГО
+    # agent, строго после последнего delegated критика) ЕСТЬ -- но
+    # attempt на повторном delegated ОТСУТСТВУЕТ. Старый текст ложно
+    # говорил "сигнала нет, либо он протух"; фикс обязан назвать ИМЕННО
+    # attempt и НЕ утверждать отсутствие/протухание сигнала.
+    staged = _staged(
+        _line(event="delegated", ts="2026-07-10T08:05:00", agent="critic", model="opus",
+              task_id="t-001", notes="critic entry 1"),
+        _line(event="rejected", ts="2026-07-10T08:10:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=1, failure_class="spec", by="critic",
+              notes="critic rejects builder's work -- foreign rejected for critic"),
+        _line(event="escalated", ts="2026-07-10T08:15:00", agent="builder", model="opus",
+              task_id="t-001", notes="fresh valid signal, strictly after critic's entry 1"),
+        _line(event="delegated", ts="2026-07-10T08:20:00", agent="critic", model="opus",
+              task_id="t-001", notes="critic entry 2, NO attempt field -- J, must FAIL naming attempt"),
+    )
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1, violations
+    assert any("поле 'attempt'" in v for v in violations), violations
+    assert not any("чужой" in v or "AT-BUG-034" in v for v in violations), violations
+
+
+def test_f3_prime_same_history_with_valid_attempt_passes():
+    # J': БУКВАЛЬНО та же история, единственная разница -- attempt=2
+    # присутствует на повторном delegated -- легален (доказывает, что
+    # сигнал действительно был свеж и валиден, реальным дефектом J был
+    # именно attempt, не сигнал).
+    staged = _staged(
+        _line(event="delegated", ts="2026-07-10T08:05:00", agent="critic", model="opus",
+              task_id="t-001", notes="critic entry 1"),
+        _line(event="rejected", ts="2026-07-10T08:10:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=1, failure_class="spec", by="critic",
+              notes="critic rejects builder's work -- foreign rejected for critic"),
+        _line(event="escalated", ts="2026-07-10T08:15:00", agent="builder", model="opus",
+              task_id="t-001", notes="fresh valid signal, strictly after critic's entry 1"),
+        _line(event="delegated", ts="2026-07-10T08:20:00", agent="critic", model="opus",
+              task_id="t-001", attempt=2,
+              notes="critic entry 2, attempt=2 present -- J', must PASS"),
+    )
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
+def test_f5_h2_self_recorded_escalated_does_not_legalize_own_reentry():
+    # H2 (критик-проба): critic сам записывает escalated на СВОЮ же
+    # задачу (agent=critic на escalated), затем пытается войти повторно,
+    # ссылаясь на этот же escalated как на сигнал новой версии --
+    # самолегализация петлёй, должна FAIL после Ф5.
+    staged = _staged(
+        _line(event="delegated", ts="2026-07-10T08:05:00", agent="critic", model="opus",
+              task_id="t-001", notes="critic entry 1"),
+        _line(event="rejected", ts="2026-07-10T08:10:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=1, failure_class="spec", by="critic",
+              notes="critic rejects builder's work -- foreign rejected for critic"),
+        _line(event="escalated", ts="2026-07-10T08:15:00", agent="critic", model="opus",
+              task_id="t-001", notes="H2: critic escalates ITSELF on its own task_id"),
+        _line(event="delegated", ts="2026-07-10T08:20:00", agent="critic", model="opus",
+              task_id="t-001", attempt=2,
+              notes="critic entry 2, citing its OWN escalated as signal -- must FAIL (Ф5)"),
+    )
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 1, violations
+    assert any("чужой" in v and "AT-BUG-034" in v for v in violations), violations
+
+
+def test_f5_positive_pair_escalated_of_different_agent_still_legalizes():
+    # Парный позитив (той же формы, что H2, но escalated ДРУГОГО agent,
+    # не критика) -- остаётся легальным, как и раньше (Ф5 сужает ТОЛЬКО
+    # самоэскалацию, не escalated вообще).
+    staged = _staged(
+        _line(event="delegated", ts="2026-07-10T08:05:00", agent="critic", model="opus",
+              task_id="t-001", notes="critic entry 1"),
+        _line(event="rejected", ts="2026-07-10T08:10:00", agent="builder", model="sonnet",
+              task_id="t-001", attempt=1, failure_class="spec", by="critic",
+              notes="critic rejects builder's work -- foreign rejected for critic"),
+        _line(event="escalated", ts="2026-07-10T08:15:00", agent="builder", model="opus",
+              task_id="t-001", notes="escalated of a DIFFERENT agent (builder, not critic)"),
+        _line(event="delegated", ts="2026-07-10T08:20:00", agent="critic", model="opus",
+              task_id="t-001", attempt=2,
+              notes="critic entry 2, legal via a different-agent escalated signal"),
+    )
+    code, violations = jv.decide(staged, HEAD_TEXT, NOW)
+    assert code == 0, violations
+
+
 # ---- 10. ts monotonicity / no narrative future ----
 
 def test_ts_not_monotonic_relative_to_previous_new_line_fails():
