@@ -208,6 +208,21 @@ Workers REPORT noticed analogs (without widening scope), the critic
 checks the fix's class completeness against the map, the Lead owns
 the walk and rule placement.
 
+Having NAMED a class, FIRST apply it to every neighbor inside the
+SAME artifact — sibling subsections of the check, clauses of the
+rule, entries of the list, branches of the parser — before the map
+walk and before the queue (D-0100). The base unit is the enclosing
+structural block, widening to the WHOLE file when this move has
+already read it; opening a file specially for the sweep is
+forbidden — queue it instead. Executed = an ENUMERATION with a
+verdict per neighbor (applied / not applicable — why / queued with a
+pointer); prose "neighbors checked" is NOT execution; no neighbors —
+the explicit line "no neighbors: <why>". A unit over ~150 lines or
+over 5 neighbors routes to ONE scout dispatch with the applicability
+question as its intent key, or carries a `dispatch_skipped` event
+(F-9 class). The sweep never replaces the map walk: a class living
+both in the artifact and on an axis gets BOTH.
+
 R10. **Mechanism discipline.** Recognition (D-0065): a mechanism is
 ANY edit adding or changing a duty of future sessions/workers or a
 machine check — regardless of file; doubt counts as a mechanism: four
