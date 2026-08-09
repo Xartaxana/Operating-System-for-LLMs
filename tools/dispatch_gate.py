@@ -308,12 +308,156 @@ FAIL-OPEN: given_path_warn() типизированно возвращает "" 
 нераспознанный payload/tool_input/prompt; main() дополнительно
 оборачивает вызов в try/except (belt-and-suspenders, тот же принцип,
 что owns_gate.py) -- адверсариальный вход не должен уронить БЛОКИРУЮЩИЙ
-хук трейсбеком из-за WARN-слоя."""
+хук трейсбеком из-за WARN-слоя.
+
+ЧАСТЬ B (П3, 2026-08-09, ПЕРЕСДАЧА attempt 2): WARN-слой "тип агента !=
+заявленный ярус" (D-0083, находка калибровки №6, t-348): журнальная
+строка объявляла agent=critic, реальный subagent_type диспатча был
+"general-purpose" при совпавшей model=opus-5 -- существующий замер
+D-0083 (journal_echo меряет МОДЕЛЬ воркера) промолчал ЗАКОННО, модель
+совпала. Вред не в модели: роль-файл критика не грузился под лейблом
+общей роли "general-purpose", воркер работал без инструкций своей роли.
+Гейт на PreToolUse видит оба нужных поля (tool_input.subagent_type,
+tool_input.description) ДО запуска -- законное место предупреждению.
+
+НОСИТЕЛЬ РЕЗОЛЮЦИИ -- `.claude/agents/*.md`, НЕ delegation.config.yaml
+(attempt 1 ошибочно резолвил через конфиг привязки; критик воспроизвёл
+живым прогоном: subagent_type='judge' с лейблом 'sonnet:' давал WARN
+"не роль привязки", хотя .claude/agents/judge.md существует, несёт
+model: sonnet и реально ГРУЗИТСЯ -- delegation.config.yaml в собственной
+шапке честно объявляет себя НЕполным реестром типов субагентов, "ось 2:
+один носитель на факт" явно исключает judge/analyst; конфиг отвечает на
+вопрос "какая модель у КООРДИНАЦИОННОЙ роли", а не "загрузится ли
+роль-файл для ЭТОГО subagent_type" -- это ДВА разных вопроса, и слой
+должен задавать второй). Каталог `.claude/agents/` -- ИСТИННЫЙ носитель
+множества типов субагентов этого деплоя: имя файла без расширения ЕСТЬ
+subagent_type, фронтматтер `model:` -- модель, которую роль реально
+получит.
+
+КОНТРАКТ: role_type_warn(payload) -- НОВЫЙ независимый слой, ТОЙ ЖЕ
+формы, что given_path_warn() выше -- чистая функция без побочных
+эффектов, "" значит "предупреждать нечего". decide() НЕ ЗАТРОНУТА НИ
+БАЙТОМ -- проверки 1/2/3, их приоритет и BLOCK_MESSAGE_* неприкосновенны,
+новый слой в exit_code не участвует. main() вызывает role_type_warn()
+СТРОГО там же, где уже живёт given_path_warn() -- ТОЛЬКО когда decide()
+вернула (0, ""); при exit_code==2 main() возвращает 2 ДО вычисления
+любого WARN (инвариант 1 -- exit-2-ветки остаются недостижимыми для
+нового кода). СТРОГО WARN: ни при каких входах слой не даёт exit 2 и не
+добавляет permissionDecision -- форма доставки идентична given_path_warn
+(JSON на stdout, hookSpecificOutput.additionalContext, exit 0).
+
+ДВА WARN В ОДНОМ ВЫЗОВЕ -- ОДИН JSON-ОБЪЕКТ: given-path и role-type
+сообщения, если оба сработали, объединяются через "\n\n" в ОДНОМ
+additionalContext (харнесс разбирает ответ хука как единый объект -- две
+JSON-строки подряд на stdout нелегальны). Порядок ФИКСИРОВАН спекой:
+given-path первым, тип вторым; порядок decide()-проверок 1->2->3 этим не
+затронут (инвариант 2).
+
+СВЕРКА: заявленное семейство модели -- ТЕМ ЖЕ LABEL_MODEL_PREFIX_RE
+(группа 1), что уже использует проверка 3, -- description "лейбл
+модели" без второго парсера. Роль-файл для subagent_type ищется в
+AGENTS_DIR (`.claude/agents/`, путь ОТ РАСПОЛОЖЕНИЯ СКРИПТА, та же форма,
+что mechanism_gate.CONFIG_PATH использует для своего файла -- НЕ от
+payload["cwd"]: агенты этого деплоя -- фиксированный актив репозитория,
+где живёт сам dispatch_gate.py, а не текст, названный в промпте, как у
+ЧАСТИ A) ДВУМЯ путями, регистронезависимо и с обрезкой пробелов (чинит
+заодно F7): (а) имя файла без ".md"; (б) поле `name:` фронтматтера --
+любое совпадение считается найденной ролью. Модель роли -- поле
+`model:` внутри фронтматтерного блока (между первой и второй строкой
+"---"), ТА ЖЕ подстрочная эвристика семейства (haiku/sonnet/opus/fable),
+что использовалась в mechanism_gate.lead_family(), но реализована ЛОКАЛЬНО
+(_model_family) -- импорт mechanism_gate этому слою БОЛЬШЕ НЕ НУЖЕН
+(снят полностью вместе с откатом mechanism_gate.py к HEAD).
+
+N3 (attempt 3, критик живым прогоном на 15 формах во временном каталоге):
+регексы \\S+ захватывают ОБРАМЛЯЮЩИЕ кавычки буквально -- `name: "scout"`
+даёт токен `"scout"`, не `scout`. У `model:` это случайно не портило
+результат (подстрочная эвристика _model_family всё равно находит "haiku"
+внутри '"haiku"'), но у `name:` сравнение ТОЧНОЕ -- кавычённый name: не
+совпадал НИКОГДА, и роль-файл становился ЛОЖНО НЕВИДИМ: слой утверждал
+"нет роль-файла" для реально загружаемой роли -- это ЛОЖЬ, не законная
+тишина, и одновременно маскировка настоящего расхождения семейств под
+этим же именем. ФИКС: _strip_quotes() снимает РОВНО ОДНУ пару
+обрамляющих кавычек (одинарных/двойных) с захваченного токена ПЕРЕД
+сравнением/использованием -- и для name:, и для model: (единообразно,
+хотя model: технически не требовал фикса -- разная защита от одного и
+того же класса ввода). Кавычка ВНУТРИ значения (не на обеих границах
+разом) не снимается -- негативный контроль в тестах.
+
+N4 (attempt 3, критик): порядок резолюции при КОНФЛИКТЕ -- два файла
+претендуют на один subagent_type (имя файла ОДНОГО файла совпадает с
+polем name: ДРУГОГО). РЕШЕНИЕ (принято, не альтернатива): совпадение по
+ИМЕНИ ФАЙЛА резолвится С ПРИОРИТЕТОМ, ПРЕЖДЕ любого совпадения по полю
+name: фронтматтера -- _find_agent_role_model() делает ДВА прохода по
+отсортированному списку файлов: первый ищет ТОЛЬКО по имени файла и
+возвращается немедленно при первом совпадении; второй (по name:)
+запускается, ТОЛЬКО если первый не нашёл НИЧЕГО. Мотив: subagent_type
+диспатча -- это то, что харнесс сопоставляет с ИМЕНЕМ ФАЙЛА в каталоге
+агентов (реальный акт резолюции роли), поле name: -- декларативная
+самоидентификация ВНУТРИ файла, вторичный источник истины. Тест на
+конфликт -- test_n4_filename_match_takes_priority_over_name_field_conflict.
+
+ПРИНЯТОЕ ОГРАНИЧЕНИЕ (записано по факту фронтматтеров НА МОМЕНТ этой
+правки, не по предположению): слой сверяет ЯРУС (семейство модели), а
+не ФУНКЦИЮ -- любые два типа субагента с ОДИНАКОВОЙ объявленной моделью
+неразличимы между собой. По факту фронтматтеров .claude/agents/*.md:
+critic.md и designer.md ОБА объявляют model: opus (диспатчи с лейблом
+"opus:" для этих двух типов слой не различит); builder.md и judge.md
+ОБА объявляют model: sonnet (аналогично для лейбла "sonnet:" -- пара,
+которой НЕ БЫЛО в ограничении attempt 1, т.к. delegation.config.yaml не
+содержал роли judge вовсе). scout.md -- единственный носитель haiku;
+ни один файл на этот момент не объявляет fable. Слой ловит РОВНО класс
+калибровки №6: тип без роль-файла (в частности general-purpose) и
+семейство мимо роль-файла для ИЗВЕСТНОГО типа -- не полную идентификацию
+роли по модели.
+
+РАСХОЖДЕНИЕ С FAIL-CLOSED (осознанное, записано явно, не молчаливое
+решение): каталог `.claude/agents/` отсутствует целиком (свежий клон,
+кит без своих ролевых файлов) -> слой МОЛЧИТ ЦЕЛИКОМ, а не WARN'ит на
+КАЖДЫЙ диспатч. Слой -- ЧИСТО ИНФОРМАЦИОННЫЙ (только additionalContext,
+ничего не запрещает); WARN на каждый диспатч при отсутствующем каталоге
+был бы шумом на блокирующем хуке без единого разрешающего эффекта --
+тот же мотив, что раньше обосновывал молчание на отсутствующем конфиге.
+
+КРАЯ (таблица спеки, реализованы дословно): description отсутствует/не
+строка/пустая строка -> молчит (симметрично проверке 3, которая тоже
+пропускается без description); лейбл с префиксом "claude" (семейство не
+выводится) -> молчит; subagent_type отсутствует/None/не строка/пустая
+(после strip) строка -> молчит; каталог .claude/agents/ отсутствует ->
+молчит ЦЕЛИКОМ; роль-файл для типа не найден -> WARN C5'; роль-файл
+найден, фронтматтер без `model:` -> тип ИЗВЕСТЕН, warn unknown НЕТ,
+сверка семейства пропускается, молчит; `model:` не даёт семейства
+(claude, кастомный id) -> молчит; семейства совпали -> молчит; семейства
+разошлись -> WARN C4'; регистр/пробелы типа (Builder/BUILDER/"builder ")
+-> сопоставляется регистронезависимо и с обрезкой, молчит, если роль
+есть; фронтматтер битый/файл нечитаем -> молчит по этому файлу,
+исключение не наружу (try/except на чтение каждого файла, ЛЮБОЕ
+исключение внутри всей функции -- fail-open, "" -- C7); кавычённые
+name:/model: ("scout" / 'sonnet') -> кавычки снимаются, сравнение как с
+голым значением (N3).
+
+N6 (attempt 3, критик живым хуком): ВСТРОЕННЫЕ типы харнесса без
+проектного роль-файла (напр. `Explore`, `statusline-setup`) ЗАКОННО
+получают WARN "нет роль-файла" -- заявленный ярус для них ДЕЙСТВИТЕЛЬНО
+не подтверждается никакой ролью этого репозитория, слой не ошибается.
+Это НЕ дефект слоя -- будущий читатель, встретив такой WARN, не должен
+чинить его как баг. Замер шума в ЭТОМ деплое на 2026-08-09 (по пяти
+свежим транскриптам): используются только subagent_type in {builder,
+judge, scout, critic, designer, general-purpose} -- шум от встроенных
+типов харнесса НУЛЕВОЙ на практике; general-purpose и есть целевой класс
+калибровки №6 (t-348), не шум."""
 
 import json
 import os
 import re
 import sys
+from pathlib import Path
+
+# ЧАСТЬ B (П3, attempt 2): AGENTS_DIR -- фиксированный актив ЭТОГО
+# деплоя, путь от расположения скрипта (та же форма, что
+# mechanism_gate.REPO/CONFIG_PATH). Никакого импорта mechanism_gate
+# больше не требуется -- см. докстринг модуля, "НОСИТЕЛЬ РЕЗОЛЮЦИИ".
+AGENTS_DIR = Path(__file__).resolve().parents[1] / ".claude" / "agents"
 
 DOD_MARKERS_RE = re.compile(
     r"\bDoD\b|критери[ия] приёмки|\bwitness\b|проверочн\w+ прогон", re.IGNORECASE
@@ -520,6 +664,175 @@ def given_path_warn(payload: dict) -> str:
     return format_given_path_warn(missing)
 
 
+# --- ЧАСТЬ B (П3, attempt 2): WARN-слой "тип агента != заявленный ярус" -
+# См. докстринг модуля, "ЧАСТЬ B", за полное обоснование дизайна. Этот
+# слой, симметрично ЧАСТИ A, НЕ участвует в decide() и не меняет
+# exit_code -- отдельная функция, вызывается ТОЛЬКО из main(), ТОЛЬКО
+# когда decide() уже вернула (0, "").
+
+ROLE_TYPE_WARN_MISMATCH = (
+    "ROLE-TYPE WARN: лейбл диспатча заявляет ярус '{declared_family}', "
+    "но роль-файл .claude/agents/ для subagent_type='{subagent_type}' "
+    "объявляет model: {bound_model} (семейство '{bound_family}') — "
+    "расхождение тип↔ярус (D-0083, калибровка №6)"
+)
+ROLE_TYPE_WARN_UNKNOWN_ROLE = (
+    "ROLE-TYPE WARN: для типа '{subagent_type}' нет роль-файла в "
+    ".claude/agents/ — заявленный ярус '{declared_family}' не "
+    "подтверждается загруженной ролью (D-0083, калибровка №6)"
+)
+
+_FAMILY_NAMES = ("fable", "opus", "sonnet", "haiku")
+_FRONTMATTER_BLOCK_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---", re.DOTALL)
+_FRONTMATTER_NAME_RE = re.compile(r"^name:\s*(\S+)", re.MULTILINE)
+_FRONTMATTER_MODEL_RE = re.compile(r"^model:\s*(\S+)", re.MULTILINE)
+
+
+def _model_family(model_id) -> str | None:
+    """Та же эвристика подстроки, что mechanism_gate.lead_family() уже
+    применяет для Lead-привязки -- реализована ЛОКАЛЬНО (см. докстринг
+    модуля, "СВЕРКА": импорт mechanism_gate этому слою больше не нужен)."""
+    if not isinstance(model_id, str) or not model_id:
+        return None
+    low = model_id.lower()
+    for fam in _FAMILY_NAMES:
+        if fam in low:
+            return fam
+    return None
+
+
+def _strip_quotes(token: str) -> str:
+    """N3 (критик, attempt 2 живой прогон): снимает РОВНО ОДНУ пару
+    обрамляющих кавычек -- одинарных или двойных -- с захваченного
+    токена. YAML-фронтматтер легально пишет `name: "scout"` /
+    `model: 'sonnet'`; \\S+ захватывает кавычки буквально, и ТОЧНОЕ
+    сравнение в _find_agent_role_model (в отличие от подстрочной
+    эвристики _model_family, которой повезло находить "haiku" внутри
+    '"haiku"' СЛУЧАЙНО) без снятия кавычек НИКОГДА не совпадает --
+    роль-файл с кавычённым name: был ложно невидим (WARN "нет
+    роль-файла" при реально загружаемой роли, ложь, не тишина). Кавычка
+    ВНУТРИ значения (не на ОБЕИХ границах разом, напр. `sco"ut`) НЕ
+    снимается -- условие требует совпадения ПЕРВОГО И ПОСЛЕДНЕГО
+    символа."""
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in ("'", '"'):
+        return token[1:-1]
+    return token
+
+
+def _read_frontmatter(path: Path):
+    """Текст фронтматтерного блока (между первой и второй строкой "---")
+    файла role-файла, или None -- файл нечитаем ИЛИ фронтматтер не
+    заякорен (нет открывающего/закрывающего "---"). Try/except -- ни одно
+    исключение чтения диска наружу (см. докстринг модуля, "ЧАСТЬ B",
+    "КРАЯ")."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None
+    m = _FRONTMATTER_BLOCK_RE.match(text)
+    return m.group(1) if m else None
+
+
+def _model_of(frontmatter) -> str | None:
+    """model: фронтматтера (кавычки сняты, N3), None -- нет строки model:."""
+    m2 = _FRONTMATTER_MODEL_RE.search(frontmatter)
+    return _strip_quotes(m2.group(1).strip()) if m2 else None
+
+
+def _find_agent_role_model(subagent_type_norm: str):
+    """subagent_type_norm -- уже .strip().lower(). Возвращает (True,
+    model|None), если найден файл .claude/agents/*.md, чьё имя файла (без
+    ".md") ИЛИ фронтматтерное поле name: совпадает регистронезависимо
+    (кавычки вокруг значения name:/model: сняты -- N3); (False, None) --
+    ни один файл не совпал. model -- значение поля model: фронтматтера
+    найденного файла (None, если фронтматтер нечитаем/без заякоренного
+    блока/без строки model:) -- "известная роль без модели" не то же
+    самое, что "роль неизвестна" (см. докстринг модуля, "ЧАСТЬ B",
+    "КРАЯ").
+
+    ПРИОРИТЕТ (N4, критик attempt 2): точное совпадение по ИМЕНИ ФАЙЛА
+    резолвится ПЕРВЫМ, ПРЕЖДЕ ЛЮБОГО совпадения по фронтматтерному полю
+    name: -- ближе к тому, как резолвит харнесс (subagent_type сопоставим
+    с ИМЕНЕМ ФАЙЛА в каталоге агентов). Совпадение по name: пробуется
+    ТОЛЬКО если НИ ОДИН файл в каталоге не совпал по имени файла -- два
+    файла, конфликтующих за один тип (имя файла одного == name: другого),
+    резолвятся в файл-победитель по ИМЕНИ, не по алфавиту путей."""
+    candidates = sorted(AGENTS_DIR.glob("*.md"))
+
+    for path in candidates:
+        if path.stem.strip().lower() == subagent_type_norm:
+            frontmatter = _read_frontmatter(path)
+            if frontmatter is None:
+                return True, None
+            return True, _model_of(frontmatter)
+
+    for path in candidates:
+        frontmatter = _read_frontmatter(path)
+        if frontmatter is None:
+            continue
+        m = _FRONTMATTER_NAME_RE.search(frontmatter)
+        if m and _strip_quotes(m.group(1).strip()).lower() == subagent_type_norm:
+            return True, _model_of(frontmatter)
+
+    return False, None
+
+
+def role_type_warn(payload: dict) -> str:
+    """"" -- ничего предупреждать не нужно (payload не Task/Agent, поля
+    отсутствуют/не строки, лейбл 'claude:', каталог .claude/agents/
+    отсутствует, известная роль без model: во фронтматтере, семейства
+    совпали). Иначе -- готовое текстовое сообщение WARN (расхождение
+    тип<->ярус ИЛИ subagent_type без роль-файла). См. докстринг модуля,
+    "ЧАСТЬ B", за полный контракт и таблицу краёв. Обёрнута целиком в
+    try/except -- fail-open на ЛЮБОЕ исключение (C7), тот же принцип, что
+    и у остальных слоёв этого файла."""
+    try:
+        if not isinstance(payload, dict):
+            return ""
+        tool_name = payload.get("tool_name")
+        if tool_name not in ("Task", "Agent"):
+            return ""
+        tool_input = payload.get("tool_input") or {}
+        if not isinstance(tool_input, dict):
+            return ""
+        subagent_type = tool_input.get("subagent_type")
+        if not isinstance(subagent_type, str) or not subagent_type.strip():
+            return ""
+        description = tool_input.get("description")
+        if not isinstance(description, str) or not description:
+            return ""
+        m = LABEL_MODEL_PREFIX_RE.search(description)
+        if not m:
+            return ""
+        declared_family = m.group(1).lower()
+        if declared_family == "claude":
+            return ""
+        if not AGENTS_DIR.is_dir():
+            # Каталог целиком отсутствует (свежий клон) -- молчит целиком,
+            # см. докстринг модуля, "ЧАСТЬ B", "РАСХОЖДЕНИЕ С FAIL-CLOSED".
+            return ""
+
+        subagent_type_norm = subagent_type.strip().lower()
+        role_known, bound_model = _find_agent_role_model(subagent_type_norm)
+        if not role_known:
+            return ROLE_TYPE_WARN_UNKNOWN_ROLE.format(
+                subagent_type=subagent_type, declared_family=declared_family
+            )
+        if not bound_model:
+            return ""
+        bound_family = _model_family(bound_model)
+        if bound_family is None or bound_family == declared_family:
+            return ""
+        return ROLE_TYPE_WARN_MISMATCH.format(
+            declared_family=declared_family,
+            subagent_type=subagent_type,
+            bound_model=bound_model,
+            bound_family=bound_family,
+        )
+    except Exception:
+        return ""
+
+
 def _reconfigure_stderr_utf8():
     try:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -556,20 +869,28 @@ def main() -> int:
         sys.stderr.write(message + "\n")
         return 2
 
-    # ЧАСТЬ A (t-343): WARN-слой -- считается ТОЛЬКО когда гейт САМ не
-    # заблокировал (см. докстринг модуля, "ЧАСТЬ A"); try/except --
-    # belt-and-suspenders, тот же принцип, что owns_gate.py -- WARN-слой
-    # не должен уронить блокирующий хук трейсбеком.
+    # ЧАСТЬ A (t-343) + ЧАСТЬ B (П3): оба WARN-слоя считаются ТОЛЬКО когда
+    # гейт САМ не заблокировал (см. докстринги "ЧАСТЬ A"/"ЧАСТЬ B",
+    # инвариант 1); try/except на КАЖДОМ -- belt-and-suspenders, тот же
+    # принцип, что owns_gate.py -- ни один WARN-слой не должен уронить
+    # блокирующий хук трейсбеком. Given-path первым, тип вторым (порядок
+    # спеки, "ЧАСТЬ B", "ДВА WARN В ОДНОМ ВЫЗОВЕ").
     try:
-        warn = given_path_warn(payload)
+        warn_given = given_path_warn(payload)
     except Exception:
-        warn = ""
-    if warn:
+        warn_given = ""
+    try:
+        warn_role = role_type_warn(payload)
+    except Exception:
+        warn_role = ""
+
+    warn_parts = [w for w in (warn_given, warn_role) if w]
+    if warn_parts:
         _reconfigure_stdout_utf8()
         output = {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
-                "additionalContext": warn,
+                "additionalContext": "\n\n".join(warn_parts),
             }
         }
         sys.stdout.write(json.dumps(output, ensure_ascii=False) + "\n")

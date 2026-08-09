@@ -26,6 +26,59 @@ sandbox-эвристики «cannot be statically analyzed»), и печатае
   --all        игнорировать фильтр времени
   --session S  только транскрипты (main + subagents), чей путь содержит подстроку S
   --summary    сводка по группам вместо полного списка
+
+П6 (разбивка permission-аудита по классам гигиены, замер, не решение) --
+=========================================================================
+Мотив: калибровка №6 намерила за окно 290 вызовов Bash/PowerShell, 210 вне
+allowlist, классы гигиены -- `2>&1` x10, `cd/Set-Location` x8,
+`python -c/heredoc` x7, «журнал мимо Edit/Write» 0. Все три первых класса --
+ЖИВЫЕ warn'ы гейта tools/hygiene_gate.py, которые поведения агента не
+изменили (команда всё равно ушла в исполнение). Стоит вопрос -- промотировать
+ли часть классов из warn в блок; решение отложено, нужен замер окна при
+НЕИЗМЕННОМ скоупе гейта, агрегации попаданий по классам не существовало.
+
+ГРАНИЦА (соблюдена строго, зафиксировано явной строкой по требованию спеки):
+этот пункт даёт ТОЛЬКО ЗАМЕР -- новый блок «По классам гигиены» в выводе
+`--summary`. Выбор warn->блок в задачу НЕ входит, норм CLAUDE.md не меняет,
+решается ОТДЕЛЬНО калибровкой №7. tools/hygiene_gate.py этой правкой не
+тронут ни строкой (non-goals манифеста).
+
+ИСТОЧНИК КЛАССИФИКАЦИИ -- ИМПОРТ tools/hygiene_gate.py (решение диспетчера,
+не выбор builder'а): вторая реализация тех же четырёх классов запрещена
+(D-0043 -- фиксить класс, не плодить экземпляр). classify_hygiene() ниже
+вызывает РОВНО те приватные хелперы гейта, что диктует манифест задачи
+(`_is_cd_prefix`, `_strip_commit_message_arg_only`, `_is_python_dash_c`,
+`_is_journal_bypass`) -- те же регексы, те же скрабы (git-statement
+маскирование, вырезание -m/--message, маскирование кавычек под `>`).
+
+ЗАПИСАННОЕ ОГРАНИЧЕНИЕ (по требованию спеки): измеритель наследует слепоту
+измеряемого -- если hygiene_gate какой-то формы записи/паттерна не видит,
+этот аудит её тоже не увидит. Это осознанная цена единой точки правды (одна
+классификация, не две расходящиеся), а не недосмотр этой правки.
+
+Новый блок печатается ТОЛЬКО в `--summary` (чек 25 калибровки гоняет именно
+сводку); ключ по всем ПРОСКАНИРОВАННЫМ вызовам (сопоставимо с baseline №6),
+в скобках рядом -- сколько из них ЕЩЁ И suspects (allowlist+sandbox). Одна
+команда может задеть несколько классов сразу -- сумма попаданий по классам
+может ПРЕВЫШАТЬ число команд с ≥1 классом, отчёт печатает оба числа явно
+(не заставляет читателя складывать самостоятельно).
+
+ПЕРЕСДАЧА (t-364 attempt 2, вердикт критика) -- две правки поверх исходной
+приёмки:
+  F9 -- `total`/suspects и классовые счёты собирались ДВУМЯ независимыми
+        обходами транскриптов (`collect_suspects` + `collect_hygiene_class_stats`,
+        каждый со своим пересчётом `mtime`-отсечки) -- числа могли разъехаться
+        на транскрипте, посвежевшем МЕЖДУ проходами. Фикс -- `collect_audit_stats()`,
+        ОДИН проход, main() зовёт ровно её (см. докстринг функции ниже).
+  F10 -- классификация в `classify_hygiene()` копирует не только регексы
+        `hygiene_gate`, но и СБОРКУ конкретных проверок (например, порядок
+        применения `_strip_commit_message_arg_only` к классу `2>&1`) --
+        при семантическом дрейфе сборки внутри `hygiene_gate._collect_warn_classes`
+        это разошлось бы МОЛЧА. Тест `test_classify_hygiene_matches_gate_attribution`
+        (tools/test_permission_audit.py) фиксирует РАВЕНСТВО результата
+        `classify_hygiene()` и прямой атрибуции `hygiene_gate` на матрице
+        команд (4 класса + 3 известных FP + компаунды с несколькими
+        классами) -- проверено эмпирически: расхождений 0.
 """
 from __future__ import annotations
 
@@ -39,8 +92,20 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import hygiene_gate
+
 REPO = Path(__file__).resolve().parents[1]
 PROJECT_KEY = "D--Improving-AI-Operating-System-for-LLMs"
+
+# П6: имена классов -- ДОСЛОВНО словами норм CLAUDE.md / чека 25 (решение
+# диспетчера), чтобы строки этого отчёта складывались с формулировками
+# калибровки без перевода.
+HYGIENE_CLASS_LABELS = [
+    "2>&1",
+    "cd/Set-Location",
+    "python -c/heredoc",
+    "журнал мимо Edit/Write",
+]
 
 
 def _resolve_claude_projects() -> Path:
@@ -312,6 +377,79 @@ def iter_tool_calls(minutes: float | None, session: str | None = None,
                     yield when, path.name, source, item["name"], cmd
 
 
+def _suspect_reason(tool: str, cmd: str, patterns) -> list[str] | None:
+    """Общее ядро suspect-определения, вынесенное из collect_suspects (D-0043
+    -- та же логика нужна П6 collect_hygiene_class_stats ниже, вторая копия
+    запрещена). None -- команда НЕ suspect; иначе список причин (как раньше)."""
+    allowed = matches_allow(tool, cmd, patterns)
+    flags = sandbox_flags(cmd)
+    if (allowed and not flags) or is_auto_allowed(cmd):
+        return None
+    reason = []
+    if not allowed:
+        reason.append("нет совпадения с allowlist")
+    reason += flags
+    return reason
+
+
+def collect_audit_stats(minutes: float | None, session: str | None = None,
+                         snapshot: list[tuple[Path, str, int]] | None = None):
+    """F9 (пересдача t-364 attempt 2, вердикт критика): ОДИН обход
+    `iter_tool_calls` -- suspects, total И классовые счёты гигиены (П6)
+    собираются из ОДНОЙ И ТОЙ ЖЕ выборки за ОДНУ итерацию, `mtime`-отсечка
+    (вычисляется внутри `iter_tool_calls` при первом обращении к генератору)
+    происходит РОВНО ОДИН РАЗ.
+
+    ДО этой правки `collect_suspects` и `collect_hygiene_class_stats` были
+    ДВА НЕЗАВИСИМЫХ обхода: каждый звал `iter_tool_calls(...)` заново, и
+    каждый вызов заново вычислял `cutoff = time.time() - minutes * 60`
+    (см. докстринг `iter_tool_calls`). Транскрипт, чей `mtime` пересёк
+    границу окна МЕЖДУ двумя проходами (второй проход стартует на доли
+    секунды позже первого, но при реальном окне в минуты этого достаточно
+    для событий на самой границе), мог попасть в один набор чисел и
+    выпасть из другого -- РОВНО класс «числа плывут», против которого сам
+    инструмент изначально заводил снапшот транскриптов (см. докстринг
+    модуля/`snapshot_transcripts`, доработка (a) пилота). Особенно
+    неуместно для ИНСТРУМЕНТА ЗАМЕРА (П6): несопоставимые `total` и
+    классовые счёты обесценивают сравнение с baseline калибровки №6.
+
+    ФИКС: единственная точка входа для main() -- один проход по
+    `iter_tool_calls(minutes, session, snapshot)`, `total`/`suspects`/
+    классовые счёты аккумулируются В ОДНОМ ТЕЛЕ ЦИКЛА над одним и тем же
+    `when/agent/tool/cmd`. `collect_suspects`/`collect_hygiene_class_stats`
+    ниже СОХРАНЕНЫ как узкие обёртки (публичный контракт -- сигнатура и
+    форма возврата -- не меняется, существующие тесты это подтверждают),
+    но каждая по-прежнему делает СВОЙ отдельный вызов сюда, а значит СВОЙ
+    отдельный обход -- если вызывающему нужны ОБА набора чисел
+    одновременно и согласованно (main(), единственный такой вызывающий в
+    этом файле), он обязан звать `collect_audit_stats()` напрямую ОДИН
+    РАЗ, а не оба геттера по отдельности; main() ниже переписан именно так.
+
+    Возвращает (suspects, total, class_counts, class_suspect_counts,
+    any_class_count) -- те же формы значений, что были у двух функций
+    раздельно, просто из одного прохода."""
+    patterns = load_allow_patterns()
+    suspects = []
+    total = 0
+    class_counts = {label: 0 for label in HYGIENE_CLASS_LABELS}
+    class_suspect_counts = {label: 0 for label in HYGIENE_CLASS_LABELS}
+    any_class_count = 0
+    for when, fname, agent, tool, cmd in iter_tool_calls(minutes, session, snapshot):
+        total += 1
+        reason = _suspect_reason(tool, cmd, patterns)
+        is_suspect = reason is not None
+        if is_suspect:
+            suspects.append((when, agent, tool, cmd, reason))
+        classes = classify_hygiene(cmd)
+        if classes:
+            any_class_count += 1
+            for c in classes:
+                class_counts[c] += 1
+                if is_suspect:
+                    class_suspect_counts[c] += 1
+    return suspects, total, class_counts, class_suspect_counts, any_class_count
+
+
 def collect_suspects(minutes: float | None, session: str | None = None,
                       snapshot: list[tuple[Path, str, int]] | None = None):
     """Прогнать все tool_use через allowlist + sandbox-эвристики.
@@ -320,22 +458,63 @@ def collect_suspects(minutes: float | None, session: str | None = None,
     (when, agent, tool, cmd, reason) для команд, которые ВЕРОЯТНО требовали
     ручного подтверждения. Вынесено из main() отдельной чистой функцией,
     чтобы юнит-тесты могли проверять фильтрацию без парсинга stdout.
-    """
-    patterns = load_allow_patterns()
-    suspects = []
-    total = 0
-    for when, fname, agent, tool, cmd in iter_tool_calls(minutes, session, snapshot):
-        total += 1
-        allowed = matches_allow(tool, cmd, patterns)
-        flags = sandbox_flags(cmd)
-        if (allowed and not flags) or is_auto_allowed(cmd):
-            continue
-        reason = []
-        if not allowed:
-            reason.append("нет совпадения с allowlist")
-        reason += flags
-        suspects.append((when, agent, tool, cmd, reason))
+
+    F9: узкая обёртка над `collect_audit_stats` (см. её докстринг) --
+    сигнатура и форма возврата НЕ изменились, существующие тесты это
+    подтверждают. Самостоятельный вызов этой функции -- по-прежнему
+    отдельный проход; main() эту функцию НЕ зовёт (см. F9), чтобы не
+    дублировать обход."""
+    suspects, total, *_rest = collect_audit_stats(minutes, session, snapshot)
     return suspects, total
+
+
+def classify_hygiene(command) -> list[str]:
+    """П6: список СРАБОТАВШИХ классов гигиены для ОДНОЙ команды -- классы
+    НЕЗАВИСИМЫ (одна команда может задеть несколько сразу, см. D5 спеки).
+    Источник классификации -- ИМПОРТ tools/hygiene_gate.py (D-0043, см.
+    докстринг модуля выше про унаследованную слепоту измерителя); вторая
+    реализация тех же регексов/скрабов здесь ЗАПРЕЩЕНА.
+
+    `command` не строка / None / пустая строка -> [] без исключения --
+    класс не засчитывается, скрипт не падает (краевое поведение задано
+    спекой явно)."""
+    if not isinstance(command, str) or not command:
+        return []
+    classes = []
+    if " 2>&1" in hygiene_gate._strip_commit_message_arg_only(command):
+        classes.append("2>&1")
+    if hygiene_gate._is_cd_prefix(command):
+        classes.append("cd/Set-Location")
+    if hygiene_gate._is_python_dash_c(command):
+        classes.append("python -c/heredoc")
+    if hygiene_gate._is_journal_bypass(command):
+        classes.append("журнал мимо Edit/Write")
+    return classes
+
+
+def collect_hygiene_class_stats(minutes: float | None, session: str | None = None,
+                                 snapshot: list[tuple[Path, str, int]] | None = None):
+    """П6: прогнать ВСЕ просканированные вызовы (не только suspects -- D2:
+    иначе замер несопоставим с baseline калибровки №6, где попадания
+    считались независимо от allowlist) через classify_hygiene().
+
+    Возвращает (class_counts, class_suspect_counts, any_class_count):
+      - class_counts: {класс: N} -- число ПОПАДАНИЙ класса среди всех
+        просканированных вызовов (двойной счёт: команда с двумя классами
+        инкрементирует оба);
+      - class_suspect_counts: {класс: N} -- тот же счёт, но только для
+        вызовов, которые ЕЩЁ И suspects (тот же критерий, что
+        collect_suspects, общее ядро _suspect_reason);
+      - any_class_count: число КОМАНД (не попаданий), у которых сработал
+        хотя бы один класс -- сумма class_counts.values() может ПРЕВЫШАТЬ
+        это число при двойном срабатывании одной команды (D5).
+
+    F9: узкая обёртка над `collect_audit_stats` (см. её докстринг) --
+    сигнатура и форма возврата НЕ изменились. Самостоятельный вызов --
+    по-прежнему отдельный проход; main() эту функцию НЕ зовёт (см. F9)."""
+    _suspects, _total, class_counts, class_suspect_counts, any_class_count = (
+        collect_audit_stats(minutes, session, snapshot))
+    return class_counts, class_suspect_counts, any_class_count
 
 
 def main(argv=None):
@@ -364,7 +543,14 @@ def main(argv=None):
         print()
 
     snapshot = snapshot_transcripts(args.session)
-    suspects, total = collect_suspects(minutes, args.session, snapshot)
+    # F9: ОДИН вызов collect_audit_stats -- total, suspects И классовые
+    # счёты гигиены (П6) выходят из ОДНОГО прохода по одному и тому же
+    # snapshot/mtime-отсечке (см. её докстринг). НЕ звать collect_suspects
+    # + collect_hygiene_class_stats по отдельности здесь -- это вернуло бы
+    # ровно тот баг, который F9 чинит (два независимых прохода, числа
+    # плывут между ними).
+    suspects, total, class_counts, class_suspect_counts, any_class_count = (
+        collect_audit_stats(minutes, args.session, snapshot))
 
     print(f"Просканировано вызовов Bash/PowerShell: {total}"
           + ("" if minutes is None else f" (за последние {minutes:g} мин)")
@@ -386,6 +572,15 @@ def main(argv=None):
         for r, n in by_reason.most_common():
             print(f"  {n:4d}  {r}")
             print(f"        пример: {examples[r]}")
+
+        # П6: замер по классам гигиены -- ДРУГАЯ выборка (все просканированные
+        # вызовы, не только suspects), но ИЗ ТОГО ЖЕ прохода, что total/suspects
+        # выше (F9) -- заголовок несёт это явно, чтобы читатель не сложил
+        # несовместимые числа с блоками выше.
+        print("\nПо классам гигиены (все просканированные вызовы; в скобках — сколько из них suspects):")
+        for label in HYGIENE_CLASS_LABELS:
+            print(f"  {class_counts[label]:4d}  {label}  (suspects: {class_suspect_counts[label]})")
+        print(f"  команд с ≥1 классом: {any_class_count}")
     else:
         for when, agent, tool, cmd, reason in suspects:
             t = datetime.fromtimestamp(when, tz=timezone.utc).strftime("%H:%M:%S") if when else "--:--:--"

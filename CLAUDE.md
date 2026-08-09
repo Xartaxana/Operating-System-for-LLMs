@@ -72,7 +72,15 @@ designer is NOT a cheaper tier than the Lead (both Opus under the
 D-0099 binding): the routing motive here is CONTEXT ISOLATION and an
 independent drafting context, not model price, and R8's obligation
 follows the MOTIVE, not the price gap. Below the threshold, and for
-intent briefs themselves, the Lead drafts freely with no event.
+intent briefs themselves, the Lead drafts freely with no event. The
+threshold counts the task's PRIMARY draft. A RESUBMISSION after a
+`rejected` — a retry under the SAME task_id — is a CONTINUATION of the
+existing spec: the Lead edits that spec ITSELF, with no designer
+dispatch and no `dispatch_skipped` event, regardless of the ≥3-items /
+≥3-files threshold (operator's word, 2026-08-09). Work re-badged under
+a NEW task_id is a NEW task and the threshold applies to it as usual;
+parts produced after a `decomposable` take new task_ids and each is
+judged against the threshold on its own.
 Pilot protocol and evidence:
 docs/tasks/2026-07-14_opus-designer-pilot.md.
 
@@ -99,9 +107,26 @@ the performer (D-0058). Acceptance itself stays with the Lead
 
 R4. **Independent parts → several parallel workers**, each with its
 own spec (context isolation). Parallel specs declare path ownership;
-the Lead checks overlap before launch. Parallel SESSIONS in one repo
-are the same class: never touch or commit another session's
-uncommitted paths (D-0060, F-23). A cross-deploy queue item exists
+the Lead checks overlap before launch. Parallel specs declare not only
+path ownership but the SCOPE OF THE WITNESS RUN: each parallel
+worker's verification run is narrowed by OWNS — it must cover the
+test sets of all owned paths in that worker's `owns`, not merely the
+files the worker judges to be its own (a named narrow target); another
+worker's uncommitted state breaks a shared full run; the FULL
+canonical run (`python -m pytest tools/ gateway/ -q`) is the
+COORDINATOR's duty after the branches converge; its output is
+APPENDED to the `witness` field of the batch's LAST `accepted` event —
+that field carries BOTH parts, clearly delimited: first the node's OWN
+narrowed run (D-0052, proving ITS work), then the canon output labeled
+BATCH CANON; the canon addition never replaces the node's own proof
+(the journal schema is unchanged, this reuses the existing
+accepted/witness slot). A SOLO writing dispatch keeps the canonical
+run. Acceptance of a parallel node stands on its narrowed witness; a
+canon failure discovered after convergence is handled as
+`defect_found` against the responsible node (reopen is forbidden,
+D-0060). Parallel SESSIONS in one repo are the same class: never touch
+or commit another session's uncommitted paths (D-0060, F-23). A
+cross-deploy queue item exists
 only if written IN THE SAME MOVE into the carrier the TARGET deploy
 reads at boot (OS: CURRENT_CONTEXT.md; AO3: docs/HANDOFF.md); own
 journal notes / FINDINGS are not a carrier — an item living only
@@ -148,7 +173,20 @@ never self-executed piecemeal by the coordinator — it accumulates in
 the session's list and goes to builder as ONE batched dispatch at a
 stage boundary (marker «батч мелочей» in notes); self-execution with
 a skip event is legal only for an edit BLOCKING the current move —
-the reason must name the blockage. Lead-tier work per the table
+the reason must name the blockage. A skip reason of the class "the
+operator is waiting / an interactive request blocks the move" is
+legal for SELF-EXECUTION ONLY on the FIRST such move in a session;
+from the SECOND same-class occurrence self-execution is a violation
+regardless of whether the edit itself is blocking — the operator's
+waiting is not an exemption, it is the very shape the loophole took
+(calibration #6, check 22, count 3). This overrides only the earlier
+blocking-edit SELF-EXECUTION concession, not dispatch itself: a
+NON-blocking edit of this class, from the second occurrence, joins the
+batch (D-0081) as usual; a BLOCKING edit of this class cannot wait for
+the batch boundary by definition — its legal exit is an IMMEDIATE SOLO
+builder dispatch, never self-execution and never a batch entry; the
+coordinator self-executing it is illegal even when it blocks the
+current move. Lead-tier work per the table
 (decomposition, specs, acceptance, architecture, policy) needs no
 skip events. DETERMINISTIC SCRIPT RUNS (D-0095): launching /
 collecting a deterministic script (exam runner, D-construction
@@ -234,7 +272,8 @@ conflicting requirement pairs: stated, or explicitly forked down
 (2026-07-29, check-23 class (б) — cases t-324/t-325/t-332/t-343);
 (3) "given"
 enumerated AND sufficient — data, fixtures, paths NAMED, not
-implied; (4) writing dispatch: owns/non-goals/handoff present;
+implied; (4) writing dispatch: owns/non-goals/handoff present; a
+PARALLEL writing dispatch also names the NARROWED witness scope (R4);
 (5) freshness — the spec's load-bearing facts checked against their
 carrier, not memory (a stale note in the spec is a dispatcher
 defect; machine layer since t-343 — the dispatch_gate given-path
@@ -358,10 +397,23 @@ stateDiagram-v2
     [*] --> Open: delegated (after the dispatch call returns)
     Open --> Open: rejected → retry attempt≥2 | critic entry | replaces_worker
     Open --> Closed: accepted (from above / basis critic / queued-to-lead)
-    Open --> Closed: escalated / decomposable → re-dispatched under the same task_id
+    Open --> Open: escalated / decomposable → re-dispatched (same task_id; closure is reader-specific, see note below)
     Open --> Closed: closes:t-NNN token in a later event's notes
     Closed --> [*]: reopen forbidden (D-0060); late defects → defect_found(ref)
 ```
+
+Closure is reader-specific, not one fact: `tools/journal_validator.py`
+(D-0060's reopen-forbidden law) marks a task_id CLOSED only by
+`accepted` — `escalated`, `decomposable` and a `closes:t-NNN` token do
+NOT close it there, so a repeat `delegated` after escalated or
+decomposable stays legal for the validator. `tools/session_context.py`'s
+`open_dispatches()` (the SessionStart OPEN DISPATCH line) uses a
+narrower window: a task_id is OPEN only while its LAST lifecycle event
+(delegated/accepted/rejected/escalated/decomposable) is `delegated`;
+after `escalated` or `decomposable` — or a later `closes:t-NNN` token
+in ANY event's notes — it silently drops off the boot list even
+though the validator still treats the task as open. The two readers
+agree only that `accepted` closes unconditionally.
 
 Events: `delegated`, `accepted`, `rejected`, `escalated`,
 `decomposable`, `dispatch_skipped` (reason mandatory), `defect_found`
@@ -475,7 +527,15 @@ all sessions and subagents of this repo:
    (case sensitivity, type/glob filters; content negatives only
    case-insensitive) finding a known-present sample; a control with a
    different pattern proves the pipe, not absence; no control →
-   emptiness = a call miss.
+   emptiness = a call miss. Same class — the STATUS of a registry
+   entry: a load-bearing claim about the status of an entry in a
+   structured registry (escalations, decisions, tasks, ledgers) is
+   valid only after reading THROUGH that entry's status line, or
+   grepping the status FIELD itself; the presence of the entry or of
+   its header inside a read window is NOT a check. Append-only
+   registries put the verdict at the END of a multi-section entry, so
+   a truncated window systematically shows the problem without its
+   resolution (F-55).
 7. **Temporary corruption is rolled back by a BYTE COPY, never by
    `git checkout`** (2026-08-05; AO3 cross-point of 08-02 confirmed on
    our side by a live case: our own critic corrupted the MONEY table

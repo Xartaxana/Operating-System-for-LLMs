@@ -864,3 +864,592 @@ def test_echo_json_no_given_path_warn_when_all_paths_exist():
     )
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
     assert result.stdout == b""
+
+
+# ---------------------------------------------------------------------
+# ЧАСТЬ B (П3, attempt 2 -- пересдача): WARN-слой "тип агента != заявленный
+# ярус" -- role_type_warn(). Носитель резолюции -- .claude/agents/*.md
+# (НЕ delegation.config.yaml, см. докстринг dispatch_gate.py "ЧАСТЬ B",
+# "НОСИТЕЛЬ РЕЗОЛЮЦИИ" -- находка F1 attempt 1). Реальные фронтматтеры
+# этого репо на момент правки: scout.md -> model: haiku, builder.md ->
+# model: sonnet, critic.md -> model: opus, designer.md -> model: opus,
+# judge.md -> model: sonnet -- позволяет тестировать C4'/C5'/C10 БЕЗ
+# инъекции, используя реальный каталог AGENTS_DIR.
+# ---------------------------------------------------------------------
+
+
+def _agent_payload(subagent_type=None, description=None, prompt="noop", cwd=None):
+    tool_input = {"prompt": prompt}
+    if subagent_type is not None:
+        tool_input["subagent_type"] = subagent_type
+    if description is not None:
+        tool_input["description"] = description
+    payload = {"tool_name": "Task", "tool_input": tool_input}
+    if cwd is not None:
+        payload["cwd"] = cwd
+    return payload
+
+
+# C4': известный тип (роль-файл есть), семейства расходятся -> WARN,
+# называющий заявленный ярус, тип и модель роль-файла.
+
+
+def test_role_type_warn_c4_known_role_family_mismatch_warns():
+    # scout.md несёт model: haiku; лейбл заявляет "sonnet:" -- расхождение.
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="sonnet: делает разведку")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "sonnet" in warn
+    assert "scout" in warn
+    assert "haiku" in warn
+
+
+def test_role_type_warn_c4_known_role_family_match_silent():
+    # Позитивный контроль (симметрично mismatch выше): тот же тип, лейбл
+    # совпадает с моделью роль-файла -> "".
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="haiku: делает разведку")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_c4_builder_opus_label_mismatch_warns():
+    # builder.md несёт model: sonnet; лейбл заявляет "opus:" -- расхождение.
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="builder", description="opus: правь файл")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "opus" in warn
+    assert "builder" in warn
+    assert "sonnet" in warn
+
+
+# C5': роль-файла для типа нет (класс general-purpose, а также ЛЮБОЙ
+# другой встроенный/несуществующий тип) -> WARN, текст -- утверждение, не
+# обвинение (ярлык "класс general-purpose" из текста убран).
+
+
+def test_role_type_warn_c5_unknown_role_general_purpose_warns():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="general-purpose", description="opus: ревью диффа")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "general-purpose" in warn
+    assert "нет роль-файла" in warn
+    assert "класс general-purpose" not in warn  # ярлык убран (спека пересдачи)
+
+
+def test_role_type_warn_c5_unknown_role_arbitrary_string_warns():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="totally-unknown-role", description="fable: что-то")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "totally-unknown-role" in warn
+    assert "нет роль-файла" in warn
+
+
+# --- C10: пин находки F1 (attempt 1) -- пара негатив + позитивный контроль
+# в одном тесте, чтобы тишина не оказалась тишиной сломанного слоя.
+
+
+def test_c10_judge_sonnet_label_silent_general_purpose_same_label_warns():
+    # НЕГАТИВ (пин F1): subagent_type='judge' с лейблом 'sonnet:' -- ровно
+    # находка критика attempt 1 -- .claude/agents/judge.md существует и
+    # несёт model: sonnet -> совпадение -> МОЛЧИТ.
+    warn_judge = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="judge", description="sonnet: приёмка диспатча")
+    )
+    assert warn_judge == ""
+
+    # ПОЗИТИВНЫЙ КОНТРОЛЬ (тот же лейбл, тип БЕЗ роль-файла) -- слой
+    # действительно работает, тишина выше -- не тишина сломанного кода.
+    warn_unknown = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="general-purpose", description="sonnet: приёмка диспатча")
+    )
+    assert "ROLE-TYPE WARN" in warn_unknown
+    assert "нет роль-файла" in warn_unknown
+
+
+# --- C11: регистр/пробелы имени типа -- сопоставляется регистронезависимо
+# и с обрезкой пробелов.
+
+
+def test_c11_subagent_type_case_and_whitespace_variants_silent():
+    for variant in ("Builder", "BUILDER", "builder ", " Builder", "BuIlDeR"):
+        warn = dispatch_gate.role_type_warn(
+            _agent_payload(subagent_type=variant, description="sonnet: правь файл")
+        )
+        assert warn == "", f"variant {variant!r} should be silent, got {warn!r}"
+
+
+def test_c11_subagent_type_case_mismatch_still_warns_on_real_mismatch():
+    # Регресс-страховка на пару с C11 выше: регистр НЕ маскирует реальное
+    # расхождение семейств -- "Scout" (в другом регистре) с лейблом
+    # "sonnet:" по-прежнему WARN (scout.md несёт model: haiku).
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="Scout", description="sonnet: делает разведку")
+    )
+    assert "ROLE-TYPE WARN" in warn
+
+
+# ---------------------------------------------------------------------
+# N3 (attempt 3, критик живым прогоном на 15 формах): кавычки вокруг
+# name:/model: снимаются -- ДО фикса кавычённый name: делал роль-файл
+# ЛОЖНО НЕВИДИМЫМ (WARN "нет роль-файла" для реально загружаемой роли --
+# ложь, не тишина; см. также отдельную before/after-пробу вне pytest,
+# приложенную в отчёте дословно).
+# ---------------------------------------------------------------------
+
+
+def test_n3_strip_quotes_double_quotes():
+    assert dispatch_gate._strip_quotes('"scout"') == "scout"
+
+
+def test_n3_strip_quotes_single_quotes():
+    assert dispatch_gate._strip_quotes("'sonnet'") == "sonnet"
+
+
+def test_n3_strip_quotes_unquoted_unchanged():
+    assert dispatch_gate._strip_quotes("scout") == "scout"
+
+
+def test_n3_strip_quotes_mismatched_quotes_unchanged():
+    # Разные кавычки на границах -- НЕ пара, не снимается.
+    assert dispatch_gate._strip_quotes("'scout\"") == "'scout\""
+
+
+def test_n3_strip_quotes_quote_inside_value_not_stripped():
+    # Негативный контроль (спека прямо требует): кавычка ВНУТРИ значения,
+    # не на ОБЕИХ границах разом -- не пара обрамляющих, не снимается.
+    assert dispatch_gate._strip_quotes('sco"ut') == 'sco"ut'
+    assert dispatch_gate._strip_quotes('scout"') == 'scout"'
+    assert dispatch_gate._strip_quotes('"scout') == '"scout'
+
+
+def test_n3_strip_quotes_too_short_unchanged():
+    # Граница: одиночный символ-кавычка -- len==1, первый и последний
+    # символ ФИЗИЧЕСКИ один и тот же индекс, не пара -- не снимается.
+    assert dispatch_gate._strip_quotes('"') == '"'
+    assert dispatch_gate._strip_quotes("") == ""
+
+
+def test_n3_quoted_name_field_now_matches_and_reveals_real_mismatch(tmp_path, monkeypatch):
+    # ТОЧНЫЙ репро критика: роль-файл с произвольным именем файла, name:
+    # "scout" В КАВЫЧКАХ, model: "haiku" (тоже в кавычках -- критик:
+    # "у model: это уцелело случайно"). subagent_type=scout, лейбл
+    # "sonnet:" -- ДО фикса: WARN "нет роль-файла" (ложь, файл грузится).
+    # ПОСЛЕ фикса: роль найдена по name:, модель haiku != заявленный
+    # sonnet -> WARN MISMATCH (верный вердикт).
+    (tmp_path / "randomname.md").write_text(
+        '---\nname: "scout"\nmodel: "haiku"\n---\n\n# scout (quoted)\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="sonnet: делает разведку")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "нет роль-файла" not in warn  # НЕ ложный UNKNOWN
+    assert "haiku" in warn  # верный MISMATCH, модель роли названа
+
+
+def test_n3_quoted_model_single_quotes_family_still_resolved(tmp_path, monkeypatch):
+    (tmp_path / "custom.md").write_text(
+        "---\nname: custom\nmodel: 'opus'\n---\n\n# custom\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn_match = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="custom", description="opus: ревью")
+    )
+    assert warn_match == ""
+    warn_mismatch = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="custom", description="sonnet: ревью")
+    )
+    assert "ROLE-TYPE WARN" in warn_mismatch
+    assert "opus" in warn_mismatch
+
+
+# ---------------------------------------------------------------------
+# N4 (attempt 3, критик): приоритет совпадения по ИМЕНИ ФАЙЛА над
+# совпадением по фронтматтерному полю name: при конфликте двух файлов.
+# ---------------------------------------------------------------------
+
+
+def test_n4_filename_match_takes_priority_over_name_field_conflict(tmp_path, monkeypatch):
+    # Два файла претендуют на тип "scout": scout.md (имя файла совпадает,
+    # но name: внутри -- ДРУГОЕ значение) и other.md (name: поле -- "scout",
+    # но имя файла другое). Приоритет -- у scout.md (model: sonnet).
+    (tmp_path / "scout.md").write_text(
+        "---\nname: not-scout\nmodel: sonnet\n---\n\n# scout by filename\n", encoding="utf-8"
+    )
+    (tmp_path / "other.md").write_text(
+        "---\nname: scout\nmodel: haiku\n---\n\n# scout by name field\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    # Если бы резолюция взяла other.md (model: haiku), лейбл "sonnet:" дал
+    # бы MISMATCH. Резолюция берёт scout.md (model: sonnet) -> тишина.
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="sonnet: делает разведку")
+    )
+    assert warn == ""
+
+    # Позитивный контроль резолюции в файл scout.md, не other.md: лейбл
+    # "haiku:" (совпал бы с other.md) ДОЛЖЕН дать MISMATCH, не тишину.
+    warn_control = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="haiku: делает разведку")
+    )
+    assert "ROLE-TYPE WARN" in warn_control
+    assert "sonnet" in warn_control
+
+
+# ---------------------------------------------------------------------
+# N6 (attempt 3, критик живым хуком): встроенные типы харнесса без
+# проектного роль-файла законно получают WARN "нет роль-файла" -- не
+# дефект слоя.
+# ---------------------------------------------------------------------
+
+
+def test_n6_builtin_harness_type_without_role_file_warns_legitimately():
+    for builtin_type in ("Explore", "statusline-setup"):
+        warn = dispatch_gate.role_type_warn(
+            _agent_payload(subagent_type=builtin_type, description="sonnet: сделай что-то")
+        )
+        assert "ROLE-TYPE WARN" in warn
+        assert "нет роль-файла" in warn
+
+
+# Ограничение (переписано по факту фронтматтеров, докстринг "ЧАСТЬ B"):
+# слой сверяет ЯРУС, не ФУНКЦИЮ -- критic.md/designer.md ОБА opus,
+# builder.md/judge.md ОБА sonnet -- пары неразличимы между собой.
+
+
+def test_role_type_warn_documented_limitation_critic_designer_opus_indistinguishable():
+    warn_critic = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="critic", description="opus: ревью диффа")
+    )
+    warn_designer = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="designer", description="opus: драфт спеки")
+    )
+    assert warn_critic == ""
+    assert warn_designer == ""
+
+
+def test_role_type_warn_documented_limitation_builder_judge_sonnet_indistinguishable():
+    warn_builder = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="builder", description="sonnet: правь файл")
+    )
+    warn_judge = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="judge", description="sonnet: приёмка диспатча")
+    )
+    assert warn_builder == ""
+    assert warn_judge == ""
+
+
+# --- Таблица пустых/отсутствующих входов (спека, дословно) -------------
+
+
+def test_role_type_warn_non_task_agent_tool_silent():
+    warn = dispatch_gate.role_type_warn({"tool_name": "Bash", "tool_input": {}})
+    assert warn == ""
+
+
+def test_role_type_warn_claude_prefix_label_silent():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="claude: делает разведку")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_missing_description_silent():
+    warn = dispatch_gate.role_type_warn(_agent_payload(subagent_type="scout"))
+    assert warn == ""
+
+
+def test_role_type_warn_empty_description_silent():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_description_not_string_silent():
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "scout", "prompt": "x", "description": 12345},
+    }
+    warn = dispatch_gate.role_type_warn(payload)
+    assert warn == ""
+
+
+def test_role_type_warn_description_without_model_prefix_silent():
+    # Ни один из других WARN-случаев не триггерится -- лейбл вообще не
+    # совпадает с LABEL_MODEL_PREFIX_RE (check3 блокировала бы это на
+    # уровне decide(), но role_type_warn() сам по себе тоже молчит).
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="fix it now")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_subagent_type_missing_silent():
+    warn = dispatch_gate.role_type_warn(_agent_payload(description="opus: x"))
+    assert warn == ""
+
+
+def test_role_type_warn_subagent_type_none_silent():
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": None, "prompt": "x", "description": "opus: x"},
+    }
+    warn = dispatch_gate.role_type_warn(payload)
+    assert warn == ""
+
+
+def test_role_type_warn_subagent_type_empty_string_silent():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="", description="opus: x")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_subagent_type_whitespace_only_silent():
+    # Обрезка пробелов (C11) не должна превращать "только пробелы" в
+    # непустую строку -- край того же класса, что пустая строка выше.
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="   ", description="opus: x")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_subagent_type_number_silent():
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": 42, "prompt": "x", "description": "opus: x"},
+    }
+    warn = dispatch_gate.role_type_warn(payload)
+    assert warn == ""
+
+
+def test_role_type_warn_subagent_type_dict_silent():
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": {"a": 1}, "prompt": "x", "description": "opus: x"},
+    }
+    warn = dispatch_gate.role_type_warn(payload)
+    assert warn == ""
+
+
+# --- Адверсариальная батарея: форма payload/tool_input целиком ---------
+
+
+def test_role_type_warn_payload_not_dict_silent():
+    assert dispatch_gate.role_type_warn(None) == ""
+    assert dispatch_gate.role_type_warn("not a dict") == ""
+    assert dispatch_gate.role_type_warn([1, 2, 3]) == ""
+
+
+def test_role_type_warn_tool_name_missing_silent():
+    warn = dispatch_gate.role_type_warn({"tool_input": {"subagent_type": "scout"}})
+    assert warn == ""
+
+
+def test_role_type_warn_tool_input_not_dict_silent():
+    warn = dispatch_gate.role_type_warn({"tool_name": "Task", "tool_input": "nope"})
+    assert warn == ""
+
+
+def test_role_type_warn_tool_input_missing_silent():
+    warn = dispatch_gate.role_type_warn({"tool_name": "Task"})
+    assert warn == ""
+
+
+def test_role_type_warn_huge_description_does_not_hang():
+    # Регресс F2 (квадратичный разбор): role_type_warn() вообще не читает
+    # tool_input["prompt"] -- проверяем, что 100КБ description и 240КБ
+    # prompt тоже не вызывают зависания (LABEL_MODEL_PREFIX_RE заякорен
+    # ^ -- анализирует только начало строки; AGENTS_DIR -- всего 5 файлов).
+    huge_description = "sonnet: " + ("x" * 100_000)
+    huge_prompt = "y" * 240_000
+    start = time.monotonic()
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description=huge_description, prompt=huge_prompt)
+    )
+    elapsed = time.monotonic() - start
+    assert elapsed < 5.0, f"took {elapsed:.2f}s"
+    assert "ROLE-TYPE WARN" in warn  # scout(haiku) != sonnet -- реальный mismatch
+
+
+# --- Известный тип, роль-файл без model: во фронтматтере -> молчит по ней
+
+
+def test_role_type_warn_known_role_without_model_in_frontmatter_silent(tmp_path, monkeypatch):
+    (tmp_path / "custom.md").write_text(
+        "---\nname: custom\ntools: Read\n---\n\n# custom\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="custom", description="opus: делает что-то")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_known_role_model_family_unrecognized_silent(tmp_path, monkeypatch):
+    (tmp_path / "custom.md").write_text(
+        "---\nname: custom\nmodel: llama-3.3-70b-versatile\n---\n\n# custom\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="custom", description="opus: делает что-то")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_matches_by_frontmatter_name_field_not_filename(tmp_path, monkeypatch):
+    # Имя файла ("xyz.md") НЕ совпадает с subagent_type -- совпадение
+    # только по фронтматтерному полю name: (С4'/C5' п.а/б спеки).
+    (tmp_path / "xyz.md").write_text(
+        "---\nname: mytype\nmodel: opus\n---\n\n# mytype\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="mytype", description="sonnet: делает что-то")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "opus" in warn
+
+
+def test_role_type_warn_malformed_frontmatter_no_closing_fence_silent(tmp_path, monkeypatch):
+    # Совпадение по ИМЕНИ ФАЙЛА ("broken.md" -> "broken") есть -- тип
+    # известен; фронтматтер без закрывающего "---" не заякорен -> модель
+    # не резолвится -> молчит (не крашится, не WARN unknown).
+    (tmp_path / "broken.md").write_text(
+        "---\nname: broken\nmodel: opus\nTELo без закрывающего fence.\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="broken", description="sonnet: делает что-то")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_agents_dir_missing_entirely_silent(tmp_path, monkeypatch):
+    # Свежий клон/кит -- каталог .claude/agents/ отсутствует вовсе.
+    missing_dir = tmp_path / "does_not_exist"
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", missing_dir)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="general-purpose", description="opus: x")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_agents_dir_exists_but_empty_warns_unknown(tmp_path, monkeypatch):
+    # Отличается от теста выше: каталог ЕСТЬ, но пуст -- НЕ тот же случай,
+    # что "каталог отсутствует целиком" (таблица спеки различает их) --
+    # ни один тип не резолвится -> WARN unknown, как обычная не-роль.
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="builder", description="opus: x")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "нет роль-файла" in warn
+
+
+# --- C7: fail-open на любое исключение внутри слоя ----------------------
+
+
+def test_role_type_warn_c7_unexpected_exception_inside_layer_fails_open(monkeypatch):
+    def _boom(subagent_type_norm):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(dispatch_gate, "_find_agent_role_model", _boom)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="sonnet: делает разведку")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_c7_agents_dir_present_positive_control():
+    # Позитивный контроль в паре с тестами выше -- реальный AGENTS_DIR
+    # существует в этом тестовом окружении (репо не свежий клон).
+    assert dispatch_gate.AGENTS_DIR.is_dir()
+
+
+# ---------------------------------------------------------------------
+# Инварианты 1/2/3/4 (докстринг "ЧАСТЬ B") на уровне main()/subprocess --
+# WARN не подменяет блок, exit-2-ветки недостижимы для нового кода,
+# stdout остаётся ОДНИМ JSON-объектом.
+# ---------------------------------------------------------------------
+
+
+def test_i1_role_type_warn_not_computed_when_gate_blocks_check1():
+    # Инвариант 1 -- пин-тест спеки: builder-промпт без DoD + лейбл с
+    # моделью + subagent_type=general-purpose (что дало бы WARN C5', если
+    # бы вычислялось) -- гейт блокирует ПО ПРОВЕРКЕ 1 раньше, stdout пуст.
+    payload = _builder_payload("Просто поправь опечатку.", description="opus: fix")
+    payload["tool_input"]["subagent_type"] = "builder"
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 2
+    assert b"\xd0\xb1\xd0\xb5\xd0\xb7 DoD" in result.stderr or "без DoD" in result.stderr.decode(
+        "utf-8", errors="replace"
+    )
+    assert result.stdout == b""
+
+
+def test_i2_role_type_warn_never_sets_exit_2_or_permission_decision():
+    # C6: mismatch-случай (WARN точно сработает) -- exit_code остаётся 0,
+    # JSON не содержит "permissionDecision".
+    payload = _agent_payload(subagent_type="scout", description="sonnet: делает разведку")
+    payload["tool_input"]["prompt"] = "DoD: тест зелёный."  # subagent_type != builder, не влияет
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    out = json.loads(result.stdout.decode("utf-8"))
+    assert "permissionDecision" not in json.dumps(out)
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert "ROLE-TYPE WARN" in ctx
+
+
+def test_i4_both_warn_layers_fire_single_json_object_given_path_first():
+    # Оба слоя срабатывают одновременно: given-path (несуществующий путь
+    # в "дано") И role-type (scout несёт model: haiku, лейбл "sonnet:").
+    # Результат -- ОДИН JSON-объект, given-path сообщение ПЕРЕД role-type.
+    payload = _agent_payload(
+        subagent_type="scout",
+        description="sonnet: разведка",
+        prompt="Дано: tools/фейк_не_существует.py. Найди упоминания.",
+        cwd=_REPO_ROOT,
+    )
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    stdout_lines = [ln for ln in result.stdout.decode("utf-8").splitlines() if ln.strip()]
+    assert len(stdout_lines) == 1, "stdout must carry exactly one JSON object"
+    out = json.loads(stdout_lines[0])
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert "GIVEN-PATH WARN" in ctx
+    assert "ROLE-TYPE WARN" in ctx
+    assert ctx.index("GIVEN-PATH WARN") < ctx.index("ROLE-TYPE WARN")
+
+
+def test_role_type_warn_silent_on_existing_dispatch_gate_own_test_suite_labels():
+    # Регресс-страховка: все существующие echo-тесты этого файла используют
+    # description="sonnet: ..." с subagent_type="builder" -- builder.md
+    # тоже несёт model: sonnet, слой ЧАСТИ B молчит -- ЧАСТЬ A не получает
+    # попутчика в существующих сценариях.
+    warn = dispatch_gate.role_type_warn(
+        _builder_payload("Почини. DoD: тест зелёный.", description="sonnet: fix")
+    )
+    assert warn == ""
