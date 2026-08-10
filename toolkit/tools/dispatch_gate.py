@@ -272,10 +272,12 @@ def is_path_like_token(tok) -> bool:
     return "*" in tok and ("/" in tok or "\\" in tok)
 
 
-# A closed set of manifest section headers (given, owns,
-# non-goals, handoff) -- used only to know where an owns declaration's
-# CONTINUATION line ends, so the one-line lookahead below does not
-# wander into the next manifest section.
+# A closed set of manifest section headers (given -- or its Cyrillic
+# equivalent marker, same short root discriminated \b-bounded in
+# MANIFEST_GIVEN_RE above -- owns, non-goals, handoff) -- used only to
+# know where an owns declaration's CONTINUATION line ends, so the
+# one-line lookahead below does not wander into the next manifest
+# section.
 _OWNS_SECTION_STOP_RE = re.compile(
     r"^\s*(?:\*\*)?(given|дано|owns|non-goals|handoff)\b", re.IGNORECASE
 )

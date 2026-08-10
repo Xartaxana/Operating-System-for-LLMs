@@ -100,11 +100,26 @@ def _git_repo_root() -> Path:
     """`git rev-parse --show-toplevel` -- the repo root, ONE call per
     --git-diff invocation. A failure (not a git repo, git unavailable)
     is a call error, RAISED as RuntimeError -- caught in main() and
-    turned into exit 2 (see the module docstring)."""
+    turned into exit 2 (see the module docstring).
+
+    ENCODING (release-gate v0.8.1 fix, sibling of the class already
+    fixed in tools/wiring_check.py's `_run_git`): `encoding="utf-8",
+    errors="replace"` replaces a bare `text=True` -- a non-UTF-8
+    console locale would otherwise let Python decode git's
+    always-UTF-8 stdout via locale.getpreferredencoding(), silently
+    mojibake-ing a repo root path that itself contains non-ASCII bytes
+    before it is ever joined with a relative path below. `-c
+    core.quotepath=false` is deliberately NOT added here: `rev-parse
+    --show-toplevel` returns a single directory path, not a
+    quotepath-affected path LISTING (ls-files/diff/status) -- the same
+    distinction tools/session_context.py's `hooks_path_autofix_line`
+    already documents for its own single-value git reads."""
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -115,7 +130,37 @@ def _git_repo_root() -> Path:
 
 
 def _run_git_name_only(args: list) -> list:
-    result = subprocess.run(args, capture_output=True, text=True)
+    """Runs a git name-LISTING subcommand -- this module's only two
+    callers pass `["git", "diff", "--name-only", ref]` and `["git",
+    "ls-files", "--others", "--exclude-standard"]` (see
+    _git_diff_paths). Both fixes are the same class already applied in
+    tools/wiring_check.py's `_run_git` (chosen form: `-c
+    core.quotepath=false` injected into argv, plus explicit
+    `encoding=`/`errors=` kwargs on subprocess.run -- the
+    wiring_check.py shape, not toolkit/tools/enforcement_probe.py's
+    manual capture_output()+.decode() shape):
+
+    ENCODING -- `encoding="utf-8", errors="replace"` instead of a bare
+    `text=True`, so git's always-UTF-8 output decodes correctly
+    regardless of the console's own locale.
+
+    QUOTEPATH -- `-c core.quotepath=false` is injected right after
+    `args[0]` (always `"git"`) UNCONDITIONALLY: both of this
+    function's callers list tracked/untracked PATHS, and git's default
+    (quotepath=true) octal-escapes any non-ASCII path byte in that
+    output (e.g. a two-byte UTF-8 sequence renders as
+    `"\\320\\277..."`), which never matches a plain-UTF-8 owns
+    declaration when compared in `verify()` -- a FALSE OUT-OF-OWNS on
+    a perfectly in-owns non-ASCII path. Centralized HERE (not at each
+    call site in _git_diff_paths) so both callers get the flag for
+    free and neither call site can forget it."""
+    result = subprocess.run(
+        [args[0], "-c", "core.quotepath=false", *args[1:]],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     if result.returncode != 0:
         raise RuntimeError(
             f"{' '.join(args)} failed (exit {result.returncode}): {result.stderr.strip()}"

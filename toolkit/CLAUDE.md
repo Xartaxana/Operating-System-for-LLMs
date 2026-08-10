@@ -373,7 +373,8 @@ vocabulary; the mapping between the two vocabularies is documented in
    the DoD as written BEFORE the run — keys chosen after the fact are
    the performer checking itself; (ii) the script is committed as a
    test OR attached in FULL source with the witness — an unrerunnable
-   witness forfeits the cheap-rerun right (rule 12); (iii) the run
+   witness forfeits the acceptor's cheap-control-rerun right (the
+   two-layer review rule, rule 3); (iii) the run
    includes a NEGATIVE control (one key deliberately absent → the
    script reports failure) — an evergreen script that cannot fail is
    indistinguishable from a broken one. Missing any of the three →

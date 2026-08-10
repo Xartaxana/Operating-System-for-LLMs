@@ -66,17 +66,17 @@
   {
     "hq": "tools/owns_verify.py",
     "kit": "toolkit/tools/owns_verify.py",
-    "synced_hq_sha256": "6dbc4170ffb52b047e6459a453f8481e7c04fdcdea2600900895ef26d8fb8e3c",
-    "synced_kit_sha256": "8a8d84b1a4de2ad4d7f334e049a9c3fa678874fc9442848176381ac6904a8b28",
-    "synced_at": "2026-08-10T13:57:53",
+    "synced_hq_sha256": "4482f3aeb920dd338c481574c1052c564dc35804c0a9674cc07b614b6f38ca88",
+    "synced_kit_sha256": "2b136455ad6aee195a58d99fd9d5d0aa50e517f0d06cdeb96936aeb4848d1e47",
+    "synced_at": "2026-08-10T15:47:02",
     "note": "pair added at the v0.8.0 full-mirror sync (sibling-only import, collision class guard)"
   },
   {
     "hq": "tools/test_owns_verify.py",
     "kit": "toolkit/tools/test_owns_verify.py",
-    "synced_hq_sha256": "76421703ce261ea02b4fe99bde9756bd6b82f63ecc3aa70695f765fb63760a1f",
-    "synced_kit_sha256": "30b1a7256fee42b05f68f56fc89fb2fef6068ca8ab62c396e63dbc5c16981a16",
-    "synced_at": "2026-08-10T12:30:37",
+    "synced_hq_sha256": "3c8fe5a39e7f2ca4a1002fde85f120efaf5a06ad592c336f51facfef8c114dd2",
+    "synced_kit_sha256": "ea9ccfab73802f2c321cf31892f18b5efcbfa37724a2e3a351a273640dbc0a44",
+    "synced_at": "2026-08-10T15:47:02",
     "note": "pair added at the v0.8.0 full-mirror sync"
   },
   {
@@ -155,16 +155,16 @@
     "hq": "tools/wiring_check.py",
     "kit": "toolkit/tools/wiring_check.py",
     "synced_hq_sha256": "d635e77c501d05512dd3bdeaa9791d8d36f1d5cd14e75be0134ac8176c99e13a",
-    "synced_kit_sha256": "4cad62ece2be10736ad43bf669955e7544b49d0782b611cc489a2994a7c69a20",
-    "synced_at": "2026-08-10T14:53:09",
+    "synced_kit_sha256": "9cccce1d49c2830101cf0e3da8e52de441213fc88ed8d99459d6eccb45a46861",
+    "synced_at": "2026-08-10T15:47:03",
     "note": "pre-existing twin, pair added at the v0.8.0 sync. ARCHITECTURAL DIVERGENCE BY DESIGN (Lead decision 2026-08-10, t-409 finding): staff side is a thin wrapper over session_context (sanitization lives there, since t-043); kit side is standalone for shipping. Sync this pair by FUNCTION (checks and their verdicts), never by structure; a check present on one side only is the real drift signal"
   },
   {
     "hq": "tools/test_wiring_check.py",
     "kit": "toolkit/tools/test_wiring_check.py",
     "synced_hq_sha256": "a461d30cb3439a0cbafc5835dd26a890687605c740c6fd4a5e7ce76db1d75f29",
-    "synced_kit_sha256": "126cfbfd6f1968b23cf274f22c154e2c8c40e095a689bedb65f6d19b0fdec0e1",
-    "synced_at": "2026-08-10T14:53:10",
+    "synced_kit_sha256": "de7f378087546e6c3e85b32a6cb799233298498618e58a753b59fb75cb76b23c",
+    "synced_at": "2026-08-10T15:47:03",
     "note": "pre-existing twin, pair added at the v0.8.0 sync"
   },
   {
@@ -258,9 +258,9 @@
   {
     "hq": "gateway/test_sqlite_logger.py",
     "kit": "toolkit/gateway/test_sqlite_logger.py",
-    "synced_hq_sha256": "078df6d6ce6c81e73e829304d59d69f56ac9a4ec0acdeb8944cae28c198e9e1c",
-    "synced_kit_sha256": "a3463d4f68143bf25ae544785fa0ab2028dc01e5d0f215161b44d84b2d0cc92f",
-    "synced_at": "2026-08-10T14:53:10",
+    "synced_hq_sha256": "6851bb07e54e167b47c5ccfaa2e0cd8eb69fbc69e1aeba67c1de2540bc6d69db",
+    "synced_kit_sha256": "2d9f50ea3032a7d41d1dc4e80cc09de97359ee7bafa6473b5280eb4384cd7112",
+    "synced_at": "2026-08-10T15:47:03",
     "note": "pre-existing twin, pair added at the v0.8.0 sync"
   },
   {
@@ -371,16 +371,16 @@
     "hq": "tools/dispatch_gate.py",
     "kit": "toolkit/tools/dispatch_gate.py",
     "synced_hq_sha256": "986fad1e5c4227c4068cd149cc6cdc1efe61c62fb3089b7472a1d3df8ac77815",
-    "synced_kit_sha256": "e6e783a111c848aa980451babcc60645748ea0e28e9efc36c6d38270b6aa1fe1",
-    "synced_at": "2026-08-10T14:53:10",
+    "synced_kit_sha256": "637cf11d60ba10d1201c78e577a995bb848413a6024874d6610fa4e5b92319b8",
+    "synced_at": "2026-08-10T15:47:03",
     "note": ""
   },
   {
     "hq": "tools/dod_gate.py",
     "kit": "toolkit/tools/dod_gate.py",
     "synced_hq_sha256": "ebc3b10403c9404c193e9c36a6b3ae308e5163c07255fb681b607f68ef22e988",
-    "synced_kit_sha256": "0fbc6bf4ce576c1c79d878d768d674f3b3d6615bf68637de9750e21c2d4f84bd",
-    "synced_at": "2026-08-10T03:50:34",
+    "synced_kit_sha256": "ca6f43d7cdf20618daf90a259debbd461492af0560d6e4c83f98a7ef938b7baf",
+    "synced_at": "2026-08-10T15:47:03",
     "note": ""
   },
   {
@@ -419,8 +419,8 @@
     "hq": "tools/journal_validator.py",
     "kit": "toolkit/tools/journal_validator.py",
     "synced_hq_sha256": "3cea1c64e7bc29e2a901a18a14a8e5b58211ce5e7f199ccb2286a48b75db40dd",
-    "synced_kit_sha256": "6c2f1bf5cc127dddc141b64250c9c5e19cdb1f3f53ab68bc79bd8998e5d684df",
-    "synced_at": "2026-08-10T13:57:52",
+    "synced_kit_sha256": "f8ca1e54dc244830716d6863f1981ff4a677750845f5f40eec90f4b2f9669a42",
+    "synced_at": "2026-08-10T15:47:03",
     "note": ""
   },
   {
@@ -444,7 +444,7 @@
     "kit": "toolkit/tools/main_gate.py",
     "synced_hq_sha256": "ce50ea277a7da46d05602e842f0e86f1683b9e34b63ca49e59b248d81ce0f576",
     "synced_kit_sha256": "c5f0cfc1b47d4302e00f2ad19c5bc2b216a3618d6d922f9b79a0ac6328804706",
-    "synced_at": "2026-08-10T14:53:10",
+    "synced_at": "2026-08-10T15:47:04",
     "note": ""
   },
   {
@@ -491,8 +491,8 @@
     "hq": "tools/session_context.py",
     "kit": "toolkit/tools/session_context.py",
     "synced_hq_sha256": "2d8159a3ae2b8782c6ebe26b9b080652092bb40d488b9d34cda225ed58da37c6",
-    "synced_kit_sha256": "1473c84cc1c675a2ed7a5f8f229571d67c0f66906ae0f600edffc1fd65c96f21",
-    "synced_at": "2026-08-10T14:53:10",
+    "synced_kit_sha256": "cae76186260bd6184175f0737c660bb58d4d2578efd5d566d271b63f893e0f17",
+    "synced_at": "2026-08-10T15:47:02",
     "note": ""
   },
   {
@@ -523,8 +523,8 @@
     "hq": "tools/test_dod_gate.py",
     "kit": "toolkit/tools/test_dod_gate.py",
     "synced_hq_sha256": "3adc6113d09234f948b19943ab7618795e567cd9598a8e4d7c1785fc91443725",
-    "synced_kit_sha256": "a61c4718c90d504dd0e2208fb22c82a7bf893bcc5ddd3379f3b9801db3a55169",
-    "synced_at": "2026-08-10T03:50:35",
+    "synced_kit_sha256": "b194b1bd347a05b525de6f76fad2cc9e55ebb950017891e1a69ea506c1aa6d41",
+    "synced_at": "2026-08-10T15:47:03",
     "note": ""
   },
   {
@@ -579,8 +579,8 @@
     "hq": "tools/test_journal_validator.py",
     "kit": "toolkit/tools/test_journal_validator.py",
     "synced_hq_sha256": "2c7d6cd9408edb82207e7c40757e52fd33210be9536662e1eea1d22b69954f2c",
-    "synced_kit_sha256": "55b322568b20e6a712625aa9181b491f73b18631399b9d15b2c2e6824b95f928",
-    "synced_at": "2026-08-10T03:50:36",
+    "synced_kit_sha256": "ad74214db9d5636cccac016081959e10d027dacc5f00c4867ee6fb5b1afe2428",
+    "synced_at": "2026-08-10T15:47:03",
     "note": ""
   },
   {
@@ -596,7 +596,7 @@
     "kit": "toolkit/tools/test_main_gate.py",
     "synced_hq_sha256": "6e4f20eac3a03efe7ce993e9aecd0c0d87e9951a195b284896757725d1066291",
     "synced_kit_sha256": "8afd5326dc78389b7fc37870016f2951c1317c1b266d9b7895d2f6c98c85284b",
-    "synced_at": "2026-08-10T14:53:10",
+    "synced_at": "2026-08-10T15:47:04",
     "note": ""
   },
   {
@@ -643,8 +643,8 @@
     "hq": "tools/test_session_context.py",
     "kit": "toolkit/tools/test_session_context.py",
     "synced_hq_sha256": "d85d07248d186a3b4b238d813de9e744b0fe759760fc7d651d18204fd916e5e0",
-    "synced_kit_sha256": "6a86e7a3eea22d27c11e2b44d652856726b840604cadf1e51614527452b5296c",
-    "synced_at": "2026-08-10T03:50:36",
+    "synced_kit_sha256": "c0bbdecb47e4825d8e1551866cffb43c22b66febb50930945402ec48bf04cec0",
+    "synced_at": "2026-08-10T15:47:03",
     "note": ""
   },
   {
@@ -739,8 +739,8 @@
     "hq": "CLAUDE.md",
     "kit": "toolkit/CLAUDE.md",
     "synced_hq_sha256": "d18262c7a15c7f3b331ad4b72eb6cbe5d161be527fff017b6ab8e1cb0eace08a",
-    "synced_kit_sha256": "f810abd8e64b16d07a94e9c2a8c9c47c4c521294381231a679b24dbeadcfa097",
-    "synced_at": "2026-08-10T14:53:11",
+    "synced_kit_sha256": "53e01c220090d36537409dae41b1ccf6b81755b13d2fb7a886035f0c4b0c7523",
+    "synced_at": "2026-08-10T15:47:04",
     "note": ""
   },
   {

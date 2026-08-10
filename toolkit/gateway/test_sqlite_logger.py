@@ -44,6 +44,15 @@ def wait_for_row(path, status, timeout=10):
             except sqlite3.OperationalError as exc:
                 last_error = exc
             else:
+                # F3 (release-gate v0.8.1, critic fix): a SUCCESSFUL
+                # SELECT (even one returning zero rows -- the table now
+                # exists, the target row just hasn't landed yet) clears
+                # any STALE last_error from an earlier transient "no
+                # such table" race. Without this reset, a genuine
+                # timeout that happens AFTER the table appears would
+                # still report the earlier, now-obsolete "no such
+                # table" text in its failure message.
+                last_error = None
                 if rows:
                     return rows
         time.sleep(0.2)
@@ -90,6 +99,34 @@ def test_wait_for_row_fails_honestly_with_last_error_when_table_never_appears(tm
     with pytest.raises(AssertionError) as excinfo:
         wait_for_row(path, "success", timeout=0.5)
     assert "no such table" in str(excinfo.value)
+
+
+def test_wait_for_row_timeout_message_has_no_stale_no_such_table_after_table_appears(tmp_path):
+    """F3 boundary (release-gate v0.8.1, critic probe reproduced
+    verbatim): the table appears mid-poll (a transient 'no such table'
+    OperationalError DOES fire early), but the target status row never
+    lands -- a genuine timeout with the table present. The final
+    AssertionError must NOT recycle the STALE 'no such table' text from
+    the earlier transient error: a successful SELECT (even one
+    returning zero rows) must clear last_error."""
+    path = tmp_path / "stale-error.db"
+    sqlite3.connect(path).close()  # file exists, table does not yet
+
+    def _create_table_late():
+        time.sleep(0.2)
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE requests (id INTEGER PRIMARY KEY, status TEXT)")
+        # deliberately no row with status='success' is ever inserted
+        conn.commit()
+        conn.close()
+
+    threading.Thread(target=_create_table_late).start()
+
+    with pytest.raises(AssertionError) as excinfo:
+        wait_for_row(path, "success", timeout=1.0)
+    message = str(excinfo.value)
+    assert "no such table" not in message
+    assert "last error" not in message
 
 
 def test_success_is_logged(db, monkeypatch):

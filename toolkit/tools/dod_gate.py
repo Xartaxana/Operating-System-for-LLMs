@@ -270,6 +270,25 @@ def decide(track: dict, agent_id: str | None = None) -> tuple[int, str, dict]:
     # without raising (append-only, nothing here parses them back).
     if consecutive >= CONSECUTIVE_BLOCK_LIMIT:
         agent_state["consecutive_blocks"] = 0
+        # F2 (release-gate v0.8.1, ported from tools/dod_gate.py's own
+        # attempt-2 fix, same class): a PERSISTENT fact in the agent's
+        # OWN agent_state dict (the same dict "consecutive_blocks"
+        # already lives in) -- the fact tools/session_context.py's
+        # GATE BREAK-GLASS surfacing reads on the NEXT SessionStart.
+        # agent_id is included IN THE VALUE (not only the per_agent
+        # key) -- the fallback branch (agent_id=None) files entries
+        # under _FALLBACK_AGENT_KEY ("__none__"), so the real agent_id
+        # would otherwise be lost unless saved alongside explicitly.
+        # Not erased by a later successful run: the "not violation"
+        # branch above only ever resets "consecutive_blocks" of this
+        # same agent_state, it never touches this key. A LIST
+        # ("unsafe_completions"), not a single overwritable dict --
+        # append, never overwrite, so a second (or later) valve trip by
+        # the same agent in the same session does not silently erase
+        # the first occurrence's fact.
+        agent_state.setdefault("unsafe_completions", []).append(
+            {"ts": _now_iso(), "reason": reason, "agent_id": agent_id}
+        )
         track.setdefault("gate_log", []).append(
             {
                 "action": "skipped_after_2_blocks",

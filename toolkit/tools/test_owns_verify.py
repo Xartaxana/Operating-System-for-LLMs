@@ -209,3 +209,69 @@ def test_cli_git_diff_happy_path_covers_tracked_and_untracked(tmp_path):
     )
     assert result_violation.returncode == 1
     assert f"OUT-OF-OWNS: {untracked_abs}" in result_violation.stdout
+
+
+# ---------------------------------------------------------------------
+# F1 (release-gate v0.8.1 critic fix): a non-ASCII path inside a
+# declared owns directory must not produce a FALSE OUT-OF-OWNS. git's
+# default (core.quotepath=true, no local override set anywhere in
+# these tests) octal-escapes non-ASCII path bytes in `ls-files
+# --others` output -- reproducible on ANY host/console locale, this is
+# a git config default, not a console-codepage effect, so no skip
+# marker is needed here.
+# ---------------------------------------------------------------------
+
+
+def test_cli_git_diff_non_ascii_untracked_path_no_false_out_of_owns(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_temp_git_repo(repo)
+
+    tracked = repo / "tracked.py"
+    tracked.write_text("v1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.py"], cwd=str(repo), capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "init"], cwd=str(repo), capture_output=True, check=True
+    )
+
+    owns_dir = repo / "owns_dir"
+    owns_dir.mkdir()
+    # "kafe.py" (Cyrillic, non-ASCII bytes in UTF-8) -- an untracked
+    # file, the exact `ls-files --others` code path this fix touches.
+    nonascii = owns_dir / "кафе.py"
+    nonascii.write_text("x\n", encoding="utf-8")
+
+    result = _run_cli(
+        ["--owns", str(owns_dir.resolve()), "--git-diff", "HEAD"], cwd=str(repo)
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "OUT-OF-OWNS" not in result.stdout
+    assert "OWNS OK: 1 paths within 1 declared" in result.stdout
+
+
+def test_cli_git_diff_ascii_untracked_path_still_matches_owns_regression(tmp_path):
+    # ASCII regression pin alongside the non-ASCII test above -- same
+    # exact scenario, plain-ASCII filename only, must still resolve
+    # cleanly after the encoding/quotepath fix.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_temp_git_repo(repo)
+
+    tracked = repo / "tracked.py"
+    tracked.write_text("v1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.py"], cwd=str(repo), capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "init"], cwd=str(repo), capture_output=True, check=True
+    )
+
+    owns_dir = repo / "owns_dir"
+    owns_dir.mkdir()
+    ascii_file = owns_dir / "plain.py"
+    ascii_file.write_text("x\n", encoding="utf-8")
+
+    result = _run_cli(
+        ["--owns", str(owns_dir.resolve()), "--git-diff", "HEAD"], cwd=str(repo)
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "OUT-OF-OWNS" not in result.stdout
+    assert "OWNS OK: 1 paths within 1 declared" in result.stdout

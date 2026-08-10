@@ -93,11 +93,26 @@ def _git_repo_root() -> Path:
     """`git rev-parse --show-toplevel` -- корень репозитория, ОДИН РАЗ
     на вызов --git-diff (B3). Отказ (не git-репо, git недоступен) --
     ошибка вызова, ПОДНИМАЕТСЯ как RuntimeError -- ловится в main() и
-    превращается в exit 2 (см. докстринг модуля)."""
+    превращается в exit 2 (см. докстринг модуля).
+
+    ENCODING (фикс release-gate v0.8.1, тот же класс, что уже
+    зафикшен в tools/wiring_check.py._run_git): `encoding="utf-8",
+    errors="replace"` вместо голого `text=True` -- не-UTF-8 консольная
+    локаль иначе даёт Python декодировать всегда-UTF-8 stdout git'а
+    через locale.getpreferredencoding(), молча получая mojibake на
+    корне репо, если сам путь содержит не-ASCII байты, ДО того, как он
+    join'ится с относительным путём ниже. `-c core.quotepath=false`
+    здесь намеренно НЕ добавлен: `rev-parse --show-toplevel` отдаёт
+    ОДИН путь-директорию, а не quotepath-зависимый ЛИСТИНГ путей
+    (ls-files/diff/status) -- то же разделение уже задокументировано в
+    tools/session_context.py._try_hookspath_autofix/
+    hooks_path_autofix_line для их собственных однозначных git-чтений."""
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -108,7 +123,38 @@ def _git_repo_root() -> Path:
 
 
 def _run_git_name_only(args: list) -> list:
-    result = subprocess.run(args, capture_output=True, text=True)
+    """Запускает git-подкоманду ЛИСТИНГА имён -- у этого модуля ровно
+    два вызывающих места, `["git", "diff", "--name-only", ref]` и
+    `["git", "ls-files", "--others", "--exclude-standard"]` (см.
+    _git_diff_paths). Оба фикса -- тот же класс, что уже в
+    tools/wiring_check.py._run_git (выбранная форма: `-c
+    core.quotepath=false` в argv + явные encoding=/errors= на
+    subprocess.run -- форма wiring_check.py, не форма
+    toolkit/tools/enforcement_probe.py с ручным
+    capture_output()+.decode()):
+
+    ENCODING -- `encoding="utf-8", errors="replace"` вместо голого
+    `text=True`, чтобы всегда-UTF-8 вывод git'а декодировался верно
+    независимо от локали консоли.
+
+    QUOTEPATH -- `-c core.quotepath=false` вставляется сразу после
+    `args[0]` (всегда `"git"`) БЕЗУСЛОВНО: оба вызывающих места этой
+    функции листингуют tracked/untracked ПУТИ, а дефолт git'а
+    (quotepath=true) octal-эскейпит любой не-ASCII байт пути в этом
+    выводе (например, двухбайтовая UTF-8 последовательность рендерится
+    как `"\\320\\277..."`), что никогда не совпадёт с обычной
+    UTF-8-декларацией owns при сверке в `verify()` -- ЛОЖНЫЙ
+    OUT-OF-OWNS на пути, который на самом деле внутри owns. Фикс
+    централизован ЗДЕСЬ (не на местах вызова в _git_diff_paths), чтобы
+    оба вызывающих места получили флаг бесплатно и ни одно не могло
+    его забыть."""
+    result = subprocess.run(
+        [args[0], "-c", "core.quotepath=false", *args[1:]],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     if result.returncode != 0:
         raise RuntimeError(
             f"{' '.join(args)} failed (exit {result.returncode}): {result.stderr.strip()}"

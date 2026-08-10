@@ -176,7 +176,8 @@ this script is known to depend on the old silent-ignore behavior for
 any flag other than --check (checked at the review that raised this
 point) -- --check itself is still accepted and still a no-op.
 
-GIT SUBPROCESS ENCODING + QUOTEPATH (B8 finding, 2026-08-10): every git
+GIT SUBPROCESS ENCODING + QUOTEPATH (the external-value sanitization
+pass, 2026-08-10): every git
 call in this module goes through the one shared `_run_git()` helper --
 see that function's own docstring for the two fixes it now applies
 (explicit `encoding="utf-8", errors="replace"` instead of a bare
@@ -246,8 +247,8 @@ def _run_git(args: list, root: Path):
     reasons, e.g. an unset config key).
 
     TWO fixes on top of the plain `text=True` capture this used to do
-    (B8 finding, repro confirmed on this host: locale.getpreferredencoding()
-    == cp1251):
+    (the external-value sanitization pass, repro confirmed on this
+    host: locale.getpreferredencoding() == cp1251):
 
     (1) ENCODING: `text=True` alone lets Python pick
     `locale.getpreferredencoding(False)` to decode git's stdout/stderr.

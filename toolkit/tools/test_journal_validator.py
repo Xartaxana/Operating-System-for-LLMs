@@ -495,7 +495,8 @@ def test_matrix_model_id_in_by_fails_as_unknown_tier():
     # (a) test_matrix_non_claude_by_with_basis_critic_passes asserted
     # code==0 for a full model id in "by" with basis="critic" -- that was
     # EXACTLY the hole this revision closes, and became a
-    # verbatim duplicate of test_b7_1_sonnet_by_builder_agent_critic_basis_ok
+    # verbatim duplicate of the sibling by=sonnet/agent=builder/
+    # basis=critic pair-legality case elsewhere in this file
     # once "by" was corrected to a legal tier word -- deleted, no
     # information lost. (b) this test (test_matrix_non_claude_by_requires_basis)
     # asserted "requires basis" as if that were still a distinct rule --
@@ -627,30 +628,30 @@ def test_pair_sonnet_by_critic_agent_queued_to_lead_ok():
     assert code == 0, violations
 
 
-def test_b7_4_opus_by_critic_agent_queued_to_lead_ok():
+def test_pair_opus_by_critic_agent_queued_to_lead_ok():
     # (4) by=opus/agent=critic/basis=queued-to-lead -> OK (equal tier,
     # the matrix explicitly allows the queue for critic-class work at an
     # opus coordinator).
     staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="critic",
                             model="opus", task_id="t-001", by="opus", basis="queued-to-lead",
-                            notes="B7 case 4: critic accepted by opus via queued-to-lead"))
+                            notes="pair case 4: critic accepted by opus via queued-to-lead"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 0, violations
 
 
-def test_b7_5_opus_by_builder_agent_no_basis_ok_via_ok_tier():
+def test_pair_opus_by_builder_agent_no_basis_ok_via_ok_tier():
     # (5) by=opus/agent=builder, no basis at all -> OK (ok_tier: opus
     # strictly above builder-tier sonnet -- no basis needed).
     obj = json.loads(_line(event="accepted", ts="2026-07-10T08:10:00", agent="builder",
                             model="sonnet", task_id="t-001", witness="w", by="opus",
-                            notes="B7 case 5: builder accepted by opus, no basis, ok_tier"))
+                            notes="pair case 5: builder accepted by opus, no basis, ok_tier"))
     assert "basis" not in obj
     staged = _staged(json.dumps(obj, ensure_ascii=False))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 0, violations
 
 
-def test_b7_6_haiku_by_scout_agent_critic_basis_fork_decision_fails():
+def test_pair_haiku_by_scout_agent_critic_basis_decision_fork_fails():
     # (6) by=haiku/agent=scout/basis=critic -- THE decision fork named in
     # the dispatch: the core rule's literal text ("OR the decision
     # carries a higher tier's input (a critic verdict)") would read this
@@ -673,13 +674,13 @@ def test_b7_6_haiku_by_scout_agent_critic_basis_fork_decision_fails():
     # legal, see test_matrix_judge_basis_passes_on_recon_category above).
     staged = _staged(_line(event="accepted", ts="2026-07-10T08:10:00", agent="scout",
                             model="haiku", task_id="t-001", by="haiku", basis="critic",
-                            notes="B7 case 6 (decision fork): scout accepted by haiku with critic basis"))
+                            notes="pair case 6 (decision fork): scout accepted by haiku with critic basis"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1
     assert any("role-vs-tier" in v and "haiku" in v for v in violations), violations
 
 
-def test_b7_boundary_fable_by_critic_agent_ok_via_ok_tier_no_basis_needed():
+def test_pair_boundary_fable_by_critic_agent_ok_via_ok_tier_no_basis_needed():
     # boundary companion to case 5/e: by=fable/agent=critic needs no
     # basis at all -- ok_tier alone covers it (fable strictly above opus).
     obj = json.loads(_line(event="accepted", ts="2026-07-10T08:10:00", agent="critic",
@@ -691,7 +692,7 @@ def test_b7_boundary_fable_by_critic_agent_ok_via_ok_tier_no_basis_needed():
     assert code == 0, violations
 
 
-def test_b7_boundary_sonnet_by_critic_agent_no_basis_fails():
+def test_pair_boundary_sonnet_by_critic_agent_no_basis_fails():
     # boundary companion to case 3: SAME pair (by=sonnet, agent=critic)
     # WITHOUT queued-to-lead -- must still FAIL (equal tier, no rescuing
     # basis at all).
@@ -703,7 +704,7 @@ def test_b7_boundary_sonnet_by_critic_agent_no_basis_fails():
     assert any("role-vs-tier" in v for v in violations), violations
 
 
-def test_b7_boundary_haiku_by_builder_agent_queued_to_lead_fails_floor():
+def test_pair_boundary_haiku_by_builder_agent_queued_to_lead_fails_floor():
     # boundary: by=haiku (known tier below sonnet) with agent=builder and
     # basis=queued-to-lead -- the floor fires before the queued-to-lead
     # branch is even reached; message must name the floor, not the
@@ -717,7 +718,7 @@ def test_b7_boundary_haiku_by_builder_agent_queued_to_lead_fails_floor():
     assert any("tier below sonnet" in v for v in violations), violations
 
 
-def test_b7_boundary_haiku_by_judge_basis_leaf_still_passes_unaffected_by_floor():
+def test_pair_boundary_haiku_by_judge_basis_leaf_still_passes_unaffected_by_floor():
     # boundary: by=haiku with basis=judge on a leaf category is NOT
     # touched by the new floor -- judge is checked first, independent of
     # by's tier (calibrated-judge acceptance is not a coordinator-tier

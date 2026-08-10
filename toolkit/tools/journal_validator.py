@@ -413,8 +413,8 @@ def check_append_only(staged_lines: list[str], head_lines: list[str]):
 
 
 def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None:
-    """Rule 11 (batch B7, 2026-07-24: pair-legality replaces
-    membership-in-set). Returns the violation text or None. Applies
+    """Rule 11 (the pair-legality rewrite, 2026-07-24: pair-legality
+    replaces membership-in-set). Returns the violation text or None. Applies
     ONLY to accepted (a literal reading of the spec: "accepted is
     legal when..."; rejected carries "by" with no further tier/basis
     check).

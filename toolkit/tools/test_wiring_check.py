@@ -815,12 +815,13 @@ def test_ascii_safe_escapes_non_ascii_readably():
 
 
 def test_hookspath_non_ascii_value_is_ascii_clean_and_readable(repo):
-    # B8 FIX (2026-08-10): _run_git() now decodes git's stdout via an
-    # explicit encoding="utf-8" instead of a bare text=True (which let
-    # Python fall back to locale.getpreferredencoding(False) -- cp1251 on
-    # this host -- and silently MOJIBAKE any non-ASCII git output; repro
-    # confirmed empirically before this fix, see B8 handoff notes). The
-    # exact Cyrillic codepoints of "\u0434\u0440\u0443\u0433\u043e\u0439"
+    # GIT SUBPROCESS ENCODING FIX (2026-08-10): _run_git() now decodes
+    # git's stdout via an explicit encoding="utf-8" instead of a bare
+    # text=True (which let Python fall back to
+    # locale.getpreferredencoding(False) -- cp1251 on this host -- and
+    # silently MOJIBAKE any non-ASCII git output; repro confirmed
+    # empirically before this fix). The exact Cyrillic codepoints of
+    # "\u0434\u0440\u0443\u0433\u043e\u0439"
     # ("drugoy" / "other") now survive the pipe correctly and
     # _ascii_safe() escapes THOSE codepoints, not mojibake
     # reinterpretations of them -- this is the precise (not merely "some
@@ -871,7 +872,7 @@ def test_untracked_enforcement_file_non_ascii_name_is_ascii_clean(repo):
 
 
 def test_skills_casing_non_ascii_dir_is_ascii_clean(repo):
-    # B8 FIX (2026-08-10): _run_git() now runs every call with
+    # QUOTEPATH FIX (2026-08-10): _run_git() now runs every call with
     # "-c core.quotepath=false" (see _run_git's own docstring), so the
     # repo-local config set here is now REDUNDANT with the fix -- kept
     # anyway as a regression pin that an explicit local override and the
@@ -879,8 +880,8 @@ def test_skills_casing_non_ascii_dir_is_ascii_clean(repo):
     # codepoints are asserted below (previously this test only checked
     # "some backslash-escape form", not the precise codepoints -- see
     # test_skills_casing_non_ascii_path_detected_with_default_quotepath
-    # right below for the actual B8 repro: DEFAULT quotepath, no local
-    # override at all).
+    # right below for the actual quotepath repro: DEFAULT quotepath, no
+    # local override at all).
     _git(["config", "--local", "core.quotepath", "false"], repo)
     dirname = "onboarding_\u043d\u0431"
     _add_skill(repo, f".claude/skills/{dirname}/skill.md")
@@ -896,7 +897,7 @@ def test_skills_casing_non_ascii_dir_is_ascii_clean(repo):
 
 
 def test_skills_casing_non_ascii_path_detected_with_default_quotepath(repo):
-    # B8 repro/fix (2026-08-10): git's DEFAULT (quotepath=true, no local
+    # QUOTEPATH repro/fix (2026-08-10): git's DEFAULT (quotepath=true, no local
     # override at all here -- unlike the test above) octal-escapes a
     # non-ASCII tracked path in `ls-files` output
     # (e.g. "\\320\\275\\320\\261..."); check_skills_casing's raw-line
@@ -917,7 +918,7 @@ def test_skills_casing_non_ascii_path_detected_with_default_quotepath(repo):
 
 
 def test_untracked_enforcement_non_ascii_tracked_file_not_falsely_flagged(repo):
-    # B8 repro/fix (2026-08-10): a non-ASCII-named file TRACKED under
+    # QUOTEPATH repro/fix (2026-08-10): a non-ASCII-named file TRACKED under
     # .githooks/ was falsely reported as untracked before this fix --
     # `git ls-files` (default quotepath=true) octal-escapes the tracked
     # name, which never matched the raw on-disk name pathlib reports, so
