@@ -101,11 +101,29 @@ vocabulary; the mapping between the two vocabularies is documented in
    another session's uncommitted paths (no-silent-reuse rule;
    parallel-session collision finding). A cross-deployment queue item
    exists only if it is written, in the same move, into a carrier that
-   the TARGET deployment reads at boot (D-0082); a session's own
+   the TARGET deployment reads at boot; a session's own
    journal notes or findings log are not such a carrier — an item
-   living only there has not actually been handed over.
+   living only there has not actually been handed over. Parallel specs
+   declare not only path ownership but the SCOPE OF THE WITNESS RUN:
+   each parallel worker's verification run is narrowed by its `owns`
+   — it must cover the test sets of every path in that worker's
+   `owns`, not merely the files the worker judges to be its own;
+   another worker's uncommitted state can break a shared full run. The
+   FULL canonical run (command hygiene, point 1) is the coordinator's
+   duty after the branches converge; its output is APPENDED to the
+   `witness` field of the batch's LAST `accepted` event — that field
+   then carries BOTH parts, clearly delimited: first the node's own
+   narrowed run (proving its own work), then the canon output labeled
+   BATCH CANON; the canon addition never replaces the node's own proof
+   (the journal schema is unchanged — this reuses the existing
+   accepted/witness field). A SOLO writing dispatch keeps the
+   canonical run as its witness. Acceptance of a parallel node stands
+   on its own narrowed witness; a canon failure discovered after
+   convergence is handled as a `defect_found` against the responsible
+   node (reopening a closed task is forbidden, the no-silent-reuse
+   rule).
    4a. A task spanning 5 or more journal events, OR 2 or more
-   sessions, is tracked as a markdown DAG under docs/tasks/ (D-0080):
+   sessions, is tracked as a markdown DAG under docs/tasks/:
    nodes/statuses/tiers as the carrier; a WRITING node also declares
    the paths it owns; a node's status moves in the same turn as its
    journal event, not separately.
@@ -132,8 +150,8 @@ vocabulary; the mapping between the two vocabularies is documented in
    non-standard agent: its actual model) — the operator sees the tier
    in the background-task list, the same self-declaration as the
    journal's `model` field (reconciled by calibration check 4). A tier
-   REQUIREMENT closes by MEASUREMENT, not by declaration alone
-   (D-0083): when a journal line carries a `worker_ref` of the form
+   REQUIREMENT closes by MEASUREMENT, not by declaration alone:
+   when a journal line carries a `worker_ref` of the form
    `agent:<id>`, the `journal_echo` hook measures the worker's actual
    transcript models and warns on a MISMATCH against the declared
    model; a mismatch is resolved — relaunch, an honest record via
@@ -143,16 +161,30 @@ vocabulary; the mapping between the two vocabularies is documented in
    maps to a cheap tier, done by Lead itself, is legitimate ONLY with
    a `dispatch_skipped` event (agent = the skipped tier, reason
    mandatory) — on any tier. Waiver: skipping critic on a small diff
-   is a note inside `accepted`. SMALL-WORK BATCHING (D-0081): a small
+   is a note inside `accepted`. SMALL-WORK BATCHING: a small
    builder-class edit that does NOT block the next step is not
    self-executed by the coordinator one at a time — it accumulates in
    a session-scoped list and goes to builder as ONE batched dispatch
    at a stage boundary (the large-cadence rule, rule 12; a
    "small-work batch" marker in notes); self-execution with a skip
    event stays legitimate only for an edit that blocks the current
-   step — the reason must name the blocker. Lead-tier work per the table
+   step — the reason must name the blocker. A skip reason of the class
+   "the operator is waiting / an interactive request blocks the move"
+   is legitimate for SELF-EXECUTION ONLY on the FIRST such move in a
+   session; from the SECOND same-class occurrence, self-execution is a
+   violation regardless of whether the edit itself is blocking — the
+   operator's waiting is not an exemption, it is the very shape this
+   loophole took (a measured window found this reason recurring three
+   times inside one session). This overrides only the earlier
+   blocking-edit self-execution concession, not dispatch itself: a
+   NON-blocking edit of this class, from the second occurrence on,
+   joins the small-work batch as usual; a BLOCKING edit of this class
+   cannot wait for the batch boundary by definition — its legitimate
+   exit is an IMMEDIATE SOLO builder dispatch, never self-execution and
+   never a batch entry; the coordinator self-executing it is illegal
+   even when it blocks the current move. Lead-tier work per the table
    (decomposition, specs, acceptance, architecture, policy) needs no
-   skip event. DETERMINISTIC SCRIPT RUNS (D-0095): launching /
+   skip event. DETERMINISTIC SCRIPT RUNS: launching /
    collecting a deterministic script (exam runner, construction
    orchestrator, validator, health check — code with no AI judgment
    in the coordinator's loop) is an ENVIRONMENT operation, not a
@@ -172,6 +204,23 @@ vocabulary; the mapping between the two vocabularies is documented in
    REPORT any analogs they notice (without expanding scope
    themselves), critic checks class-wide completeness of the fix
    against the map, Lead owns the workaround and where the rule lives.
+
+   Having named a class, FIRST apply it to every neighbor inside the
+   SAME artifact — sibling subsections of a check, clauses of a rule,
+   entries of a list, branches of a parser — before walking the map
+   and before queuing anything (the sweep-the-artifact-first rule).
+   The base unit is the enclosing structural block, widening to the
+   WHOLE file only when this move has already read it; opening a file
+   specially for the sweep is forbidden — queue it instead. Executed
+   means an ENUMERATION carrying a verdict per neighbor (applied / not
+   applicable — why / queued with a pointer); prose saying "neighbors
+   checked" is NOT execution; no neighbors found gets an explicit line
+   "no neighbors: <why>". A unit over roughly 150 lines, or with more
+   than 5 neighbors, routes to a single scout dispatch carrying the
+   applicability question as its intent key, or carries a
+   `dispatch_skipped` event (the silent-skip violation class). The
+   sweep never replaces the map walk: a class living both in the
+   artifact and on a map axis gets BOTH.
 10. Four questions for every mechanism (the four-questions-per-
    mechanism rule; question (c) is an invariant clause; question (d)
    is the code-gates-execution clause). Before committing a
@@ -257,14 +306,16 @@ vocabulary; the mapping between the two vocabularies is documented in
    no DoD. Completeness of the DoD and of the manifest is the
    DISPATCHER's duty BEFORE sending — checking against this rule is
    part of composing the dispatch, not a step delegated to the
-   worker's judgment — executed as a FIVE-POINT CHECKLIST (D-0096)
+   worker's judgment — executed as a FIVE-POINT CHECKLIST
    run against every dispatch before it goes: (1) explicit question /
    completeness criterion or acceptance keys; (2) DoD inline with
    the exact verification run AND the edge behaviors NAMED —
    limits/truncations, empty/absent inputs, conflicting requirement
    pairs: stated, or explicitly forked up; (3) "given" enumerated AND
    sufficient — data, fixtures, paths NAMED, not implied;
-   (4) writing dispatch: owns/non-goals/handoff present;
+   (4) writing dispatch: owns/non-goals/handoff present; a PARALLEL
+   writing dispatch also names the narrowed witness scope (rule 4,
+   above);
    (5) freshness — the spec's load-bearing facts checked against
    their carrier, not memory (a stale note in the spec is a
    dispatcher defect). A checklist miss exposed by a reject or
@@ -314,8 +365,8 @@ vocabulary; the mapping between the two vocabularies is documented in
    LEAF closes under ONE performer of one tier with no dependencies on
    other work; doubt about that = treat it as a graph (the standard
    Lead loop, rules 1-12). A leaf runs through the lighter
-   construction BY DEFAULT (D-0094 — MAY promoted to default on the
-   clean judge-window audit of the staff's calibration #4): tier
+   construction BY DEFAULT (promoted from an optional path to the
+   default after a clean judge-window audit found no leaks): tier
    chosen by the assignment table, the worker executes, and
    acceptance comes from a CALIBRATED JUDGE instead of the
    coordinator — the `accepted` event records `basis: "judge"`;
@@ -453,7 +504,7 @@ FUNCTION-tier words, not model ids, and `basis` supplies the input
 the tier comparison cannot. `by` and `model` are DIFFERENT formats,
 on purpose: `by` must be
 a bare tier keyword from `TIER_ORDER` in `tools/journal_validator.py`
-(`haiku`/`sonnet`/`opus`/`fable`) — since 2026-07-28 an unknown `by`
+(`haiku`/`sonnet`/`opus`/`fable`) — an unknown `by`
 FAILS the matrix outright: no `basis` (including "judge") legalizes
 an acceptance from an acceptor outside `TIER_ORDER` (ported from a
 sibling deployment's pair-matrix fix); a full model id (e.g.
@@ -607,4 +658,12 @@ operator. For all sessions and subagents in this repo:
    pattern proves the pipe, not the absence (shell-grep alternation
    needs -E; -P needs a UTF-8 locale; the Grep tool is
    case-sensitive by default — a content-negative claim requires a
-   case-insensitive search).
+   case-insensitive search). Same class — the STATUS of a registry
+   entry: a load-bearing claim about the status of an entry in a
+   structured registry (escalations, decisions, tasks, ledgers) is
+   valid only after reading THROUGH that entry's status line, or
+   grepping the status field itself; the entry or its header merely
+   appearing inside a read window is NOT a check. Append-only
+   registries put the verdict at the END of a multi-section entry, so
+   a truncated window systematically shows the problem without its
+   resolution.

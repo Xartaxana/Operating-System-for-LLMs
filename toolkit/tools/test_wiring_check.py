@@ -1,11 +1,11 @@
-"""Tests for tools/wiring_check.py (D-0092/D-0093 -- generalized host-
+"""Tests for tools/wiring_check.py (a generalized host-
 wiring checker). All checks run subprocess `git` calls, so every test
 builds an isolated tmp-repo fixture (`git init` in tmp_path) rather than
 touching this repo's own .git; tests never assume anything about the
 state of the OS repo they happen to run inside.
 
 Boundaries covered per the task's DoD: a hook committed at mode 100644
-(the class F-53/D-0093 exists to catch), a missing hook file, an
+(the class a live incident once slipped through), a missing hook file, an
 adoption-ledger "adopt" row with no live wiring behind it, and a
 corrupt/unreadable ledger failing OPEN (a WARN, not a crash).
 """
@@ -93,7 +93,7 @@ def test_hookspath_wrong_target_is_an_issue(repo):
 
 
 # ---------------------------------------------------------------------
-# check_required_hooks -- the mode-100644 boundary (F-53/D-0093)
+# check_required_hooks -- the mode-100644 boundary
 # ---------------------------------------------------------------------
 
 
@@ -296,7 +296,7 @@ def test_skills_casing_issue_text_is_ascii_only(repo):
 
 
 # ---------------------------------------------------------------------
-# check_adoption_ledger (D-0092) -- adopt-row-without-live-wiring
+# check_adoption_ledger -- adopt-row-without-live-wiring
 # boundary, and the fail-open-on-corrupt-ledger boundary
 # ---------------------------------------------------------------------
 
@@ -482,14 +482,14 @@ def test_check_wiring_skip_unknown_name_is_a_silent_no_op(repo):
 
 # ---------------------------------------------------------------------
 # --host-root / --kit-root / --mode (the installed-vs-source root-confusion finding:
-# `python toolkit/tools/wiring_check.py --check` run from the staff
-# repo used to treat toolkit/ as an installed HOST root and report a
-# spurious core.hooksPath mismatch against the staff repo's OWN
+# `python toolkit/tools/wiring_check.py --check` run from the
+# enclosing repo used to treat toolkit/ as an installed HOST root and report a
+# spurious core.hooksPath mismatch against the enclosing repo's OWN
 # .githooks -- there was no way to say "this root is the kit's source
 # tree, not an installed host" from the CLI at all.)
 #
-# All printed diagnostic strings are plain ASCII (critic fix #1 --
-# see the module docstring's CLI MESSAGE ENCODING section), so no
+# All printed diagnostic strings are plain ASCII (hardened after
+# review -- see the module docstring's CLI MESSAGE ENCODING section), so no
 # special PYTHONIOENCODING handling is needed for these assertions;
 # the dedicated codepage-survival probes further below exercise the
 # narrow-codepage boundary explicitly.
@@ -521,8 +521,8 @@ def test_default_invocation_pins_exact_real_toolkit_output():
     # The literal regression pin: running the unmodified CLI form
     # against THIS repo's real kit tree (toolkit/, which does carry
     # its own .githooks/.claude) must emit exactly today's known
-    # output shape -- the P2 bug's own symptom (a hooksPath mismatch
-    # against the ENCLOSING staff repo's config) is a pre-existing
+    # output shape -- the original bug's own symptom (a hooksPath mismatch
+    # against the ENCLOSING repo's config) is a pre-existing
     # fact this task deliberately leaves unchanged for default/
     # installed-mode calls; only --mode source is a legal escape hatch.
     result = subprocess.run(

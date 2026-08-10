@@ -40,6 +40,22 @@ import json
 import sys
 from pathlib import Path
 
+_TOOLS_DIR = Path(__file__).resolve().parent
+if str(_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_DIR))
+
+# A DIRECT sibling-module import only -- NOT a "try tools.judge_client
+# package-style, fall back to a sibling import" pattern. This kit's
+# install tree lives inside a larger repository that ALSO carries its
+# own top-level tools/ directory with a DIFFERENTLY BEHAVING
+# judge_client.py; a bare `import tools.judge_client` can resolve
+# "tools" as an implicit namespace package rooted at the CURRENT
+# WORKING DIRECTORY (PEP 420 -- no __init__.py required) rather than
+# at this file's own directory, silently picking up the WRONG module
+# whenever the working directory happens to be that repo's root. The
+# sys.path insertion above already guarantees a sibling `import
+# judge_client` resolves to THIS directory's own module unambiguously
+# -- no package-style guess is needed or safe here.
 import judge_client
 
 

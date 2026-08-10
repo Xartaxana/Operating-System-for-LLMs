@@ -1,6 +1,6 @@
 """Shadow Evaluation: replay sampled Lead requests on a cheaper model
 and compare outputs, turning DELEGATION_TABLE.md estimates into
-evidence-backed rows (ARCHITECTURE.md, "Shadow Evaluation"; D-0028).
+evidence-backed rows.
 
 For each sampled request: replay the same prompt on --target-model,
 compare the replayed answer to the original. Two comparison modes:
@@ -25,7 +25,7 @@ loops, so a "provisionally_validated" verdict here only confirms
 one-shot quality, not the retry-loop cost risk rule 4 warns about --
 and never means "production_validated" (that status requires a
 full-week window + cost-per-accepted-task evidence, per
-DELEGATION_TABLE.md's status vocabulary, D-0035); note the caveat in
+DELEGATION_TABLE.md's status vocabulary); note the caveat in
 DELEGATION_TABLE.md when relying on it.
 
 Table status cells move ONLY via the weekly calibration process
@@ -361,8 +361,8 @@ def decide_status(agg: dict, similarity_threshold: float, min_samples: int,
     """"estimated" means inconclusive here (not enough evidence yet to
     move off the table's default), distinct from a positive validation.
     A positive shadow-eval run can only ever return
-    "provisionally_validated" (DELEGATION_TABLE.md status vocabulary,
-    D-0035): a single-shot replay against a sample is exactly what that
+    "provisionally_validated" (DELEGATION_TABLE.md status vocabulary):
+    a single-shot replay against a sample is exactly what that
     status means, and never "production_validated" (which requires a
     full-week real-traffic window + cost-per-accepted-task evidence).
     When judge verdicts are present (pass_rate) they override the

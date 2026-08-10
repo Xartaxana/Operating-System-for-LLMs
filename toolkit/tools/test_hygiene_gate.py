@@ -41,6 +41,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import hygiene_gate  # noqa: E402
@@ -77,7 +79,9 @@ def test_decide_powershell_tool_checked_too():
     exit_code, output = hygiene_gate.decide(payload)
     assert exit_code == 0
     assert output is not None
-    assert hygiene_gate.MSG_CD_PREFIX in output["hookSpecificOutput"]["additionalContext"]
+    # "foo" is not this repo's own root -- WARN, not a block (see
+    # "Class (a): repo-root only" in the module docstring).
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in output["hookSpecificOutput"]["additionalContext"]
 
 
 def test_decide_clean_command_is_silent_pass():
@@ -87,17 +91,32 @@ def test_decide_clean_command_is_silent_pass():
 
 
 def test_decide_cd_prefix_and_amp_triggers():
+    # "gateway" is a sanctioned, non-root subdirectory (command hygiene
+    # point 2) -- a cd/continuation into it WARNs, it does not block
+    # (only a cd INTO THIS REPO'S OWN ROOT blocks -- see
+    # test_decide_cd_prefix_to_repo_root_denies below).
     exit_code, output = hygiene_gate.decide(_bash_payload("cd gateway && python x.py"))
     assert exit_code == 0
-    ctx = output["hookSpecificOutput"]["additionalContext"]
-    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
 
 
 def test_decide_cd_prefix_with_semicolon_triggers():
     exit_code, output = hygiene_gate.decide(_bash_payload("cd gateway; python x.py"))
     assert exit_code == 0
-    ctx = output["hookSpecificOutput"]["additionalContext"]
-    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
+
+
+def test_decide_cd_prefix_to_repo_root_denies():
+    command = f"cd {hygiene_gate._REPO_ROOT_NAME} && python x.py"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_CD_PREFIX
 
 
 def test_decide_bare_cd_without_continuation_does_not_trigger():
@@ -361,6 +380,10 @@ def test_belt_block_carries_both_deny_fields_and_matching_additional_context():
 
 
 def test_belt_block_plus_other_warn_class_both_texts_present_not_overwritten():
+    # "gateway" is non-root -- cd contributes a WARN reason here, not a
+    # second deny reason; the journal block still wins the
+    # permissionDecisionReason slot, both texts still land in
+    # additionalContext (belt-and-suspenders).
     command = "cd gateway && echo evil >> logs/routing-log.jsonl"
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
@@ -369,21 +392,34 @@ def test_belt_block_plus_other_warn_class_both_texts_present_not_overwritten():
     assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
     ctx = hso["additionalContext"]
     assert hygiene_gate.MSG_JOURNAL_BLOCK in ctx
-    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in ctx
 
 
 def test_belt_pure_warn_call_has_no_deny_fields_regression():
-    # Regression of existing behavior: a call that triggers ONLY WARN
-    # classes (a)/(b)/(c) -- without class (d) -- carries neither
-    # permissionDecision nor permissionDecisionReason; additionalContext
-    # stays in the previous WARN format.
-    exit_code, output = hygiene_gate.decide(_bash_payload("cd gateway && python x.py 2>&1"))
+    # A call that triggers ONLY WARN classes (a)/(c) -- non-root cd and
+    # python -c, no certain redirect, no journal bypass -- carries
+    # neither permissionDecision nor permissionDecisionReason.
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload('cd gateway && python -c "print(1)"')
+    )
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
     assert "permissionDecision" not in hso
     assert "permissionDecisionReason" not in hso
-    assert hygiene_gate.MSG_CD_PREFIX in hso["additionalContext"]
-    assert hygiene_gate.MSG_REDIRECT_STDERR in hso["additionalContext"]
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+def test_belt_unquoted_redirect_denies_not_pure_warn():
+    # Contrast with the test above: an UNQUOTED, non-heredoc 2>&1 is
+    # certain -- it DOES block, on its own, even with no cd/journal
+    # involved (see "Class (b)" in the module docstring).
+    exit_code, output = hygiene_gate.decide(_bash_payload("cd gateway && python x.py 2>&1"))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
 
 
 # ---------------------------------------------------------------------
@@ -807,11 +843,17 @@ def test_echo_json_v2_regress_evidence_exit0_no_stdout():
 
 
 def test_decide_multiple_classes_all_listed():
+    # The trailing " 2>&1" sits OUTSIDE the quoted -c argument -- it is
+    # a certain (unquoted, non-heredoc) redirect and denies on its own;
+    # cd (non-root) and python -c stay WARN reasons alongside it.
     command = 'cd gateway && python -c "print(1)" 2>&1'
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
-    ctx = output["hookSpecificOutput"]["additionalContext"]
-    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+    ctx = hso["additionalContext"]
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in ctx
     assert hygiene_gate.MSG_REDIRECT_STDERR in ctx
     assert hygiene_gate.MSG_PYTHON_DASH_C in ctx
 
@@ -867,14 +909,18 @@ def test_echo_json_clean_command_exit0_no_stdout():
 
 
 def test_echo_json_dirty_command_exit0_with_stdout_json():
+    # An unquoted, non-heredoc 2>&1 is a certain redirect -- it denies;
+    # exit_code stays 0 regardless (the block is carried in the JSON
+    # body, never the process return code).
     payload = _bash_payload("cd gateway && python x.py 2>&1")
     result = _run_hook(json.dumps(payload), text=True, encoding="utf-8")
     assert result.returncode == 0
     data = json.loads(result.stdout)
     hso = data["hookSpecificOutput"]
     assert hso["hookEventName"] == "PreToolUse"
-    assert "permissionDecision" not in hso
-    assert hygiene_gate.MSG_CD_PREFIX in hso["additionalContext"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
     assert hygiene_gate.MSG_REDIRECT_STDERR in hso["additionalContext"]
 
 
@@ -911,8 +957,13 @@ def test_adversarial_non_ascii_command_raw_utf8_bytes():
     assert result.returncode == 0
     stdout_text = result.stdout.decode("utf-8")
     data = json.loads(stdout_text)
-    ctx = data["hookSpecificOutput"]["additionalContext"]
-    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    hso = data["hookSpecificOutput"]
+    # "répo" is not this repo's own root -- cd WARNs; the unquoted,
+    # non-heredoc 2>&1 is certain and denies on its own.
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+    ctx = hso["additionalContext"]
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in ctx
     assert hygiene_gate.MSG_REDIRECT_STDERR in ctx
 
 
@@ -1058,3 +1109,394 @@ def test_heredoc_body_redirect_stderr_still_warns_class_b_documented_residual():
     assert exit_code == 0
     ctx = output["hookSpecificOutput"]["additionalContext"]
     assert hygiene_gate.MSG_REDIRECT_STDERR in ctx
+
+
+# =========================================================================
+# Determinism principle: quote-masking for class (b) (` 2>&1`), via
+# _collect_redirect_signal -- see the module docstring, "Determinism
+# principle" / "Class (b)".
+# =========================================================================
+
+
+def test_collect_redirect_signal_unit_absent():
+    assert hygiene_gate._collect_redirect_signal("git status") == {
+        "present": False, "certain": False,
+    }
+
+
+def test_collect_redirect_signal_unit_certain_deny():
+    assert hygiene_gate._collect_redirect_signal("make 2>&1") == {
+        "present": True, "certain": True,
+    }
+
+
+def test_collect_redirect_signal_unit_ambiguous_heredoc_warn():
+    command = "python - <<'PY'\nbody\nPY\nls 2>&1"
+    signal = hygiene_gate._collect_redirect_signal(command)
+    assert signal["present"] is True
+    assert signal["certain"] is False
+
+
+def test_collect_redirect_signal_unit_quoted_2_greater_1_silent():
+    command = "python -c \"print('ran 2>&1 here')\""
+    assert hygiene_gate._collect_redirect_signal(command) == {
+        "present": False, "certain": False,
+    }
+
+
+def test_redirect_denies_when_no_quotes_no_heredoc():
+    exit_code, output = hygiene_gate.decide(_bash_payload("python foo.py 2>&1"))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+
+
+def test_redirect_fully_silent_when_quoted():
+    # " 2>&1" sits ENTIRELY inside the -c argument's quotes --
+    # _mask_quoted_segments hides it before the check; class (b) does
+    # not fire at all (class (c) python -c/heredoc is a separate,
+    # independent WARN -- it still fires).
+    command = "python -c \"print('ran 2>&1 here')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_REDIRECT_STDERR not in hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+def test_redirect_fully_silent_when_quoted_chain():
+    command = 'python -c "a" ; python -c "b 2>&1"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_REDIRECT_STDERR not in hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+def test_redirect_warns_when_heredoc_present_unquoted():
+    # The heredoc's own delimiter is quoted ('PY', masked), but the `<<`
+    # TOKEN ITSELF sits outside any quotes and stays visible.
+    command = "python - <<'PY'\nbody\nPY\nmake 2>&1"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_REDIRECT_STDERR in hso["additionalContext"]
+
+
+def test_redirect_denies_when_shift_operator_quoted_real_redirect_outside():
+    # `<<` used as a real Python shift operator, but ENTIRELY inside a
+    # quoted -c argument -- masked; the real redirect after `&&` is
+    # outside any quotes and denies.
+    command = 'python -c "print(1 << 3)" && ls 2>&1'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+
+
+def test_redirect_warn_uses_verbatim_message_text():
+    command = "python - <<'PY'\nbody\nPY\nx 2>&1"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert hygiene_gate.MSG_REDIRECT_STDERR == "don't append 2>&1 (command hygiene point 3)"
+    assert hygiene_gate.MSG_REDIRECT_STDERR in output["hookSpecificOutput"]["additionalContext"]
+
+
+def test_cmd_slash_c_quoted_redirect_fully_silent():
+    command = 'cmd /c "pi some_pipeline 2>&1"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_powershell_command_quoted_redirect_fully_silent():
+    command = 'powershell -Command "Set-Location tools; pytest . 2>&1 | tee out.txt"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_gate_smoke_probe_json_line_fully_silent():
+    # A smoke probe of the gate itself -- a command (echo | python
+    # tools/hygiene_gate.py) carrying a JSON string with "2>&1" INSIDE
+    # the "command" value (double quotes, escaped internally by single
+    # quotes outside) -- silence.
+    command = (
+        "echo '{...\"command\":\"cd gateway && ls 2>&1\"}' "
+        "| python tools/hygiene_gate.py"
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_dash_m_message_2_greater_1_still_fully_silent():
+    # The -m value is ALWAYS quoted -- quote-masking (_mask_quoted_
+    # segments) hides it whole; no git-specific mechanism is needed for
+    # this class any more.
+    command = 'git commit -m "note about pytest 2>&1 output redirection"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+# =========================================================================
+# Class (a): cd/Set-Location target parsing + the repo-root-only check.
+# =========================================================================
+
+
+def test_gateway_falls_into_generic_non_root_warn_no_special_case():
+    exit_code, output = hygiene_gate.decide(_bash_payload("cd gateway && python x.py"))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
+
+
+def test_non_root_cd_target_variants_all_warn_not_deny():
+    for command in [
+        "cd gateway && ls",
+        "Set-Location gateway; ls",
+        "cd ./gateway && ls",
+        'cd "gateway" && ls',
+        "cd D:\\repo\\gateway && ls",
+        "cd D:\\SomeOtherTree && ls",
+        "cd D:\\Somewhere\\exam_kit && ls",
+        "cd tools && ls",
+        "cd scratchpad && ls",
+    ]:
+        exit_code, output = hygiene_gate.decide(_bash_payload(command))
+        assert exit_code == 0
+        hso = output["hookSpecificOutput"]
+        assert "permissionDecision" not in hso, command
+        assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"], command
+
+
+def test_cd_to_subdirectory_of_repo_warns_not_denies():
+    # cd INTO A SUBDIRECTORY of this repo (not the root itself) -- WARN,
+    # not a block; only a cd to the root itself blocks.
+    exit_code, output = hygiene_gate.decide(_bash_payload("cd tools && python x.py"))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
+
+
+def test_repo_root_target_denies():
+    command = f"cd {hygiene_gate._REPO_ROOT_NAME} && python x.py"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_CD_PREFIX
+
+
+def test_repo_root_target_case_insensitive_denies():
+    command = f"cd {hygiene_gate._REPO_ROOT_NAME.upper()} && python x.py"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_set_location_dash_path_flag_target_parsed_correctly():
+    command = "Set-Location -Path gateway && ls"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
+
+
+def test_set_location_dash_path_flag_repo_root_denies():
+    command = f"Set-Location -Path {hygiene_gate._REPO_ROOT_NAME} && ls"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_quoted_path_with_spaces_parsed_correctly_not_truncated():
+    command = 'cd "some dir with spaces" && ls'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
+
+
+def test_extract_cd_prefix_target_unit_quoted_with_spaces():
+    target = hygiene_gate._extract_cd_prefix_target('cd "some dir with spaces" && ls')
+    assert target == '"some dir with spaces"'
+
+
+def test_extract_cd_prefix_target_unit_dash_path_flag_skipped():
+    target = hygiene_gate._extract_cd_prefix_target("Set-Location -Path gateway && ls")
+    assert target == "gateway"
+
+
+def test_extract_cd_prefix_target_unit_literal_path_flag_skipped():
+    target = hygiene_gate._extract_cd_prefix_target("Set-Location -LiteralPath gateway && ls")
+    assert target == "gateway"
+
+
+def test_extract_cd_prefix_target_unit_bare_no_flag():
+    target = hygiene_gate._extract_cd_prefix_target("cd gateway && ls")
+    assert target == "gateway"
+
+
+def test_extract_cd_prefix_target_unit_no_target_returns_none():
+    assert hygiene_gate._extract_cd_prefix_target("cd") is None
+    assert hygiene_gate._extract_cd_prefix_target("echo hi") is None
+
+
+def test_three_blocking_classes_all_listed_fixed_order():
+    # A fixed order: journal -> cd -> 2>&1.
+    command = (
+        f"cd {hygiene_gate._REPO_ROOT_NAME} && echo x >> logs/routing-log.jsonl "
+        "&& python y.py 2>&1"
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+    ctx = hso["additionalContext"]
+    assert hygiene_gate.MSG_JOURNAL_BLOCK in ctx
+    assert hygiene_gate.MSG_CD_PREFIX in ctx
+    assert hygiene_gate.MSG_REDIRECT_STDERR in ctx
+    assert (
+        ctx.index(hygiene_gate.MSG_JOURNAL_BLOCK)
+        < ctx.index(hygiene_gate.MSG_CD_PREFIX)
+        < ctx.index(hygiene_gate.MSG_REDIRECT_STDERR)
+    )
+
+
+# --- a newline closes the cd bypass (a third, equal separator) ---------
+
+
+def test_newline_separated_cd_root_denies():
+    command = f'cd "{hygiene_gate._REPO_ROOT_NAME}"\ngit status'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_CD_PREFIX
+
+
+def test_newline_separated_cd_non_root_warns_not_denies():
+    command = "cd gateway\ngit status"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_CD_NON_ROOT_WARN in hso["additionalContext"]
+
+
+def test_is_cd_prefix_unit_newline_true():
+    assert hygiene_gate._is_cd_prefix("cd gateway\nls") is True
+
+
+def test_is_cd_prefix_unit_bare_no_continuation_false():
+    assert hygiene_gate._is_cd_prefix("cd gateway") is False
+
+
+def test_is_cd_prefix_unit_not_at_start_false():
+    assert hygiene_gate._is_cd_prefix("echo hi\ncd gateway") is False
+
+
+# --- a trailing newline with NOTHING after it stays legal (same
+# semantics as a bare cd) -- the only way back to the root once a
+# session has legitimately cd'd elsewhere. --------------------------
+
+
+def test_trailing_newline_no_continuation_is_none_not_deny():
+    command = f"cd {hygiene_gate._REPO_ROOT_NAME}\n"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_trailing_newline_no_continuation_unit_false():
+    assert hygiene_gate._is_cd_prefix("cd gateway\n") is False
+
+
+def test_bare_cd_root_still_none_same_semantics():
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload(f"cd {hygiene_gate._REPO_ROOT_NAME}")
+    )
+    assert exit_code == 0
+    assert output is None
+
+
+def test_trailing_double_ampersand_no_continuation_is_none():
+    assert hygiene_gate._is_cd_prefix("cd gateway && ") is False
+
+
+def test_real_continuation_after_newline_still_true_regression():
+    assert hygiene_gate._is_cd_prefix("cd gateway\nls") is True
+
+
+# =========================================================================
+# PowerShell write cmdlets for class (d) -- Add-Content/Set-Content/
+# Out-File; PowerShell's redirect (>) is already covered by the
+# existing check, and Tee-Object is already covered by TEE_RE.
+# =========================================================================
+
+
+@pytest.mark.parametrize(
+    "cmdlet,args",
+    [
+        ("Add-Content", "-Path logs/routing-log.jsonl -Value x"),
+        ("Set-Content", "-Path logs/routing-log.jsonl -Value x"),
+        ("Out-File", "-FilePath logs/routing-log.jsonl"),
+    ],
+)
+def test_ps_write_cmdlet_with_journal_target_denies(cmdlet, args):
+    command = f"{cmdlet} {args}"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+
+
+@pytest.mark.parametrize(
+    "cmdlet,args",
+    [
+        ("Add-Content", "-Path notes.txt -Value x"),
+        ("Set-Content", "-Path notes.txt -Value x"),
+        ("Out-File", "-FilePath notes.txt"),
+    ],
+)
+def test_ps_write_cmdlet_non_journal_target_never_blocks(cmdlet, args):
+    command = f"{cmdlet} {args}"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_ps_write_cmdlet_statement_scope_preserved():
+    # The journal TARGET in one statement, the PS write form in a
+    # DIFFERENT statement, writing to a non-journal file -- not a block
+    # (the same statement-scoping principle _is_journal_bypass already
+    # carries for bash forms).
+    command = "cat logs/routing-log.jsonl; Add-Content -Path notes.txt -Value x"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_tee_object_already_covered_by_existing_tee_re():
+    # "Tee-Object" already matches the existing TEE_RE (`\btee\b`) --
+    # the "Tee" substring plus a word boundary at the hyphen -- so it is
+    # NOT separately added to _PS_WRITE_CMDLET_RE (no duplicate
+    # detector for the same class).
+    command = "Tee-Object -FilePath logs/routing-log.jsonl"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"

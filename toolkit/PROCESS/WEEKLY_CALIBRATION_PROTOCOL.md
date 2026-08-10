@@ -19,6 +19,25 @@ for the period, and diffs to DECISIONS.md.
    usage records with a large volume of reads/edits, for which the
    same period shows neither a `delegated` nor a `dispatch_skipped`
    event. Source: usage report + journal.
+   (b) WITHIN-SESSION RECURRENCE of the "first move free" self-execution
+   waiver (rule 8): `dispatch_skipped` events of ONE session are
+   grouped by reason CLASS in ts order; the SECOND and later event of
+   the SAME class in the SAME session is a VIOLATION IN ITS OWN RIGHT,
+   independent of whether that reason class has also crossed any
+   across-window repeat threshold elsewhere (a separate signal, not
+   replaced or overridden by this one). Reference class: "the operator
+   is waiting / an interactive request blocks the move". SESSION
+   BOUNDARY: the transcript is the final arbiter; a cheap first pass
+   is self-declaration — every `dispatch_skipped` event from the
+   second one of its class onward in a session is obligated to carry a
+   repeat marker in notes ("repeat of class", "second occurrence" — any
+   explicit line), making the violation visible by grep without
+   touching the transcript. Both layers are checked: the transcript
+   scan is the final arbiter, the notes marker is the cheap first pass;
+   a second-or-later same-class event with no marker is itself a
+   violation (self-declaration failed). An empty window (no skip
+   events, or no class repeated within one session) is noted
+   explicitly — "no within-session recurrence".
 2. **Rule 3 — critic on large diffs.** Commits in the period with
    over roughly 100 changed lines, accepted with no
    `delegated(critic)` and no "critic: skipped, <reason>" note in the
@@ -102,6 +121,18 @@ for the period, and diffs to DECISIONS.md.
 9. **SIBLING_MAP — class-wide completeness.** Commits that close a
    finding name the axes it touches; "new axis for SIBLING_MAP" lines
    noted anywhere in your logs get folded into the map.
+   (b) SWEEP INSIDE THE ARTIFACT (the sweep-the-artifact-first rule,
+   CLAUDE.md rule 9). Every window finding that names a CLASS (a
+   findings log, critic verdicts, journal event notes) carries an
+   enumeration of its own artifact's neighbors with a verdict on each,
+   or an explicit line "no neighbors: <why>". Either form missing is a
+   window finding in its own right. A cheap first pass: grep for the
+   enumeration marker, with a positive control of the same form; the
+   final arbiter is reading the entry itself. FORMALITY DETECTOR: an
+   enumeration where EVERY neighbor gets "not applicable" with no
+   statement of what distinguishes that neighbor from the found
+   instance is a rubber stamp, and a finding in its own right. An
+   empty window (no class-named findings) is noted explicitly.
 10. **Growth of live files.** Line counts of the boot-path files (the
     files BOOT.md's boot sequence reads, plus CLAUDE.md and
     CURRENT_CONTEXT.md), plus docs/SIBLING_MAP.md (the map is
@@ -214,6 +245,27 @@ for the period, and diffs to DECISIONS.md.
     have blocked it — something bypassed the commit-time gate);
     spot-check 1–2 window `worker_ref` values against a real worker (a
     sidechain transcript, a job log).
+    (j) NARROWED WITNESS SCOPE OF A PARALLEL NODE (rule 4). For every
+    group of window `delegated` entries that ran CONCURRENTLY
+    (overlapping delegated…accepted windows with different
+    `worker_ref`s), check whether the DoD required TWO OR MORE workers
+    of the group to each run the SAME full canonical run
+    (command hygiene, point 1). Requiring that is a spec defect of the
+    DISPATCHER, even when the runs happened not to conflict that time.
+    DATA SIGNATURE: the `witness` field of two or more concurrent
+    builder acceptances carries the output of the FULL canonical run
+    instead of a narrowed target. Exactly ONE full canonical run is
+    legitimate per window — the coordinator's, AFTER the branches
+    converge — identified by a "BATCH CANON" label in the `witness` of
+    the batch's LAST `accepted` event (rule 4 names this the carrier);
+    a second or later full run in the `witness` of the same group is a
+    violation. SECOND SIGNATURE: a parallel node's `witness` NOT
+    covering the test sets of every path in its OWN `owns` (the rule
+    says "narrowed BY OWNS", not "narrowed to whatever the node
+    touched") is the same class of spec defect, even when the missed
+    path wasn't touched by the node's diff. An empty window (no
+    concurrent `delegated` groups) is noted explicitly — "no
+    concurrent groups".
 14. **A golden set for recon, and a regression rule for prompt
     edits.** (a) Git log for the window on `.claude/agents/*.md`:
     every edit to a tier's role file that has an exam set (scout —
@@ -333,6 +385,36 @@ for the period, and diffs to DECISIONS.md.
     fired given the track's own contents, is a finding about the gate
     itself, not about the session it blocked.
 
+    PER-GATE ACCOUNTING: this posture check's duty is, for EVERY hook
+    this posture names, to establish whether it is named ANYWHERE in
+    this protocol as the subject of a failure/liveness check — a grep
+    of the hook's name across the whole file, with a positive control
+    of the same call form on every zero result. A name-match falls
+    into one of three categories, and only the middle one counts:
+    (1) MERELY MENTIONED — the name appears in prose, in a reference
+    snapshot, or in a rollup that lists every hook by name (a rollup
+    like that cannot serve as its own positive control) — does NOT
+    count; (2) NAMED AS THE SUBJECT of its own failure/liveness check
+    — a subcheck here prescribes what is verified for THIS gate and
+    what counts as its failure, OR a mechanism resolves unambiguously
+    to this gate from the run's own data (e.g. a `gate_log` event
+    whose `gate` field names it, even where the surrounding prose
+    never spells the name out) — counts, but FULL credit requires the
+    prescribed check to be able to detect the gate's SILENCE (firing
+    zero times), not only its wrong firing: a check that only
+    cross-references EXISTING records ("no false blocks found") cannot
+    tell "no violations happened" apart from "the gate is dead and
+    writes nothing", and earns PARTIAL credit only; (3) NAMED AS A
+    TOOL FOR SOMEONE ELSE'S CHECK — the gate is cited only because
+    another check borrows something from it (a file, a line, an
+    anchor) to verify a DIFFERENT subject — does NOT count. Category
+    (2) is re-derived at every run by re-reading the relevant
+    subchecks fresh, never from a cached summary of a past run (a
+    summary is navigation, not a source of truth, and goes stale the
+    moment the underlying subchecks change). A hook covered nowhere —
+    neither the full nor the partial form of (2), nor the excusing
+    form (3) — is itself a finding.
+
 Numbering note: checks 20 and 21 below are this deployment's own
 sequence, continuing straight on from 19 (no numbering gap) -- they are
 the local equivalents of a source deployment's checks 30 and 31, ported
@@ -389,9 +471,14 @@ once, rather than in every cross-reference below.
     test-cache entry, a file mtime, a process/track log) -- the same
     forensic class as the check above.
 
-22. **Ledger drift and completeness (D-0091).** Mechanism: the
+22. **Ledger drift and completeness.** Mechanism: the
     adoption ledger records the kit snapshot revision and mirrors the
-    current template's row nomenclature. Violation: an "adopt" row
+    current template's row nomenclature; an upgrade is a
+    re-inventory BY DELTA-PER-REVISION — new/changed mechanisms since
+    the recorded revision, including role-file CONTENT (not just
+    their model: frontmatter), skills, tools, PROCESS; a full rescan
+    applies only when no revision is recorded (a pre-versioning
+    install, one-off). Violation: an "adopt" row
     whose mechanism is absent or stale in the tree; a template row
     missing from the ledger entirely (a dropped row hides forever —
     the F-52 class); a recorded revision no upgrade batch has
@@ -400,15 +487,16 @@ once, rather than in every cross-reference below.
     tree (mechanism present, wired); (c) the recorded kit revision
     exists, and the last upgrade batch's delta was decided row by
     row — at least deferred, silence is not a decision. For (b),
-    "wired" is explicit (D-0092, wiring drift): the row's mechanism
+    "wired" is explicit (wiring drift): the row's mechanism
     is not just present on disk but actually wired — its hooksPath
     entry / settings hook / invocation path exists; an adopt row
     whose wiring silently fell off is a finding even when the file
     itself is still in the tree. Continuous pair of (b): the
     deployment's SessionStart wiring check reads this ledger's adopt
-    rows, not only the configured hooks. The
-    staff-side pair of this check is the kit maintainer's port-batch
-    delta check (their calibration protocol).
+    rows, not only the configured hooks. The counterpart of this
+    check, on the side of whoever maintains the kit you're adopting
+    from, is their own port-batch delta check (their calibration
+    protocol).
 
 ## Closing out a run
 

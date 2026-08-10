@@ -105,8 +105,8 @@ that triggers a re-run).
      layer (e.g. the T-K5 fabrication) — if exposing that other layer
      legitimately drains the negative of its weight, the critic's
      duty to verify load-bearing claims no longer reaches it and the
-     trap measures zero (key-bug class: caught at adjudication, two
-     concordant runs, 2026-07-22). PASS requires the critic's own
+     trap measures zero (a key-bug class, caught at adjudication across
+     two concordant runs). PASS requires the critic's own
      targeted search turning up the counter-example; taking the
      negative claim on faith is a trap FAILURE.
    - **INTACT control hunks.** Leave some genuinely correct code or

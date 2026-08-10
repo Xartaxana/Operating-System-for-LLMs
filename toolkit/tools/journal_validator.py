@@ -40,8 +40,33 @@ log" section):
        different tier, e.g. a critic entry into acceptance);
     c) task_id exists, task is open, agent matches one of the earlier
        delegated agents -- legal ONLY with an attempt field (integer
-       >=2) AND an earlier rejected for the same task_id (a retry
-       after rejection);
+       >=2) AND ONE of (i)/(ii) below (the self/foreign-retry gap: the
+       naive form "an attempt field plus ANY rejected on the task_id"
+       would legalize a repeat delegated of ANY agent off ANY rejected
+       on the task -- a reviewer (e.g. critic) could re-enter a SECOND
+       time on an EXECUTOR's rejected with nothing reworked):
+       (i) SELF -- an earlier rejected exists for the SAME agent
+          (rejected.agent -- the executor whose result was rejected) on
+          this task_id -- legalizes the agent's own retry with NO
+          extra conditions (the "as before" form, narrowed to exactly
+          "its own" rejected -- a self-retry needs no signal between
+          the rejected and the repeat delegated);
+       (ii) FOREIGN -- a rejected exists on the task_id, but NONE of
+          them names an agent matching the incoming one (a "foreign"
+          rejected) -- legalizes the entry ONLY if, STRICTLY AFTER that
+          agent's own LAST delegated on this task_id (not anywhere
+          earlier in the history -- a signal from an earlier round has
+          gone stale and does not legalize the next round), at least
+          one new-version signal appeared:
+            (1) a new delegated by a DIFFERENT agent on this task_id;
+            (2) a new rejected with agent=lead on this task_id (a Lead
+               fix with no own delegated -- the fix itself is the
+               signal);
+            (3) a new escalated by a DIFFERENT agent on this task_id
+               (an escalated by the SAME agent that is re-entering is a
+               self-legalizing loop and does NOT count, symmetric with
+               signal (1)).
+          Neither (i) nor a valid (ii) signal -> FAIL (see (d));
     c2) (dead-worker replacement) the SAME situation as (c) (agent
        matches, task open) but rejected is NOT required and attempt
        does not need to grow -- this is not a rule-6 retry -- is legal
@@ -66,16 +91,16 @@ log" section):
     only -- rejected carries "by" with no further check, a literal
     reading of the spec). For agent=lead the matrix doesn't apply --
     presence of "by" is enough. For agent in {scout, builder, critic,
-    designer} (batch B7, 2026-07-24 -- membership-in-set "basis in BASIS_VALUES"
-    replaced by legality-PER-(by, agent)-PAIR, after the live AO3
-    07-24 leak: two different Sonnet coordinators accepted Sonnet-class
-    (builder) results via basis=queued-to-lead -- membership passed
-    that basis regardless of WHICH by/agent pair it was attached to).
-    PRECEDES branches (a)-(f) (t-323, port of AO3's fix 30e79c8,
-    2026-07-28): an enum check "is by even in TIER_ORDER" -- an
-    unknown by FAILS unconditionally, BEFORE the judge branch too --
-    judge's by-independence (staff fix t-276, branch b below) applies
-    only to LEGAL tier words; no basis of any kind legalizes an
+    designer} (a revision after a live leak: two different sonnet-tier
+    coordinators independently accepted a sonnet-class (builder) result
+    via basis=queued-to-lead -- a bare "basis in BASIS_VALUES" set
+    membership check passed that basis regardless of WHICH by/agent
+    pair it was attached to; the check is now legality PER (by, agent)
+    PAIR instead of bare membership).
+    An enum check PRECEDES branches (a)-(f): "is by even in
+    TIER_ORDER" -- an unknown by FAILS unconditionally, BEFORE the
+    judge branch too -- judge's by-independence (branch b below)
+    applies only to LEGAL tier words; no basis of any kind legalizes an
     acceptance from an unknown acceptor:
 
     a) ok_tier -- tier(by) > tier(agent) (haiku<sonnet<opus<fable by
@@ -97,16 +122,15 @@ log" section):
        unconditionally, no basis rescues it (this toolkit's own
        CLAUDE.md "Role != tier" matrix: "below Sonnet | no
        coordination is provided for | --"). Decision fork (documented
-       deliberately, per the same fork the staff sibling batch names):
-       the core rule's literal text ("OR the decision carries a higher
-       tier's input (a critic verdict)") would read basis="critic" as
-       rescuing ANY by, including haiku -- but the matrix's "below
-       Sonnet" row states, without exception, "no coordination is
-       provided for"; a haiku-tier session is not a functioning
-       coordinator at all in this structure. The floor wins over the
-       general "carries higher tier's input" allowance for
-       basis="critic"/"queued-to-lead" (but NOT for basis="judge" --
-       see (b), a separate non-coordinator path).
+       deliberately): the core rule's literal text ("OR the decision
+       carries a higher tier's input (a critic verdict)") would read
+       basis="critic" as rescuing ANY by, including haiku -- but the
+       matrix's "below Sonnet" row states, without exception, "no
+       coordination is provided for"; a haiku-tier session is not a
+       functioning coordinator at all in this structure. The floor
+       wins over the general "carries higher tier's input" allowance
+       for basis="critic"/"queued-to-lead" (but NOT for basis="judge"
+       -- see (b), a separate non-coordinator path).
     d) basis=="critic" -- legal ONLY when the critic tier (opus,
        fixed) is strictly above tier(agent), i.e. agent is
        scout/builder-class: a critic verdict on top of the critic's
@@ -114,17 +138,16 @@ log" section):
     e) basis=="queued-to-lead" -- legal ONLY for agent=="critic"
        (critic-class, tier opus) AND by ∈ {"sonnet", "opus"} (for
        by="sonnet" the queue is legal specifically for critic-class --
-       NOT builder-class: at a sonnet coordinator, builder-class is
-       legal only via basis="critic" -- exactly the AO3 pattern; for
-       by="opus" the queue is legal for critic-class as an equal-tier
-       concession).
+       NOT builder-class: at a sonnet coordinator, builder-class
+       acceptance is legal only via basis="critic"; for by="opus" the
+       queue is legal for critic-class as an equal-tier concession).
     f) any other basis (including none) -- FAIL with the generic
        role-vs-tier message.
 
-    SURFACE NARROWING (t-323, critic verdict 2026-07-28): the by-shape
-    enum gate applies ONLY to accepted with agent ∈ {scout, builder,
-    critic, designer} (designer added to AGENT_TIER, same class);
-    OUTSIDE the gate (recorded DECISIONS, not oversights):
+    SURFACE NARROWING (a later revision, on a critic verdict): the
+    by-shape enum gate applies ONLY to accepted with agent ∈ {scout,
+    builder, critic, designer} (designer added to AGENT_TIER, same
+    class); OUTSIDE the gate (recorded DECISIONS, not oversights):
     rejected -- by carries no matrix check at all (a literal reading
     of the spec, see the top of rule 11); agent=lead -- a non-tier by
     is legal (a live precedent, by="operator", in
@@ -132,20 +155,7 @@ log" section):
     hierarchy, rule 11a); agent outside AGENT_TIER -- the matrix is
     simply undefined by the spec (an early return before any branch).
     Form-validation candidates for these three neighbors are queued
-    for calibration #5 (the coordinator places the queue item itself).
-
-    NOTE (history): at the time of this port the reference validator
-    (the staff repo's own tools/journal_validator.py) accepted
-    basis=="judge" UNCONDITIONALLY, despite its own CLAUDE.md
-    documenting the leaf-class restriction -- this port implemented
-    the restriction first, from the toolkit's OWN CLAUDE.md text
-    (quoted above). The staff validator was then brought to the same
-    leaf-gated form the same day (staff fix t-276: LEAF_CATEGORIES,
-    a dedicated R13 message) -- both siblings of the pair are now
-    converged; this note stays as provenance, not as a live delta. The
-    same convergence pattern repeats for batch B7 (2026-07-24): the
-    pair-legality table above ported from the staff sibling's own
-    same-day fix.
+    for a future calibration pass.
 12. Every NEW delegated line carries worker_ref -- a non-empty handle
     by which the next session finds the worker/result; catches a
     phantom delegated whose worker was never launched.
@@ -198,16 +208,15 @@ AGENT_TIER = {
 QUEUED_TO_LEAD_AGENTS = {"critic", "designer"}
 # Known non-judge basis string values -- a PLAIN enum/reference (external
 # consumers: PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md, log_append.py), no
-# longer used as a legality check "basis in BASIS_VALUES" -- since batch
-# B7 (2026-07-24) legality is decided per (by, agent) pair in
-# _matrix_d0058_violation, not bare membership (closes the AO3 07-24
-# leak: basis=queued-to-lead passed membership for ANY by/agent,
-# including builder-class at a sonnet coordinator).
+# longer used as a legality check "basis in BASIS_VALUES" -- legality is
+# decided per (by, agent) pair in _matrix_d0058_violation, not bare
+# membership (closes a leak where basis=queued-to-lead passed membership
+# for ANY by/agent, including builder-class at a sonnet coordinator).
 BASIS_VALUES = {"critic", "queued-to-lead"}
 JUDGE_BASIS_VALUE = "judge"
 # Leaf-class categories a "judge" basis is legal for (rule 11 / this
-# toolkit's own CLAUDE.md "Leaf routing" section, R13/D-0087-equivalent):
-# "recon, or implementation to a written spec".
+# toolkit's own CLAUDE.md "Leaf routing" section): "recon, or
+# implementation to a written spec".
 LEAF_CATEGORIES = {"recon", "implementation"}
 
 TASK_ID_RE = re.compile(r"^t-(\d{3,})$")
@@ -280,8 +289,9 @@ def extract_replaces_worker(notes) -> str | None:
     return m.group(1) if m else None
 
 
-def _harvest_line_into(event, task_id, agent, worker_ref, delegated_agents: dict, closed_tasks: set,
-                        rejected_tasks: set, task_worker_refs: dict) -> None:
+def _harvest_line_into(idx: int, event, task_id, agent, worker_ref, delegated_agents: dict, closed_tasks: set,
+                        rejected_tasks: set, task_worker_refs: dict, rejected_by_agent: dict,
+                        last_delegated_idx: dict, signal_log: dict) -> None:
     """Rule 9(b/c/c2) state: updates the per-task_id history by ONE line
     (used both to seed state from HEAD and, line by line, for new
     lines -- call order = line order in the file, so the state at the
@@ -289,34 +299,87 @@ def _harvest_line_into(event, task_id, agent, worker_ref, delegated_agents: dict
     the file"). task_worker_refs accumulates every worker_ref of every
     delegated (any agent) for this task_id -- rule 9(c2) looks for the
     claimed prior worker_ref in this same set, not only among lines by
-    the same agent."""
+    the same agent.
+
+    idx -- the 0-based position of the line in the FULL file (HEAD
+    lines: 0..len(head)-1 in order; new lines continue the count -- see
+    the call in validate_new_lines: len(head_lines)+idx-in-new_lines).
+    A self/foreign-retry gap fix (rule 9c): rejected_by_agent (task_id
+    -> the set of agents whose result was rejected on that task) and
+    signal_log (task_id -> a list of (idx, kind, agent) new-version
+    signals: kind="delegated" on EVERY delegated, kind="lead_rejected"
+    on a rejected with agent=lead, kind="escalated" on escalated) --
+    together with last_delegated_idx[(task_id, agent)] -> the idx of
+    that agent's LAST delegated on that task_id -- feed
+    _has_new_version_signal(), which tells apart a "self" (i) and a
+    "foreign" (ii) rejected under rule 9c."""
     if not (isinstance(task_id, str) and TASK_ID_RE.match(task_id)):
         return
     if event == "delegated" and isinstance(agent, str) and agent:
         delegated_agents.setdefault(task_id, set()).add(agent)
         if isinstance(worker_ref, str) and worker_ref.strip():
             task_worker_refs.setdefault(task_id, set()).add(worker_ref.strip())
+        last_delegated_idx[(task_id, agent)] = idx
+        signal_log.setdefault(task_id, []).append((idx, "delegated", agent))
     elif event == "accepted":
         closed_tasks.add(task_id)
     elif event == "rejected":
         rejected_tasks.add(task_id)
+        if isinstance(agent, str) and agent:
+            rejected_by_agent.setdefault(task_id, set()).add(agent)
+            if agent == "lead":
+                signal_log.setdefault(task_id, []).append((idx, "lead_rejected", agent))
+    elif event == "escalated":
+        signal_log.setdefault(task_id, []).append((idx, "escalated", agent))
 
 
 def harvest_task_state(lines: list[str]):
     """Seeds rule 9(b/c/c2) state from the HEAD version (or any prefix
     of lines) -- (delegated_agents, closed_tasks, rejected_tasks,
-    task_worker_refs)."""
+    task_worker_refs, rejected_by_agent, last_delegated_idx,
+    signal_log). idx inside lines is the 0-based position IN THIS LIST
+    (for the HEAD seeding this is the position in head_lines, exactly
+    0..len(head_lines)-1 -- see _harvest_line_into's docstring on the
+    count continuing for new lines)."""
     delegated_agents: dict[str, set] = {}
     closed_tasks: set = set()
     rejected_tasks: set = set()
     task_worker_refs: dict[str, set] = {}
-    for line in lines:
+    rejected_by_agent: dict[str, set] = {}
+    last_delegated_idx: dict[tuple, int] = {}
+    signal_log: dict[str, list] = {}
+    for idx, line in enumerate(lines):
         obj = _try_parse_obj(line)
         if obj is None:
             continue
-        _harvest_line_into(obj.get("event"), obj.get("task_id"), obj.get("agent"), obj.get("worker_ref"),
-                           delegated_agents, closed_tasks, rejected_tasks, task_worker_refs)
-    return delegated_agents, closed_tasks, rejected_tasks, task_worker_refs
+        _harvest_line_into(idx, obj.get("event"), obj.get("task_id"), obj.get("agent"), obj.get("worker_ref"),
+                           delegated_agents, closed_tasks, rejected_tasks, task_worker_refs,
+                           rejected_by_agent, last_delegated_idx, signal_log)
+    return (delegated_agents, closed_tasks, rejected_tasks, task_worker_refs,
+            rejected_by_agent, last_delegated_idx, signal_log)
+
+
+def _has_new_version_signal(task_id: str, agent, after_idx: int, signal_log: dict) -> bool:
+    """Rule 9(c-ii), the self/foreign-retry gap: True if signal_log[task_id]
+    carries a signal STRICTLY AFTER after_idx (= the idx of this same
+    agent's last delegated on this task_id) of one of three kinds --
+    (1) a delegated by a DIFFERENT agent (kind_agent != agent), (2) a
+    rejected with agent=lead (kind="lead_rejected"), (3) an escalated
+    by a DIFFERENT agent (kind="escalated", kind_agent != agent -- with
+    no this narrowing, an agent could record its own escalated on its
+    own task and use that very move to legalize its own repeat entry --
+    a self-legalizing loop; symmetric with signal (1)). idx <= after_idx
+    -- a signal from an EARLIER round (before the incoming agent's own
+    last delegated) -- is stale, does not count (see the
+    test_b3_stale_* tests)."""
+    for idx, kind, kind_agent in signal_log.get(task_id, ()):
+        if idx <= after_idx:
+            continue
+        if kind in ("delegated", "escalated") and kind_agent != agent:
+            return True
+        if kind == "lead_rejected":
+            return True
+    return False
 
 
 def _last_head_ts(head_lines: list[str]):
@@ -362,9 +425,9 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
     full pair table and quotes):
 
     1) basis=="judge" -- a separate, non-coordinator acceptance path
-       (a calibrated judge, R13/D-0087): legal ONLY on a leaf-class
-       category, INDEPENDENT of tier(by) -- checked first so the floor
-       in (3) never intercepts it (unchanged from before this batch).
+       (a calibrated judge, rule 13/leaf routing): legal ONLY on a
+       leaf-class category, INDEPENDENT of tier(by) -- checked first so
+       the floor in (3) never intercepts it.
     2) ok_tier: tier(by) > tier(agent) -- legal at any basis.
     3) FLOOR: tier(by) is known and strictly below sonnet (i.e.
        by=="haiku") -- FAIL unconditionally, no basis (other than the
@@ -382,19 +445,16 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
     if agent not in AGENT_TIER:
         return None  # unknown agent -- the matrix doesn't define one
     if by not in TIER_ORDER:
-        # Port of AO3's fix (their calibration #4, commit 30e79c8): an
-        # enum/shape check ("is by even a known tier") precedes ANY
-        # matrix semantics, including judge (t-323) -- no basis
-        # legalizes an acceptance from an unknown acceptor; ok_tier/
-        # floor stayed silent at by_tier=None, and basis="critic"/
-        # "judge" never looked at by at all -- the AO3 07-24 hole this
-        # closes.
+        # An enum/shape check ("is by even a known tier") precedes ANY
+        # matrix semantics, including judge -- no basis legalizes an
+        # acceptance from an unknown acceptor; ok_tier/floor stayed
+        # silent at by_tier=None, and basis="critic"/"judge" never
+        # looked at by at all -- this check closes that hole.
         return (
             f"role-vs-tier acceptance matrix: by={by!r} is not a known "
             f"tier ({sorted(TIER_ORDER)}) -- basis cannot legalize an "
             f"acceptance from an unknown acceptor (an enum/shape check "
-            f"precedes the matrix's semantics; ported from AO3's fix "
-            f"30e79c8)"
+            f"precedes the matrix's semantics)"
         )
     agent_tier_name = AGENT_TIER[agent]
     agent_tier = TIER_ORDER[agent_tier_name]
@@ -468,9 +528,8 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
 
     # (5) basis=="queued-to-lead" -- legal for the upper-mid-tier CLASS
     # (QUEUED_TO_LEAD_AGENTS = {critic, designer}, see its own comment
-    # above) at by∈{sonnet,opus} (the AO3 case: builder-class at a
-    # sonnet coordinator does NOT pass -- legal only via
-    # basis='critic').
+    # above) at by∈{sonnet,opus} (builder-class at a sonnet coordinator
+    # does NOT pass -- legal only via basis='critic').
     if basis == "queued-to-lead":
         if agent in QUEUED_TO_LEAD_AGENTS and by in ("sonnet", "opus"):
             return None
@@ -499,7 +558,8 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
     max_num = max_task_num(seen_task_ids)
     last_ts = _last_head_ts(head_lines)
     now_limit = now + datetime.timedelta(minutes=10)
-    delegated_agents, closed_tasks, rejected_tasks, task_worker_refs = harvest_task_state(head_lines)
+    (delegated_agents, closed_tasks, rejected_tasks, task_worker_refs,
+     rejected_by_agent, last_delegated_idx, signal_log) = harvest_task_state(head_lines)
 
     for idx, line in enumerate(new_lines):
         line_no = len(head_lines) + idx + 1
@@ -606,7 +666,26 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
                     attempt = obj.get("attempt")
                     valid_attempt = (isinstance(attempt, int) and not isinstance(attempt, bool)
                                       and attempt >= 2)
-                    retry_ok = valid_attempt and task_id in rejected_tasks
+                    # The self/foreign-retry gap: a "foreign" rejected
+                    # (the agent whose result was rejected DIFFERS from
+                    # the incoming agent) legalizes a repeat entry ONLY
+                    # with a new-version signal AFTER that agent's own
+                    # last delegated (rule 9c-ii) -- see
+                    # _has_new_version_signal. The old, unqualified form
+                    # ("valid_attempt and task_id in rejected_tasks")
+                    # let ANY agent re-enter on ANY rejected of the
+                    # task, including a reviewer re-entering on an
+                    # EXECUTOR's rejected with nothing redone.
+                    own_rejected = isinstance(agent, str) and agent in rejected_by_agent.get(task_id, set())
+                    foreign_rejected = task_id in rejected_tasks and not own_rejected
+                    if valid_attempt and own_rejected:
+                        retry_ok = True  # (c-i) self-retry -- as before, no extra conditions
+                    elif valid_attempt and foreign_rejected:
+                        last_own_idx = last_delegated_idx.get((task_id, agent))
+                        retry_ok = (last_own_idx is not None
+                                    and _has_new_version_signal(task_id, agent, last_own_idx, signal_log))
+                    else:
+                        retry_ok = False
                     replaces_handle = extract_replaces_worker(notes)
                     if retry_ok:
                         pass  # (c) legal retry after rejected
@@ -621,10 +700,38 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
                                 "fabricated replacement is forbidden (rule 9c2)"
                             )
                     else:
-                        # (c) retry conditions not met, no replaces_worker marker -> (d)
+                        # (c) retry conditions not met, no replaces_worker marker -> (d).
+                        # The failure text is branched by valid_attempt FIRST -- if
+                        # attempt itself is absent/invalid, the message must say
+                        # exactly that, not reason about rejected/signals (even when
+                        # foreign_rejected is formally True and a fresh signal
+                        # exists -- a missing attempt is on its own sufficient and
+                        # the sole reason for the reject here; the text must not
+                        # claim the false "no signal" when a signal is in fact
+                        # present). This gate's failure text is read by a human at
+                        # the moment of rejection -- worth getting exactly right.
+                        if not valid_attempt:
+                            reason = (
+                                "the 'attempt' field is absent or invalid (must be an integer "
+                                ">=2 for a repeated delegated on an existing open task_id) -- "
+                                "the remaining conditions (a rejected's presence/ownership, a "
+                                "new-version signal) are not checked while attempt itself is wrong"
+                            )
+                        elif foreign_rejected:
+                            reason = (
+                                "task_id has a rejected, but not of the agent re-entering "
+                                "(a \"foreign\" rejected, rule 9c-ii) -- legal only if a "
+                                "new-version signal appeared AFTER this agent's own last "
+                                "delegated (a new delegated by a different agent / a rejected "
+                                "with agent=lead / an escalated on this task_id); no such "
+                                "signal exists, or it is from an earlier round and has gone "
+                                "stale (the self/foreign-retry gap)"
+                            )
+                        else:
+                            reason = "attempt is valid, but there is no rejected at all for this task_id (neither self nor foreign)"
                         violations.append(
                             f"{tag}: repeated delegated by the same agent={agent!r} on task_id={task_id!r} "
-                            "without attempt>=2 and an earlier rejected -- forbidden duplicate "
+                            f"{reason} -- forbidden duplicate "
                             "(the no-silent-reuse rule); a legal alternative is a "
                             "'replaces_worker:<prior worker_ref>' marker in notes when replacing "
                             "a dead worker with no verdict (rule 9c2)"
@@ -635,8 +742,9 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
                     f"{tag}: task_id {task_id!r} does not reference anything existing earlier in the file"
                 )
 
-        _harvest_line_into(event, task_id, agent, obj.get("worker_ref"), delegated_agents, closed_tasks,
-                           rejected_tasks, task_worker_refs)
+        _harvest_line_into(len(head_lines) + idx, event, task_id, agent, obj.get("worker_ref"),
+                           delegated_agents, closed_tasks, rejected_tasks, task_worker_refs,
+                           rejected_by_agent, last_delegated_idx, signal_log)
 
         parsed_ts = parse_ts(ts) if isinstance(ts, str) else None
         if isinstance(ts, str) and ts and parsed_ts is None:

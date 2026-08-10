@@ -94,8 +94,8 @@ CLAUDE.md wins and that's a bug report against this file.
    | Kit mechanism | Prerequisite | If missing |
    |---|---|---|
    | Leaf-routing judge acceptance (rule 13) | a calibrated judge — the labeled set in gateway/judge_calibration.json reproduced in full, per PROCESS/JUDGE_CALIBRATION_PROTOCOL.md, BEFORE any `accepted` carries `basis: "judge"` | `native-equivalent` (the host already has its own deterministic acceptance gate for that leaf class) or `deferred(trigger: calibration run)` |
-   | Any hook-backed gate (mechanism_gate, dispatch_gate, dod_gate, main_gate, hygiene_gate, journal_echo) | `git config core.hooksPath` pointing at `.githooks`, wired into `.claude/settings.json` | `deferred(trigger: hooksPath + settings.json wired)` or `native-equivalent` (the host's own CI/lint gate already closes the same function) |
-   | Escape-allowlist pre-commit check (escape_check) | a `tools/escape_allowlist.json` MUST exist before the first commit once hooksPath is wired — the check fails closed on a missing file. Minimum viable: `{"entries": []}` (passes, exit 0). The shipped `escape_allowlist.template.json` contains a deliberately-failing example: copy it only to REPLACE the example with real entries, or start from empty entries. Note: a terse one-line-per-decision log has no `## D-NNNN` sections to pin against — real entries need a sectioned decision document (yours, or a cross-repo absolute path) | `deferred(trigger: sectioned decision log exists)` with the empty-entries allowlist in place so the hook stays green |
+   | Any hook-backed gate (mechanism_gate, dispatch_gate, owns_gate, dod_gate, main_gate, hygiene_gate, journal_echo) | `git config core.hooksPath` pointing at `.githooks`, wired into `.claude/settings.json` | `deferred(trigger: hooksPath + settings.json wired)` or `native-equivalent` (the host's own CI/lint gate already closes the same function) |
+   | Escape-allowlist pre-commit check (escape_check) | a `tools/escape_allowlist.json` MUST exist before the first commit once hooksPath is wired — the check fails closed on a missing file. Minimum viable: the template's two pin sections (`judge_prompt_pin`, `judge_role_pin` — both ALREADY REAL for the shipped tree) plus `"entries": []` — a bare `{"entries": []}` FAILS: both pin sections are mandatory, their absence is itself an error. The shipped `escape_allowlist.template.json` contains a deliberately-failing example entry: copy it and REPLACE the example with real entries, or start with empty entries while keeping both pin sections. Note: a terse one-line-per-decision log has no `## D-NNNN` sections to pin against — real entries need a sectioned decision document (yours, or a cross-repo absolute path) | `deferred(trigger: sectioned decision log exists)` with the empty-entries allowlist in place so the hook stays green |
    | Calibration / usage accounting (usage_report, savings_report, calibration_counts) | a carrier for prices/usage the tooling can read (cc_usage or an equivalent cost record) | `deferred(trigger: usage carrier configured)` |
    | Non-Claude worker guard (pi_run_guard) | an actual non-Claude worker in the contour (`api-keys`/`both`) | moot under `subscription`-only — `deferred(trigger: api-keys contour adopted)` |
    | Gateway / api-keys contour (judge, analyst, shadow-eval, budgets) | contour includes `api-keys` | `deferred(trigger: contour changed)` under `subscription`-only |
@@ -180,12 +180,12 @@ CLAUDE.md wins and that's a bug report against this file.
    exam's PASS, and the keep-or-replace decision below uses the last
    unconditioned score.
 
-   **D-0085 reference ladder** (baseline for "no worse than the
+   **Reference ladder** (baseline for "no worse than the
    mirror"): the exam score of the model bound to a host function is
    compared against this function's reference bar, not judged in
-   isolation. Bindings and prices, taken from D-0085 (the reference
-   deployment's evidence line — do not invent numbers for a different
-   host binding):
+   isolation. Bindings and prices, taken from the reference
+   deployment's own evidence line — do not invent numbers for a different
+   host binding:
    - scout = Haiku 4.5 ($1 / $5 per MTok)
    - builder = Sonnet ($3 / $15 per MTok)
    - critic = Opus 4.8 ($5 / $25 per MTok)
@@ -323,7 +323,7 @@ CLAUDE.md wins and that's a bug report against this file.
      digest. Everything else about this system runs in the background
      without a ping.
 
-## Upgrade mode (existing deployment; D-0091)
+## Upgrade mode (existing deployment)
 
 Re-running this skill over a deployment that already carries an
 adoption ledger is an UPGRADE, not a re-install. The unit of delivery
@@ -351,11 +351,11 @@ is the REVISION DELTA, never the full kit:
 4. Update the ledger's recorded kit revision in the same move. The
    cost is bounded by the delta and paid by the host (Rule #1); a
    full re-scan is the fallback only when no revision was recorded.
-5. Sealed delivery for the enforcement chain (D-0093): a delta item
+5. Sealed delivery for the enforcement chain: a delta item
    that changes an EXECUTABLE control-chain file (a git hook, a hook
    script) ships the FULL target content of that file, never a
    "add this line" delta — a delta cannot carry the file's
-   invariants (the `set -e` lesson of finding F-53). Applying it
+   invariants (a live incident's `set -e` lesson). Applying it
    ends with a liveness PROBE: a known-invalid input is rejected by
    the gate, then the probe is reverted; the probe's witness goes
    into the batch's acceptance. Check hook executability while

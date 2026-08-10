@@ -28,7 +28,7 @@ from session_context import (
     read_journal_events,
 )
 
-# Worked example of the D-0069 landing pattern: a SessionStart hook is a
+# Worked example of the enforcement-file landing pattern: a SessionStart hook is a
 # self-activating enforcement file, so a builder session adding new
 # MODEL / BOOT BUDGET functions lands them under a neighboring draft
 # filename first, and Lead moves the draft onto the live path only at
@@ -136,7 +136,7 @@ def test_last_event_line_empty_journal():
     assert "empty or missing" in last_event_line([])
 
 
-# ---- ported from HQ 2026-07-23 (staff VG-1 part B): CLOCK DRIFT line ----
+# ---- CLOCK DRIFT line ----
 # Field precedent: a session's journal tail carried a ts LATER than the
 # system clock (a previous environment's clock ran ahead). Threshold:
 # > 60s. Battery per CLAUDE.md R11: acceptance keys (fires when ahead,
@@ -164,7 +164,7 @@ def test_clock_drift_line_one_second_past_threshold_fires():
     line = sc.clock_drift_line(events, now)
     assert line.startswith("CLOCK DRIFT: last journal ts is ")
     assert "min ahead of system clock" in line
-    assert "D-0089" in line
+    assert "do not rewrite past lines" in line
     assert "non-monotonic" in line
     assert line.isascii()
 
@@ -270,7 +270,7 @@ def test_open_degradation_window_none_when_closed():
 
 def test_open_degradation_window_scans_whole_journal_not_just_tail():
     # An unclosed window far from the tail must still be caught -- the
-    # scan is over the WHOLE journal (D-0039 p.4: a safety-reset can
+    # scan is over the WHOLE journal (a safety-reset can
     # leave no lead_restored anywhere after it).
     events = [
         _event("lead_degraded", ts="2026-07-01T00:00:00"),
@@ -356,7 +356,7 @@ def test_main_fail_open_on_broken_journal(tmp_path, capsys):
 
 def test_main_full_output_when_gateway_dir_missing(tmp_path, capsys):
     # preflight_quota.load_config's exists-guard (a documented finding,
-    # class D-0043 alongside load_budgets, which already had this
+    # the same class alongside load_budgets, which already had this
     # shape): a repo root with no gateway/ directory at all (config.yaml
     # unreachable) is this toolkit's own subscription-contour DEFAULT
     # state, not a crash condition -- the SessionStart output must stay
@@ -555,7 +555,7 @@ def test_module_survives_broken_preflight_quota_import_and_fails_open(tmp_path, 
     assert out[0].startswith("session-context warning:")
 
 
-# ==== MODEL line (D-0056a) ====================
+# ==== MODEL line ====================
 
 
 class _FakeStdin:
@@ -608,12 +608,12 @@ def test_model_tier_mapping_unknown_string():
 
 def test_model_line_found_string_form():
     line = sc.model_line({"model": "claude-fable-5"})
-    # F-37: the payload id is a harness declaration, not a measurement --
+    # The payload id is a harness declaration, not a measurement --
     # the line must say so (present-but-stale stated confidently is the
     # failure mode this marker exists to prevent).
     assert line == (
         "MODEL: claude-fable-5 -> tier Lead(top)"
-        " (declared by harness, not measured -- F-37; Lead tier = fable)"
+        " (declared by harness, not measured; Lead tier = fable)"
     )
 
 
@@ -621,19 +621,19 @@ def test_model_line_found_dict_form():
     line = sc.model_line({"model": {"id": "claude-sonnet-5"}})
     assert line == (
         "MODEL: claude-sonnet-5 -> tier builder-tier"
-        " (declared by harness, not measured -- F-37; Lead tier = fable)"
+        " (declared by harness, not measured; Lead tier = fable)"
     )
 
 
 def test_model_line_missing_payload():
     assert sc.model_line(None) == (
-        "MODEL: not provided by hook input -- verify tier yourself (D-0056a)"
+        "MODEL: not provided by hook input -- verify tier yourself"
     )
 
 
 def test_model_line_empty_payload():
     assert sc.model_line({}) == (
-        "MODEL: not provided by hook input -- verify tier yourself (D-0056a)"
+        "MODEL: not provided by hook input -- verify tier yourself"
     )
 
 
@@ -665,7 +665,7 @@ def test_model_line_injection_attempt_stays_single_line():
 
 def test_model_line_whitespace_only_falls_back_to_not_provided():
     assert sc.model_line({"model": "   "}) == (
-        "MODEL: not provided by hook input -- verify tier yourself (D-0056a)"
+        "MODEL: not provided by hook input -- verify tier yourself"
     )
 
 
@@ -679,7 +679,7 @@ def test_model_line_long_model_id_is_truncated():
     assert len(sanitized) == 80
     assert line == (
         f"MODEL: {sanitized} -> tier builder-tier"
-        " (declared by harness, not measured -- F-37; Lead tier = fable)"
+        " (declared by harness, not measured; Lead tier = fable)"
     )
 
 
@@ -727,11 +727,11 @@ def test_build_context_lines_model_line_placed_right_after_now(tmp_path):
     assert lines[0].startswith("NOW:")
     assert lines[1] == (
         "MODEL: claude-fable-5 -> tier Lead(top)"
-        " (declared by harness, not measured -- F-37; Lead tier = fable)"
+        " (declared by harness, not measured; Lead tier = fable)"
     )
 
 
-# ==== BOOT BUDGET (D-0068/D-0038) ==============
+# ==== BOOT BUDGET ==============
 
 
 def _seed_boot_files(root: Path, file_sizes: dict, boot_md_names=None):
@@ -807,7 +807,7 @@ def test_boot_budget_breach_includes_hint_and_top3(tmp_path):
     assert total > sc.BOOT_BREACH_THRESHOLD
     assert lines[0] == (
         f"BOOT BUDGET: {total} bytes / 100000 (4 files) BREACH -> boot-diet due "
-        "(D-0068; report first, operator word starts it)"
+        "(report first, operator word starts it)"
     )
     assert lines[1] == "  60000  README.md"
     assert lines[2] == "  30000  PROJECT_CHARTER.md"
@@ -1061,7 +1061,7 @@ def test_build_context_lines_shows_open_dispatch(tmp_path):
         assert line.isascii()
 
 
-# ==== closes:t-NNN marker convention (ported from HQ 2026-07-20) =======
+# ==== closes:t-NNN marker convention =======
 
 
 def test_open_dispatches_closes_marker_in_later_lifecycle_event_closes_delegated():
@@ -1236,10 +1236,10 @@ def test_open_dispatches_non_string_notes_does_not_raise():
 
 
 # ---------------------------------------------------------------------
-# Ported from HQ 2026-07-23 (staff VG-1 part A): hooks_path_autofix_line
+# hooks_path_autofix_line
 # ---------------------------------------------------------------------
-# Scoped port: the kit's session_context.py carries the AUTOFIX action
-# itself (this section), not the staff's full git_hooks_channel report
+# Scoped: session_context.py carries the AUTOFIX action
+# itself (this section), not a full git_hooks_channel report
 # (required-file/exec-bit WARNINGs on an already-set hooksPath are
 # tools/wiring_check.py's job -- see that module's own test suite,
 # test_wiring_check.py, and session_context.py's module docstring for
@@ -1350,7 +1350,7 @@ def test_hooks_path_autofix_line_never_raises_when_git_missing(tmp_path, monkeyp
 
 
 # ---------------------------------------------------------------------
-# wiring_summary_line -- mirrors the staff channel via tools/wiring_check.py
+# wiring_summary_line -- see tools/wiring_check.py
 # ---------------------------------------------------------------------
 
 

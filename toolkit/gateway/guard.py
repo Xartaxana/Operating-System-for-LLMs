@@ -1,10 +1,9 @@
 """Guard: deterministic budget enforcement in the request path.
 
-ARCHITECTURE.md, "Guard"; D-0027. No LLM involved.
+No LLM involved.
 
-Why not LiteLLM's native budgets (D-0030 evaluation, 2026-07-03):
-they require Postgres (and Redis for cross-worker counters), both
-explicitly deferred by ARCHITECTURE.md until the MVP stack fails,
+Why not LiteLLM's native budgets: they require Postgres (and Redis
+for cross-worker counters), both deferred until the MVP stack fails,
 and they have no per-model 80%-warning semantics. This hook reuses
 the SQLite request log the gateway already writes.
 
@@ -30,8 +29,8 @@ with ts within window_seconds of now (a true sliding window: a
 request only ages out once its own timestamp is older than
 window_seconds, not at a fixed clock boundary). Same warn/block
 semantics as the $ budgets, recorded in a separate quota_events
-table (different unit: tokens, not USD). D-0030 native-first check
-(2026-07-09): litellm 1.90.2 ships router_strategy/lowest_tpm_rpm_v2.py,
+table (different unit: tokens, not USD). Native-first check:
+litellm 1.90.2 ships router_strategy/lowest_tpm_rpm_v2.py,
 a per-deployment RPM/TPM limiter that works Redis-less (falls back to
 an in-memory DualCache) -- but its window is a fixed calendar-minute
 bucket (keyed by strftime("%H-%M")), not sliding, and it has no TPD

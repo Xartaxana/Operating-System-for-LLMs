@@ -1,10 +1,10 @@
 """SQLite request logger for the LiteLLM gateway.
 
 Every request passing through the gateway is recorded in a SQLite log.
-The schema already contains what the Ledger (Phase 1 step 3) needs,
+The schema already contains what the Ledger needs,
 including raw prompt/response text for the context-repetition ratio --
 but writing that raw text is now OPT-IN (safe-telemetry default,
-operator decision 2026-07-16, port-queue item 13): by default the
+an operator decision): by default the
 `prompt`/`response` columns hold a short marker instead of the actual
 conversation text, while every accounting/ledger field (model,
 tokens, cost, ts, category, traffic_kind) is written unconditionally
@@ -39,8 +39,7 @@ from litellm.integrations.custom_logger import CustomLogger
 RAW_TEXT_DISABLED_MARKER = "[raw text logging disabled]"
 
 # Truncation applied to the `error` column when raw text logging is off
-# (operator decision, docs/tasks/2026-07-20_toolkit-release-v040.md,
-# "Next batch queue" item 3, option "b"): provider exceptions can echo
+# (an operator decision): provider exceptions can echo
 # fragments of the prompt/response (content-policy errors especially),
 # so `error` is not exempt from the masking the raw-text flag applies
 # to the other two text columns. Truncating to the first ~200 chars of
@@ -101,7 +100,7 @@ CREATE TABLE IF NOT EXISTS requests (
 );
 """
 
-# traffic_kind convention (D-0033, CURRENT_CONTEXT.md "Delegated Task 2"):
+# traffic_kind convention:
 # the caller tags its own traffic via a "metadata": {"traffic_kind": ...}
 # field in the JSON body sent to this gateway. From a remote client this
 # means extra_body={"metadata": {...}} (see shadow_eval.py replay() /

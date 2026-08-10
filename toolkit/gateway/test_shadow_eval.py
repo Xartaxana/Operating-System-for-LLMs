@@ -515,7 +515,7 @@ def test_decide_status_judge_overrides_similarity():
 
 def test_decide_status_vocabulary_pin():
     # decide_status must only ever return one of the 4-status
-    # DELEGATION_TABLE.md vocabulary's non-production values (D-0035) --
+    # DELEGATION_TABLE.md vocabulary's non-production values --
     # "estimated" (inconclusive), "provisionally_validated" (positive
     # shadow-eval result), or "rejected". It must NEVER return the bare
     # legacy word "validated" (not in the 4-status model) nor

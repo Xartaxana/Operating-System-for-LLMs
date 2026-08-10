@@ -6,8 +6,6 @@ session/coordinator still judges any discrepancy). This hook never
 blocks anything and never argues with the session -- it just places the
 measured fact in front of it.
 
-Ported from HQ 2026-07-20.
-
 SubagentStop PAYLOAD CONTRACT (verified empirically against the
 installed harness): base fields (session_id, transcript_path, cwd,
 prompt_id?) + hook_event_name="SubagentStop", stop_hook_active: bool,

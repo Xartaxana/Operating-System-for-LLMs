@@ -1,283 +1,259 @@
 """hygiene_gate.py -- PreToolUse hook for command hygiene, for the
 Bash|PowerShell tools. Mechanizes CLAUDE.md's "Command hygiene" points
-3-5: a `cd` prefix, a trailing ` 2>&1`, a `python -c`/`python - <<`
-edit bypassing Edit/Write, and a journal write bypassing Edit/Write --
-catches them BEFORE the command runs.
-
-Ported from HQ 2026-07-20 (v2 delta 2026-07-21, v3 delta 2026-07-23).
+3-5: a `cd`/`Set-Location` prefix into this repo's own root, a
+` 2>&1` redirect, a `python -c`/`python - <<` edit bypassing
+Edit/Write, and a journal write bypassing Edit/Write -- catches them
+BEFORE the command runs.
 
 DELIVERY CHANNEL (verified empirically against the installed harness
 binary, not assumed from memory): the hook's response is delivered via
 `hookSpecificOutput` on stdout, exit 0:
 
   {"hookSpecificOutput": {"hookEventName": "PreToolUse",
-                           "additionalContext": "<list of matched classes>"}}
+                           "additionalContext": "<list of matched classes>",
+                           "permissionDecision": "deny",       # only on a BLOCK
+                           "permissionDecisionReason": "..."}}  # only on a BLOCK
 
-`permissionDecision` is deliberately OMITTED on the WARN classes below:
-an earlier draft set it to "allow" for every match, which would have
-auto-approved the very command this hook flags, silencing the
-operator's own permission prompt -- a review finding on that draft.
-Leaving it out on WARN classes delivers the warning without touching
-the permission path at all. Class (d) (journal bypass, see v3 below)
-is the one exception: it is severe enough to warrant an actual block,
-via `permissionDecision: "deny"`.
+`permissionDecision` is OMITTED on WARN-only results: setting it to
+"allow" would auto-approve the very command being flagged, silencing
+the operator's own permission prompt. `additionalContext` ALWAYS
+duplicates the first BLOCK reason too (belt-and-suspenders): if
+`permissionDecision: "deny"` turns out to be inert on a given harness
+build, a BLOCK class degrades back into a visible WARN, not silence.
 
-DETECTION CLASSES (checks (a)-(c) are WARN and INDEPENDENT of each
-other; additionalContext lists ALL that matched, not just the first):
+DETECTION CLASSES:
 
- (a) cd-prefix: the command starts with `cd <non-empty argument>` (a
-     real path, not a bare "cd" and not "cd&&...") AND somewhere later
-     there is `&&` or `;`.
- (b) the literal substring ` 2>&1`.
- (c) `python -c` or `python - <<` -- literally "python" (not "python3":
-     deliberately not generalized beyond what command hygiene names),
-     with \\b word boundaries so "mypython -c" does not match as a
-     substring.
- (d) a journal write bypassing Edit/Write (v3: BLOCK, see below).
+ (a) cd/Set-Location prefix -- see "Determinism principle" below: BLOCK
+     only when the target is unambiguously THIS repository's own root;
+     any other target -- WARN (MSG_CD_NON_ROOT_WARN), never silence.
+ (b) a ` 2>&1` redirect -- BLOCK only when unambiguous (no heredoc
+     marker on the quote-masked text); WARN when a heredoc makes the
+     body's contents unknowable; silent when the ` 2>&1` itself sits
+     inside quotes (argument data, not a real redirect).
+ (c) `python -c` or `python - <<` (literally "python", not "python3" --
+     command hygiene names this exact form) -- always WARN, never
+     BLOCK; \\b-bounded so "mypython -c" is not a substring match.
+ (d) a journal write bypassing Edit/Write -- always BLOCK, unaffected
+     by the determinism principle below (see "Class (d) is the
+     exception" further down for why).
 
-All classes are case-insensitive (uniform choice; hygiene points don't
-call out per-class case sensitivity).
-
-ADVERSARIAL SAFETY ON LARGE INPUT: every check is a substring test
-(`in`, O(n)) or a simple \\b-anchored regex with no nested
-quantifiers (no `.*...*` chains that could cause catastrophic
-backtracking) -- linear in the length of the command.
+All classes are case-insensitive. Every check is a substring test
+(`in`, O(n)) or a simple regex with no nested quantifiers -- no
+`.*...*` chains that could cause catastrophic backtracking -- linear
+in the length of the command.
 
 Fail-open: a non-Bash/PowerShell tool, empty/malformed stdin, a
 non-dict payload, or a missing/non-string/empty command all fall
-through silently, with no stdout side effect. The hook never returns a
-non-zero exit code on any input -- even the v3 BLOCK below signals
-through the JSON body, not the process exit code.
+through silently, with no stdout side effect. ANY exception raised
+while classifying a real command also fails open, but VISIBLY -- see
+"Fail-open with a visible marker" near decide() -- silent fail-open on
+a genuine classification bug would be indistinguishable from "checked,
+found nothing".
 
-v2 (ported from HQ 2026-07-21) -- git-statement/commit-message false
-positives of class (d)
-====================================================================
+--- Determinism principle: "a BLOCK requires certainty; an ambiguous
+input degrades to a WARN." -----------------------------------------
+This gate does not try to tell code from data by parsing nested
+command structure (an earlier design attempted exactly that --
+masking nested `python -c`/heredoc payload bodies -- and was dropped:
+the parsing complexity did not pay for itself against the false
+positives it prevented, and introduced its own bugs). Instead, TWO
+cheap, linear signals decide when a match is certain enough to BLOCK
+rather than WARN:
 
-Two independent maskings applied BEFORE evaluating class (d)'s target/
-form condition, closing a git-related false-positive class (a
-`git add`/`commit`/`push` chain whose staged path or commit-message
-text happens to mention the journal path -- git itself writes nothing
-to the journal there):
+ - QUOTES: `_mask_quoted_segments` blanks out the contents of single/
+   double-quoted segments before a determinism-sensitive check runs.
+   Quoted text is DATA by construction, regardless of which
+   interpreter (cmd, sh, powershell, python, anything else) consumes
+   it -- a hard-coded list of "risky interpreters" cannot keep up with
+   every quoting form a new tool introduces, but quoting itself is a
+   universal signal.
+ - HEREDOC (`<<`): a heredoc's BODY can contain arbitrary text,
+   including an accidental match of the pattern being searched for
+   (a stray "2>&1" in prose). A `<<` marker on the quote-masked text
+   downgrades a redirect match from BLOCK-certain to WARN-only
+   ambiguous, rather than trying to parse where the heredoc actually
+   ends.
 
- (1) _strip_commit_messages -- cuts the -m/--message argument text of
-     a `git commit` invocation before class (d) is evaluated (all
-     quoting forms: `-m "..."`, `-m '...'`, `--message="..."`,
-     `--message='...'`, and the two PowerShell here-string forms
-     `-m @'...'@` / `-m @"..."@`). Closes the sub-class "the journal
-     path/substring sits INSIDE the commit-message text".
+Class (a) (cd/Set-Location) uses a THIRD kind of determinism instead of
+quotes/heredoc: POSITION. `CD_PREFIX_START_RE` anchors on the absolute
+start of the command (`.match()`, not `.search()`) -- a cd/Set-Location
+verb that is genuinely the FIRST thing in the command is always a real
+command, never data, regardless of what a payload elsewhere in the
+string might contain. What determines BLOCK vs WARN for class (a) is
+therefore not ambiguity at all, but WHERE the prefix targets (see
+"Class (a): repo-root only" below) -- known limitation: a cd-to-root
+that is NOT the first statement (e.g. `pwd; cd <root> && ...`) is not
+detected at all, neither BLOCK nor WARN, since the position anchor only
+looks at the absolute start of the command.
 
- (2) _mask_git_statements -- masks (replaces with a single space) a
-     statement that starts with `git ` followed by one of
-     add/commit/push/diff/log/show/status (either at the start of the
-     command or right after a chain separator `;`/`&`/`|`/newline),
-     before class (d) is evaluated. Closes the wider sub-class where
-     there is no commit/-m at all -- e.g. `git diff <journal-path> >
-     /tmp/out.txt`, where the journal path is a `git diff` ARGUMENT
-     and the `>` redirects git's OWN output to an unrelated file, not
-     the journal. Order: (1) runs first (a commit message may itself
-     contain `;`/`&`/`|`, which would break a naive statement split in
-     (2) if (2) ran first), then (2) runs on the already-stripped
-     text.
+--- Class (a): repo-root only -----------------------------------------
+An EARLIER, narrower design blocked `cd`/`Set-Location` whenever the
+command carried a continuation (`&&`/`;`) -- ANY target. That produced
+false positives on legitimate cd's into a different tree entirely (a
+sibling deployment, an exam/test kit, a scratch directory, a sanctioned
+subdirectory such as gateway/ for the proxy server, command hygiene
+point 2) -- roughly half of all cd-class hits in a measured corpus, all
+sharing the same excuse: their working directory IS the point, not a
+hygiene slip. The class is narrowed to what command hygiene point 3
+actually means -- "invoke from the repo root" -- by checking the
+TARGET: BLOCK only when the cd/Set-Location prefix targets THIS
+repository's own root (by basename, case-insensitive, computed
+dynamically from this file's own location -- `Path(__file__).resolve()
+.parents[1].name` -- so it survives a rename/relocation of the tree
+without a constant edit); every OTHER target is a WARN
+(MSG_CD_NON_ROOT_WARN), never silent.
 
-     v3 addendum: both GIT_COMMIT_RE and GIT_STATEMENT_RE now accept
-     0+ repetitions of the `-C <dir>` global option between `git` and
-     the subcommand (`git -C <dir> add ...`) -- the literal `-C`
-     prefix on each repetition keeps the match unambiguous (no
-     catastrophic backtracking).
+A newline is treated as a THIRD, equal continuation separator alongside
+`&&`/`;` (`cd "<root>"\ngit status` was previously invisible to either
+class -- no `&&`/`;` anywhere) -- but a BARE `cd <root>` with NO
+continuation at all (or with only a single trailing newline and nothing
+real after it) stays completely legal: it is the only way back to the
+repo root once a session's working directory has already legitimately
+shifted via a WARN-class cd (e.g. `cd gateway` to run the proxy) --
+forbidding the bare return would strand the session outside the root
+with no way back, defeating the very point of "work from the root".
 
-Known residual gap (accepted, not preemptively closed): a
-git-statement for show/diff is masked WHOLLY, including any REAL `>`
-inside it -- so an actual journal-write-via-plumbing bypass (`git show
-HEAD:<journal-path> > <journal-path>`) is also silenced and NOT
-detected. The same masking does not distinguish a syntactically broken
-`git commit` (e.g. an unclosed quote in -m) from a valid one -- both
-are masked alike. Tightening this is deferred to evidence of a real
-leak of this shape, not done preemptively. Not ported: PowerShell
-write-token set (Add-Content/Set-Content/Out-File) and sed/tee/awk
-generically (v3 below closes sed -i and tee specifically; awk remains
-a known sibling gap, out of scope for this port).
+Target parsing handles an optional `-Path`/`-LiteralPath` PowerShell
+flag (skipped before the target is read) and a quoted target containing
+spaces (matched up to its PAIRED closing quote, not the first space
+inside it) -- both via `_extract_cd_prefix_target`, the single shared
+entry point for the repo-root check.
 
-v3 (ported from HQ 2026-07-23) -- class (d) promoted WARN -> BLOCK
-====================================================================
+--- Class (b): ` 2>&1` --------------------------------------------------
+`_collect_redirect_signal` computes `present`/`certain` against the
+QUOTE-MASKED command (`_mask_quoted_segments`):
+ - ` 2>&1` absent on the masked text -> the class does not fire at all
+   (a quoted ` 2>&1` is argument data -- silence, not even a WARN);
+ - ` 2>&1` present AND `<<` also present on the SAME masked text ->
+   WARN (heredoc ambiguity -- the body could contain anything,
+   including a coincidental "2>&1" as prose; note `<<` itself sits
+   OUTSIDE any quotes even when its delimiter is quoted, e.g. `<<'PY'`,
+   so it remains visible on the masked text);
+ - ` 2>&1` present, no `<<` -> BLOCK.
+This REPLACES an earlier git-commit-message-specific scrub for this
+class entirely: quoting already handles a commit message's `-m` value
+(always quoted by shell syntax), and a heredoc-form commit message
+(`git commit -F - <<EOF ... EOF`) is now treated uniformly with any
+other heredoc (ambiguous -> WARN, not silence).
 
-Rationale: WARN mode conditions the operator to ignore warnings; class
-(d) (shell write to the journal, bypassing Edit/Write) is the most
-dangerous of the four -- it breaks the journal's append-only guarantee
-and evades journal_echo/journal_validator in the moment -- so it is
-promoted to an actual BLOCK. Classes (a)/(b)/(c) are unchanged, still
-pure WARN, still evaluated against the ORIGINAL (unscrubbed) command.
+--- Class (c): python -c / python - <<heredoc -------------------------
+Unchanged in shape from the original design: always WARN, `\\b`-bounded
+`python\\s+-c` or `python\\s+-\\s*<<`, evaluated on the raw command.
 
-BLOCK MECHANISM: `hookSpecificOutput.permissionDecision = "deny"` (NOT
-a non-zero exit code) -- the same forensically-confirmed JSON channel
-already used above for `additionalContext`. `main()`/`decide()` still
-ALWAYS return exit code 0 -- the block is carried entirely in the JSON
-body, keeping one uniform invariant ("this hook never fails the
-process") across all four classes.
+--- Class (d) is the exception: the determinism principle does NOT
+apply to it ------------------------------------------------------
+The journal-bypass class stays a BLOCK unconditionally, without the
+quote/heredoc downgrade classes (a)/(b) get. Concretely:
+`python -c "open('logs/routing-log.jsonl','a').write(...)"` BLOCKS even
+though it carries the same `-c` ambiguity signal class (c) warns on --
+degrading class (d) the same way would OPEN a real bypass: that exact
+command is BOTH ambiguous-by-form (like class (c)) AND a real journal
+write at the same time, and if it degraded to a WARN, the write would
+slip past append-only enforcement unnoticed. The asymmetry is
+deliberate: classes (a)/(b) trade a false BLOCK for continued work (the
+class exists to catch a hygiene slip, not to gate correctness); class
+(d) trades a false WARN for a SILENT loss of the journal's append-only
+guarantee -- the two classes have different error costs, and the
+gate's determinism rule reflects that difference rather than applying
+one recipe everywhere.
 
-BELT-AND-SUSPENDERS: `additionalContext` ALWAYS duplicates the block
-reason (the same string as `permissionDecisionReason`) on a class-(d)
-match, even when no other WARN class fired. Rationale: there is no
-live precedent in this kit of the harness actually enforcing
-`permissionDecision: "deny"` (the one live blocking gate,
-`dispatch_gate.py`, blocks via exit code 2 + stderr, an entirely
-different channel) -- if `deny` turns out to be inert on a given
-harness build, the class would otherwise degrade from a WARN into
-total silence. Duplicating the reason into `additionalContext` means a
-dead deny-channel degrades back into a visible warning, not silence.
-When other WARN classes (a)/(b)/(c) fire on the same call, their text
-is appended alongside the block reason -- neither overwrites the
-other.
+Target widened beyond the literal "routing-log": ANY `logs/*.jsonl`
+path also counts (`JOURNAL_JSONL_UNDER_LOGS_RE`) -- other log/journal
+files under the same directory, not just the routing journal by name.
+Write forms recognized: a redirect (`>`/`>>`, on quote-masked text --
+see `_mask_quoted_segments`, applied only to the redirect check, not to
+the other write indicators), printf/echo, `sed -i` (in-place,
+space-bounded so it doesn't match `-i` inside `--ignore-*`), `tee`
+(this also matches PowerShell's `Tee-Object` for free -- `\\btee\\b`'s
+word boundaries land correctly on both sides of "Tee" in
+"Tee-Object"), Python `open(path, 'w'/'a'/'x')`, and the PowerShell
+write cmdlets `Add-Content`/`Set-Content`/`Out-File` (PowerShell's
+`>`/`>>` redirect is internally the same Out-File/-Append alias, so it
+is already covered by the existing `>` check with no separate
+indicator needed).
 
-TARGET WIDENED: class (d)'s target used to be the literal substring
-"routing-log"; it now also matches any `logs/*.jsonl` path
-(`JOURNAL_JSONL_UNDER_LOGS_RE`) -- covers sibling log/journal files
-under the same directory, not just the routing journal by name. Either
-condition alone is sufficient (`_has_journal_target`).
+STATEMENT SCOPING: the command is split into shell statements on
+`;`/`&`/`|`/newline (`_statements`, operating on the already
+git-scrubbed text) -- class (d) triggers only when the SAME statement
+carries both a journal target and a write form (`cat <journal>; echo
+done` does not trigger: echo there does not write to the journal, it
+lands in a different statement).
 
-WRITE FORMS WIDENED: beyond redirect (`>`/`>>`) and printf/echo, class
-(d) now also recognizes `sed -i` (in-place edit -- `SED_INPLACE_RE`,
-a space-bounded `-i` so it doesn't match `-i` inside `--ignore-*`),
-`tee` (`TEE_RE`), and Python `open(path, 'w'/'a'/'x')`
-(`OPEN_WRITE_MODE_RE` -- the mode literal right after the comma inside
-`open(...)`, a negative char class `[^)]*` with no nested
-quantifiers, linear, stops at the first `)`). A heredoc feeding a
-redirect (`cat <<EOF >> <journal>`) needs no separate handling -- the
-heredoc itself is only a way to supply stdin; the `>>` it may carry is
-an ordinary shell redirect already covered by the `>` check.
+GIT-COMMIT-MESSAGE MASKING (`_strip_commit_messages`/
+`_mask_git_statements`, class (d) only): a `-m`/`--message` argument or
+a `-F - <<DELIM ... DELIM` heredoc body of `git commit`, and any
+`git [-C <dir>] add/commit/push/diff/log/show/status ...` statement, is
+masked before class (d) is evaluated -- prose in a commit message (a
+journal path mentioned in text, an ASCII arrow containing `>`) must not
+trigger the block on its own, and git itself is not a journal writer.
+Known residual gap, accepted, not preemptively closed: a git
+show/diff statement is masked WHOLLY, including a REAL `>` inside it --
+an actual bypass via git plumbing (`git show HEAD:<path> > <path>`)
+would also go undetected by this same masking.
 
-STATEMENT SCOPING: before this port, `_is_journal_bypass` checked the
-WHOLE scrubbed command -- "the target appears SOMEWHERE" AND "a write
-form appears SOMEWHERE", not necessarily in the same statement. That
-produces a live false positive on a compound call where the target and
-an unrelated write form land in different statements (e.g.
-`cat <journal>; echo done`, or `cat <journal> | tee /tmp/out.txt` --
-neither `echo` nor `tee` there writes to the journal). Now
-`_is_journal_bypass` splits the scrubbed command into statements on
-`;`/`&`/`|`/newline (`_statements`) and requires target AND write form
-in the SAME statement.
-
-QUOTE-AWARE REDIRECT DETECTION: a quoted `>` (e.g. the argument string
-of `grep -c ">" <journal>`, a read-only call) is not a shell redirect
-and must not count as a write form. `_mask_quoted_segments` blanks out
-single/double-quoted segments (the double-quote pattern mirrors
-`COMMIT_MESSAGE_ARG_RE`'s already-proven char class) before the `>`
-check only -- the other write indicators (printf/echo/sed -i/tee/
-open-write-mode) still run against the UNMASKED text. Known
-limitation, not addressed here: statement-splitting (`_statements`)
-happens BEFORE quote-aware masking, on the un-masked text -- a literal
-`;`/`&`/`|` INSIDE quotes (e.g. `echo "a;b" > <journal>`) would be
-mis-split into separate statements by that earlier layer; queued as a
-known sibling gap.
-
-`-C <dir>` GIT GLOBAL OPTION: `GIT_COMMIT_RE`/`GIT_STATEMENT_RE`
-originally required the subcommand immediately after `git\\s+`; a
-`git -C <dir> add/commit/...` form (the `-C` global option sitting
-between `git` and the subcommand) broke the match, producing a false
-WARN/BLOCK on an otherwise-innocent git compound. Fixed by allowing
-0+ repetitions of `-C <dir>` between `git` and the subcommand in both
-regexes. Known residual gap: `-c <key>=<value>` (git config override,
-a different option from `-C`) is not recognized by this fix -- queued,
-no live evidence yet of this exact form leaking.
-
-v4 -- heredoc-body scrub for `git commit -F - <<DELIM ... DELIM`
-====================================================================
-
-`_strip_commit_messages` above only ever cut a `-m`/`--message`
-ARGUMENT; a commit message supplied via a heredoc instead
-(`git commit -F - <<EOF\n...\nEOF`, any quoting of the delimiter:
-`<<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF`) was left completely
-untouched -- prose inside that body (a journal path/substring, an
-ASCII arrow containing `>`) could still trip class (d) even though it
-is commit-message TEXT, not a real journal write.
-
-SCOPE, deliberately narrow: only the heredoc's BODY (and its closing
-delimiter line) is cut -- the opener line up through `<<DELIM` and
-anything AFTER the delimiter on that same line are preserved verbatim
-(`COMMIT_HEREDOC_RE`'s groups 1+4), so a real trailing write chained
-onto the same line via `&&`/`;` (e.g.
-`git commit -F - <<EOF\n...\nEOF && echo "{}" >> logs/routing-log.jsonl`)
-stays fully visible to class (d) -- only the heredoc BODY between the
-opener and the closing delimiter is replaced.
-
-TWO conditions gate the scrub, checked per heredoc match:
- (1) `_is_python_heredoc_opener` -- a heredoc opened by
-     `python -...<<...` (class (c)'s own heredoc form, `PY_HEREDOC_RE`)
-     is NOT a commit message at all; scrubbing it would hide a real
-     journal write happening inside a `python - <<PY` body from the
-     existing statement-scoped machinery (`_statements`/
-     `_is_journal_bypass`). Checked by inspecting the text immediately
-     before the heredoc's own `<<` (a post-match check, not a
-     lookbehind: Python's `re` has no variable-length lookbehind for
-     `\\s+`).
- (2) `_heredoc_belongs_to_git_commit` -- the heredoc must actually
-     belong to a STATEMENT containing `git commit`: the nearest
-     preceding chain separator (`;`/`&`/`|`) before the heredoc marks
-     where the current statement starts (or the command's own start,
-     if there is none); that prefix must match `GIT_COMMIT_RE`. A
-     heredoc belonging to some OTHER statement (e.g. a `python -
-     <<'PY'` chained after `&&`, unrelated to any `git commit`) is left
-     untouched -- its real write stays visible to the existing
-     statement-scoped machinery.
-
-Neither condition holds -> the heredoc is left byte-for-byte as-is.
-Nested heredocs (one heredoc's body containing another heredoc opener)
-are not specially handled by "nearest preceding separator" -- a
-documented residual limitation, not fixed here.
-
-RESIDUAL, DOCUMENTED, NOT FIXED BY THIS SCRUB: class (d)'s own
-detectors ((a)/(b)/(c) below and the target/write-form check itself)
-still run against the RAW, un-scrubbed command for classes (a)-(c) --
-this heredoc scrub only feeds into `_strip_commit_messages`, which
-class (d) alone consults. A literal ` 2>&1` sitting INSIDE a
-git-commit heredoc body still fires the class-(b) WARN (it is
-evaluated against the raw command) -- this is not a regression, it is
-the same "class (b)/(c) see the raw command" invariant this file
-already documents above for the `-m` argument scrub.
+Fail-open with a visible marker: any exception raised while
+classifying a real (non-empty, correctly-typed) command is caught at
+the decide() boundary and turned into exit 0 + an additionalContext
+carrying `MSG_FAIL_OPEN_TEMPLATE` -- never a silent pass and never
+`permissionDecision`. Fail-CLOSED here would mean rejecting every
+Bash/PowerShell call of every session, including the ones fixing the
+gate itself -- a stuck deployment with no way out; a silent fail-open
+was rejected too, since a broken classifier would then be
+indistinguishable from a genuinely clean command.
 """
 
 import json
 import re
 import sys
+from pathlib import Path
 
-CD_PREFIX_START_RE = re.compile(r"^\s*cd\s+\S", re.IGNORECASE)
+CD_PREFIX_START_RE = re.compile(r"^\s*(?:cd|Set-Location)\s+\S", re.IGNORECASE)
 PY_DASH_C_RE = re.compile(r"\bpython\s+-c\b", re.IGNORECASE)
 PY_HEREDOC_RE = re.compile(r"\bpython\s+-\s*<<", re.IGNORECASE)
 PRINTF_ECHO_RE = re.compile(r"\b(printf|echo)\b", re.IGNORECASE)
 
-# --- v3: additional shell-WRITE indicators for class (d) -- sed -i
-# (in-place), tee (duplicates stdout into a file argument), python
-# open(path, 'a'/'w'/'x') -- all linear (simple \b-regexes / one
-# negative char class with no nested quantifiers, same hygiene as the
-# rest of the file).
+# Additional shell-WRITE indicators for class (d): sed -i (in-place),
+# tee (duplicates stdout into a file argument -- also matches
+# PowerShell's Tee-Object, see the module docstring), python
+# open(path,'a'/'w'/'x') -- all linear (simple \b-regexes / one
+# negative char class with no nested quantifiers).
 SED_INPLACE_RE = re.compile(r"\bsed\b[^\n]*\s-i(?:\s|$)", re.IGNORECASE)
 TEE_RE = re.compile(r"\btee\b", re.IGNORECASE)
 OPEN_WRITE_MODE_RE = re.compile(r"open\s*\([^)]*,\s*[\"'][wax]", re.IGNORECASE)
 
-# v3: single/double quotes -- their contents are masked before the `>`
-# redirect check, see _mask_quoted_segments. The double-quote branch
-# is the same escape-aware char class COMMIT_MESSAGE_ARG_RE already
-# uses for the -m value (proven, linear, no nested quantifiers); the
-# single-quote branch is a plain `[^']*` (bash has no escaping inside
-# '...').
+# PowerShell write cmdlets for class (d) -- see the module docstring,
+# "Class (d)": Tee-Object is already covered by TEE_RE above (not
+# duplicated here); PowerShell's `>`/`>>` redirect is already covered
+# by the existing `>` check in _has_write_form (internally the same
+# Out-File/-Append alias as bash's redirect, verified against
+# about_Redirection).
+_PS_WRITE_CMDLET_RE = re.compile(r"\b(?:Add-Content|Set-Content|Out-File)\b", re.IGNORECASE)
+
+# Single/double quotes -- their contents are masked before the `>`
+# redirect check (class (d)) and before the ` 2>&1` check (class (b)) --
+# see _mask_quoted_segments. The double-quote branch is the same
+# escape-aware char class COMMIT_MESSAGE_ARG_RE below uses for the -m
+# value (linear, no nested quantifiers); the single-quote branch is a
+# plain `[^']*` (bash has no escaping inside '...').
 QUOTED_SEGMENT_RE = re.compile(
     r"'[^']*'" r'|"(?:[^"\\]|\\.)*"',
     re.DOTALL,
 )
 
-# v3: class (d)'s target widened from the literal "routing-log" to
-# ALSO include any `logs/*.jsonl` path -- covers other journal/log
-# files under the same directory, not just routing-log.jsonl itself.
-# Linear (negative char class, no nested quantifiers).
+# Class (d)'s target: the literal substring "routing-log" OR any
+# `logs/*.jsonl` path -- covers sibling log/journal files under the
+# same directory, not just routing-log.jsonl by name. Linear (negative
+# char class, no nested quantifiers).
 JOURNAL_JSONL_UNDER_LOGS_RE = re.compile(r"logs/[\w./-]*\.jsonl", re.IGNORECASE)
 
-# --- v2 -- port (1): strip -m/--message of git commit ------------------
+# --- strip -m/--message of git commit -----------------------------------
 # All supported forms of the -m/--message value; DOTALL is needed only
 # by the branches with `.` (the here-string forms) -- the plain-quote
-# branches already match newlines via their negated char class.
-# v3: extended with a `-C <dir>` (0+ repetitions) allowance between
-# "git" and "commit" -- see the v3 "-C <dir> git global option"
-# section in the module docstring. The literal "-C" before each
-# repetition keeps it unambiguous (no catastrophic backtracking).
+# branches already match newlines via their negated char class. 0+
+# repetitions of a `-C <dir>` global option are allowed between "git"
+# and "commit" -- a `git -C <dir> commit ...` compound would otherwise
+# break the match and produce a false class-(d) result on an innocent
+# git compound.
 GIT_COMMIT_RE = re.compile(r"\bgit\b(?:\s+-C\s+\S+)*\s+commit\b", re.IGNORECASE)
 
 COMMIT_MESSAGE_ARG_RE = re.compile(
@@ -290,114 +266,106 @@ COMMIT_MESSAGE_ARG_RE = re.compile(
     re.DOTALL,
 )
 
-# --- v4 -- heredoc-body scrub for `git commit -F - <<DELIM ... DELIM` --
-# See the module docstring, "v4 -- heredoc-body scrub", for the full
-# design. Group 1 is the opener up through `<<DELIM` (kept verbatim in
-# the replacement); group 2/3 are the optional quote char and the
+# --- heredoc-body scrub for `git commit -F - <<DELIM ... DELIM` ---------
+# Group 1 is the opener up through `<<DELIM` (kept verbatim in the
+# replacement); group 2/3 are the optional quote char and the
 # delimiter name; group 4 is anything AFTER `<<DELIM` on the SAME line
 # (also kept verbatim -- a chained `&& echo ... >> journal` on that
 # line stays visible); group 5 is the body plus the closing delimiter
-# line (this is what gets cut).
+# line (this is what gets cut, for class (d) only -- see
+# _strip_commit_messages).
 COMMIT_HEREDOC_RE = re.compile(
     r"(<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2)([^\n]*)(\n.*?^\3\s*$)",
     re.DOTALL | re.MULTILINE,
 )
 
-# v4: a heredoc opener belonging to class (c) (`python - <<...`) is
-# excluded from the commit scrub entirely (see COMMIT_HEREDOC_RE's
-# docstring reference above). Checked by a POST-MATCH scan (the text
-# immediately before this heredoc match's own "<<"), not a lookbehind
-# -- Python's `re` has no variable-length lookbehind for `\s+`.
+# A heredoc opener belonging to class (c) (`python - <<...`) is
+# excluded from the commit scrub entirely -- such a heredoc is not a
+# commit message; scrubbing it would hide a real journal write inside a
+# `python - <<PY` body from the statement-scoped machinery below.
+# Checked by a POST-MATCH scan (the text immediately before this
+# heredoc match's own "<<"), not a lookbehind -- Python's `re` has no
+# variable-length lookbehind for `\s+`.
 _PY_HEREDOC_PREFIX_RE = re.compile(r"python\s+-\s*$", re.IGNORECASE)
 
 
 def _is_python_heredoc_opener(text: str, match) -> bool:
-    """v4: True when the literal "<<" of this heredoc match is
-    immediately preceded by "python -" (the same form PY_HEREDOC_RE
-    matches as a whole) -- such a heredoc is not a commit message; the
-    commit scrub must not touch it."""
+    """True when the literal "<<" of this heredoc match is immediately
+    preceded by "python -" (the same form PY_HEREDOC_RE matches as a
+    whole) -- such a heredoc is not a commit message; the commit scrub
+    must not touch it."""
     pos = match.start(1)  # the position of "<<" itself (group 1 starts there)
     return bool(_PY_HEREDOC_PREFIX_RE.search(text[:pos]))
 
 
 def _heredoc_belongs_to_git_commit(text: str, match) -> bool:
-    """v4: True when this heredoc genuinely belongs to a STATEMENT
-    containing `git commit` -- finds the nearest preceding chain
+    """True when this heredoc genuinely belongs to a STATEMENT
+    containing `git commit`: finds the nearest preceding chain
     separator (`;`, `&`, `|`) before the START of the heredoc match;
     the text from there (or from the start of the command, if there is
     no separator) up to the heredoc -- "the current statement so far"
     -- must contain `git commit` (GIT_COMMIT_RE). Does not account for
-    heredocs nested inside one another (see the module docstring's
-    "v4" section, "residual limitation")."""
+    heredocs nested inside one another -- a documented residual
+    limitation."""
     start = match.start()
     prefix = text[:start]
     sep_idx = max(prefix.rfind(";"), prefix.rfind("&"), prefix.rfind("|"))
     statement_prefix = prefix[sep_idx + 1:] if sep_idx != -1 else prefix
     return bool(GIT_COMMIT_RE.search(statement_prefix))
 
-# --- v2 -- port (2): mask a git statement --------------------------------
+
+# --- mask a git statement (class (d) only) -------------------------------
 # A statement starting with `git ` plus one of the listed subcommands
 # (at the start of the command, or right after a chain separator
 # `;`/`&`/`|`/newline). Group 1 is the separator itself (or an empty
 # string at the start) -- kept UNTOUCHED in the replacement so adjacent
 # statements are not glued together; group 2 (the statement body up to
-# the next separator) is replaced with a single space. A simple negated
-# char class `[^;&|\n]*` with no nested quantifiers -- linear in the
-# length of the command, same hygiene as the other regexes in this
-# file. v3: same `-C <dir>` (0+ repetitions) allowance as GIT_COMMIT_RE
-# above.
+# the next separator) is replaced with a single space. 0+ repetitions of
+# `-C <dir>` are allowed, same as GIT_COMMIT_RE above.
 GIT_STATEMENT_RE = re.compile(
     r"(^|[;&|\n])(\s*git\s+(?:-C\s+\S+\s+)*(?:add|commit|push|diff|log|show|status)\b[^;&|\n]*)",
     re.IGNORECASE,
 )
 
-MSG_CD_PREFIX = "don't prefix cd, invoke from the repo root (command hygiene point 3)"
+MSG_CD_PREFIX = "don't cd into this repo's own root, invoke from there directly (command hygiene point 3)"
 MSG_REDIRECT_STDERR = "don't append 2>&1 (command hygiene point 3)"
 MSG_PYTHON_DASH_C = "edits/scripts go through the Edit/Write tool or a named script (command hygiene point 4)"
-# v3: class (d) promoted WARN -> BLOCK; this message now goes into
-# permissionDecisionReason (and, belt-and-suspenders, additionalContext
-# too), not a plain WARN line. Renamed BYPASS -> BLOCK to match the new
-# status; all references updated in the test twin.
 MSG_JOURNAL_BLOCK = (
     "the journal is written only via Edit/Write (command hygiene point 5); "
     "shell write to the journal blocked"
 )
-
-
-def _is_cd_prefix(command: str) -> bool:
-    if not CD_PREFIX_START_RE.match(command):
-        return False
-    return "&&" in command or ";" in command
-
-
-def _is_python_dash_c(command: str) -> bool:
-    return bool(PY_DASH_C_RE.search(command) or PY_HEREDOC_RE.search(command))
+MSG_CD_NON_ROOT_WARN = (
+    "cd/Set-Location -- a warning, not a block: the target does not look like "
+    "this repository's own root (the working directory is load-bearing there -- "
+    "e.g. a different tree/an exam kit/a nested kit install/scratchpad, or an "
+    "authorized subdirectory such as gateway, command hygiene point 2 -- there "
+    "is no 'invoke from the root' alternative for those); only an explicit cd "
+    "INTO THIS repository's own root is blocked (command hygiene point 3)"
+)
 
 
 def _strip_commit_messages(command: str) -> str:
-    """v2 port (1) -- strips the -m/--message argument of a `git commit`
-    invocation before classes (a)/(b)/(d) are evaluated: commit-message
-    TEXT (journal paths/substrings in prose, ASCII arrows containing
-    `>`) must not trigger detection on its own. Only applied when the
-    command contains `git commit`; the git add/commit paths themselves
-    are untouched -- only the message argument is stripped. An unclosed
-    quote does not match and is left as-is (fail-safe toward detection,
-    see the class (d) discussion in the module docstring).
-
-    v4: AFTER the -m/--message argument is stripped, ALSO strips a
+    """Strips -m/--message arguments of a `git commit` invocation, AND a
     commit-message HEREDOC body (`git commit -F - <<EOF ... EOF`, any
-    delimiter quoting) via COMMIT_HEREDOC_RE -- see the module
-    docstring's "v4" section for the full design: (1) the remainder of
-    the opener line AFTER `<<DELIM` is preserved verbatim
-    (`_heredoc_sub` keeps groups 1+4), only the body+closing-delimiter
-    line (group 5) is cut; (2) a heredoc opened by `python -...<<...`
-    (class (c)) is excluded from the scrub (`_is_python_heredoc_opener`);
-    (3) the scrub is scoped to a heredoc that genuinely belongs to a
-    STATEMENT containing `git commit` (`_heredoc_belongs_to_git_commit`)
-    -- a heredoc of some other statement (e.g. `python - <<'PY'` after
-    `&&`) is left untouched, its real write staying visible to the
-    existing statement-scoped machinery (`_statements`/
-    `_is_journal_bypass`)."""
+    delimiter quoting), before class (d) is evaluated: commit-message
+    TEXT (a journal path/substring in prose, `>` inside an ASCII arrow)
+    must not trigger detection on its own. Only applied when the
+    command contains `git commit`; the git add/commit paths themselves
+    are untouched -- only the message argument/heredoc body is
+    stripped. An unclosed quote does not match and is left as-is
+    (fail-safe toward detection).
+
+    The heredoc scrub cuts ONLY the body + closing delimiter line
+    (group 5) -- the remainder of the opener line AFTER `<<DELIM` is
+    preserved verbatim (`_heredoc_sub` keeps groups 1+4), so a chained
+    `&& echo ... >> journal` on the SAME line stays visible; a heredoc
+    opened by `python -...<<...` (class (c)) is excluded entirely
+    (`_is_python_heredoc_opener`); the scrub is scoped to a heredoc
+    that genuinely belongs to a STATEMENT containing `git commit`
+    (`_heredoc_belongs_to_git_commit`) -- a heredoc of some other
+    statement (e.g. `python - <<'PY'` after `&&`) is left untouched,
+    its real write staying visible to the statement-scoped machinery
+    below."""
     if not GIT_COMMIT_RE.search(command):
         return command
     stripped = COMMIT_MESSAGE_ARG_RE.sub(" ", command)
@@ -413,13 +381,11 @@ def _strip_commit_messages(command: str) -> str:
 
 
 def _mask_git_statements(command: str) -> str:
-    """v2 port (2) -- masks `git [-C <dir>] add/commit/push/diff/log/
-    show/status ...` statements (git is not a journal writer) before
-    class (d) is evaluated; see the module docstring for ordering
-    relative to _strip_commit_messages and the known residual gap
+    """Masks `git [-C <dir>] add/commit/push/diff/log/show/status ...`
+    statements (git is not a journal writer) before class (d) is
+    evaluated -- see the module docstring's known residual gap
     (show/diff with a redirect that REALLY overwrites the journal via
-    git plumbing -- accepted, not preemptively closed). v3: also
-    recognizes `-C <dir>` between "git" and the subcommand."""
+    git plumbing -- accepted, not preemptively closed)."""
     return GIT_STATEMENT_RE.sub(lambda m: m.group(1) + " ", command)
 
 
@@ -427,41 +393,39 @@ _STATEMENT_SPLIT_RE = re.compile(r"[;&|\n]")
 
 
 def _statements(scrubbed: str) -> list[str]:
-    """v3 -- splits the already-scrubbed (git-masked) command into
-    shell statements on the same separators GIT_STATEMENT_RE uses
-    (`;`/`&`/`|`/newline), see the "STATEMENT SCOPING" section of the
-    module docstring. `&&`/`||` produce an empty element between the
-    two separators -- harmless (matches none of the checks below)."""
+    """Splits the already-scrubbed (git-masked) command into shell
+    statements on the same separators GIT_STATEMENT_RE uses
+    (`;`/`&`/`|`/newline) -- see the module docstring's "STATEMENT
+    SCOPING". `&&`/`||` produce an empty element between the two
+    separators -- harmless (matches none of the checks below)."""
     return _STATEMENT_SPLIT_RE.split(scrubbed)
 
 
 def _has_journal_target(text: str) -> bool:
-    """v3 -- class (d)'s target, widened: the literal substring
-    "routing-log" (case-insensitive, as before) OR any `logs/*.jsonl`
-    path (case-insensitive, new -- see the "TARGET WIDENED" section of
-    the module docstring)."""
+    """Class (d)'s target: the literal substring "routing-log"
+    (case-insensitive) OR any `logs/*.jsonl` path (case-insensitive)."""
     return "routing-log" in text.lower() or bool(JOURNAL_JSONL_UNDER_LOGS_RE.search(text))
 
 
 def _mask_quoted_segments(text: str) -> str:
-    """v3 -- a quoted `>` (e.g. the argument string of
-    `grep -c ">" <journal>`, read-only) is not a shell redirect and
-    must not count as a write form. Blanks out single/double-quoted
-    segments (the double-quote branch mirrors COMMIT_MESSAGE_ARG_RE's
-    already-proven char class) before the redirect check only -- the
-    other write indicators (printf/echo/sed -i/tee/open-write-mode)
-    still run on the UNMASKED text. An unclosed quote does not match
-    and is left unmasked (fail-safe toward detection, same principle
-    as the rest of the file)."""
+    """A quoted `>` (e.g. the argument string of `grep -c ">" <journal>`,
+    read-only) is not a shell redirect and must not count as a write
+    form; a quoted ` 2>&1` is likewise argument data, not a real
+    redirect. Blanks out single/double-quoted segments (the
+    double-quote branch mirrors COMMIT_MESSAGE_ARG_RE's already-proven
+    char class). An unclosed quote does not match and is left unmasked
+    (fail-safe toward detection, same principle as the rest of this
+    file)."""
     return QUOTED_SEGMENT_RE.sub(lambda m: " " * len(m.group(0)), text)
 
 
 def _has_write_form(text: str) -> bool:
-    """v3 -- shell WRITE forms: redirect `>`/`>>`, printf/echo (as
-    before), + sed -i (in-place), tee, python open(...,'w'/'a'/'x')
-    (new, see the module docstring). The redirect `>` check runs on
-    text with quotes masked (_mask_quoted_segments) -- a quoted `>`
-    (argument data, not a shell redirect) no longer counts."""
+    """Shell WRITE forms for class (d): redirect `>`/`>>`, printf/echo,
+    sed -i (in-place), tee, python open(...,'w'/'a'/'x'), and the
+    PowerShell write cmdlets (Add-Content/Set-Content/Out-File). The
+    redirect `>` check runs on text with quotes masked
+    (_mask_quoted_segments) -- a quoted `>` no longer counts; the other
+    indicators run on the UNMASKED text."""
     redirect_check_text = _mask_quoted_segments(text)
     return bool(
         ">" in redirect_check_text
@@ -469,15 +433,16 @@ def _has_write_form(text: str) -> bool:
         or SED_INPLACE_RE.search(text)
         or TEE_RE.search(text)
         or OPEN_WRITE_MODE_RE.search(text)
+        or _PS_WRITE_CMDLET_RE.search(text)
     )
 
 
 def _is_journal_bypass(command: str) -> bool:
-    """v3 -- STATEMENT-SCOPED (was: checked the whole scrubbed command
-    without regard to separators, see the "STATEMENT SCOPING" section
-    of the module docstring). Triggers only when ONE AND THE SAME
-    statement carries both the target (_has_journal_target) and a
-    write form (_has_write_form)."""
+    """STATEMENT-SCOPED: triggers only when ONE AND THE SAME statement
+    carries both the target (_has_journal_target) and a write form
+    (_has_write_form) -- see the module docstring's "STATEMENT
+    SCOPING" (e.g. `cat logs/routing-log.jsonl; echo done` does NOT
+    trigger -- echo there writes nothing to the journal)."""
     scrubbed = _mask_git_statements(_strip_commit_messages(command))
     return any(
         _has_journal_target(stmt) and _has_write_form(stmt)
@@ -485,27 +450,237 @@ def _is_journal_bypass(command: str) -> bool:
     )
 
 
-def _collect_warn_classes(command: str) -> list[str]:
-    """Classes (a)/(b)/(c) -- pure WARN, evaluated on the ORIGINAL
-    (unscrubbed) command, unchanged by the v3 port."""
-    triggered = []
-    if _is_cd_prefix(command):
-        triggered.append(MSG_CD_PREFIX)
-    if " 2>&1" in command:
-        triggered.append(MSG_REDIRECT_STDERR)
-    if _is_python_dash_c(command):
-        triggered.append(MSG_PYTHON_DASH_C)
-    return triggered
+# --- class (b): ` 2>&1` via quote-masking, no interpreter list ----------
+# See the module docstring, "Determinism principle" / "Class (b)", for
+# the full design and the rationale for replacing an earlier
+# interpreter-name list with quote-masking (a list cannot enumerate
+# every interpreter/quoting form; quoting itself is universal).
+
+
+def _collect_redirect_signal(command: str) -> dict:
+    """Computes `present`/`certain` for class (b) on the QUOTE-MASKED
+    (via `_mask_quoted_segments`, the same function class (d) uses --
+    not a second implementation) text -- see the module docstring's
+    "Class (b)" for the three branches (absent / present+heredoc-
+    ambiguous / present+certain)."""
+    masked = _mask_quoted_segments(command)
+    present = " 2>&1" in masked
+    if not present:
+        return {"present": False, "certain": False}
+    ambiguous_heredoc = "<<" in masked
+    return {"present": True, "certain": not ambiguous_heredoc}
+
+
+# --- class (a): cd/Set-Location target parsing + repo-root check --------
+# See the module docstring, "Class (a): repo-root only", for the full
+# design.
+
+_CD_PREFIX_VERB_RE = re.compile(r"^\s*(?:cd|Set-Location)\b", re.IGNORECASE)
+_CD_PREFIX_PATH_FLAG_RE = re.compile(r"\s*-(?:Literal)?Path\b", re.IGNORECASE)
+_CD_PREFIX_QUOTED_TARGET_RE = re.compile(r"\s*(\"(?:[^\"\\]|\\.)*\"|'[^']*')")
+_CD_PREFIX_BARE_TARGET_RE = re.compile(r"\s*([^\s&;|]+)")
+
+
+def _extract_cd_prefix_target(command: str) -> str | None:
+    """Parses the target of a cd/Set-Location prefix: skips an optional
+    `-Path`/`-LiteralPath` PowerShell flag, then reads the target --
+    quoted (up to the paired closing quote, including any spaces
+    inside) or bare (up to a space/`&`/`;`/`|`). Returns the RAW
+    substring (quotes included, if any), or None if this is not a
+    cd/Set-Location prefix with a non-empty argument at all (the same
+    boundary _is_cd_prefix uses -- "cd"/"Set-Location" with no
+    argument, "cd&&..." with no space -- is not a target)."""
+    verb_m = _CD_PREFIX_VERB_RE.match(command)
+    if not verb_m:
+        return None
+    pos = verb_m.end()
+    if pos >= len(command) or not command[pos].isspace():
+        return None
+    flag_m = _CD_PREFIX_PATH_FLAG_RE.match(command, pos)
+    if flag_m:
+        pos = flag_m.end()
+    qm = _CD_PREFIX_QUOTED_TARGET_RE.match(command, pos)
+    if qm:
+        return qm.group(1)
+    bm = _CD_PREFIX_BARE_TARGET_RE.match(command, pos)
+    if bm:
+        return bm.group(1)
+    return None
+
+
+def _cd_prefix_target_basename(command: str) -> str | None:
+    """The basename of a cd/Set-Location prefix's target (separators/
+    quotes/a trailing slash normalized) -- None if there is no target
+    at all, or it is empty after normalization."""
+    raw_target = _extract_cd_prefix_target(command)
+    if raw_target is None:
+        return None
+    target = raw_target.strip("\"'")
+    if not target:
+        return None
+    normalized = target.replace("\\", "/").rstrip("/")
+    if not normalized:
+        return None
+    return normalized.split("/")[-1]
+
+
+_REPO_ROOT_NAME = Path(__file__).resolve().parents[1].name
+
+
+def _is_cd_to_repo_root(command: str) -> bool:
+    """True when a cd/Set-Location prefix in `command` targets THIS
+    repository's own root (by basename). Does not itself check for a
+    continuation (`&&`/`;`/newline) -- the caller (`_is_cd_prefix`)
+    already guarantees something real follows the cd before asking
+    about its target."""
+    basename = _cd_prefix_target_basename(command)
+    return basename is not None and basename.lower() == _REPO_ROOT_NAME.lower()
+
+
+# A newline is a THIRD, equal continuation separator alongside `&&`/`;`
+# (a command of the form `cd "<root>"\ngit status` -- a newline with NO
+# `&&`/`;` anywhere -- would otherwise evade detection entirely). A
+# BARE `cd <root>` with no continuation at all -- OR with only a single
+# trailing newline and nothing real after it -- must stay legal: it is
+# the only way back to the root once a session's working directory has
+# already legitimately shifted (see the module docstring's "Class (a)"
+# for why forbidding the bare return would be self-defeating). Known
+# limitation, NOT addressed here: cd-to-root that is NOT the first
+# statement of the command (e.g. `pwd; cd <root> && ...`) is not
+# detected at all -- the position anchor (CD_PREFIX_START_RE.match)
+# only looks at the absolute start of the command.
+_CD_PREFIX_CONTINUATION_RE = re.compile(r"(?:&&|;|\n)(.*)$", re.DOTALL)
+
+
+def _is_cd_prefix(command: str) -> bool:
+    if not CD_PREFIX_START_RE.match(command):
+        return False
+    m = _CD_PREFIX_CONTINUATION_RE.search(command)
+    if not m:
+        return False
+    return bool(m.group(1).strip())
+
+
+def _is_python_dash_c(command: str) -> bool:
+    return bool(PY_DASH_C_RE.search(command) or PY_HEREDOC_RE.search(command))
+
+
+def _collect_signals(command: str) -> dict:
+    """The single point of computation for ALL signals -- used both by
+    decide() (assembling the JSON response below) and by
+    permission_audit.classify_hygiene (a measurement tool must walk the
+    exact same logic the gate does) -- one computation, not two
+    independently maintained copies. Returns BOOLEAN signals (not
+    ready-made messages/ordering/deny-vs-warn -- that assembly stays
+    with decide()).
+
+      - `journal` -- class (d), on the RAW command (plus PS write
+        forms, see _has_write_form).
+      - `cd` -- ANY cd/Set-Location prefix with a real continuation
+        (newline counts as a third separator, see _is_cd_prefix) -- the
+        broader signal, useful to a measurement tool even when the
+        target isn't the repo root.
+      - `cd_to_repo_root` -- a NARROWER signal (the target IS this
+        repo's own root) -- THIS ONE decides BLOCK vs WARN for class
+        (a) below; unaffected by quote/heredoc ambiguity (class (a)'s
+        determinism comes from position, not quoting -- see the module
+        docstring).
+      - `redirect` -- ` 2>&1` present on the quote-masked text -- ANY
+        presence, for measurement.
+      - `redirect_certain` -- `redirect` AND no `<<` on that same
+        masked text -- THIS ONE decides BLOCK vs WARN for class (b).
+      - `pyc` -- class (c), on the RAW command -- always WARN, never
+        promoted to BLOCK."""
+    cd_hit = _is_cd_prefix(command)
+    redirect_signal = _collect_redirect_signal(command)
+    return {
+        "journal": _is_journal_bypass(command),
+        "cd": cd_hit,
+        "cd_to_repo_root": cd_hit and _is_cd_to_repo_root(command),
+        "redirect": redirect_signal["present"],
+        "redirect_certain": redirect_signal["certain"],
+        "pyc": _is_python_dash_c(command),
+    }
+
+
+def _classify(command: str) -> tuple[int, dict | None]:
+    """Assembles the JSON response from `_collect_signals` (see its
+    docstring for what each signal means). See the module docstring for
+    the full per-class BLOCK/WARN/silent rules.
+
+    Fixed ORDER when several classes fire at once: journal -> cd ->
+    2>&1. `permissionDecisionReason` is the FIRST BLOCK reason in that
+    order; `additionalContext` (belt-and-suspenders) lists ALL BLOCK
+    reasons in that order, then all remaining WARN reasons, as one
+    string."""
+    signals = _collect_signals(command)
+    journal_hit = signals["journal"]
+    cd_hit = signals["cd"]
+    cd_to_repo_root = signals["cd_to_repo_root"]
+    redirect_present = signals["redirect"]
+    redirect_certain = signals["redirect_certain"]
+    pyc_hit = signals["pyc"]
+
+    deny_reasons = []
+    if journal_hit:
+        deny_reasons.append(MSG_JOURNAL_BLOCK)
+    if cd_to_repo_root:
+        deny_reasons.append(MSG_CD_PREFIX)
+    if redirect_certain:
+        deny_reasons.append(MSG_REDIRECT_STDERR)
+
+    warn_reasons = []
+    if cd_hit and not cd_to_repo_root:
+        warn_reasons.append(MSG_CD_NON_ROOT_WARN)
+    if redirect_present and not redirect_certain:
+        warn_reasons.append(MSG_REDIRECT_STDERR)
+    if pyc_hit:
+        warn_reasons.append(MSG_PYTHON_DASH_C)
+
+    if deny_reasons:
+        context_parts = deny_reasons + warn_reasons
+        return 0, {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": deny_reasons[0],
+                "additionalContext": "Command hygiene: " + "; ".join(context_parts),
+            }
+        }
+
+    if warn_reasons:
+        return 0, {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "additionalContext": (
+                    "Command hygiene (WARN, does not block): " + "; ".join(warn_reasons)
+                ),
+            }
+        }
+
+    return 0, None
+
+
+# --- fail-open marker ----------------------------------------------------
+MSG_FAIL_OPEN_TEMPLATE = (
+    "hygiene_gate: internal classifier error ({exc_type}), hygiene was NOT checked"
+)
 
 
 def decide(payload: dict) -> tuple[int, dict | None]:
-    """Pure logic, no I/O -- directly testable. exit_code is ALWAYS 0,
-    including on a v3 class-(d) BLOCK: the block is signalled entirely
-    via hookSpecificOutput.permissionDecision="deny" in the JSON on
-    stdout, never through the process return code (see the "BLOCK
-    MECHANISM" section of the module docstring). Returns (0, None) on
-    a silent pass, or (0, dict) where dict is ready for json.dumps on
-    stdout when at least one class matched."""
+    """Entry point -- validates the payload (a silent pass on empty/
+    malformed input), then classifies the command via `_classify`.
+    exit_code is ALWAYS 0, including on a BLOCK: the block is signalled
+    entirely via hookSpecificOutput.permissionDecision="deny" in the
+    JSON on stdout, never through the process return code.
+
+    Fail-open with a visible marker: ANY exception raised while
+    classifying is caught HERE (not only in main()), so a direct
+    decide() call in tests -- no subprocess -- also gets fail-open if a
+    monkeypatched helper raises. `permissionDecision` never appears on
+    this branch. See the module docstring's "Fail-open with a visible
+    marker" for why fail-closed and silent fail-open were both
+    rejected."""
     if not isinstance(payload, dict):
         return 0, None
 
@@ -520,43 +695,17 @@ def decide(payload: dict) -> tuple[int, dict | None]:
     if not isinstance(command, str) or not command:
         return 0, None
 
-    # v3: class (d) -- BLOCK, checked FIRST and independently of the
-    # WARN classes (a)/(b)/(c), which stay as they were.
-    #
-    # BELT-AND-SUSPENDERS (see module docstring): additionalContext
-    # ALWAYS duplicates the block reason -- if permissionDecision:
-    # "deny" turns out to be inert on a given harness build, the class
-    # degrades back into a visible warning instead of total silence.
-    # Other independently-triggered WARN classes of the same call are
-    # appended alongside (never overwrite the block reason).
-    if _is_journal_bypass(command):
-        other_warn = _collect_warn_classes(command)
-        context_parts = [MSG_JOURNAL_BLOCK] + other_warn
+    try:
+        return _classify(command)
+    except Exception as exc:  # noqa: BLE001 -- intentionally broad: see module docstring
         return 0, {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": MSG_JOURNAL_BLOCK,
-                "additionalContext": "Command hygiene: " + "; ".join(context_parts),
+                "additionalContext": MSG_FAIL_OPEN_TEMPLATE.format(
+                    exc_type=type(exc).__name__
+                ),
             }
         }
-
-    triggered = _collect_warn_classes(command)
-    if not triggered:
-        return 0, None
-
-    context = "Command hygiene (WARN, does not block): " + "; ".join(triggered)
-    # permissionDecision is deliberately absent here -- "allow" would
-    # auto-approve the very (dirty) command this hook flags, silencing
-    # the operator's own permission prompt; additionalContext still
-    # reaches the model without it, and the permission decision itself
-    # stays on the normal path.
-    return 0, {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "additionalContext": context,
-        }
-    }
 
 
 def _reconfigure_stdout_utf8():

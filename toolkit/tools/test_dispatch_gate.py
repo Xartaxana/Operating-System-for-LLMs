@@ -820,6 +820,540 @@ def test_echo_json_no_missing_given_paths_emits_no_stdout():
     assert result.stdout == ""
 
 
+# =======================================================================
+# Write-indicator discriminator: is_path_like_token /
+# owns_declaration_has_path_token, and the removal of the bare
+# "\bowns\b" alternative from WRITE_INDICATORS_RE.
+# =======================================================================
+
+
+def test_is_path_like_token_direct():
+    assert dispatch_gate.is_path_like_token("D:/repo/tools/a.py") is True
+    assert dispatch_gate.is_path_like_token("D:\\repo\\tools\\a.py") is True
+    assert dispatch_gate.is_path_like_token("/repo/tools/a.py") is True
+    assert dispatch_gate.is_path_like_token("tools/*.py") is True
+    # A bare "*" with no slash (markdown bold decoration) is NOT a path.
+    assert dispatch_gate.is_path_like_token("**Attention**:") is False
+    assert dispatch_gate.is_path_like_token("the other side.**") is False
+    # A relative path with no drive/slash prefix is not a path either
+    # (rule 11's manifest requires ABSOLUTE write paths).
+    assert dispatch_gate.is_path_like_token("tools/x.py") is False
+    assert dispatch_gate.is_path_like_token("") is False
+    assert dispatch_gate.is_path_like_token(None) is False
+
+
+def test_owns_declaration_has_path_token_canonical_forms():
+    assert dispatch_gate.owns_declaration_has_path_token(
+        "owns (ABSOLUTE write paths): D:/repo/tools/x.py"
+    ) is True
+    assert dispatch_gate.owns_declaration_has_path_token(
+        "**owns (ABSOLUTE write paths):**\n- D:/a.py\n- D:/b.py\n"
+    ) is True
+    # A bare owns: with a relative, non-path-like token is NOT a hit.
+    assert dispatch_gate.owns_declaration_has_path_token("owns: tools/x.py.") is False
+    assert dispatch_gate.owns_declaration_has_path_token("owns:") is False
+    assert dispatch_gate.owns_declaration_has_path_token("") is False
+    assert dispatch_gate.owns_declaration_has_path_token(None) is False
+
+
+def test_owns_bare_word_no_longer_a_write_indicator():
+    """The bare word "owns" appearing anywhere in the prompt (a topic
+    mention, not a real declaration) must no longer, by itself, mark a
+    builder dispatch as writing -- WRITE_INDICATORS_RE no longer
+    carries "\\bowns\\b"."""
+    assert not dispatch_gate.WRITE_INDICATORS_RE.search("let's discuss how owns works")
+    prompt = "DoD: witness present. This dispatch discusses how owns works, read-only."
+    exit_code, message = dispatch_gate.decide(_builder_payload(prompt, description="sonnet: x"))
+    assert exit_code == 0, message
+
+
+def test_owns_declaration_with_absolute_path_still_requires_manifest():
+    """An owns: declaration carrying a real absolute path token is
+    still a write indicator (via owns_declaration_has_path_token, not
+    the bare-word regex) -- a builder dispatch with such an owns line
+    but no given-marker still blocks check 2."""
+    prompt = "DoD: witness present. owns (ABSOLUTE write paths): D:/repo/tools/x.py."
+    exit_code, message = dispatch_gate.decide(_builder_payload(prompt, description="sonnet: x"))
+    assert exit_code == 2
+    assert "context manifest" in message
+
+
+def test_owns_declaration_with_absolute_path_and_given_passes():
+    prompt = (
+        "DoD: witness present. Given: the whole repo. "
+        "owns (ABSOLUTE write paths): D:/repo/tools/x.py."
+    )
+    exit_code, _ = dispatch_gate.decide(_builder_payload(prompt, description="sonnet: x"))
+    assert exit_code == 0
+
+
+# =======================================================================
+# Role-type WARN layer: declared label tier vs. the model actually
+# bound by the .claude/agents/*.md role file for subagent_type.
+# =======================================================================
+
+
+def _agent_payload(subagent_type=None, description=None, prompt="noop", cwd=None):
+    tool_input = {"prompt": prompt}
+    if subagent_type is not None:
+        tool_input["subagent_type"] = subagent_type
+    if description is not None:
+        tool_input["description"] = description
+    payload = {"tool_name": "Task", "tool_input": tool_input}
+    if cwd is not None:
+        payload["cwd"] = cwd
+    return payload
+
+
+def test_role_type_warn_known_role_family_mismatch_warns():
+    # scout.md declares model: haiku; the label declares "sonnet:".
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="sonnet: does recon")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "sonnet" in warn
+    assert "scout" in warn
+    assert "haiku" in warn
+
+
+def test_role_type_warn_known_role_family_match_silent():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="haiku: does recon")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_builder_opus_label_mismatch_warns():
+    # builder.md declares model: sonnet; the label declares "opus:".
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="builder", description="opus: fix the file")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "opus" in warn
+    assert "builder" in warn
+    assert "sonnet" in warn
+
+
+def test_role_type_warn_unknown_role_general_purpose_warns():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="general-purpose", description="opus: review the diff")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "general-purpose" in warn
+    assert "no role file" in warn
+
+
+def test_role_type_warn_unknown_role_arbitrary_string_warns():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="totally-unknown-role", description="fable: something")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "totally-unknown-role" in warn
+    assert "no role file" in warn
+
+
+def test_known_label_silent_general_purpose_same_label_warns():
+    # A pin/positive-control pair in one test: a real role file with a
+    # matching label is silent, the SAME label on an unresolvable type
+    # warns -- proving the silence above isn't a broken layer.
+    warn_critic = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="critic", description="opus: review the diff")
+    )
+    assert warn_critic == ""
+
+    warn_unknown = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="general-purpose", description="opus: review the diff")
+    )
+    assert "ROLE-TYPE WARN" in warn_unknown
+    assert "no role file" in warn_unknown
+
+
+def test_subagent_type_case_and_whitespace_variants_silent():
+    for variant in ("Builder", "BUILDER", "builder ", " Builder", "BuIlDeR"):
+        warn = dispatch_gate.role_type_warn(
+            _agent_payload(subagent_type=variant, description="sonnet: fix the file")
+        )
+        assert warn == "", f"variant {variant!r} should be silent, got {warn!r}"
+
+
+def test_subagent_type_case_mismatch_still_warns_on_real_mismatch():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="Scout", description="sonnet: does recon")
+    )
+    assert "ROLE-TYPE WARN" in warn
+
+
+# --- Quote-stripping around name:/model: frontmatter values -----------
+
+
+def test_strip_quotes_double_quotes():
+    assert dispatch_gate._strip_quotes('"scout"') == "scout"
+
+
+def test_strip_quotes_single_quotes():
+    assert dispatch_gate._strip_quotes("'sonnet'") == "sonnet"
+
+
+def test_strip_quotes_unquoted_unchanged():
+    assert dispatch_gate._strip_quotes("scout") == "scout"
+
+
+def test_strip_quotes_mismatched_quotes_unchanged():
+    assert dispatch_gate._strip_quotes("'scout\"") == "'scout\""
+
+
+def test_strip_quotes_quote_inside_value_not_stripped():
+    assert dispatch_gate._strip_quotes('sco"ut') == 'sco"ut'
+    assert dispatch_gate._strip_quotes('scout"') == 'scout"'
+    assert dispatch_gate._strip_quotes('"scout') == '"scout'
+
+
+def test_strip_quotes_too_short_unchanged():
+    assert dispatch_gate._strip_quotes('"') == '"'
+    assert dispatch_gate._strip_quotes("") == ""
+
+
+def test_quoted_name_field_now_matches_and_reveals_real_mismatch(tmp_path, monkeypatch):
+    (tmp_path / "randomname.md").write_text(
+        '---\nname: "scout"\nmodel: "haiku"\n---\n\n# scout (quoted)\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="sonnet: does recon")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "no role file" not in warn
+    assert "haiku" in warn
+
+
+def test_quoted_model_single_quotes_family_still_resolved(tmp_path, monkeypatch):
+    (tmp_path / "custom.md").write_text(
+        "---\nname: custom\nmodel: 'opus'\n---\n\n# custom\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn_match = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="custom", description="opus: review")
+    )
+    assert warn_match == ""
+    warn_mismatch = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="custom", description="sonnet: review")
+    )
+    assert "ROLE-TYPE WARN" in warn_mismatch
+    assert "opus" in warn_mismatch
+
+
+# --- Filename match takes priority over a name: field conflict --------
+
+
+def test_filename_match_takes_priority_over_name_field_conflict(tmp_path, monkeypatch):
+    (tmp_path / "scout.md").write_text(
+        "---\nname: not-scout\nmodel: sonnet\n---\n\n# scout by filename\n", encoding="utf-8"
+    )
+    (tmp_path / "other.md").write_text(
+        "---\nname: scout\nmodel: haiku\n---\n\n# scout by name field\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="sonnet: does recon")
+    )
+    assert warn == ""
+
+    warn_control = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="haiku: does recon")
+    )
+    assert "ROLE-TYPE WARN" in warn_control
+    assert "sonnet" in warn_control
+
+
+def test_builtin_harness_type_without_role_file_warns_legitimately():
+    for builtin_type in ("Explore", "statusline-setup"):
+        warn = dispatch_gate.role_type_warn(
+            _agent_payload(subagent_type=builtin_type, description="sonnet: do something")
+        )
+        assert "ROLE-TYPE WARN" in warn
+        assert "no role file" in warn
+
+
+def test_role_type_warn_documented_limitation_critic_designer_opus_indistinguishable():
+    # This kit's critic.md and designer.md both declare model: opus --
+    # the layer compares FAMILY, not function, so this pair is
+    # indistinguishable by design (documented limitation).
+    warn_critic = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="critic", description="opus: review the diff")
+    )
+    warn_designer = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="designer", description="opus: draft a spec")
+    )
+    assert warn_critic == ""
+    assert warn_designer == ""
+
+
+# --- Table of empty/absent inputs (verbatim from the port's edge table) -
+
+
+def test_role_type_warn_non_task_agent_tool_silent():
+    warn = dispatch_gate.role_type_warn({"tool_name": "Bash", "tool_input": {}})
+    assert warn == ""
+
+
+def test_role_type_warn_claude_prefix_label_silent():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="claude: does recon")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_missing_description_silent():
+    warn = dispatch_gate.role_type_warn(_agent_payload(subagent_type="scout"))
+    assert warn == ""
+
+
+def test_role_type_warn_empty_description_silent():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_description_not_string_silent():
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "scout", "prompt": "x", "description": 12345},
+    }
+    warn = dispatch_gate.role_type_warn(payload)
+    assert warn == ""
+
+
+def test_role_type_warn_description_without_model_prefix_silent():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="fix it now")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_subagent_type_missing_silent():
+    warn = dispatch_gate.role_type_warn(_agent_payload(description="opus: x"))
+    assert warn == ""
+
+
+def test_role_type_warn_subagent_type_none_silent():
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": None, "prompt": "x", "description": "opus: x"},
+    }
+    warn = dispatch_gate.role_type_warn(payload)
+    assert warn == ""
+
+
+def test_role_type_warn_subagent_type_empty_string_silent():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="", description="opus: x")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_subagent_type_whitespace_only_silent():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="   ", description="opus: x")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_subagent_type_number_silent():
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": 42, "prompt": "x", "description": "opus: x"},
+    }
+    warn = dispatch_gate.role_type_warn(payload)
+    assert warn == ""
+
+
+def test_role_type_warn_subagent_type_dict_silent():
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": {"a": 1}, "prompt": "x", "description": "opus: x"},
+    }
+    warn = dispatch_gate.role_type_warn(payload)
+    assert warn == ""
+
+
+def test_role_type_warn_payload_not_dict_silent():
+    assert dispatch_gate.role_type_warn(None) == ""
+    assert dispatch_gate.role_type_warn("not a dict") == ""
+    assert dispatch_gate.role_type_warn([1, 2, 3]) == ""
+
+
+def test_role_type_warn_tool_name_missing_silent():
+    warn = dispatch_gate.role_type_warn({"tool_input": {"subagent_type": "scout"}})
+    assert warn == ""
+
+
+def test_role_type_warn_tool_input_not_dict_silent():
+    warn = dispatch_gate.role_type_warn({"tool_name": "Task", "tool_input": "nope"})
+    assert warn == ""
+
+
+def test_role_type_warn_tool_input_missing_silent():
+    warn = dispatch_gate.role_type_warn({"tool_name": "Task"})
+    assert warn == ""
+
+
+def test_role_type_warn_huge_description_does_not_hang():
+    huge_description = "sonnet: " + ("x" * 100_000)
+    huge_prompt = "y" * 240_000
+    start = time.monotonic()
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description=huge_description, prompt=huge_prompt)
+    )
+    elapsed = time.monotonic() - start
+    assert elapsed < 5.0, f"took {elapsed:.2f}s"
+    assert "ROLE-TYPE WARN" in warn  # scout(haiku) != sonnet -- a real mismatch
+
+
+def test_role_type_warn_known_role_without_model_in_frontmatter_silent(tmp_path, monkeypatch):
+    (tmp_path / "custom.md").write_text(
+        "---\nname: custom\ntools: Read\n---\n\n# custom\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="custom", description="opus: does something")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_known_role_model_family_unrecognized_silent(tmp_path, monkeypatch):
+    (tmp_path / "custom.md").write_text(
+        "---\nname: custom\nmodel: llama-3.3-70b-versatile\n---\n\n# custom\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="custom", description="opus: does something")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_matches_by_frontmatter_name_field_not_filename(tmp_path, monkeypatch):
+    (tmp_path / "xyz.md").write_text(
+        "---\nname: mytype\nmodel: opus\n---\n\n# mytype\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="mytype", description="sonnet: does something")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "opus" in warn
+
+
+def test_role_type_warn_malformed_frontmatter_no_closing_fence_silent(tmp_path, monkeypatch):
+    (tmp_path / "broken.md").write_text(
+        "---\nname: broken\nmodel: opus\nno closing fence.\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="broken", description="sonnet: does something")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_agents_dir_missing_entirely_silent(tmp_path, monkeypatch):
+    missing_dir = tmp_path / "does_not_exist"
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", missing_dir)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="general-purpose", description="opus: x")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_agents_dir_exists_but_empty_warns_unknown(tmp_path, monkeypatch):
+    monkeypatch.setattr(dispatch_gate, "AGENTS_DIR", tmp_path)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="builder", description="opus: x")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "no role file" in warn
+
+
+def test_role_type_warn_unexpected_exception_inside_layer_fails_open(monkeypatch):
+    def _boom(subagent_type_norm):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(dispatch_gate, "_find_agent_role_model", _boom)
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="scout", description="sonnet: does recon")
+    )
+    assert warn == ""
+
+
+def test_role_type_warn_agents_dir_present_positive_control():
+    assert dispatch_gate.AGENTS_DIR.is_dir()
+
+
+# --- Invariants at the main()/subprocess level: WARN never replaces a
+# block, exit-2 branches stay unreachable to the new code, stdout stays
+# a single JSON object. ------------------------------------------------
+
+
+def test_role_type_warn_not_computed_when_gate_blocks_check1():
+    payload = _builder_payload("Just fix a typo.", description="opus: fix")
+    payload["tool_input"]["subagent_type"] = "builder"
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 2
+    assert "no DoD" in result.stderr.decode("utf-8", errors="replace")
+    assert result.stdout == b""
+
+
+def test_role_type_warn_never_sets_exit_2_or_permission_decision():
+    payload = _agent_payload(subagent_type="scout", description="sonnet: does recon")
+    payload["tool_input"]["prompt"] = "DoD: the test is green."
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    out = json.loads(result.stdout.decode("utf-8"))
+    assert "permissionDecision" not in json.dumps(out)
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert "ROLE-TYPE WARN" in ctx
+
+
+def test_both_warn_layers_fire_single_json_object_given_path_first():
+    repo_root = str(Path(__file__).resolve().parents[1])
+    payload = _agent_payload(
+        subagent_type="scout",
+        description="sonnet: recon",
+        prompt="Given: tools/fake_does_not_exist.py. Find mentions.",
+        cwd=repo_root,
+    )
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    stdout_lines = [ln for ln in result.stdout.decode("utf-8").splitlines() if ln.strip()]
+    assert len(stdout_lines) == 1, "stdout must carry exactly one JSON object"
+    out = json.loads(stdout_lines[0])
+    ctx = out["hookSpecificOutput"]["additionalContext"]
+    assert "GIVEN-PATH WARN" in ctx
+    assert "ROLE-TYPE WARN" in ctx
+    assert ctx.index("GIVEN-PATH WARN") < ctx.index("ROLE-TYPE WARN")
+
+
+def test_role_type_warn_silent_on_existing_dispatch_gate_own_test_suite_labels():
+    warn = dispatch_gate.role_type_warn(
+        _builder_payload("Fix it. DoD: test is green.", description="sonnet: fix")
+    )
+    assert warn == ""
+
+
 def test_given_path_warn_layer_exception_is_swallowed_exit_0(monkeypatch):
     """Any exception raised inside the WARN layer must be swallowed by
     main()'s belt-and-suspenders try/except -- the blocking hook must

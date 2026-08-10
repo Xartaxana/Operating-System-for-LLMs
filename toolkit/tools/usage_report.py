@@ -1,4 +1,8 @@
-"""Claude Code transcript telemetry (Delegated Task 5, D-0034).
+"""Claude Code transcript telemetry (Delegated Task 5): the operator's
+real Lead is the Claude Code subscription, and Claude Code session
+transcripts are a first-class real-traffic telemetry source alongside
+any gateway log; subscription usage is accounted at API list prices
+(a subscription is a cash discount, not a cost of zero).
 
 Reads Claude Code session transcripts (~/.claude/projects/*/*.jsonl --
 one file per session; the directory name encodes the project path),
@@ -8,7 +12,7 @@ used by the API-contour gateway, is untouched), and prints a Ledger-
 style usage report (tokens, accounted cost, cache economics) roughly
 matching gateway/metrics.py's style.
 
-PRIVACY (D-0034, unified plan section 5): this script reads only
+PRIVACY (unified plan section 5): this script reads only
 `message.model` / `message.usage` and session/turn metadata. It never
 reads message content, tool inputs/outputs, or any prompt text, and
 writes none to the database or to reports.
@@ -225,7 +229,10 @@ _TASK7_NEW_COLUMNS = ("agent_id", "agent_type")
 # only overwritten when a newly-seen line's output_tokens is strictly
 # greater. See module docstring.
 
-# Accounted API list prices, USD per token (D-0032 Rule #1, D-0034).
+# Accounted API list prices, USD per token -- accounting prices, not
+# cash prices: a free/subscription tier is a cash discount, not a cost
+# of zero (Rule #1: supervision must cost less than the savings it
+# produces, verified against accounting prices).
 # Source: Anthropic pricing, as cached in the claude-api skill
 # (SKILL.md "Current Models", cache date 2026-06-24) and cross-checked
 # against gateway/config.yaml's own anthropic/claude-fable-5 and

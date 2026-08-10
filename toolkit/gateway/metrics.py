@@ -1,6 +1,6 @@
 """Ledger: deterministic analytics over the gateway request log.
 
-ARCHITECTURE.md, "Ledger"; D-0027. Pure Python/SQL, no LLM.
+Pure Python/SQL, no LLM.
 
 Produces a daily digest: requests, tokens, cost, latency and response
 length per model per day; budget events; token-quota (sliding-window)
@@ -43,11 +43,11 @@ def categorize(prompt_text: str) -> str:
 
 
 # Categories from CATEGORY_RULES/categorize() (and the stored `category`
-# column) that DELEGATION_TABLE.md's four-state status vocabulary (D-0035)
+# column) that DELEGATION_TABLE.md's four-state status vocabulary
 # currently marks provisionally_validated or production_validated -- i.e.
 # have a delegate whose suitability has actually been checked, as opposed
 # to "estimated" (not yet checked) or "rejected" (checked and found
-# harmful). Used by R2 readiness (ROADMAP.md "Money on the table"). No
+# harmful). Used by R2 readiness. No
 # machine link to DELEGATION_TABLE.md; the drift detector is REGISTERED
 # (rule 10(c)): a calibration check diffs this frozenset against the
 # table's provisionally/production_validated rows -- statuses move ONLY
@@ -73,7 +73,7 @@ def repetition_totals(rows):
     per-model character counts (repeated prefix chars, total prompt chars)
     over consecutive same-model pairs. repetition_by_model() turns this into
     ratios; phase2_readiness's C1 aggregates the raw counts across models
-    into a single ratio (ROADMAP.md C1 names one ratio, not per-model)."""
+    into a single ratio (gate C1 names one ratio, not per-model)."""
     previous = {}
     repeated = defaultdict(int)
     total = defaultdict(int)
@@ -98,12 +98,12 @@ def repetition_by_model(rows) -> dict:
     }
 
 
-# --- Phase 2 readiness (Delegated Task 3, D-0025) ------------------------
+# --- Phase 2 readiness ----------------------------------------------------
 #
-# ROADMAP.md "Phase 2 -- Routing and Context Management Evaluation" gate
+# "Phase 2 -- Routing and Context Management Evaluation" gate
 # criteria: G1-G2 (common), R1-R5 (Router), C1-C3 (Context management).
-# Deterministic Python/SQL over requests.db (incl. its cc_usage table,
-# Delegated Task 5) and docs/SHADOW_EVALUATION_LOG.md only -- no LLM calls
+# Deterministic Python/SQL over requests.db (incl. its cc_usage table)
+# and docs/SHADOW_EVALUATION_LOG.md only -- no LLM calls
 # (spec rule 1). Every entry is one of four vocabularies, never a guessed
 # value (spec rule 2/3, Rule #1 spirit):
 #   status="met" | "not_met"          -> entry also carries "detail"
@@ -283,7 +283,7 @@ def _c2_readiness(conn: sqlite3.Connection, days: int) -> dict:
 
 
 def _r2_readiness(conn: sqlite3.Connection, days: int) -> dict:
-    """ROADMAP.md R2 ("Money on the table"): validated-delegable categories'
+    """Gate R2 ("Money on the table"): validated-delegable categories'
     share of real-traffic spend, over the G1 window. Category attribution
     prefers the stored `category` column (ground truth); NULL rows fall
     back to categorize() the same way daily_digest's categories_heuristic
@@ -349,7 +349,7 @@ def _r2_readiness(conn: sqlite3.Connection, days: int) -> dict:
 
 
 def _c3_readiness(conn: sqlite3.Connection, days: int) -> dict:
-    """ROADMAP.md C3: cache-aware truly-uncached share of real-traffic
+    """Gate C3: cache-aware truly-uncached share of real-traffic
     input-side tokens. prompt_tokens is INCLUSIVE of the cache columns
     (verified empirically): the truly-uncached paid portion of a row is
     prompt_tokens minus BOTH cache columns, not prompt_tokens alone (the
@@ -434,7 +434,7 @@ def _r1_readiness(shadow_log_path) -> dict:
 
 
 def phase2_readiness(conn: sqlite3.Connection, days: int, shadow_log_path=None) -> dict:
-    """Builds the Phase 2 readiness section: one entry per ROADMAP.md gate
+    """Builds the Phase 2 readiness section: one entry per gate
     criterion (G1, G2, R1-R5, C1-C3). See the module comment above for the
     four-status vocabulary. shadow_log_path defaults to
     docs/SHADOW_EVALUATION_LOG.md next to this repo's metrics.py (one level
@@ -465,13 +465,13 @@ def phase2_readiness(conn: sqlite3.Connection, days: int, shadow_log_path=None) 
             "status": "not_computable_yet",
             "needs": (
                 "R1-R3 satisfied first, plus a projected router operating cost"
-                " (no router built yet, D-0029)"
+                " (no router built yet)"
             ),
         },
         "R5": {
             "status": "manual_check",
             "pointer": (
-                "ROADMAP.md Router gate R5 / CURRENT_CONTEXT.md Environment"
+                "Router gate R5 criteria / CURRENT_CONTEXT.md Environment"
                 " Notes"
             ),
         },
@@ -652,7 +652,7 @@ def format_digest(digest: dict) -> str:
         )
 
     lines.append("")
-    lines.append('Phase 2 readiness (ROADMAP.md "Phase 2" gate; Delegated Task 3):')
+    lines.append('Phase 2 readiness (gate criteria G1-G2/R1-R5/C1-C3):')
     for criterion, entry in digest["phase2_readiness"].items():
         lines.append(format_phase2_line(criterion, entry))
 

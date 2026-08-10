@@ -27,12 +27,46 @@ PRICES_PER_TOKEN_USD -- they're imported from there, the single owner
 of pricing.
 """
 import argparse
-import io
 import sqlite3
 import sys
 from pathlib import Path
 
+_TOOLS_DIR = Path(__file__).resolve().parent
+if str(_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_DIR))
+
+# A DIRECT sibling-module import only -- NOT a "try tools.usage_report
+# package-style, fall back to a sibling import" pattern. This kit's
+# install tree lives inside a larger repository that ALSO carries its
+# own top-level tools/ directory with a DIFFERENTLY BEHAVING
+# usage_report.py; a bare `import tools.usage_report` can resolve
+# "tools" as an implicit namespace package rooted at the CURRENT
+# WORKING DIRECTORY (PEP 420 -- no __init__.py required) rather than
+# at this file's own directory, silently picking up the WRONG module
+# whenever the working directory happens to be that repo's root. The
+# sys.path insertion above already guarantees a sibling `from
+# usage_report import ...` resolves to THIS directory's own module
+# unambiguously -- no package-style guess is needed or safe here.
 from usage_report import CACHE_READ_MULTIPLIER, CACHE_WRITE_MULTIPLIER, PRICES_PER_TOKEN_USD
+
+# Both streams: the report prints non-ASCII text to stdout (section
+# headers, totals) -- without reconfigure, a Windows console mangles
+# it. errors="replace": a bare encoding="utf-8" leaves errors="strict"
+# -- replace removes the last chance of a ValueError on re-encoding
+# without losing diagnosability (the report prints text, not binary
+# data). Replaces an earlier ad hoc `sys.stdout =
+# io.TextIOWrapper(...)` under `if __name__ == "__main__":` -- that
+# fixed only stdout, only on a direct script run (not when the module
+# is imported), and with no errors="replace" (bare strict); keeping
+# both mechanisms at once would conflict: a TextIOWrapper with no
+# errors="replace" would FIRST rebind sys.stdout back to strict,
+# undoing the reconfigure below -- one canonical mechanism, the same
+# one used everywhere else in this tool set.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 FABLE_MODEL = "claude-fable-5"
 
@@ -147,5 +181,4 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     sys.exit(main())

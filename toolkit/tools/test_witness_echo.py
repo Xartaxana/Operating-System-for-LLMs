@@ -905,7 +905,7 @@ def test_e2e_non_builder_accepted_no_witness_check(tmp_path):
 
 
 def test_e2e_witness_payload_scoped_not_reechoed_on_later_unrelated_call(tmp_path):
-    # t-277/t-279 (ported from HQ): a WITNESS ECHO contradiction
+    # A WITNESS ECHO contradiction
     # reported on call #1 must NOT be re-echoed on a LATER, unrelated
     # call #2 that appends a different clean line -- call #2's
     # original_file already includes call #1's accepted+witness line,

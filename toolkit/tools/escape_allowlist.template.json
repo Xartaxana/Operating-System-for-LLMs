@@ -8,13 +8,18 @@
     "To use this mechanism: copy this file to escape_allowlist.json next",
     "to it, delete this '_comment' key, and replace the one example entry",
     "below with your own real escape/concession clause(s). The",
-    "'judge_prompt_pin' section below is ALREADY REAL (not a placeholder",
-    "like the example entry) -- it pins this toolkit's own",
-    "gateway/shadow_eval.py JUDGE_SYSTEM_PROMPT constant, recomputed with",
+    "'judge_prompt_pin' AND 'judge_role_pin' sections below are ALREADY",
+    "REAL (not placeholders like the example entry) -- the first pins",
+    "this toolkit's own gateway/shadow_eval.py JUDGE_SYSTEM_PROMPT",
+    "constant, recomputed with",
     "'python tools/escape_check.py --hash-judge-prompt' against this",
     "toolkit's shipped copy of that file; re-run that command and update",
     "'sha256' here in the same commit if you intentionally edit the judge",
-    "prompt.",
+    "prompt. The second pins the shipped judge role file",
+    "(.claude/agents/judge.md) to its two source constants byte-for-byte",
+    "(no hash to maintain -- the check compares live text to live text);",
+    "if you intentionally edit the judge prompt or instruction, re-copy",
+    "the fenced blocks in the role file verbatim in the same commit.",
     "",
     "Each entry hash-pins ONE permanent escape/concession clause in a",
     "carrier document (e.g. CLAUDE.md) to the decision-log section that",
@@ -49,6 +54,15 @@
     "symbol": "JUDGE_SYSTEM_PROMPT",
     "sha256": "179b700690a76bfad799123b1e70dc7d9d59d9a845886682acf77e63e56ae9e1",
     "evidence": "computed via 'python tools/escape_check.py --hash-judge-prompt' against this toolkit's shipped gateway/shadow_eval.py (2026-07-24 port batch); re-verify against your own judge-calibration protocol before relying on it for real acceptance"
+  },
+  "judge_role_pin": {
+    "role_file": ".claude/agents/judge.md",
+    "credential_source": "gateway/shadow_eval.py",
+    "credential_symbol": "JUDGE_SYSTEM_PROMPT",
+    "acceptance_source": "tools/judge_client.py",
+    "acceptance_symbol": "JUDGE_INSTRUCTION",
+    "expected_model": "sonnet",
+    "evidence": "pins this toolkit's shipped .claude/agents/judge.md to its two source constants byte-for-byte; verified by the shipped test battery (test_escape_check.py, judge_role_pin cases incl. the green path against the real role file); re-verify against your own judge-calibration protocol before relying on the judge for real acceptance"
   },
   "entries": [
     {

@@ -90,7 +90,7 @@ as-is, not changing a mechanism): use the exact phrase the gate
 recognizes, `axes: not a mechanism (<reason>)`, filling in your own
 `<reason>` (e.g. "installing the template's own shipped files").
 
-## Hook executability and liveness (both paths; D-0093)
+## Hook executability and liveness (both paths)
 
 Git runs a hook only if its file is EXECUTABLE. On Linux/macOS a hook
 committed with index mode `100644` is silently ignored: the gate
@@ -112,7 +112,7 @@ things explicitly right after step 3 of either path:
 The same rule applies to any later delivery that changes an
 executable file of the enforcement chain: the carrier ships the FULL
 target content of the file (a delta line cannot express the file's
-invariants — the `set -e` lesson of finding F-53), and the delivery
+invariants — a live incident's `set -e` lesson), and the delivery
 ends with the same probe.
 
 ## Escape allowlist (both paths)

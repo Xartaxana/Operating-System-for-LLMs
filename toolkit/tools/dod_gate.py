@@ -120,7 +120,7 @@ BLOCK_MESSAGE = (
     "and stop on green. Re-submission = a COMPLETE final report all "
     "over again (only your LAST message reaches the coordinator -- "
     "earlier text in this session is not delivered to it; a reference "
-    "back to it is not a substitute, F-49-class hazard)."
+    "back to it is not a substitute)."
 )
 
 SAFETY_SKIP_MESSAGE = (

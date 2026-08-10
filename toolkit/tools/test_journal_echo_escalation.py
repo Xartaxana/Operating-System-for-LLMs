@@ -1,13 +1,13 @@
-"""Tests for the ESCALATION ECHO layer (ported from HQ, batch B6, task 2
--- R6-escalation machine guard on the write path, workstream 3 / Phase 4
-D-0098), implemented in toolkit/tools/journal_echo.py (see its
+"""Tests for the ESCALATION ECHO layer -- an
+R6-escalation machine guard on the write path, implemented in
+toolkit/tools/journal_echo.py (see its
 "ESCALATION ECHO at write time" section for the full design).
 
 GAP (CLAUDE.md rule 6, this repo): "two `rejected` events with the same
 task_id on the same tier make escalation mandatory" had no machine
 layer on the write path -- a third same-tier retry went unchecked at
-write time. The ONLY existing detector for a miss here is the HOST's
-weekly R6-escalation calibration check (a post-hoc journal audit -- see
+write time. The ONLY existing detector for a miss here is the
+deployment's weekly R6-escalation calibration check (a post-hoc journal audit -- see
 tools/journal_echo.py's "DETECTOR REGISTRATION" comment for the exact
 pointer). This file tests the WARN-only layer this task adds (never a
 block).
@@ -362,7 +362,7 @@ def test_collect_escalation_events_not_a_dict_line_skipped():
 
 def test_format_escalation_line_contains_all_fields():
     line = je._format_escalation_line((5, "attempt", "t-042", 3), ascii_only=False)
-    assert "R6-ЗЕРКАЛО" in line  # "R6-ЗЕРКАЛО"
+    assert "ESCALATION" in line
     assert "line 5" in line
     assert "attempt 3" in line
     assert "t-042" in line
@@ -370,10 +370,8 @@ def test_format_escalation_line_contains_all_fields():
 
 
 def test_format_escalation_line_ascii_channel_replaces_dynamic_non_ascii():
-    # The static literal ("R6-ЗЕРКАЛО: ... без escalated по task_id ...")
-    # is Cyrillic, never passed through either sanitizer (the same
-    # principle build_context already establishes for its own Cyrillic
-    # static prefix -- see toolkit/tools/test_journal_echo.py); only the
+    # The static literal ("ESCALATION: ... no escalated for task_id ...")
+    # is plain ASCII, never affected by either sanitizer; only the
     # DYNAMIC part (task_id) is sanitized per channel -- a non-ASCII
     # task_id becomes '?' with ascii_only=True, stays as-is with
     # ascii_only=False.
@@ -398,14 +396,14 @@ def test_build_escalation_segment_single_event():
 def test_build_escalation_segment_exactly_five_boundary_no_more_suffix():
     events = [(i, "attempt", f"t-{i:03d}", 3) for i in range(1, je.MAX_ESCALATION_LINES + 1)]
     seg = je.build_escalation_segment(events)
-    assert seg.count("R6-ЗЕРКАЛО") == je.MAX_ESCALATION_LINES
+    assert seg.count("ESCALATION") == je.MAX_ESCALATION_LINES
     assert "more" not in seg
 
 
 def test_build_escalation_segment_beyond_boundary_six_adds_one_more():
     events = [(i, "attempt", f"t-{i:03d}", 3) for i in range(1, je.MAX_ESCALATION_LINES + 2)]
     seg = je.build_escalation_segment(events)
-    assert seg.count("R6-ЗЕРКАЛО") == je.MAX_ESCALATION_LINES
+    assert seg.count("ESCALATION") == je.MAX_ESCALATION_LINES
     assert seg.endswith("; +1 more")
 
 
@@ -468,7 +466,7 @@ def test_echo_escalation_form1_warns(tmp_path):
     assert result.returncode == 0
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
-    assert "R6-ЗЕРКАЛО" in ctx
+    assert "ESCALATION" in ctx
     assert "t-002" in ctx
 
 
@@ -493,7 +491,7 @@ def test_echo_escalation_form2_warns(tmp_path):
     assert result.returncode == 0
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
-    assert "R6-ЗЕРКАЛО" in ctx
+    assert "ESCALATION" in ctx
 
 
 def test_echo_escalation_never_blocks_no_permission_decision(tmp_path):
@@ -579,7 +577,7 @@ def test_echo_escalation_attempt3_boundary_warns(tmp_path):
     result = _run_hook(_post_tool_use_payload(journal_path))
     assert result.returncode == 0
     hook_output = _parse_stdout_json(result.stdout)
-    assert "R6-ЗЕРКАЛО" in hook_output["additionalContext"]
+    assert "ESCALATION" in hook_output["additionalContext"]
 
 
 def test_echo_escalation_critic_entry_silent(tmp_path):
@@ -709,5 +707,5 @@ def test_echo_escalation_combined_with_defect_one_context(tmp_path):
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
     assert "JOURNAL ECHO" in ctx
-    assert "R6-ЗЕРКАЛО" in ctx
-    assert "; R6-ЗЕРКАЛО" in ctx
+    assert "ESCALATION" in ctx
+    assert "; ESCALATION" in ctx

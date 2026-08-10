@@ -91,7 +91,7 @@ def _seed_db(db_path: Path, rows: list):
     conn.close()
 
 
-# ---- load_config exists-guard (a documented finding, class D-0043
+# ---- load_config exists-guard (a documented finding, the same class
 # alongside load_budgets, which already had this shape) ----
 
 
@@ -272,7 +272,7 @@ def test_usage_in_window_excludes_non_success_status(tmp_path):
 
 
 def test_usage_in_window_sums_across_multiple_dbs(tmp_path):
-    # Main requests.db + a side db (F-27: gateway/t013.db-style GATEWAY_DB_PATH
+    # Main requests.db + a side db (gateway/t013.db-style GATEWAY_DB_PATH
     # traffic burns the same provider quota and must be counted too).
     root = _seed_root(tmp_path)
     now = datetime.datetime(2026, 7, 10, 12, 0, 0)

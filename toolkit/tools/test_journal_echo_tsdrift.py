@@ -1,5 +1,5 @@
 """Tests for the TS DRIFT layer and the WITNESS ECHO staleness axis in
-tools/journal_echo.py (ported from HQ, this batch).
+tools/journal_echo.py.
 
 Self-contained, by the same convention tools/test_witness_echo.py
 already uses: this file does NOT import test_journal_echo.py (helpers
@@ -221,8 +221,8 @@ def test_detect_ts_drift_hours_old_warns_stale():
     # comparing one specific ts against one specific now). The value
     # here models a DIFFERENT, orthogonal and still-legitimate case: a
     # ts declared "5 hours ago" AT THE MOMENT a NEW line is written --
-    # itself an F-29 violation (ts must be read from the clock
-    # immediately before writing), not growing staleness of an
+    # itself a "ts must be read from the clock
+    # immediately before writing" violation, not growing staleness of an
     # already-checked line -- and must warn regardless of which base
     # version is in play. See test_echo_tsdrift_hours_old_warns_stale
     # below for the same note at the e2e level, and the "PAYLOAD-SCOPED
@@ -316,7 +316,7 @@ def test_format_ts_drift_line_future_exact_literal():
     line = je._format_ts_drift_line((2, "future", 125.0))
     assert line == (
         "TS DRIFT: line 2 event ts is 125s in the FUTURE "
-        "(F-29: ts must be read from the system clock immediately before writing)"
+        "(ts must be read from the system clock immediately before writing)"
     )
 
 
@@ -454,7 +454,7 @@ def test_echo_tsdrift_future_beyond_threshold_warns(tmp_path):
     ctx = hook_output["additionalContext"]
     assert "TS DRIFT" in ctx
     assert "FUTURE" in ctx
-    assert "F-29" in ctx
+    assert "immediately before writing" in ctx
 
 
 def test_echo_tsdrift_stale_beyond_threshold_warns(tmp_path):
@@ -469,7 +469,7 @@ def test_echo_tsdrift_stale_beyond_threshold_warns(tmp_path):
     ctx = hook_output["additionalContext"]
     assert "TS DRIFT" in ctx
     assert "STALE" in ctx
-    assert "D-0079" in ctx
+    assert "carried over from an earlier check" in ctx
 
 
 def test_echo_tsdrift_hours_old_warns_stale(tmp_path):
@@ -478,10 +478,10 @@ def test_echo_tsdrift_hours_old_warns_stale(tmp_path):
     # append, no originalFile -> falls back to HEAD-diff, which here
     # COINCIDES with the payload-scoped base: both agree "new" is
     # exactly this one line). Its ts is "5 hours ago" AT THE MOMENT OF
-    # WRITING -- a legitimate F-29 warning regardless of which base
+    # WRITING -- a legitimate warning regardless of which base
     # version is active (see the comment on
     # test_detect_ts_drift_hours_old_warns_stale above for how this
-    # differs from the t-277-class bug: GROWING staleness of an
+    # differs from the payload-scoping class of bug: GROWING staleness of an
     # ALREADY-checked line on a LATER, different call -- see the
     # regression test in the "PAYLOAD-SCOPED ECHO BASE" section below).
     journal_path = _seed_committed_journal(tmp_path)

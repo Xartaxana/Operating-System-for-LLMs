@@ -342,10 +342,10 @@ def test_build_fact_edit_file_path_for_each_edit_tool_name():
 def test_build_fact_scratchpad_path_excluded_from_edit_scope():
     payload = {
         "tool_name": "Write",
-        "cwd": "D:/Improving_AI/Operating-System-for-LLMs",
+        "cwd": "D:/repo",
         "tool_input": {
             "file_path": (
-                "C:/Users/user/AppData/Local/Temp/claude/repo/"
+                "C:/Users/someone/AppData/Local/Temp/claude/repo/"
                 "some-session-id/scratchpad/script.py"
             )
         },
@@ -387,8 +387,7 @@ def test_build_fact_normal_repo_absolute_path_not_excluded(tmp_path):
 
 
 def test_build_fact_scratchpad_word_without_cwd_no_longer_excluded():
-    # (source deployment critic t-278(b), mirrored) DIVERGENCE from
-    # prior behavior, documented not silent: a bare "scratchpad"
+    # DIVERGENCE from prior behavior, documented not silent: a bare "scratchpad"
     # substring (no cwd) no longer excludes on its own -- the criterion
     # is now solely "outside cwd", which cannot be evaluated without
     # cwd at all -- fail-safe: NOT excluded.
@@ -399,8 +398,7 @@ def test_build_fact_scratchpad_word_without_cwd_no_longer_excluded():
 
 
 def test_build_fact_repo_internal_scratchpad_named_file_not_excluded():
-    # (source deployment critic t-278(b) DoD requirement, mirrored) an
-    # in-repo path whose NAME merely contains "scratchpad" is NOT
+    # An in-repo path whose NAME merely contains "scratchpad" is NOT
     # excluded from main scope -- cwd matches the root, so "outside cwd"
     # is false, and the standalone substring branch no longer exists.
     payload = {
@@ -421,8 +419,7 @@ def test_build_fact_no_cwd_and_no_scratchpad_word_not_excluded():
 
 
 def test_is_scratchpad_path_direct_boundary_cases():
-    # (source deployment critic t-278(b), mirrored) without cwd, a
-    # "scratchpad" name is no longer enough by itself -- the criterion
+    # Without cwd, a "scratchpad" name is no longer enough by itself -- the criterion
     # is entirely "outside cwd", which cannot be evaluated without cwd
     # -> False (fail-safe).
     assert dod_track._is_scratchpad_path("C:/x/scratchpad/y.py", None) is False

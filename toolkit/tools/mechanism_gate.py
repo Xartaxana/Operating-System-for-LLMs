@@ -18,9 +18,9 @@ without git):
    message itself the line counts ONLY as its OWN separate line
    (^...$ anchor with MULTILINE, indentation by spaces allowed) --
    otherwise an inline quote of the skip syntax in the middle of the
-   message's prose would silence the whole gate (source deployment's
-   Dog range finding, D-0093); the same anchor already used by
-   TIER_LINE_RE below.
+   message's prose would silence the whole gate (a finding from a
+   sibling deployment's own commit-message review); the same anchor
+   already used by TIER_LINE_RE below.
 4. Axis block -- lines "axis N: <verdict>" for EVERY axis of the
    current docs/SIBLING_MAP.md -- looked up in the commit message PLUS
    in the staged diff of ONE file, DECISIONS.md (this template ships a
@@ -36,14 +36,36 @@ without git):
 6. Net: known homes of mechanisms in this template (CLAUDE.md,
    DECISIONS.md, docs/SIBLING_MAP.md, PROCESS/, .claude/agents/,
    .claude/skills/, BOOT.md) plus self-protection of the enforcement
-   chain itself (this file, tools/session_context.py -- the
-   SessionStart hook, .githooks/, .claude/settings.json -- editing the
-   gate or the hook registration must not bypass the gate). Wide
-   directories (tools/, gateway/) are deliberately outside the net --
-   false positives there train toward --no-verify (same tradeoff as
-   the source deployment's D-0055).
-7. Tier declaration (ported from the source deployment's D-0072,
-   mechanism 5): on the "mechanism" branch (axis block already
+   chain itself -- NAMED, one entry per script this template's OWN
+   live wiring (.claude/settings.json's hook commands, .githooks/
+   pre-commit and commit-msg) actually points at: this file, the
+   SessionStart hook (tools/session_context.py), the PreToolUse
+   Task|Agent hooks (tools/dispatch_gate.py, tools/critic_snapshot.py),
+   the PreToolUse Bash|PowerShell hook (tools/hygiene_gate.py), the
+   PostToolUse hooks (tools/dod_track.py, tools/journal_echo.py), the
+   SubagentStop hook (tools/dod_gate.py), the Stop hook
+   (tools/main_gate.py), the pre-commit hook's own scripts
+   (tools/journal_validator.py, tools/escape_check.py,
+   tools/enforcement_probe.py), plus .githooks/ and
+   .claude/settings.json themselves (editing the gate or the hook
+   registration must not bypass the gate). TRANSITIVE closure: a
+   script named directly by the wiring can itself import another
+   tools/*.py module that is NOT a hook command in its own right but
+   whose failure/corruption still changes what the wired hook does --
+   this template's tools/session_context.py imports
+   tools/preflight_quota.py and (locally, inside a function) tools/
+   wiring_check.py, and tools/journal_echo.py imports tools/
+   journal_validator.py (already named above) and tools/tier_echo.py --
+   all three reached-but-not-directly-named modules are in the net too,
+   found and verified by the self-closing AST-import-closure test
+   below (test_transitive_import_closure_of_live_wiring_is_covered_by_
+   mechanism_prefixes), not by hand-transcription. Wide directories
+   (tools/, gateway/) are deliberately outside the net as a category --
+   false positives there train toward --no-verify (the same tradeoff a
+   sibling deployment's own version of this gate already records) --
+   but every module the wiring ACTUALLY reaches, named or transitive,
+   is named individually.
+7. Tier declaration: on the "mechanism" branch (axis block already
    satisfied), the commit message must carry a SEPARATE line
    "tier: <value>" -- a self-declaration of the committer's actual
    tier, the same pattern as `dispatch_skipped`. Expected value: the
@@ -95,6 +117,32 @@ MECHANISM_PREFIXES = (
     # SessionStart hook duties are future-session obligations too.
     "tools/session_context.py",
     ".claude/settings.json",
+    # Named net, not a directory (point 6 above): every tools/*.py this
+    # template's OWN .claude/settings.json / .githooks/ actually wires
+    # in -- verified live by test_every_live_settings_hook_command_is_
+    # covered_by_mechanism_prefixes / test_every_githooks_script_
+    # reference_is_covered_by_mechanism_prefixes in the test twin. Wide
+    # directories (tools/, gateway/) stay outside the net as a category
+    # (point 6) -- naming is per-file, not per-directory.
+    "tools/dispatch_gate.py",       # PreToolUse Task|Agent hook
+    "tools/critic_snapshot.py",     # PreToolUse Task|Agent hook
+    "tools/owns_gate.py",           # PreToolUse Task|Agent hook
+    "tools/hygiene_gate.py",        # PreToolUse Bash|PowerShell hook
+    "tools/dod_track.py",           # PostToolUse hook
+    "tools/journal_echo.py",        # PostToolUse hook
+    "tools/dod_gate.py",            # SubagentStop hook
+    "tools/main_gate.py",           # Stop hook
+    "tools/journal_validator.py",   # .githooks/pre-commit
+    "tools/escape_check.py",        # .githooks/pre-commit
+    "tools/enforcement_probe.py",   # .githooks/pre-commit
+    # Transitive closure (point 6): reached by AST import from an
+    # already-named module above, not itself a direct hook command --
+    # test_transitive_import_closure_of_live_wiring_is_covered_by_
+    # mechanism_prefixes is the machine check that this list stays
+    # complete against that closure as the wiring drifts.
+    "tools/tier_echo.py",           # imported by tools/journal_echo.py
+    "tools/preflight_quota.py",     # imported by tools/session_context.py
+    "tools/wiring_check.py",        # imported by tools/session_context.py
 )
 
 # Template dependency (toolkit transfer, empirically verified against
@@ -107,7 +155,7 @@ MECHANISM_PREFIXES = (
 # commit); ported as English to match the artifact these regexes
 # actually run against.
 AXIS_HEADING_RE = re.compile(r"^##\s+Axis\s+(\d+)", re.MULTILINE)
-# Line anchor (D-0093, source deployment's Dog range): without ^...$/
+# Line anchor: without ^...$/
 # MULTILINE the phrase matched via .search() ANYWHERE in the message --
 # an inline quote of the skip syntax in the middle of prose ("...the
 # line \"axes: not a mechanism (example)\" would bypass...") silenced
@@ -183,7 +231,7 @@ def find_tier_declarations(msg: str) -> list[str]:
     spoofed/quoted matching line mask a REAL mismatched value elsewhere
     in the same message.
 
-    GUARANTEE-SCOPE CLARIFICATION (source deployment critic t-278(a) --
+    GUARANTEE-SCOPE CLARIFICATION (a sibling deployment's own review --
     docstring corrected, no code change): "ALL must pass" defends
     exactly that MULTI-LINE case (a real mismatched line plus a
     spoofing matching line next to it) -- a SINGLE-LINE spoofer (one
@@ -230,7 +278,7 @@ def decide(msg: str, block_extra: str, staged: list[str],
         return 0, ""
     if merging:
         return 0, ""
-    if SKIP_RE.search(msg):  # message only -- not looked up in the diff + own separate line only (anchor, D-0093)
+    if SKIP_RE.search(msg):  # message only -- not looked up in the diff + own separate line only (line anchor)
         return 0, ""
     if map_text is None:
         return 1, (f"axis map not found ({MAP_PATH}) -- fail-closed, "

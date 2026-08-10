@@ -61,7 +61,7 @@ greenfield ledger can be written before, or independent of, the actual
 template copy landing on disk — straight from this template plus the
 toolkit's own docs.
 
-## Kit snapshot revision (D-0091)
+## Kit snapshot revision
 
 Kit snapshot revision: `<commit/tag of the toolkit snapshot this
 ledger was last reconciled against>` — written at install, updated by
@@ -82,14 +82,16 @@ add rows freely, never remove the standard ones without recording why):
 | Kit mechanism | Status | Basis / trigger |
 |---|---|---|
 | Routing policy (CLAUDE.md core rules, Role != tier, Lead degradation, command hygiene) | | |
-| Role profiles (`.claude/agents/{scout,builder,critic,designer}.md`) | | |
+| Role profiles (`.claude/agents/{scout,builder,critic,designer,judge}.md`; judge carries the pinned prompt — see the escape-check role pin) | | |
 | Model binding (`delegation.config.yaml`) | | |
 | Routing journal + validator (`logs/routing-log.jsonl`, `tools/journal_validator.py` pre-commit, `tools/journal_echo.py` PostToolUse) | | |
 | Mechanism gate + symmetry map (`tools/mechanism_gate.py`, `.githooks/commit-msg`, `docs/SIBLING_MAP.md`) | | |
 | Tier verification / SessionStart (`tools/session_context.py`, `tools/tier_echo.py`) | | |
-| Wiring integrity check (SessionStart wiring check reconciling this ledger's adopt rows against actual hooksPath/settings — D-0092) | | |
+| Wiring integrity check (SessionStart wiring check reconciling this ledger's adopt rows against actual hooksPath/settings) | | |
 | Dispatch gate / critic snapshot (`tools/dispatch_gate.py`, `tools/critic_snapshot.py`) | | |
+| Owns gate — parallel-dispatch path-ownership overlap (`tools/owns_gate.py`, PreToolUse Task/Agent) | | |
 | Hygiene gate (`tools/hygiene_gate.py`) | | |
+| Judge role-file pin (`tools/escape_check.py` judge_role_pin leg + `tools/escape_allowlist.template.json` section) | | |
 | DoD track / gate (`tools/dod_track.py`, `tools/dod_gate.py`) | | |
 | Main gate / Stop hook (`tools/main_gate.py`) | | |
 | Calibration / usage tooling (`tools/calibration_counts.py`, `tools/savings_report.py`, `tools/usage_report.py`, `tools/preflight_quota.py`) | | |

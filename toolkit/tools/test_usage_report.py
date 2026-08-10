@@ -192,7 +192,7 @@ def test_accounted_cost_known_model():
 
 def test_accounted_cost_cache_rates_are_distinct_from_base_input():
     # cache write and cache read must NOT be priced the same as a bare
-    # input token, or D-0032's "cache write/read price distinction"
+    # input token, or the "cache write/read price distinction"
     # requirement is violated.
     base_cost, _ = accounted_cost("claude-sonnet-5", 1000, 0, 0, 0)
     write_cost, _ = accounted_cost("claude-sonnet-5", 0, 0, 1000, 0)

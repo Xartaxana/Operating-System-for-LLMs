@@ -30,6 +30,53 @@ Usage:  python tools/permission_audit.py [--minutes 120] [--all] [--session ID] 
   --all        ignore the time-window filter
   --session S  only transcripts (main + subagents) whose path contains substring S
   --summary    a grouped summary instead of the full list
+
+Hygiene-class breakdown of the permission audit -- a measurement, not
+a decision, printed only in `--summary`
+=========================================================================
+Alongside the allowlist/sandbox suspect count, `--summary` also prints
+a MEASUREMENT of how many scanned Bash/PowerShell calls tripped each of
+tools/hygiene_gate.py's own detection classes (2>&1 / cd-Set-Location /
+python -c-heredoc / a journal write bypassing Edit/Write) -- whether or
+not that call ALSO needed a permission prompt. This block is a MEASURE
+ONLY: it does not decide whether any class should move from WARN to
+BLOCK, and it does not modify tools/hygiene_gate.py itself; that
+decision, if ever made, is a separate, later move.
+
+CLASSIFICATION SOURCE -- an IMPORT of tools/hygiene_gate.py, not a
+second implementation of the same four classes (fix the class, not the
+instance): `classify_hygiene()` below calls hygiene_gate's OWN signal
+computation (`hygiene_gate._collect_signals`, the exact function
+`_classify` itself uses to assemble a real decision) -- the same
+regexes, the same scrubs (git-statement masking, -m/--message
+stripping, quote-masking before a `>`/` 2>&1` check). ACCEPTED
+LIMITATION: this measurement inherits whatever hygiene_gate itself is
+blind to -- if the gate doesn't see some write form/pattern, this audit
+doesn't either. That is the deliberate price of a single point of
+truth (one classification, not two that can drift apart), not an
+oversight of this addition.
+
+The class breakdown is printed keyed by ALL SCANNED calls (comparable
+to a measurement baseline that counted hits independently of the
+allowlist), with, in parentheses, how many of those were ALSO suspects
+(allowlist+sandbox). A single command can trip more than one class at
+once -- the sum of per-class hits can EXCEED the count of commands with
+>=1 class; the report prints both numbers explicitly rather than
+leaving the reader to add them up.
+
+ONE PASS, not two: `total`/suspects and the class counts are collected
+by a SINGLE walk of the transcripts (`collect_audit_stats`) -- two
+independent walks, each recomputing its own mtime cutoff
+(`iter_tool_calls` computes `cutoff` fresh on each call), could let a
+transcript whose mtime crosses the window boundary BETWEEN the two
+walks land in one count and fall out of the other -- exactly the
+"numbers drift" class this tool's own snapshot mechanism exists to
+prevent (see "SNAPSHOT" above). `collect_suspects`/
+`collect_hygiene_class_stats` remain as narrow wrappers over
+`collect_audit_stats` (their own public signature/return shape is
+unchanged) for any caller that only needs one of the two views; main()
+below calls `collect_audit_stats()` directly, once, since it needs
+both views consistently.
 """
 from __future__ import annotations
 
@@ -42,6 +89,24 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+_TOOLS_DIR = Path(__file__).resolve().parent
+if str(_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_DIR))
+
+# A DIRECT sibling-module import only -- NOT a "try tools.hygiene_gate
+# package-style, fall back to a sibling import" pattern. This kit's
+# install tree lives inside a larger repository that ALSO carries its
+# own top-level tools/ directory with a DIFFERENTLY BEHAVING
+# hygiene_gate.py; a bare `import tools.hygiene_gate` can resolve
+# "tools" as an implicit namespace package rooted at the CURRENT
+# WORKING DIRECTORY (PEP 420 -- no __init__.py required) rather than
+# at this file's own directory, silently picking up the WRONG module
+# whenever the working directory happens to be that repo's root. The
+# sys.path insertion above already guarantees a sibling `import
+# hygiene_gate` resolves to THIS directory's own module unambiguously
+# -- no package-style guess is needed or safe here.
+import hygiene_gate
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -80,6 +145,17 @@ def _resolve_claude_projects(repo: Path) -> Path:
 
 PROJECT_KEY = _default_project_key(REPO)
 CLAUDE_PROJECTS = _resolve_claude_projects(REPO)
+
+# Hygiene-class labels -- VERBATIM the wording of CLAUDE.md's command
+# hygiene points / tools/hygiene_gate.py's own class letters (a
+# dispatcher decision, not a builder's own phrasing choice), so this
+# report's lines line up with calibration wording without translation.
+HYGIENE_CLASS_LABELS = [
+    "2>&1",
+    "cd/Set-Location",
+    "python -c/heredoc",
+    "journal write bypassing Edit/Write",
+]
 
 # --- commands the harness auto-allows with no allowlist entry (a practical, trimmed list) ---
 AUTO_ALLOW_ANY_ARGS = {
@@ -343,6 +419,106 @@ def iter_tool_calls(minutes: float | None, session: str | None = None,
                     yield when, path.name, source, item["name"], cmd
 
 
+def _suspect_reason(tool: str, cmd: str, patterns) -> list[str] | None:
+    """The shared suspect-determination core, pulled out of
+    collect_suspects (fix the class, not the instance -- the same
+    logic is needed by collect_hygiene_class_stats below; a second copy
+    is not made). None -- the command is NOT a suspect; otherwise the
+    list of reasons (as before)."""
+    allowed = matches_allow(tool, cmd, patterns)
+    flags = sandbox_flags(cmd)
+    if (allowed and not flags) or is_auto_allowed(cmd):
+        return None
+    reason = []
+    if not allowed:
+        reason.append("no allowlist match")
+    reason += flags
+    return reason
+
+
+def classify_hygiene(command) -> list[str]:
+    """The list of hygiene classes a SINGLE command TRIPS -- classes are
+    INDEPENDENT (one command can trip several at once). Classification
+    source: an IMPORT of tools/hygiene_gate.py -- a second implementation
+    of the same regexes/scrubs here is forbidden (see the module
+    docstring's "CLASSIFICATION SOURCE"). Calls
+    `hygiene_gate._collect_signals(command)` -- the exact function
+    `_classify` itself uses to assemble a real decision -- a single
+    source of truth, not a parallel one that can drift from the gate.
+
+    `command` not a string / None / an empty string -> [] with no
+    exception -- the class is simply not counted, the script does not
+    crash."""
+    if not isinstance(command, str) or not command:
+        return []
+    signals = hygiene_gate._collect_signals(command)
+    classes = []
+    if signals["redirect"]:
+        classes.append("2>&1")
+    if signals["cd"]:
+        classes.append("cd/Set-Location")
+    if signals["pyc"]:
+        classes.append("python -c/heredoc")
+    if signals["journal"]:
+        classes.append("journal write bypassing Edit/Write")
+    return classes
+
+
+def collect_audit_stats(minutes: float | None, session: str | None = None,
+                         snapshot: list[tuple[Path, str, int]] | None = None):
+    """A SINGLE walk of `iter_tool_calls` -- suspects, total, AND the
+    hygiene class counts are collected from the SAME sample in ONE
+    iteration, with the mtime cutoff (computed inside `iter_tool_calls`
+    on first use of the generator) happening EXACTLY ONCE.
+
+    Two INDEPENDENT walks (each calling `iter_tool_calls(...)` afresh,
+    each recomputing `cutoff = time.time() - minutes * 60` on its own)
+    could let a transcript whose mtime crosses the window boundary
+    BETWEEN the two walks land in one count and fall out of the other --
+    exactly the "numbers drift" class this tool's own transcript
+    snapshot exists to prevent (see the module docstring's
+    "SNAPSHOT"/refinement (a)). Especially inappropriate for a
+    MEASUREMENT tool (the hygiene-class breakdown): incomparable
+    `total` and class counts would defeat any comparison against a
+    calibration baseline.
+
+    The single entry point for main(): one pass over
+    `iter_tool_calls(minutes, session, snapshot)`, `total`/`suspects`/
+    class counts all accumulated in ONE loop body over the same
+    `when/agent/tool/cmd`. `collect_suspects`/
+    `collect_hygiene_class_stats` below remain as narrow wrappers
+    (their own public signature/return shape unchanged) -- but each
+    still makes its OWN separate call here, i.e. its OWN separate walk
+    -- a caller that needs BOTH sets of numbers at once and consistent
+    (main(), the only such caller in this file) must call
+    `collect_audit_stats()` directly, once, rather than both getters
+    separately; main() below is written that way.
+
+    Returns (suspects, total, class_counts, class_suspect_counts,
+    any_class_count) -- the same value shapes the two functions had
+    separately, just from one pass."""
+    patterns = load_allow_patterns()
+    suspects = []
+    total = 0
+    class_counts = {label: 0 for label in HYGIENE_CLASS_LABELS}
+    class_suspect_counts = {label: 0 for label in HYGIENE_CLASS_LABELS}
+    any_class_count = 0
+    for when, fname, agent, tool, cmd in iter_tool_calls(minutes, session, snapshot):
+        total += 1
+        reason = _suspect_reason(tool, cmd, patterns)
+        is_suspect = reason is not None
+        if is_suspect:
+            suspects.append((when, agent, tool, cmd, reason))
+        classes = classify_hygiene(cmd)
+        if classes:
+            any_class_count += 1
+            for c in classes:
+                class_counts[c] += 1
+                if is_suspect:
+                    class_suspect_counts[c] += 1
+    return suspects, total, class_counts, class_suspect_counts, any_class_count
+
+
 def collect_suspects(minutes: float | None, session: str | None = None,
                       snapshot: list[tuple[Path, str, int]] | None = None):
     """Run every tool_use through the allowlist + sandbox heuristics.
@@ -352,22 +528,40 @@ def collect_suspects(minutes: float | None, session: str | None = None,
     manual permission prompt. Pulled out of main() as a separate pure
     function so unit tests can check the filtering without parsing
     stdout.
-    """
-    patterns = load_allow_patterns()
-    suspects = []
-    total = 0
-    for when, fname, agent, tool, cmd in iter_tool_calls(minutes, session, snapshot):
-        total += 1
-        allowed = matches_allow(tool, cmd, patterns)
-        flags = sandbox_flags(cmd)
-        if (allowed and not flags) or is_auto_allowed(cmd):
-            continue
-        reason = []
-        if not allowed:
-            reason.append("no allowlist match")
-        reason += flags
-        suspects.append((when, agent, tool, cmd, reason))
+
+    A narrow wrapper over `collect_audit_stats` (see its docstring) --
+    signature and return shape are unchanged. Calling this function on
+    its own is still a separate walk; main() does NOT call this
+    function (see collect_audit_stats), to avoid walking twice."""
+    suspects, total, *_rest = collect_audit_stats(minutes, session, snapshot)
     return suspects, total
+
+
+def collect_hygiene_class_stats(minutes: float | None, session: str | None = None,
+                                 snapshot: list[tuple[Path, str, int]] | None = None):
+    """Run ALL scanned calls (not only suspects -- otherwise the
+    measurement is not comparable to a calibration baseline that
+    counted hits independently of the allowlist) through
+    classify_hygiene().
+
+    Returns (class_counts, class_suspect_counts, any_class_count):
+      - class_counts: {class: N} -- the number of HITS of the class
+        among all scanned calls (double-counted: a command with two
+        classes increments both);
+      - class_suspect_counts: {class: N} -- the same count, but only
+        for calls that are ALSO suspects (the same criterion as
+        collect_suspects, the shared _suspect_reason core);
+      - any_class_count: the number of COMMANDS (not hits) that tripped
+        at least one class -- the sum of class_counts.values() can
+        EXCEED this number when one command trips more than one class.
+
+    A narrow wrapper over `collect_audit_stats` (see its docstring) --
+    signature and return shape are unchanged. Calling this function on
+    its own is still a separate walk; main() does NOT call this
+    function (see collect_audit_stats)."""
+    _suspects, _total, class_counts, class_suspect_counts, any_class_count = (
+        collect_audit_stats(minutes, session, snapshot))
+    return class_counts, class_suspect_counts, any_class_count
 
 
 def main(argv=None):
@@ -395,7 +589,14 @@ def main(argv=None):
         print()
 
     snapshot = snapshot_transcripts(args.session)
-    suspects, total = collect_suspects(minutes, args.session, snapshot)
+    # A SINGLE call to collect_audit_stats: total, suspects, AND the
+    # hygiene-class counts all come from ONE pass over the same
+    # snapshot/mtime cutoff (see its docstring). Do NOT call
+    # collect_suspects + collect_hygiene_class_stats separately here --
+    # that would reintroduce exactly the bug collect_audit_stats fixes
+    # (two independent walks, numbers drifting between them).
+    suspects, total, class_counts, class_suspect_counts, any_class_count = (
+        collect_audit_stats(minutes, args.session, snapshot))
 
     print(f"Scanned Bash/PowerShell calls: {total}"
           + ("" if minutes is None else f" (in the last {minutes:g} min)")
@@ -417,6 +618,16 @@ def main(argv=None):
         for r, n in by_reason.most_common():
             print(f"  {n:4d}  {r}")
             print(f"        example: {examples[r]}")
+
+        # A measurement, not a decision (see the module docstring): a
+        # DIFFERENT sample (all scanned calls, not only suspects), but
+        # from the SAME pass as total/suspects above -- the header says
+        # so explicitly so the reader doesn't add incompatible numbers
+        # from the blocks above.
+        print("\nBy hygiene class (all scanned calls; in parens -- how many of them are suspects):")
+        for label in HYGIENE_CLASS_LABELS:
+            print(f"  {class_counts[label]:4d}  {label}  (suspects: {class_suspect_counts[label]})")
+        print(f"  commands with >=1 class: {any_class_count}")
     else:
         for when, agent, tool, cmd, reason in suspects:
             t = datetime.fromtimestamp(when, tz=timezone.utc).strftime("%H:%M:%S") if when else "--:--:--"

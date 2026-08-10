@@ -132,7 +132,7 @@ def parse_ts(ts: str) -> datetime.datetime:
 
 
 def load_config(root: Path) -> dict:
-    """A documented finding (class D-0043, alongside load_budgets right
+    """A documented finding (the same class alongside load_budgets right
     below): a missing config.yaml used to raise FileNotFoundError from
     the bare open() call. Harmless for this file's own CLI (main()
     below already wraps its call in a targeted try/except), but a real
@@ -238,7 +238,7 @@ def resolve_target(config: dict, alias: str):
 
 def discover_dbs(root: Path) -> list:
     """Every *.db directly under root that has a `requests` table
-    (F-27: side DBs count too). Sorted for deterministic output.
+    (side DBs count too). Sorted for deterministic output.
 
     N5 sibling fix (found while testing the usage_in_window fix, not in
     the spec's own line range): this schema check is itself a read and
@@ -436,7 +436,7 @@ def probe(alias: str, proxy_url: str = "http://localhost:4000/v1/chat/completion
     """Sends ONE minimal request through the live proxy (network -- only
     called from main() when --probe is passed; never called by tests).
     Tags the call traffic_kind=synthetic so it does not pollute 'real'
-    accounting (D-0033 convention, sqlite_logger.py)."""
+    accounting (see sqlite_logger.py's convention)."""
     body = {
         "model": alias,
         "messages": [{"role": "user", "content": "ping"}],
@@ -527,14 +527,14 @@ def format_text(report: dict) -> str:
                 f" Requested={pp.get('requested')} retry_in={pp.get('retry_after_text')}"
             )
             if recon:
-                # N3 / OpenClaw p.2: explicit ledger-vs-provider reconciliation
+                # explicit ledger-vs-provider reconciliation
                 # line, always printed when the probe found off-ledger delta --
                 # not just implied by the (possibly bumped) used_tokens total.
                 lines.append(
                     f"  RECONCILIATION: provider Used={recon['provider_used']} tok,"
                     f" local sum={recon['local_used']} tok, delta={recon['delta']} tok"
                     " (off-ledger traffic our db does not see; provider number"
-                    " used for the verdict above, F-27)"
+                    " used for the verdict above)"
                 )
             elif pp["used"] != report["local_used_tokens"]:
                 lines.append(

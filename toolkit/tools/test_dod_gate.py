@@ -1014,11 +1014,11 @@ def test_echo_json_malformed_json_fails_open():
     assert result.stderr == ""
 
 
-# ---- BLOCK_MESSAGE carries an F-49-class re-submission hint ----
+# ---- BLOCK_MESSAGE carries a re-submission hint ----
 
 
 def test_block_message_names_resubmission_is_a_full_report():
-    # F-49 class: only the LAST message reaches the coordinator -- a
+    # Only the LAST message reaches the coordinator -- a
     # re-submission after this block must redeliver the whole report,
     # not point back at an earlier one. The exact wording is this
     # toolkit's own (not a byte-for-byte copy of any other repo's

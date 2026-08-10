@@ -209,7 +209,7 @@ def test_daily_digest_quota_events_excludes_old_rows(conn):
     assert digest["quota_events"] == []
 
 
-# --- Phase 2 readiness (Delegated Task 3) ---------------------------------
+# --- Phase 2 readiness -----------------------------------------------------
 
 # Mirrors the ACTUAL docs/SHADOW_EVALUATION_LOG.md layout: an H1
 # "# Shadow Evaluation Log" at the top of its own file, not a subsection of

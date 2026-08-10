@@ -524,8 +524,7 @@ def test_startup_banner_reports_enabled_when_flag_true(capsys, monkeypatch):
 
 def test_failure_error_truncated_when_raw_text_logging_disabled(db, monkeypatch):
     """At raw-off (default), a long multi-line error is cut to the first
-    200 chars of its first line, with the truncation suffix appended --
-    docs/tasks/2026-07-20_toolkit-release-v040.md queue item 3.
+    200 chars of its first line, with the truncation suffix appended.
 
     Calls log_failure_event directly (rather than routing a string
     through litellm's mock_response) so the exact error text under test

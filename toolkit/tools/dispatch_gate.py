@@ -28,11 +28,16 @@ Checks (blocking gate):
     DoD marker (DOD_MARKERS_RE). None found -> BLOCK
     (BLOCK_MESSAGE_NO_DOD).
  2. subagent_type == "builder" AND the prompt shows a write indicator
-    (WRITE_INDICATORS_RE) -- a conservative heuristic: block ONLY
-    when a write indicator is present AND BOTH manifest markers
-    (MANIFEST_GIVEN_RE and MANIFEST_OWNS_RE) are missing -> BLOCK
-    (BLOCK_MESSAGE_NO_MANIFEST). No write indicator -> check 2 is
-    skipped entirely (a read-only dispatch needs no manifest).
+    -- a conservative heuristic: block ONLY when a write indicator is
+    present AND BOTH manifest markers (MANIFEST_GIVEN_RE and
+    MANIFEST_OWNS_RE) are missing -> BLOCK (BLOCK_MESSAGE_NO_MANIFEST).
+    No write indicator -> check 2 is skipped entirely (a read-only
+    dispatch needs no manifest). The write indicator is EITHER a match
+    of WRITE_INDICATORS_RE (four write verbs -- see "Write-indicator
+    discriminator" below for why the bare word "owns" is NOT one of
+    them any more) OR owns_declaration_has_path_token(prompt) -- an
+    owns: declaration that actually carries a path-like token, not
+    just the bare word.
  3. ANY subagent_type (including critic/scout): tool_input["description"],
     IF PRESENT, must start with a leading token followed by a
     separator ([ :-]) -- LABEL_MODEL_PREFIX_RE below. This is a FORM
@@ -72,6 +77,81 @@ internal space, and no realistic filename/token in this repo's basket
 contains that exact sequence of words as a false-positive substring,
 so adding \\b there would be an unmotivated widening of the class the
 substring bugs above actually belong to.
+
+--- Write-indicator discriminator (owns as a path, not as a word) ---
+Earlier, WRITE_INDICATORS_RE carried a bare "\\bowns\\b" alternative:
+the WORD "owns" appearing anywhere in the prompt (a read-only recon
+dispatch discussing the owns mechanism itself, a quote of rule 11, a
+mention of this very file's name) counted as a write indicator. That
+is too coarse: the word "owns" as a topic is not the same fact as a
+prompt that actually DECLARES an owns path. "\\bowns\\b" is REMOVED
+from WRITE_INDICATORS_RE; a writing dispatch is now detected either by
+one of the four write verbs, or by owns_declaration_has_path_token()
+below finding a real path-like token attached to an "owns" marker.
+
+is_path_like_token(tok) -- a single, shared predicate for "does this
+token look like a real path": a Windows absolute path (drive letter +
+":" + slash), a POSIX absolute path (leading "/"), or a glob carrying
+BOTH "*" and a slash. A bare "*" with no slash (e.g. markdown
+"**bold**") is deliberately NOT a path -- a naive "any token with a
+`*`" predicate would treat ordinary bold-text markup in a manifest
+paragraph as a path token.
+
+owns_declaration_has_path_token(prompt) -- the write predicate used by
+check 2: True when the prompt carries at least one "owns" marker
+(word-bounded) with at least one real path-like token either on the
+SAME line after the marker, or on the line immediately below it (a
+one-line lookahead: an "owns:" header followed by the actual path on
+the next line, the same shape this repo's own manifests commonly use).
+A bare "owns" mention with no attached path token anywhere nearby is
+NOT a write indicator.
+
+--- Role-type WARN layer (declared tier vs. loaded agent role) ------
+A SEPARATE, informational-only layer, symmetric with the given-path
+layer below: it never blocks (never returns exit 2, never adds a
+permissionDecision), it only adds text to additionalContext, and only
+when decide() has already returned (0, ""). Motivation: the dispatch
+label's leading token (LABEL_MODEL_PREFIX_RE) is a self-declared tier
+("opus: review the diff"), but the tier ACTUALLY applied to the
+worker session is whatever role file loads for tool_input's
+subagent_type -- and those two facts can silently diverge (a
+subagent_type with no matching role file at all, e.g. "general-
+purpose", runs with no role instructions loaded even though its label
+claims a specific tier).
+
+role_type_warn(payload) resolves subagent_type against
+`.claude/agents/*.md` in THIS repo (AGENTS_DIR, a fixed path relative
+to this script's own location, not to payload["cwd"] -- the agent
+role files are a fixed asset of this deployment, not something named
+in dispatch text): a role file's STEM (filename without ".md") or its
+frontmatter `name:` field, matched case-insensitively with surrounding
+quotes stripped, identifies the role; filename match takes priority
+over a `name:` field match (closer to how the harness itself resolves
+subagent_type -> role file). The role file's frontmatter `model:`
+field gives its bound model; the same substring family heuristic used
+elsewhere in this tool set (haiku/sonnet/opus/fable) reduces it to a
+tier family and compares that against the label's declared family.
+
+Edges (all silent, no WARN): description absent/not a string/empty;
+a label with the "claude" prefix (no family can be inferred);
+subagent_type absent/not a string/blank; the `.claude/agents/`
+directory itself missing entirely (a fresh checkout with no role
+files yet -- this layer is purely informational, warning on every
+single dispatch in that state would be noise with no corresponding
+enforcement value); a role file found but with no `model:` line
+(a known role with an unstated model -- not the same fact as "role
+unknown"); a `model:` value that doesn't resolve to a known family
+(e.g. a bare "claude" or a custom id); families that match. A role
+file that IS found for the subagent_type, but whose declared family
+differs from the label -- WARN (mismatch). No role file found at all
+for a real subagent_type -- WARN (unknown role). Any exception inside
+this layer is swallowed -- fail-open, the same posture as
+given_path_warn().
+
+Two WARNs in one call are joined into ONE additionalContext string
+("\\n\\n"-joined, given-path first, role-type second) -- the harness
+parses a hook's response as a single JSON object, so two separate
+JSON blobs on stdout would not both be read.
 
 --- Given-path WARN layer -------------------------------------------
 A NEW, independent layer on top of the blocking gate above: exit-2
@@ -133,6 +213,12 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
+
+# Fixed asset of this deployment -- see the module docstring,
+# "Role-type WARN layer": the path is relative to this script's own
+# location, not to payload["cwd"].
+AGENTS_DIR = Path(__file__).resolve().parents[1] / ".claude" / "agents"
 
 DOD_MARKERS_RE = re.compile(
     r"\bDoD\b|acceptance criteria|критери[ия] приёмки|\bwitness\b|"
@@ -141,9 +227,13 @@ DOD_MARKERS_RE = re.compile(
 )
 # \b-bounded so a marker only matches as a whole word -- otherwise a
 # short Cyrillic root like "правь" would also match as a substring
-# inside unrelated longer words (e.g. "поправь", "исправь").
+# inside unrelated longer words (e.g. "поправь", "исправь"). "owns" is
+# deliberately NOT one of these alternatives any more -- see the module
+# docstring, "Write-indicator discriminator", for why the bare word is
+# too coarse a signal and what replaces it
+# (owns_declaration_has_path_token below).
 WRITE_INDICATORS_RE = re.compile(
-    r"\bowns\b|\bwrite file\b|\bcreate file\b|\bedit file\b|\bmodify file\b|"
+    r"\bwrite file\b|\bcreate file\b|\bedit file\b|\bmodify file\b|"
     r"\bзапиши\b|\bсоздай файл\b|\bправь\b|\bизмени файл\b",
     re.IGNORECASE,
 )
@@ -160,6 +250,85 @@ MANIFEST_OWNS_RE = re.compile(r"\bowns\b", re.IGNORECASE)
 # fixed list of model/tier names -- this template doesn't know a
 # deployment's actual bindings.
 LABEL_MODEL_PREFIX_RE = re.compile(r"^\S+[ :-]")
+
+# --- Write-indicator discriminator: a shared "is this a path token"
+# predicate -- see the module docstring, "Write-indicator
+# discriminator", for the full contract and rationale.
+_PATH_TOKEN_WIN_ABS_RE = re.compile(r"^[A-Za-z]:[\\/]")
+_PATH_TOKEN_POSIX_ABS_RE = re.compile(r"^/")
+
+
+def is_path_like_token(tok) -> bool:
+    """The single, shared predicate for "does this token look like a
+    path": a Windows absolute path (drive letter + ":" + slash), a
+    POSIX absolute path (leading "/"), or a glob carrying BOTH "*" and
+    a slash ("/" or "\\"). A bare "*" with no slash (e.g. markdown
+    "**bold**") is NOT a path -- see the module docstring for the
+    false-positive this excludes."""
+    if not isinstance(tok, str) or not tok:
+        return False
+    if _PATH_TOKEN_WIN_ABS_RE.match(tok) or _PATH_TOKEN_POSIX_ABS_RE.match(tok):
+        return True
+    return "*" in tok and ("/" in tok or "\\" in tok)
+
+
+# A closed set of manifest section headers (given/дано, owns,
+# non-goals, handoff) -- used only to know where an owns declaration's
+# CONTINUATION line ends, so the one-line lookahead below does not
+# wander into the next manifest section.
+_OWNS_SECTION_STOP_RE = re.compile(
+    r"^\s*(?:\*\*)?(given|дано|owns|non-goals|handoff)\b", re.IGNORECASE
+)
+# After the "owns" marker, when the marker's own line carries no path:
+# "this is a declaration, not prose" only when what follows is, at
+# most, an optional parenthetical note plus separator punctuation
+# (colon/dash/asterisks/quotes/spaces) up to the end of the line.
+_OWNS_MARKER_JUNK_ONLY_RE = re.compile(r"^(?:\s*\([^)]*\))?[\s*:\-—«»\"']*$")
+_OWNS_DECLARATION_PREFIX_RE = re.compile(r"^\s*(?:[-*•]\s+)?(?:\*\*)?$")
+_OWNS_TOKEN_SPLIT_RE = re.compile(r"[;,\s]+")
+_OWNS_TOKEN_EDGE_STRIP = "\"'`()[]{}«»„“”.,:-"
+
+
+def _owns_region_has_path_token(text: str) -> bool:
+    for raw in _OWNS_TOKEN_SPLIT_RE.split(text):
+        tok = raw.strip(_OWNS_TOKEN_EDGE_STRIP)
+        if is_path_like_token(tok):
+            return True
+    return False
+
+
+def owns_declaration_has_path_token(prompt: str) -> bool:
+    """The write predicate used by check 2 (see the module docstring,
+    "Write-indicator discriminator"): True when the prompt carries at
+    least one "owns" marker (MANIFEST_OWNS_RE, word-bounded) with at
+    least one real path-like token (is_path_like_token) either on the
+    SAME line after the marker, or on the line immediately below it (a
+    one-line lookahead: an "owns:" header followed by the actual path
+    on the next line)."""
+    if not isinstance(prompt, str) or not prompt:
+        return False
+    lines = prompt.splitlines()
+    for i, line in enumerate(lines):
+        m = MANIFEST_OWNS_RE.search(line)
+        if not m:
+            continue
+        if _owns_region_has_path_token(line[m.end():]):
+            return True
+        prefix = line[: m.start()]
+        remainder = line[m.end():]
+        if not _OWNS_DECLARATION_PREFIX_RE.match(prefix):
+            continue
+        if not _OWNS_MARKER_JUNK_ONLY_RE.match(remainder):
+            continue
+        if i + 1 >= len(lines):
+            continue
+        cont = lines[i + 1]
+        if cont.strip() == "" or _OWNS_SECTION_STOP_RE.match(cont):
+            continue
+        if _owns_region_has_path_token(cont):
+            return True
+    return False
+
 
 BLOCK_MESSAGE_NO_DOD = (
     "A builder dispatch with no DoD does not go out (rule 11): add "
@@ -192,7 +361,14 @@ def decide(payload: dict) -> tuple[int, str]:
         if not DOD_MARKERS_RE.search(prompt):
             return 2, BLOCK_MESSAGE_NO_DOD
 
-        if WRITE_INDICATORS_RE.search(prompt):
+        # The write signal is EITHER one of the four write verbs OR an
+        # owns: declaration that actually carries a path-like token --
+        # see the module docstring, "Write-indicator discriminator":
+        # the bare word "owns" alone is no longer sufficient.
+        is_write = bool(WRITE_INDICATORS_RE.search(prompt)) or owns_declaration_has_path_token(
+            prompt
+        )
+        if is_write:
             has_manifest = bool(MANIFEST_GIVEN_RE.search(prompt)) and bool(
                 MANIFEST_OWNS_RE.search(prompt)
             )
@@ -340,6 +516,181 @@ def given_path_warn(payload: dict) -> str:
     return format_given_path_warn(missing)
 
 
+# --- Role-type WARN layer -------------------------------------------
+# See the module docstring, "Role-type WARN layer", for the full
+# design rationale. Symmetric with the given-path layer above: does
+# NOT participate in decide() and does not change the exit code --
+# called ONLY from main(), ONLY when decide() has already returned
+# (0, "").
+
+ROLE_TYPE_WARN_MISMATCH = (
+    "ROLE-TYPE WARN: the dispatch label declares tier '{declared_family}', "
+    "but the role file .claude/agents/ for subagent_type='{subagent_type}' "
+    "declares model: {bound_model} (family '{bound_family}') -- "
+    "a type<->tier mismatch."
+)
+ROLE_TYPE_WARN_UNKNOWN_ROLE = (
+    "ROLE-TYPE WARN: no role file in .claude/agents/ for type "
+    "'{subagent_type}' -- the declared tier '{declared_family}' is not "
+    "backed by any loaded role."
+)
+
+_FAMILY_NAMES = ("fable", "opus", "sonnet", "haiku")
+# A non-greedy variant of LABEL_MODEL_PREFIX_RE's leading-token check,
+# local to this layer: LABEL_MODEL_PREFIX_RE itself (`^\S+[ :-]`,
+# greedy) is used unchanged by check 3 above and must not be touched;
+# this layer additionally needs the FIRST separator's position (a
+# lazy `\S+?` stops at the first match rather than backtracking from
+# the end) to read out the leading token itself, not just confirm one
+# exists.
+_LABEL_LEADING_TOKEN_RE = re.compile(r"^(\S+?)[ :-]")
+_FRONTMATTER_BLOCK_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---", re.DOTALL)
+_FRONTMATTER_NAME_RE = re.compile(r"^name:\s*(\S+)", re.MULTILINE)
+_FRONTMATTER_MODEL_RE = re.compile(r"^model:\s*(\S+)", re.MULTILINE)
+
+
+def _model_family(model_id) -> str | None:
+    """The same substring heuristic used elsewhere in this tool set for
+    a bound model's tier family -- implemented locally (this layer
+    does not import any other gate module for it)."""
+    if not isinstance(model_id, str) or not model_id:
+        return None
+    low = model_id.lower()
+    for fam in _FAMILY_NAMES:
+        if fam in low:
+            return fam
+    return None
+
+
+def _strip_quotes(token: str) -> str:
+    """Strips EXACTLY one pair of surrounding quotes (single or
+    double) from a captured token. YAML frontmatter legally writes
+    `name: "scout"` / `model: 'sonnet'`; \\S+ captures the quotes
+    literally, and an exact comparison against a quoted value would
+    otherwise never match. A quote INSIDE the value (not on both edges
+    at once) is left untouched -- the condition requires the first and
+    last character to match."""
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in ("'", '"'):
+        return token[1:-1]
+    return token
+
+
+def _read_frontmatter(path: Path):
+    """The text of the frontmatter block (between the first and second
+    "---" line) of a role file, or None -- the file is unreadable OR
+    no frontmatter is anchored there (no opening/closing "---"). Any
+    read exception is swallowed here -- see the module docstring,
+    "Role-type WARN layer", "Edges"."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None
+    m = _FRONTMATTER_BLOCK_RE.match(text)
+    return m.group(1) if m else None
+
+
+def _model_of(frontmatter) -> str | None:
+    """The frontmatter's model: value (quotes stripped), None if there
+    is no model: line."""
+    m2 = _FRONTMATTER_MODEL_RE.search(frontmatter)
+    return _strip_quotes(m2.group(1).strip()) if m2 else None
+
+
+def _find_agent_role_model(subagent_type_norm: str):
+    """subagent_type_norm is already .strip().lower(). Returns (True,
+    model|None) when a `.claude/agents/*.md` file is found whose
+    filename (without ".md") OR frontmatter `name:` field matches
+    case-insensitively (surrounding quotes stripped); (False, None) --
+    no file matched. model is that file's frontmatter model: value
+    (None if the frontmatter is unreadable/unanchored/has no model:
+    line) -- "a known role with no stated model" is not the same fact
+    as "role unknown".
+
+    PRIORITY: an exact FILENAME match resolves FIRST, before any
+    `name:` field match -- closer to how the harness itself resolves
+    subagent_type (matched against the FILENAME in the agents
+    directory). The `name:` match is tried ONLY if no file in the
+    directory matched by filename."""
+    candidates = sorted(AGENTS_DIR.glob("*.md"))
+
+    for path in candidates:
+        if path.stem.strip().lower() == subagent_type_norm:
+            frontmatter = _read_frontmatter(path)
+            if frontmatter is None:
+                return True, None
+            return True, _model_of(frontmatter)
+
+    for path in candidates:
+        frontmatter = _read_frontmatter(path)
+        if frontmatter is None:
+            continue
+        m = _FRONTMATTER_NAME_RE.search(frontmatter)
+        if m and _strip_quotes(m.group(1).strip()).lower() == subagent_type_norm:
+            return True, _model_of(frontmatter)
+
+    return False, None
+
+
+def role_type_warn(payload: dict) -> str:
+    """"" -- nothing to warn about (payload isn't Task/Agent, required
+    fields absent/not strings, a "claude:" label, the .claude/agents/
+    directory missing, a known role with no model: in its frontmatter,
+    or families matching). Otherwise the ready-made WARN text (a
+    type<->tier mismatch OR a subagent_type with no role file). See the
+    module docstring, "Role-type WARN layer", for the full contract.
+    Wrapped entirely in try/except -- fail-open on ANY exception, the
+    same posture as the rest of this file's WARN layers."""
+    try:
+        if not isinstance(payload, dict):
+            return ""
+        tool_name = payload.get("tool_name")
+        if tool_name not in ("Task", "Agent"):
+            return ""
+        tool_input = payload.get("tool_input") or {}
+        if not isinstance(tool_input, dict):
+            return ""
+        subagent_type = tool_input.get("subagent_type")
+        if not isinstance(subagent_type, str) or not subagent_type.strip():
+            return ""
+        description = tool_input.get("description")
+        if not isinstance(description, str) or not description:
+            return ""
+        if not LABEL_MODEL_PREFIX_RE.search(description):
+            return ""
+        token_m = _LABEL_LEADING_TOKEN_RE.match(description)
+        if not token_m:
+            return ""
+        declared_family = token_m.group(1).lower()
+        if declared_family not in _FAMILY_NAMES:
+            # Not a recognized tier family (e.g. "claude:", a custom
+            # label token) -- no family to compare, silent.
+            return ""
+        if not AGENTS_DIR.is_dir():
+            # The directory is missing entirely (a fresh checkout) --
+            # silent, see the module docstring, "Edges".
+            return ""
+
+        subagent_type_norm = subagent_type.strip().lower()
+        role_known, bound_model = _find_agent_role_model(subagent_type_norm)
+        if not role_known:
+            return ROLE_TYPE_WARN_UNKNOWN_ROLE.format(
+                subagent_type=subagent_type, declared_family=declared_family
+            )
+        if not bound_model:
+            return ""
+        bound_family = _model_family(bound_model)
+        if bound_family is None or bound_family == declared_family:
+            return ""
+        return ROLE_TYPE_WARN_MISMATCH.format(
+            declared_family=declared_family,
+            subagent_type=subagent_type,
+            bound_model=bound_model,
+            bound_family=bound_family,
+        )
+    except Exception:
+        return ""
+
+
 def _reconfigure_stderr_utf8():
     try:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -377,20 +728,28 @@ def main() -> int:
         sys.stderr.write(message + "\n")
         return 2
 
-    # Given-path WARN layer: only considered when the gate itself did
-    # NOT block (see the module docstring, "Given-path WARN layer");
-    # try/except is belt-and-suspenders -- this layer must never crash
-    # the blocking hook with a traceback.
+    # Both WARN layers are considered only when the gate itself did NOT
+    # block (see the module docstrings, "Given-path WARN layer" /
+    # "Role-type WARN layer"); try/except on EACH is belt-and-
+    # suspenders -- neither layer must ever crash the blocking hook
+    # with a traceback. Given-path first, role-type second (fixed
+    # order, see "Role-type WARN layer" -- two WARNs in one call").
     try:
-        warn = given_path_warn(payload)
+        warn_given = given_path_warn(payload)
     except Exception:
-        warn = ""
-    if warn:
+        warn_given = ""
+    try:
+        warn_role = role_type_warn(payload)
+    except Exception:
+        warn_role = ""
+
+    warn_parts = [w for w in (warn_given, warn_role) if w]
+    if warn_parts:
         _reconfigure_stdout_utf8()
         output = {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
-                "additionalContext": warn,
+                "additionalContext": "\n\n".join(warn_parts),
             }
         }
         sys.stdout.write(json.dumps(output, ensure_ascii=False) + "\n")

@@ -151,16 +151,43 @@ def _default_judge_pin(tmp_path, source_name=JUDGE_PROMPT_FIXTURE_SOURCE_NAME,
     }
 
 
+_OMIT_JUDGE_ROLE_PIN = object()
+
+
+def _default_judge_role_pin(tmp_path, role_file_name="judge.md"):
+    """Writes a valid judge_role_pin fixture (role file + its two source
+    files) into tmp_path and returns a matching judge_role_pin section
+    dict -- mirrors _default_judge_pin()'s role for judge_prompt_pin.
+    _write_allowlist() below wires this in by default so every
+    pre-existing, judge-role-pin-agnostic test in this file stays green
+    under the mandatory section, the same way _default_judge_pin already
+    does for judge_prompt_pin. References _write_role_source_files()/
+    _good_role_text()/_write_role_file()/_role_pin(), all defined later
+    in this file in the judge_role_pin section -- resolved at call time
+    (module fully loaded before any test runs), not at definition time,
+    so the forward reference is safe."""
+    _write_role_source_files(tmp_path)
+    _write_role_file(tmp_path, _good_role_text(), name=role_file_name)
+    return _role_pin(role_file=role_file_name)
+
+
 def _write_allowlist(tmp_path, entries, name="allowlist.json",
-                      judge_prompt_pin=_OMIT_JUDGE_PIN):
-    """judge_prompt_pin: omit (default) for a valid auto-generated pin,
-    None to omit the section entirely (tests the "section absent" case),
-    or an explicit dict to test a broken/custom pin section."""
+                      judge_prompt_pin=_OMIT_JUDGE_PIN,
+                      judge_role_pin=_OMIT_JUDGE_ROLE_PIN):
+    """judge_prompt_pin/judge_role_pin: omit (default) for a valid
+    auto-generated pin, None to omit the section entirely (tests the
+    "section absent" case -- both sections are MANDATORY, so None means
+    "expect run_validate() to fail closed on this one"), or an explicit
+    dict to test a broken/custom pin section."""
     if judge_prompt_pin is _OMIT_JUDGE_PIN:
         judge_prompt_pin = _default_judge_pin(tmp_path)
+    if judge_role_pin is _OMIT_JUDGE_ROLE_PIN:
+        judge_role_pin = _default_judge_role_pin(tmp_path)
     root = {"entries": entries}
     if judge_prompt_pin is not None:
         root["judge_prompt_pin"] = judge_prompt_pin
+    if judge_role_pin is not None:
+        root["judge_role_pin"] = judge_role_pin
     p = tmp_path / name
     p.write_bytes(json.dumps(root, ensure_ascii=False).encode("utf-8"))
     return p
@@ -576,9 +603,12 @@ def test_empty_entries_is_ok_zero(tmp_path):
 
 def test_cli_empty_entries_prints_ok_zero(tmp_path):
     pin = _default_judge_pin(tmp_path)
+    role_pin = _default_judge_role_pin(tmp_path)
     allowlist = tmp_path / "escape_allowlist.json"
     allowlist.write_bytes(
-        json.dumps({"entries": [], "judge_prompt_pin": pin}).encode("utf-8")
+        json.dumps(
+            {"entries": [], "judge_prompt_pin": pin, "judge_role_pin": role_pin}
+        ).encode("utf-8")
     )
     ok, errors, count = ec.run_validate(str(allowlist), str(tmp_path))
     assert ok and count == 0
@@ -1028,3 +1058,485 @@ def test_template_shape_passes_once_placeholders_are_replaced(tmp_path):
     ok, errors, count = ec.run_validate(str(allowlist), str(tmp_path))
     assert ok, errors
     assert count == 1
+
+
+# ---------------------------------------------------------------------------
+# judge_role_pin: pins .claude/agents/judge.md's two fenced blocks
+# (CREDENTIAL = gateway/shadow_eval.py's JUDGE_SYSTEM_PROMPT, ACCEPTANCE =
+# tools/judge_client.py's JUDGE_INSTRUCTION) and its frontmatter "model:"
+# field, byte-for-byte, DIRECT comparison (no stored hash -- see module
+# docstring "JUDGE ROLE FILE PIN"). MANDATORY, same fail-closed class as
+# judge_prompt_pin: the section's ABSENCE is itself a violation. No test in
+# this section touches the real .claude/agents/judge.md except the one
+# dedicated live-tree check below; every other test builds its own isolated
+# tmp_path fixture.
+# ---------------------------------------------------------------------------
+
+REAL_ROLE_FILE_REL = os.path.join(".claude", "agents", "judge.md")
+
+ROLE_CREDENTIAL_SOURCE_NAME = "role_credential_source.py"
+ROLE_CREDENTIAL_SYMBOL = "JUDGE_SYSTEM_PROMPT"
+ROLE_CREDENTIAL_TEXT_CONST = "fixture credential prompt, single line, no embedded newline."
+
+ROLE_ACCEPTANCE_SOURCE_NAME = "role_acceptance_source.py"
+ROLE_ACCEPTANCE_SYMBOL = "JUDGE_INSTRUCTION"
+ROLE_ACCEPTANCE_TEXT_CONST = "fixture acceptance instruction, single line, no embedded newline."
+
+
+def _write_role_source_files(tmp_path, credential_text=ROLE_CREDENTIAL_TEXT_CONST,
+                              acceptance_text=ROLE_ACCEPTANCE_TEXT_CONST):
+    (tmp_path / ROLE_CREDENTIAL_SOURCE_NAME).write_bytes(
+        ('JUDGE_SYSTEM_PROMPT = "%s"\n' % credential_text).encode("utf-8")
+    )
+    (tmp_path / ROLE_ACCEPTANCE_SOURCE_NAME).write_bytes(
+        ('JUDGE_INSTRUCTION = "%s"\n' % acceptance_text).encode("utf-8")
+    )
+
+
+def _good_role_text(model="sonnet", credential_text=ROLE_CREDENTIAL_TEXT_CONST,
+                     acceptance_text=ROLE_ACCEPTANCE_TEXT_CONST, newline="\n"):
+    text = (
+        "---\n"
+        "name: judge\n"
+        "description: fixture judge role\n"
+        "model: %s\n"
+        "tools: Read\n"
+        "---\n"
+        "\n"
+        "# judge fixture\n"
+        "\n"
+        "```judge-credential-block\n"
+        "%s\n"
+        "```\n"
+        "\n"
+        "```judge-acceptance-block\n"
+        "%s\n"
+        "```\n"
+    ) % (model, credential_text, acceptance_text)
+    if newline != "\n":
+        text = text.replace("\n", newline)
+    return text
+
+
+def _write_role_file(tmp_path, text, name="judge.md"):
+    p = tmp_path / name
+    p.write_bytes(text.encode("utf-8"))
+    return p
+
+
+def _role_pin(role_file="judge.md",
+              credential_source=ROLE_CREDENTIAL_SOURCE_NAME,
+              credential_symbol=ROLE_CREDENTIAL_SYMBOL,
+              acceptance_source=ROLE_ACCEPTANCE_SOURCE_NAME,
+              acceptance_symbol=ROLE_ACCEPTANCE_SYMBOL,
+              expected_model="sonnet", evidence="fixture pin", **overrides):
+    base = {
+        "role_file": role_file,
+        "credential_source": credential_source,
+        "credential_symbol": credential_symbol,
+        "acceptance_source": acceptance_source,
+        "acceptance_symbol": acceptance_symbol,
+        "expected_model": expected_model,
+        "evidence": evidence,
+    }
+    base.update(overrides)
+    return base
+
+
+def _setup_good_role_tree(tmp_path, **role_text_kwargs):
+    _write_role_source_files(tmp_path)
+    _write_role_file(tmp_path, _good_role_text(**role_text_kwargs))
+    return _role_pin()
+
+
+# --- MANDATORY: absence fails closed, the same class as judge_prompt_pin's
+#     own "missing required section" contract. ------------------------------
+
+
+def test_judge_role_pin_absent_section_fails_closed(tmp_path):
+    root = {"entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert errors == ["missing required section: judge_role_pin"]
+
+
+def test_judge_role_pin_removed_from_allowlist_fails_run_validate(tmp_path):
+    # Deleting the section from an otherwise-valid, fully-wired allowlist
+    # MUST fail the run -- a pin whose absence is silent is a pin a single
+    # deletion turns off unnoticed.
+    carrier, decision = _make_tree(tmp_path)
+    digest = _real_digest(DECISION_TEXT, "D-0001")
+    entry = _entry(section_sha256=digest)
+    allowlist = _write_allowlist(tmp_path, [entry], judge_role_pin=None)
+    ok, errors, count = ec.run_validate(str(allowlist), str(tmp_path))
+    assert not ok
+    assert any("missing required section: judge_role_pin" in e for e in errors)
+
+
+def test_judge_role_pin_present_by_default_keeps_positional_result(tmp_path):
+    # companion to the removal test above: the section IS present (via
+    # _write_allowlist()'s auto-injected default, mirroring judge_prompt_pin's
+    # own default) -- run_validate() stays green, same as every pre-existing
+    # green-path test in this file now implicitly re-verifies.
+    carrier, decision = _make_tree(tmp_path)
+    digest = _real_digest(DECISION_TEXT, "D-0001")
+    entry = _entry(section_sha256=digest)
+    allowlist = _write_allowlist(tmp_path, [entry])
+    ok, errors, count = ec.run_validate(str(allowlist), str(tmp_path))
+    assert ok, errors
+    assert count == 1
+
+
+def test_judge_role_pin_empty_dict_fails_with_all_missing_fields(tmp_path):
+    # section present but an EMPTY dict -- distinct from both "not an
+    # object" (wrong type) and "one field missing".
+    root = {"judge_role_pin": {}, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert len(errors) == len(ec.JUDGE_ROLE_PIN_FIELDS)
+    for field in ec.JUDGE_ROLE_PIN_FIELDS:
+        assert any("missing required field: %s" % field in e for e in errors)
+
+
+def test_judge_role_pin_missing_section_message_distinct_from_drift_message(tmp_path):
+    # "missing section" and "value mismatch/drift" must be textually
+    # distinguishable -- different causes need different fixes.
+    missing_errors = ec.check_judge_role_pin({"entries": []}, str(tmp_path))
+    assert missing_errors == ["missing required section: judge_role_pin"]
+
+    pin = _setup_good_role_tree(tmp_path)
+    drifted = ROLE_CREDENTIAL_TEXT_CONST.replace("credential", "CREDENTIAL")
+    _write_role_file(tmp_path, _good_role_text(credential_text=drifted))
+    root = {"judge_role_pin": pin, "entries": []}
+    drift_errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert not any("missing required section" in e for e in drift_errors)
+    assert any("does not match" in e for e in drift_errors)
+    assert set(missing_errors).isdisjoint(set(drift_errors))
+
+
+# --- green path against the REAL role file on its live path (test seam on
+#     check_judge_role_pin() with an in-test root dict, not a live
+#     allowlist.json -- this toolkit ships none) ----------------------------
+
+
+def test_judge_role_pin_green_path_against_real_role_file():
+    pin = _role_pin(
+        role_file=REAL_ROLE_FILE_REL,
+        credential_source="gateway/shadow_eval.py",
+        credential_symbol="JUDGE_SYSTEM_PROMPT",
+        acceptance_source="tools/judge_client.py",
+        acceptance_symbol="JUDGE_INSTRUCTION",
+        expected_model="sonnet",
+        evidence="live role-file liveness probe against this toolkit's shipped sources",
+    )
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(REPO_ROOT))
+    assert errors == []
+
+
+# --- green path on a synthetic fixture tree --------------------------------
+
+
+def test_judge_role_pin_green_path_synthetic(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert errors == []
+
+
+# --- drift: one character changed in each block ----------------------------
+
+
+def test_judge_role_pin_credential_drift_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    drifted = ROLE_CREDENTIAL_TEXT_CONST.replace("credential", "CREDENTIAL")
+    _write_role_file(tmp_path, _good_role_text(credential_text=drifted))
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "credential block in role file does not match" in e for e in errors
+    )
+
+
+def test_judge_role_pin_acceptance_drift_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    drifted = ROLE_ACCEPTANCE_TEXT_CONST.replace("acceptance", "ACCEPTANCE")
+    _write_role_file(tmp_path, _good_role_text(acceptance_text=drifted))
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "acceptance block in role file does not match" in e for e in errors
+    )
+
+
+# --- block absent / duplicated / empty / unterminated ----------------------
+
+
+def test_judge_role_pin_credential_block_missing_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    text = _good_role_text().replace(
+        "```judge-credential-block\n%s\n```\n\n" % ROLE_CREDENTIAL_TEXT_CONST, ""
+    )
+    _write_role_file(tmp_path, text)
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "credential block (marker 'judge-credential-block') not found" in e
+        for e in errors
+    )
+
+
+def test_judge_role_pin_acceptance_block_duplicated_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    text = _good_role_text() + (
+        "\n```judge-acceptance-block\nsecond copy\n```\n"
+    )
+    _write_role_file(tmp_path, text)
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "acceptance block (marker 'judge-acceptance-block') appears more than once" in e
+        for e in errors
+    )
+
+
+def test_judge_role_pin_credential_block_empty_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    _write_role_file(tmp_path, _good_role_text(credential_text=""))
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "credential block (marker 'judge-credential-block') is empty" in e
+        for e in errors
+    )
+
+
+def test_judge_role_pin_credential_block_unterminated_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    text = (
+        "---\nname: judge\nmodel: sonnet\n---\n\n"
+        "```judge-credential-block\n%s\n" % ROLE_CREDENTIAL_TEXT_CONST
+    )  # no closing fence at all
+    _write_role_file(tmp_path, text)
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "credential block (marker 'judge-credential-block') fence is not closed" in e
+        for e in errors
+    )
+
+
+# --- trailing-newline decision: a stray blank line before the closing fence
+#     becomes part of the compared content and MUST fail (documented
+#     decision: nothing is stripped) ----------------------------------------
+
+
+def test_judge_role_pin_trailing_blank_line_before_fence_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    text = _good_role_text().replace(
+        "```judge-credential-block\n%s\n```" % ROLE_CREDENTIAL_TEXT_CONST,
+        "```judge-credential-block\n%s\n\n```" % ROLE_CREDENTIAL_TEXT_CONST,
+    )
+    _write_role_file(tmp_path, text)
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "credential block in role file does not match" in e for e in errors
+    )
+
+
+# --- frontmatter: absent / no model field / model mismatch -----------------
+
+
+def test_judge_role_pin_no_frontmatter_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    text = "# no frontmatter here\n\n" + _good_role_text().split("---\n", 2)[-1]
+    _write_role_file(tmp_path, text)
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "role file has no frontmatter block" in e for e in errors
+    )
+
+
+def test_judge_role_pin_frontmatter_missing_model_field_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    text = _good_role_text().replace("model: sonnet\n", "")
+    _write_role_file(tmp_path, text)
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "role file frontmatter has no 'model' field" in e for e in errors
+    )
+
+
+def test_judge_role_pin_model_mismatch_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    _write_role_file(tmp_path, _good_role_text(model="opus"))
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "frontmatter model opus does not match expected_model sonnet" in e
+        for e in errors
+    )
+
+
+# --- source-file legs: missing file / symbol absent / duplicate / not a
+#     string / syntax error (reusing extract_judge_prompt's own statuses) ---
+
+
+def test_judge_role_pin_role_file_missing_fails(tmp_path):
+    pin = _role_pin(role_file="NOPE_NOT_A_FILE.md")
+    _write_role_source_files(tmp_path)
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any("role file leg failed" in e for e in errors)
+
+
+def test_judge_role_pin_credential_source_missing_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    pin["credential_source"] = "NOPE_NOT_A_REAL_SOURCE.py"
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any("credential source leg failed" in e for e in errors)
+
+
+def test_judge_role_pin_credential_symbol_absent_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    (tmp_path / ROLE_CREDENTIAL_SOURCE_NAME).write_bytes(
+        b"OTHER_NAME = 'not the credential prompt'\n"
+    )
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "credential symbol" in e and "not found" in e for e in errors
+    )
+
+
+def test_judge_role_pin_acceptance_symbol_duplicate_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    (tmp_path / ROLE_ACCEPTANCE_SOURCE_NAME).write_bytes(
+        b"JUDGE_INSTRUCTION = 'first'\nJUDGE_INSTRUCTION = 'second'\n"
+    )
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "acceptance symbol" in e and "assigned more than once" in e for e in errors
+    )
+
+
+def test_judge_role_pin_credential_symbol_not_a_string_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    (tmp_path / ROLE_CREDENTIAL_SOURCE_NAME).write_bytes(
+        b"JUDGE_SYSTEM_PROMPT = 'a' + 'b'\n"
+    )
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "credential symbol" in e and "not a string literal" in e for e in errors
+    )
+
+
+def test_judge_role_pin_acceptance_source_syntax_error_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    (tmp_path / ROLE_ACCEPTANCE_SOURCE_NAME).write_bytes(b"def broken(:\n    pass\n")
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "acceptance source file" in e and "syntax error" in e for e in errors
+    )
+
+
+# --- schema-level: not an object / missing field / empty field -------------
+
+
+def test_judge_role_pin_not_an_object_fails(tmp_path):
+    root = {"judge_role_pin": "not-an-object", "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any("judge_role_pin' is not an object" in e for e in errors)
+
+
+def test_judge_role_pin_missing_field_named(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    del pin["evidence"]
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "judge_role_pin: missing required field: evidence" in e for e in errors
+    )
+
+
+def test_judge_role_pin_empty_string_field_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    pin["role_file"] = ""
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "judge_role_pin: field 'role_file' must be a non-empty string" in e
+        for e in errors
+    )
+
+
+# --- CRLF equivalence -------------------------------------------------------
+
+
+def test_judge_role_pin_crlf_role_file_still_passes(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    crlf_text = _good_role_text(newline="\r\n")
+    _write_role_file(tmp_path, crlf_text)
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert errors == []
+
+
+def test_judge_role_pin_bare_cr_role_file_still_passes(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    cr_text = _good_role_text(newline="\r")
+    _write_role_file(tmp_path, cr_text)
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert errors == []
+
+
+def test_judge_role_pin_crlf_source_file_still_passes(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    (tmp_path / ROLE_CREDENTIAL_SOURCE_NAME).write_bytes(
+        ('JUDGE_SYSTEM_PROMPT = "%s"\r\n' % ROLE_CREDENTIAL_TEXT_CONST).encode("utf-8")
+    )
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert errors == []
+
+
+# --- fold tolerance from leg (a) does NOT apply here: whitespace reordering
+#     inside the block must still fail (negative control) -------------------
+
+
+def test_judge_role_pin_whitespace_only_change_still_fails(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    reflowed = ROLE_CREDENTIAL_TEXT_CONST.replace(" ", "  ")  # double every space
+    _write_role_file(tmp_path, _good_role_text(credential_text=reflowed))
+    root = {"judge_role_pin": pin, "entries": []}
+    errors = ec.check_judge_role_pin(root, str(tmp_path))
+    assert any(
+        "credential block in role file does not match" in e for e in errors
+    )
+
+
+# --- wired into run_validate(): section present -> enforced; section absent
+#     -> the pre-existing invariant (already covered above) -----------------
+
+
+def test_judge_role_pin_wired_into_run_validate_when_present(tmp_path):
+    pin = _setup_good_role_tree(tmp_path)
+    pin["expected_model"] = "opus"  # force a mismatch against the fixture's "sonnet"
+    allowlist = _write_allowlist(tmp_path, [])
+    # _write_allowlist's default judge_role_pin doesn't know about this
+    # forced mismatch -- inject the broken pin directly.
+    with open(allowlist, "r", encoding="utf-8") as fh:
+        root = json.load(fh)
+    root["judge_role_pin"] = pin
+    with open(allowlist, "w", encoding="utf-8") as fh:
+        json.dump(root, fh)
+
+    ok, errors, count = ec.run_validate(str(allowlist), str(tmp_path))
+    assert not ok
+    assert any("frontmatter model" in e for e in errors)

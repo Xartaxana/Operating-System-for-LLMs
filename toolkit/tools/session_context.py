@@ -27,7 +27,7 @@ self-activating enforcement file: it was delivered under a sibling
 filename and placed on this live path only at review/acceptance time,
 not by whoever wrote it.
 
-Ported from HQ 2026-07-20: adds the `closes:<task-id>` token scan
+Adds the `closes:<task-id>` token scan
 (previously, this hook read only event TYPES, so a plain-English
 closing note in a later event's `notes` was invisible to it and
 produced a false OPEN DISPATCH line for a task already closed out in
@@ -65,7 +65,7 @@ Hard constraints (all load-bearing):
 
 Registered as the SessionStart hook via .claude/settings.json.
 
---- ported from HQ 2026-07-23 (staff VG-1, two-part addition) ---
+--- hardened after a live incident (two-part addition) ---
 
 Part A: HOOKSPATH AUTOFIX (`hooks_path_autofix_line`). If
 core.hooksPath comes back UNSET, this hook attempts a one-line
@@ -90,8 +90,7 @@ non-monotonic ts ordering on its next journal append. Fail-open on an
 empty journal, a missing/blank tail ts, or a tail ts that does not
 parse as the journal's naive-ISO format.
 
---- WIRING summary line (mirrors the staff channel; see
-tools/wiring_check.py for the actual checks) ---
+--- WIRING summary line (see tools/wiring_check.py for the actual checks) ---
 
 `wiring_summary_line` calls tools/wiring_check.py's `check_wiring()`
 and folds its result into ONE line here: "WIRING: OK" when clean, or
@@ -149,7 +148,7 @@ except Exception as _e:  # noqa: BLE001 -- deliberately broad, see comment above
 MAX_LINES = 25
 QUOTA_WINDOW_SECONDS = 86400
 
-# D-0068/D-0038 boot-budget thresholds (bytes).
+# Boot-budget thresholds (bytes).
 BOOT_WARN_THRESHOLD = 90000
 BOOT_BREACH_THRESHOLD = 100000
 BOOT_BUDGET_LIMIT = 100000
@@ -158,7 +157,7 @@ _ALWAYS_INCLUDE_BOOT_FILE = "CLAUDE.md"
 
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
-# D-0056a tier mapping: substring of the model id (lowercased) -> tier
+# Tier mapping: substring of the model id (lowercased) -> tier
 # label. Order matters only in that each id is expected to match at
 # most one of these; first match wins.
 _MODEL_TIER_SUBSTRINGS = (
@@ -246,7 +245,7 @@ def last_event_line(events: list) -> str:
     )
 
 
-# Ported from HQ 2026-07-23 (staff VG-1 part B): threshold (seconds)
+# Threshold (seconds)
 # above which the tail journal event's ts being AHEAD of the system
 # clock is worth a line of its own, rather than silent noise from
 # ordinary sub-second/sub-minute scheduling jitter between when an
@@ -255,7 +254,7 @@ _CLOCK_DRIFT_THRESHOLD_SECONDS = 60
 
 
 def clock_drift_line(events: list, now: datetime.datetime = None) -> str:
-    """Ported from HQ 2026-07-23 (staff VG-1 part B). NOW and LAST EVENT
+    """NOW and LAST EVENT
     are printed side by side already; this makes an actual DRIFT
     between them visible instead of leaving a session to notice the
     mismatch by eye: if the tail event's ts is MORE than
@@ -287,14 +286,14 @@ def clock_drift_line(events: list, now: datetime.datetime = None) -> str:
     drift_minutes = round(drift_seconds / 60)
     return (
         f"CLOCK DRIFT: last journal ts is {drift_minutes} min ahead of system clock"
-        " -- new events will be non-monotonic (D-0089: do not rewrite past lines)"
+        " -- new events will be non-monotonic (do not rewrite past lines)"
     )
 
 
 def open_degradation_window(events: list):
     """Scans the WHOLE journal (not just the tail): an unclosed
     lead_degraded can be arbitrarily far back if lead_restored never
-    followed (D-0039 p.4: a safety-reset can leave the window open with
+    followed (a safety-reset can leave the window open with
     no restore event ever written). Pairs each lead_degraded with the
     next lead_restored in journal order; returns the ts of the
     currently-open one, or None if the last pair closed."""
@@ -333,7 +332,7 @@ def open_dispatches(events: list) -> list:
     share one ts, and the closing line is written below the delegated
     one, so on a tie the later line wins).
 
-    Ported from HQ 2026-07-20: a plain-English closing note in a later
+    A plain-English closing note in a later
     event's `notes` used to be invisible to this scan (it only ever
     read event TYPE), producing false OPEN DISPATCH lines for tasks
     already closed out in the journal's own prose. Fix: a bare
@@ -533,7 +532,7 @@ def quota_lines(gateway_root: Path, now: datetime.datetime = None) -> list:
 
 
 # ---------------------------------------------------------------------------
-# New in b3: MODEL line (D-0056a)
+# MODEL line
 # ---------------------------------------------------------------------------
 
 
@@ -607,7 +606,7 @@ def _ascii_sanitize(s: str, max_len: int = 80) -> str:
 
 
 def model_line(stdin_payload=None) -> str:
-    """F-37: the payload model is the harness's SessionStart
+    """The payload model is the harness's SessionStart
     DECLARATION, not a measurement -- it can be stale (observed live: a
     payload named a lower tier than the session actually ran on; the
     provider-side usage log was the ground truth). A present-but-stale
@@ -622,21 +621,21 @@ def model_line(stdin_payload=None) -> str:
     calibration's transcripts-vs-declarations check."""
     model_id = extract_model_id(stdin_payload)
     if not model_id:
-        return "MODEL: not provided by hook input -- verify tier yourself (D-0056a)"
+        return "MODEL: not provided by hook input -- verify tier yourself"
     sanitized = _ascii_sanitize(model_id)
     if not sanitized:
         # whitespace-only (or entirely-stripped) model id: same fallback
         # as "no model id at all" -- there is nothing left to report.
-        return "MODEL: not provided by hook input -- verify tier yourself (D-0056a)"
+        return "MODEL: not provided by hook input -- verify tier yourself"
     tier = model_tier(sanitized)
     return (
         f"MODEL: {sanitized} -> tier {tier}"
-        " (declared by harness, not measured -- F-37; Lead tier = fable)"
+        " (declared by harness, not measured; Lead tier = fable)"
     )
 
 
 # ---------------------------------------------------------------------------
-# New in b3: BOOT BUDGET line(s) (D-0068/D-0038)
+# BOOT BUDGET line(s)
 # ---------------------------------------------------------------------------
 
 
@@ -645,7 +644,7 @@ def boot_path_files(root: Path) -> list:
     list (BOOT.md stays the single owner of that list -- this hook only
     mirrors it for budget arithmetic, it does not maintain a second copy
     of the sequence), then always appends CLAUDE.md, which the harness
-    auto-loads separately from the BOOT.md sequence (D-0041) but still
+    auto-loads separately from the BOOT.md sequence but still
     counts against the same boot-budget bytes. Missing BOOT.md (or an
     unreadable one) yields just the always-included CLAUDE.md, not an
     exception -- callers still get a usable, if degraded, budget line."""
@@ -670,8 +669,7 @@ def boot_budget_lines(root: Path) -> list:
     by name so the gap is visible rather than silently absorbed into a
     lower total). Emits one summary line always, plus a top-3-by-size
     breakdown (one line each, "  <bytes>  <file>") whenever the total
-    crosses either the WARN (>90000) or BREACH (>100000) threshold from
-    D-0068/D-0038."""
+    crosses either the WARN (>90000) or BREACH (>100000) threshold."""
     root = Path(root)
     names = boot_path_files(root)
 
@@ -694,7 +692,7 @@ def boot_budget_lines(root: Path) -> list:
         # auto-run command -- boot recovery is not work authorization by
         # itself (a breach line is a flag for the report, not a silent
         # trigger to start the diet before the operator has seen it).
-        status_suffix = " BREACH -> boot-diet due (D-0068; report first, operator word starts it)"
+        status_suffix = " BREACH -> boot-diet due (report first, operator word starts it)"
     elif total > BOOT_WARN_THRESHOLD:
         status_suffix = " WARN"
     else:
@@ -711,7 +709,7 @@ def boot_budget_lines(root: Path) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Ported from HQ 2026-07-23 (staff VG-1 part A): HOOKSPATH AUTOFIX
+# HOOKSPATH AUTOFIX
 # ---------------------------------------------------------------------------
 
 _GITHOOKS_DIRNAME = ".githooks"
@@ -823,7 +821,7 @@ def hooks_path_autofix_line(root: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# WIRING summary line -- mirrors the staff channel via tools/wiring_check.py
+# WIRING summary line -- see tools/wiring_check.py
 # ---------------------------------------------------------------------------
 
 

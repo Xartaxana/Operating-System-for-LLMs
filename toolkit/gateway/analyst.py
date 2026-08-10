@@ -1,6 +1,6 @@
 """Analyst: a small local model narrating Ledger telemetry.
 
-ARCHITECTURE.md, "Analyst"; D-0027. The Analyst reads Ledger output —
+The Analyst reads Ledger output —
 never raw conversations — and answers operator questions like
 "where did tokens go?".
 

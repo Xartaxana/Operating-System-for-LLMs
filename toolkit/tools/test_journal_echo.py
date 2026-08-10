@@ -5,8 +5,6 @@ of the whole hook via stdin) and tools/test_journal_validator.py (real
 tmp_path git repos for git-mode: _git/_init_repo/_write_journal -- the
 same scheme).
 
-Ported from HQ 2026-07-20.
-
 Covers the module's DoD literally:
  1. a non-journal path -> silence;
  2. a journal with a clean new line (a git repo with a HEAD) -> silence;

@@ -103,7 +103,7 @@ UI_WITNESS_RE = re.compile(
     r"screenshot|playwright|puppeteer|selenium|screencap", re.IGNORECASE
 )
 
-# Fix (a documented finding, class D-0043): a bare substring "failed"
+# Fix (a documented finding, the fix-the-class-not-the-instance class): a bare substring "failed"
 # with no word boundary used to false-match "xfailed" ("2 xfailed" ->
 # a false "red" -- an honest xfail submission from builder got blocked
 # by dod_gate; reproduced: xfail -> block, skip -> green). \bfailed\b
@@ -139,8 +139,8 @@ NUMERIC_RC_FIELDS = ("rc", "exit_code", "returnCode", "return_code")
 # _is_scratchpad_path()); a real harness scratchpad is always outside
 # cwd, so this fully covers it.
 #
-# NARROWED (source deployment critic t-278(b), mirrored per sibling
-# rule): this used to ALSO carry a literal substring match on
+# NARROWED (hardened after a review finding the same defect class
+# elsewhere): this used to ALSO carry a literal substring match on
 # "scratchpad" (case-insensitive) as a separate, cwd-independent
 # criterion. Removed: it was redundant to the outside-cwd criterion for
 # a real scratchpad path, and gave a latent fail-open on a hypothetical

@@ -51,4 +51,4 @@ for:
 - `BOOT.md` — how a session restores context.
 - `docs/TWO_VOCABULARIES.md` — the function vocabulary (routing rules)
   vs. the grade vocabulary (models/accounting), and the reference
-  model bindings for each channel (D-0062/D-0085).
+  model bindings for each channel.

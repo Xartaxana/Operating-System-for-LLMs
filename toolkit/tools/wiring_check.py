@@ -1,8 +1,8 @@
-"""wiring_check.py -- generalized host-wiring checker (D-0092/D-0093).
+"""wiring_check.py -- generalized host-wiring checker.
 
 Read-only auditor of whether the kit's enforcement chain is actually
 wired into a host repo, independent of what any single mechanism's own
-SessionStart output claims. Patterns are drawn from the staff
+SessionStart output claims. Patterns are drawn from a sibling
 deployment's wiring channel in tools/session_context.py (its
 git_hooks_channel/harness_channel functions) -- this module is a
 standalone, more general reimplementation, not an import of that file:
@@ -32,13 +32,14 @@ clean):
      `git ls-files -s`, the INDEX, not the filesystem: a hook committed
      as mode 100644 is silently skipped by git on a Linux clone --
      Windows/NTFS carries no meaningful exec bit at all, so this cannot
-     be observed via os.stat(); F-53/D-0093). Two independent sub-facts
+     be observed via os.stat() -- a finding from a live incident).
+     Two independent sub-facts
      per hook, both reportable: untracked (missing from the index
      entirely -- a fresh clone gets NO gate at all, worse than
      non-executable) vs tracked-but-wrong-mode.
  (3) check_harness_hooks -- every "python tools/<file>.py" hook command
      named in .claude/settings.json points to a file that EXISTS.
-     Existence only, deliberately no import check (unlike the staff
+     Existence only, deliberately no import check (unlike a sibling
      deployment's harness_channel): this module runs against arbitrary
      host repos, and importing arbitrary host code as a side effect of
      a read-only auditor is out of scope.
@@ -47,7 +48,7 @@ clean):
      template itself), every row whose Status cell is exactly "adopt"
      AND whose "Kit mechanism" cell names the git-hooks or
      harness-hooks machinery checks (1)-(3) above already cover is
-     cross-checked against the issues those checks found (D-0092: an
+     cross-checked against the issues those checks found (an
      "adopt" row with an open issue on the wiring it claims is a WARN).
      Deliberately NARROW: reconciling an arbitrary ledger row ("Skills",
      "PROCESS docs", ...) against a concrete live fact is not
@@ -98,13 +99,13 @@ things a caller might mean by "the root to check":
     its own .githooks/.claude) -- the only case check_git_hooks_path
     was ever meaningful for;
   - the KIT'S OWN SOURCE TREE (e.g. this repo's toolkit/ directory,
-    reviewed from the staff repo one level up) -- which is NOT a
+    reviewed from an enclosing repo one level up) -- which is NOT a
     self-contained git repo with its own hooksPath wiring; its git
     config is whatever the ENCLOSING repo happens to have configured,
     which has no reason to point at <kit-root>/.githooks. Running the
     old single-root CLI against a kit source tree therefore produced
     a spurious "core.hooksPath does not resolve to ..." finding that
-    looks identical to a real wiring defect (the reported P2 case).
+    looks identical to a real wiring defect.
 
 --mode installed (default, byte-identical to the pre-existing
 behavior on a real installed host -- DoD (a)) checks --host-root
@@ -256,7 +257,7 @@ def check_required_hooks(root: Path) -> list:
         elif modes[name] != "100755":
             issues.append(
                 f"hook {name} committed non-executable ({modes[name]}) --"
-                " Linux clones get a silently dead gate (D-0093)"
+                " Linux clones get a silently dead gate"
             )
     return issues
 
@@ -417,7 +418,7 @@ def _parse_ledger_adopt_rows(text: str) -> list:
 
 
 def check_adoption_ledger(root: Path, git_issues: list, harness_issues: list) -> list:
-    """(4, D-0092): see module docstring for the full rationale and its
+    """(check 4): see module docstring for the full rationale and its
     deliberately narrow scope. git_issues/harness_issues are the
     already-computed outputs of the checks above (passed in rather than
     recomputed) so the whole reconciliation reads one consistent
@@ -463,7 +464,7 @@ def check_adoption_ledger(root: Path, git_issues: list, harness_issues: list) ->
 # are looking at the same vocabulary. An unrecognized name in `skip`
 # is silently a no-op (nothing in check_wiring's own five-line body
 # matches an unknown key) by the same "fail open, no raise" contract
-# the individual check_* functions already follow -- see D-0058
+# the individual check_* functions already follow -- see the
 # discussion in the module docstring's CLI section for why an unknown
 # --mode-adjacent name here is a warning at the CLI layer instead of
 # an exception at this layer, which is the importable function other
@@ -533,7 +534,7 @@ _SOURCE_MODE_SKIP = {"check_git_hooks_path": "core.hooksPath wiring"}
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wiring_check.py",
-        description="Read-only auditor of the kit's enforcement-chain wiring (D-0092/D-0093).",
+        description="Read-only auditor of the kit's enforcement-chain wiring.",
     )
     parser.add_argument(
         "--check",

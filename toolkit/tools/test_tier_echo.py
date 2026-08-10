@@ -2,8 +2,6 @@
 measures the ACTUAL model(s) a finished subagent ran on from its own
 jsonl transcript).
 
-Ported from HQ 2026-07-20.
-
 CHANNEL: the subprocess smokes below check the stdout JSON
 {"hookSpecificOutput": {"hookEventName": "SubagentStop",
 "additionalContext": "TIER ECHO (measured): ..."}} -- the channel that
