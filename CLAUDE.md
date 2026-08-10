@@ -297,7 +297,19 @@ spec-defect of the dispatcher (check-23 case); promotion to a
 machine layer follows the next recurrence (D-0063). The DoD is
 written INLINE in the dispatch prompt itself — named acceptance
 criteria plus the exact verification run; a bare pointer to a spec
-file or an earlier event is NOT a DoD. A worker returning
+file or an earlier event is NOT a DoD. DOC-DISPATCH WITNESS
+(2026-08-10, критик t-407 по прецеденту витнесса B6 батча v0.8.0):
+when the owns are markdown/config with no test set of their own, a
+deterministic key-presence run IS a legal mechanical layer, but ONLY
+with three properties: (i) the keys are quoted VERBATIM from the DoD
+as written BEFORE the run — keys chosen after the fact are the
+performer checking itself; (ii) the script is committed as a test OR
+attached in FULL source with the witness — an unrerunnable witness
+forfeits the cheap-rerun right; (iii) the run includes a NEGATIVE
+control (one key deliberately absent → the script reports failure) —
+an evergreen script that cannot fail is indistinguishable from a
+broken one. Missing any of the three → the witness is a retelling,
+not a run (D-0052 class); detector — check 13(л). A worker returning
 a DoD-less dispatch (or a writing/parallel one without a manifest)
 with questions is the emergency net, not the normal cycle: frequent
 returns = a spec-discipline defect of the coordinator, a calibration

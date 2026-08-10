@@ -383,7 +383,12 @@ def test_git_channel_ls_files_nonzero_returncode_folds_into_one_warning_no_untra
         stderr = "fatal: simulated ls-files error"
 
     def _failing_run(cmd, *args, **kwargs):
-        if len(cmd) >= 2 and cmd[0] == "git" and cmd[1] == "ls-files":
+        # B8 fix (2026-08-10): the real call now leads with
+        # "-c core.quotepath=false" before the "ls-files" subcommand
+        # (see git_hooks_channel's own docstring), so cmd[1] is no longer
+        # "ls-files" -- match by membership instead of position, same
+        # call identified, same test intent.
+        if cmd[0] == "git" and "ls-files" in cmd:
             return _FakeResult()
         return real_run(cmd, *args, **kwargs)
 
@@ -403,7 +408,9 @@ def test_git_channel_ls_files_failure_folds_into_one_warning(tmp_path, monkeypat
     real_run = sc.subprocess.run
 
     def _flaky_run(cmd, *args, **kwargs):
-        if len(cmd) >= 2 and cmd[0] == "git" and cmd[1] == "ls-files":
+        # B8 fix (2026-08-10): see the sibling test above -- cmd[1] is now
+        # "-c", not "ls-files"; match by membership instead of position.
+        if cmd[0] == "git" and "ls-files" in cmd:
             raise OSError("simulated git ls-files failure")
         return real_run(cmd, *args, **kwargs)
 

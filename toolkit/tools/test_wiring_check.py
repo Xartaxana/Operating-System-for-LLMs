@@ -807,7 +807,7 @@ def test_ascii_safe_is_identity_on_ascii_input():
 
 
 def test_ascii_safe_escapes_non_ascii_readably():
-    escaped = wiring_check._ascii_safe("\u0434\u043e\u043c")  # "дом"
+    escaped = wiring_check._ascii_safe("\u0434\u043e\u043c")  # "dom" (Russian for "house")
     _assert_ascii_clean(escaped)
     assert "\\u0434" in escaped
     assert "\\u043e" in escaped
@@ -815,26 +815,26 @@ def test_ascii_safe_escapes_non_ascii_readably():
 
 
 def test_hookspath_non_ascii_value_is_ascii_clean_and_readable(repo):
-    # NOTE (environment finding, out of this task's class -- see report):
-    # _run_git()'s subprocess.run(..., text=True) has no explicit
-    # encoding, so on a non-UTF8-locale Windows host (this one:
-    # locale.getpreferredencoding() == cp1251) a non-ASCII git config
-    # value round-trips MOJIBAKE'd before this check ever sees it --
-    # confirmed empirically (git itself stores/returns the value
-    # correctly; only the Python<->git pipe under cp1251 corrupts it).
-    # That is a separate, pre-existing subprocess-encoding defect in
-    # _run_git, not this task's class (interpolating a value into an
-    # issue string without ASCII-sanitizing it) -- so this test does not
-    # assert the exact Cyrillic codepoints survived the pipe, only that
-    # WHATEVER non-ASCII value arrives is rendered ASCII-clean and in a
-    # generically readable backslash-escape form, which is the actual
-    # invariant this fix guarantees.
-    _git(["config", "--local", "core.hooksPath", "\u0434\u0440\u0443\u0433\u043e\u0439"], repo)
+    # B8 FIX (2026-08-10): _run_git() now decodes git's stdout via an
+    # explicit encoding="utf-8" instead of a bare text=True (which let
+    # Python fall back to locale.getpreferredencoding(False) -- cp1251 on
+    # this host -- and silently MOJIBAKE any non-ASCII git output; repro
+    # confirmed empirically before this fix, see B8 handoff notes). The
+    # exact Cyrillic codepoints of "\u0434\u0440\u0443\u0433\u043e\u0439"
+    # ("drugoy" / "other") now survive the pipe correctly and
+    # _ascii_safe() escapes THOSE codepoints, not mojibake
+    # reinterpretations of them -- this is the precise (not merely "some
+    # escape form") expectation the fix restores.
+    cyrillic = "\u0434\u0440\u0443\u0433\u043e\u0439"
+    _git(["config", "--local", "core.hooksPath", cyrillic], repo)
     issues = wiring_check.check_git_hooks_path(repo)
     assert len(issues) == 1
     _assert_ascii_clean(issues[0])
     assert "does not resolve to" in issues[0]
     assert re.search(r"\\u[0-9a-fA-F]{4}", issues[0]), issues[0]
+    expected_escape = "".join(f"\\u{ord(c):04x}" for c in cyrillic)
+    assert expected_escape in issues[0], issues[0]
+    assert f"core.hooksPath='{expected_escape}'" in issues[0], issues[0]
 
 
 def test_hookspath_ascii_value_message_unchanged_byte_for_byte(repo):
@@ -850,7 +850,7 @@ def test_hookspath_ascii_value_message_unchanged_byte_for_byte(repo):
 
 
 def test_harness_hooks_non_ascii_filename_is_ascii_clean(repo):
-    _write_settings(repo, ["python tools/\u0444\u0430\u0439\u043b.py"])  # "файл.py"
+    _write_settings(repo, ["python tools/\u0444\u0430\u0439\u043b.py"])  # "fayl.py" (Russian for "file.py")
     issues = wiring_check.check_harness_hooks(repo)
     assert len(issues) == 1
     _assert_ascii_clean(issues[0])
@@ -871,23 +871,103 @@ def test_untracked_enforcement_file_non_ascii_name_is_ascii_clean(repo):
 
 
 def test_skills_casing_non_ascii_dir_is_ascii_clean(repo):
-    # core.quotepath=false: git's DEFAULT (true) reports a non-ASCII
-    # tracked path in a quoted-octal form ("\NNN\NNN...") that this
-    # check's raw-line parsing does not recognize as ending in
-    # "skill.md" at all -- a separate, pre-existing scope gap in
-    # check_skills_casing's git-output parsing (documented finding, out
-    # of this task's class), not the interpolation-sanitization bug
-    # this test targets. Disabling quoting isolates that gap so this
-    # test exercises only the sanitization fix: once the check DOES
-    # recognize the casing violation, is the resulting issue string
-    # ASCII-clean.
+    # B8 FIX (2026-08-10): _run_git() now runs every call with
+    # "-c core.quotepath=false" (see _run_git's own docstring), so the
+    # repo-local config set here is now REDUNDANT with the fix -- kept
+    # anyway as a regression pin that an explicit local override and the
+    # fix's own forced override do not conflict. The exact non-ASCII
+    # codepoints are asserted below (previously this test only checked
+    # "some backslash-escape form", not the precise codepoints -- see
+    # test_skills_casing_non_ascii_path_detected_with_default_quotepath
+    # right below for the actual B8 repro: DEFAULT quotepath, no local
+    # override at all).
     _git(["config", "--local", "core.quotepath", "false"], repo)
-    _add_skill(repo, ".claude/skills/onboarding_\u043d\u0431/skill.md")
+    dirname = "onboarding_\u043d\u0431"
+    _add_skill(repo, f".claude/skills/{dirname}/skill.md")
     issues = wiring_check.check_skills_casing(repo)
     assert len(issues) == 1
     _assert_ascii_clean(issues[0])
     assert issues[0].startswith("skill file '.claude/skills/onboarding_")
     assert re.search(r"\\u[0-9a-fA-F]{4}", issues[0]), issues[0]
+    # _ascii_safe() escapes only the non-ASCII codepoints, leaving the
+    # ASCII "onboarding_" prefix literal -- reuse the production function
+    # itself rather than reimplementing its escaping rule here.
+    assert wiring_check._ascii_safe(dirname) in issues[0], issues[0]
+
+
+def test_skills_casing_non_ascii_path_detected_with_default_quotepath(repo):
+    # B8 repro/fix (2026-08-10): git's DEFAULT (quotepath=true, no local
+    # override at all here -- unlike the test above) octal-escapes a
+    # non-ASCII tracked path in `ls-files` output
+    # (e.g. "\\320\\275\\320\\261..."); check_skills_casing's raw-line
+    # `Path(line).name` parsing did not recognize that shape as ending in
+    # "skill.md" at all, so a real mis-casing under a non-ASCII directory
+    # went UNREPORTED (confirmed empirically before the fix: this exact
+    # scenario returned issues == []). _run_git()'s unconditional
+    # "-c core.quotepath=false" now neutralizes git's default regardless
+    # of the host repo's own config, so the check sees the real path and
+    # reports the mis-casing.
+    dirname = "onboarding_\u043d\u0431"
+    _add_skill(repo, f".claude/skills/{dirname}/skill.md")
+    issues = wiring_check.check_skills_casing(repo)
+    assert len(issues) == 1
+    assert issues[0].startswith("skill file '.claude/skills/onboarding_")
+    assert wiring_check._ascii_safe(dirname) in issues[0], issues[0]
+    assert "SKILL.md" in issues[0]
+
+
+def test_untracked_enforcement_non_ascii_tracked_file_not_falsely_flagged(repo):
+    # B8 repro/fix (2026-08-10): a non-ASCII-named file TRACKED under
+    # .githooks/ was falsely reported as untracked before this fix --
+    # `git ls-files` (default quotepath=true) octal-escapes the tracked
+    # name, which never matched the raw on-disk name pathlib reports, so
+    # `on_disk - tracked` incorrectly included it (confirmed empirically:
+    # this exact scenario returned a spurious "untracked enforcement
+    # file" issue before the fix). "-c core.quotepath=false" makes the
+    # tracked-name and on-disk-name sets comparable again.
+    _add_githook(repo, "pre-commit", executable=True)
+    githooks = repo / ".githooks"
+    nonascii_name = "\u0441\u043a\u0440\u0438\u043f\u0442.sh"  # a tracked helper script
+    (githooks / nonascii_name).write_text("echo hi\n", encoding="utf-8")
+    _git(["add", str((githooks / nonascii_name).relative_to(repo))], repo)
+    _git(["commit", "-q", "-m", "add non-ascii hook helper"], repo)
+    issues = wiring_check.check_untracked_enforcement_files(repo)
+    assert issues == [], issues
+
+
+def test_untracked_enforcement_still_flags_a_genuinely_untracked_non_ascii_file(repo):
+    # Mirror boundary of the test above: the false-positive fix must not
+    # become a false negative -- a non-ASCII file that really is
+    # untracked (never `git add`-ed) still fires.
+    _add_githook(repo, "pre-commit", executable=True)
+    githooks = repo / ".githooks"
+    nonascii_name = "\u0441\u043a\u0440\u0438\u043f\u0442.sh"
+    (githooks / nonascii_name).write_text("echo hi\n", encoding="utf-8")
+    # Deliberately NOT git-added.
+    issues = wiring_check.check_untracked_enforcement_files(repo)
+    assert len(issues) == 1
+    assert issues[0].startswith("untracked enforcement file: .githooks/")
+
+
+def test_run_git_invokes_with_quotepath_override_and_utf8_encoding(repo, monkeypatch):
+    # Regression pin on _run_git's own contract (not just its observable
+    # effect above): every call is launched with the quotepath override
+    # as the first args after "git", and with an explicit utf-8/replace
+    # decode -- not a bare text=True relying on locale detection.
+    captured = {}
+    real_run = subprocess.run
+
+    def _spy(cmd, *args, **kwargs):
+        captured["cmd"] = cmd
+        captured["encoding"] = kwargs.get("encoding")
+        captured["errors"] = kwargs.get("errors")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(wiring_check.subprocess, "run", _spy)
+    wiring_check._run_git(["status"], repo)
+    assert captured["cmd"][:3] == ["git", "-c", "core.quotepath=false"]
+    assert captured["encoding"] == "utf-8"
+    assert captured["errors"] == "replace"
 
 
 def test_ledger_non_ascii_mechanism_row_is_ascii_clean(repo):

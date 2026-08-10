@@ -226,8 +226,8 @@ DOD_MARKERS_RE = re.compile(
     re.IGNORECASE,
 )
 # \b-bounded so a marker only matches as a whole word -- otherwise a
-# short Cyrillic root like "правь" would also match as a substring
-# inside unrelated longer words (e.g. "поправь", "исправь"). "owns" is
+# short Cyrillic root (see WRITE_INDICATORS_RE below) would also
+# match inside unrelated longer words sharing that root. "owns" is
 # deliberately NOT one of these alternatives any more -- see the module
 # docstring, "Write-indicator discriminator", for why the bare word is
 # too coarse a signal and what replaces it
@@ -272,7 +272,7 @@ def is_path_like_token(tok) -> bool:
     return "*" in tok and ("/" in tok or "\\" in tok)
 
 
-# A closed set of manifest section headers (given/дано, owns,
+# A closed set of manifest section headers (given, owns,
 # non-goals, handoff) -- used only to know where an owns declaration's
 # CONTINUATION line ends, so the one-line lookahead below does not
 # wander into the next manifest section.

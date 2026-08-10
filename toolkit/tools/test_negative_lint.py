@@ -224,7 +224,7 @@ def test_decide_plain_string_response_negative_still_warns_regression():
 
 
 # ---------------------------------------------------------------------
-# control false positive -- the "ЗАКРЫТО" form (DoD point 4)
+# control false positive -- the CLOSED-marker form (DoD point 4)
 # ---------------------------------------------------------------------
 
 

@@ -8,6 +8,7 @@ Run: python -m pytest gateway/test_sqlite_logger.py
 import json
 import os
 import sqlite3
+import threading
 import time
 
 import pytest
@@ -21,17 +22,74 @@ def db(tmp_path):
 
 
 def wait_for_row(path, status, timeout=10):
-    """Sync callbacks run in a worker thread; poll until the row lands."""
+    """Sync callbacks run in a worker thread; poll until the row lands.
+
+    The db FILE can exist before the `requests` TABLE does -- sqlite3
+    creates the file on connect, and the worker thread's own CREATE
+    TABLE can still be in flight when this poller's first SELECT runs
+    (a live "no such table: requests" OperationalError, caught by a
+    canonical run). That race is a TRANSIENT within the deadline --
+    retry, don't crash. Only a table that genuinely never appears by
+    the deadline is a real failure, reported as an honest fail carrying
+    the LAST OperationalError's text -- never a silent/generic timeout.
+    """
     deadline = time.time() + timeout
+    last_error = None
     while time.time() < deadline:
         if path.exists():
-            rows = sqlite3.connect(path).execute(
-                "SELECT * FROM requests WHERE status = ?", (status,)
-            ).fetchall()
-            if rows:
-                return rows
+            try:
+                rows = sqlite3.connect(path).execute(
+                    "SELECT * FROM requests WHERE status = ?", (status,)
+                ).fetchall()
+            except sqlite3.OperationalError as exc:
+                last_error = exc
+            else:
+                if rows:
+                    return rows
         time.sleep(0.2)
+    if last_error is not None:
+        raise AssertionError(
+            f"no '{status}' row appeared in {path} within {timeout}s "
+            f"(last error: {last_error})"
+        )
     raise AssertionError(f"no '{status}' row appeared in {path} within {timeout}s")
+
+
+# --- wait_for_row transient-vs-real-failure boundary ---
+
+
+def test_wait_for_row_retries_transient_operational_error_until_table_exists(tmp_path):
+    """The db FILE can exist before the `requests` TABLE does (the exact
+    race reproduced here: an open connection creates the file, but the
+    table lands only later, on another thread). A transient 'no such
+    table' OperationalError within the deadline is retried, not raised."""
+    path = tmp_path / "race.db"
+    sqlite3.connect(path).close()  # file exists, table does not yet
+
+    def _create_table_late():
+        time.sleep(0.5)
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE requests (id INTEGER PRIMARY KEY, status TEXT)")
+        conn.execute("INSERT INTO requests (status) VALUES ('success')")
+        conn.commit()
+        conn.close()
+
+    threading.Thread(target=_create_table_late).start()
+
+    rows = wait_for_row(path, "success", timeout=5)
+    assert len(rows) == 1
+
+
+def test_wait_for_row_fails_honestly_with_last_error_when_table_never_appears(tmp_path):
+    """A table that genuinely never appears by the deadline -> an honest
+    AssertionError naming the last OperationalError, not a silent or
+    generic timeout message."""
+    path = tmp_path / "no-table.db"
+    sqlite3.connect(path).close()  # file exists, table never created
+
+    with pytest.raises(AssertionError) as excinfo:
+        wait_for_row(path, "success", timeout=0.5)
+    assert "no such table" in str(excinfo.value)
 
 
 def test_success_is_logged(db, monkeypatch):

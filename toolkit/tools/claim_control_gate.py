@@ -200,9 +200,9 @@ _POSIX_DRIVE_RE = re.compile(r"^/([A-Za-z])(/.*)?$")
 # HARDENING FIX (a live reproduction of the same false-positive class
 # tools/dispatch_gate.py's own OWNS_WORD_RE fix already closed for a
 # sibling detector): markers used to be matched by a PLAIN substring
-# search (`lower.find(marker, ...)`) -- "нет " (with a trailing space)
-# falsely matched INSIDE "станет "/"интернет "/"достанет " (Cyrillic,
-# "нет" landing at the end of a word right before a space), "has no"
+# search (`lower.find(marker, ...)`) -- the Russian "there is no"
+# marker with a trailing space falsely matched inside several longer
+# words sharing that suffix (word-boundary violation), and "has no"
 # matched inside "has notes". FIXED (see `_boundary_pattern_for_marker`,
 # `_scan_negative_claims` below): every marker is matched at a WORD
 # BOUNDARY on whichever side the marker itself starts/ends with a word
@@ -214,10 +214,10 @@ _POSIX_DRIVE_RE = re.compile(r"^/([A-Za-z])(/.*)?$")
 # regex/locale of a specific shell), NOT to python `re` in general;
 # these two classes must not be confused.
 #
-# THE ONE EXCEPTION: "отсутству" -- a DELIBERATE STEM (the shared root
-# of "отсутствует"/"отсутствие"/"отсутствуют" etc), which never has a
-# natural right word-edge -- a word-forming suffix ALWAYS follows
-# "отсутству", so a trailing `\b` there would NEVER match and would
+# THE ONE EXCEPTION: the stem entry in NEGATIVE_MARKERS below -- a
+# DELIBERATE STEM shared by several inflected forms of the same word,
+# which never has a natural right word-edge -- a word-forming suffix
+# ALWAYS follows it, so a trailing `\b` there would NEVER match and would
 # make the marker completely inert, breaking already-live tests
 # (test_russian_marker_with_path_token_warns and others). The choice is
 # documented, not guessed silently -- see _MARKER_NO_SUFFIX_BOUNDARY.
@@ -256,7 +256,7 @@ NEGATIVE_MARKERS = (
 
 # Markers whose intentional design is a STEM/prefix, not a complete
 # word -- excluded from the trailing word-boundary (see NEGATIVE_MARKERS'
-# own docstring comment above for "отсутству"'s rationale). Empty
+# own comment above for the stem marker's rationale). Empty
 # unless a future marker needs the same carve-out.
 _MARKER_NO_SUFFIX_BOUNDARY = {"отсутству"}
 

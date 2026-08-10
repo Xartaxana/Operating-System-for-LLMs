@@ -748,7 +748,19 @@ def _try_hookspath_autofix(root: Path, reason: str) -> str:
     (human or an earlier session), silently overwriting it is exactly
     the harm this carve-out exists to prevent. Only a genuinely unset
     hooksPath is treated as "nothing to preserve, safe to wire up
-    automatically"."""
+    automatically".
+
+    B8 FIX (2026-08-10, sibling of the same class fixed in
+    tools/session_context.py's git_hooks_channel and
+    toolkit/tools/wiring_check.py's `_run_git`): this call and
+    hooks_path_autofix_line's `git config core.hooksPath` read below
+    now pass `encoding="utf-8", errors="replace"` instead of a bare
+    `text=True` -- a non-UTF-8 console locale would otherwise let
+    Python decode git's always-UTF-8 output via
+    locale.getpreferredencoding(), silently mojibake-ing a non-ASCII
+    value before it is ever compared or reported. quotepath is not
+    applicable here -- neither call lists tracked paths, only reads/
+    writes a single config value."""
     base_warning = f"core.hooksPath not set -- {reason}"
     try:
         set_result = subprocess.run(
@@ -756,6 +768,8 @@ def _try_hookspath_autofix(root: Path, reason: str) -> str:
             cwd=str(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except Exception as e:
@@ -802,6 +816,8 @@ def hooks_path_autofix_line(root: Path) -> str:
             cwd=str(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except Exception:

@@ -375,7 +375,7 @@ def test_format_escalation_line_ascii_channel_replaces_dynamic_non_ascii():
     # DYNAMIC part (task_id) is sanitized per channel -- a non-ASCII
     # task_id becomes '?' with ascii_only=True, stays as-is with
     # ascii_only=False.
-    task_id_with_cyrillic = "t-042-кириллица"  # "кириллица"
+    task_id_with_cyrillic = "t-042-кириллица"  # deliberately non-ASCII
     raw_line = je._format_escalation_line((1, "attempt", task_id_with_cyrillic, 3), ascii_only=False)
     ascii_line = je._format_escalation_line((1, "attempt", task_id_with_cyrillic, 3), ascii_only=True)
     assert task_id_with_cyrillic in raw_line

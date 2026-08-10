@@ -301,6 +301,17 @@ for the period, and diffs to DECISIONS.md.
     path wasn't touched by the node's diff. An empty window (no
     concurrent `delegated` groups) is noted explicitly — "no
     concurrent groups".
+    (k) DOC-DISPATCH WITNESS (rule 11). For every builder acceptance
+    of the window whose witness is NOT a pytest run but a
+    deterministic key-presence script (owns — markdown/config with no
+    test set of their own): check the three properties of the norm —
+    (i) keys quoted from the DoD as written BEFORE the run; (ii) the
+    script committed as a test or attached in full source; (iii) the
+    run carried a NEGATIVE control (a deliberately absent key → a
+    reported failure). Any missing property = a finding (the witness
+    is a retelling, the witness-rule class); a script witness with no
+    negative control is a finding ALWAYS, even with (i)-(ii) intact.
+    An empty window (no doc witnesses) gets an explicit line.
 14. **A golden set for recon, and a regression rule for prompt
     edits.** (a) Git log for the window on `.claude/agents/*.md`:
     every edit to a tier's role file that has an exam set (scout —

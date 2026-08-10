@@ -366,7 +366,19 @@ vocabulary; the mapping between the two vocabularies is documented in
    promotion to a machine layer follows the next recurrence. The DoD itself is written INLINE in the dispatch
    prompt — named acceptance criteria plus the exact verification run
    whose output becomes the witness; a bare pointer to a spec file or
-   to an earlier event is NOT a DoD. A worker returning a DoD-less (or, for a
+   to an earlier event is NOT a DoD. DOC-DISPATCH WITNESS: when the
+   owns are markdown/config with no test set of their own, a
+   deterministic key-presence run IS a legal mechanical layer, but
+   ONLY with three properties: (i) the keys are quoted VERBATIM from
+   the DoD as written BEFORE the run — keys chosen after the fact are
+   the performer checking itself; (ii) the script is committed as a
+   test OR attached in FULL source with the witness — an unrerunnable
+   witness forfeits the cheap-rerun right (rule 12); (iii) the run
+   includes a NEGATIVE control (one key deliberately absent → the
+   script reports failure) — an evergreen script that cannot fail is
+   indistinguishable from a broken one. Missing any of the three →
+   the witness is a retelling, not a run (the witness rule); the
+   detector is the calibration's doc-witness check (13(k)). A worker returning a DoD-less (or, for a
    writing/parallel dispatch, manifest-less) dispatch is an emergency
    net, not the normal cycle: each return is a double context switch;
    frequent returns are a coordinator spec-discipline defect, worth

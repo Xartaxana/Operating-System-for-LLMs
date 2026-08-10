@@ -923,6 +923,8 @@ def _try_hookspath_autofix(root: Path, reason: str) -> str:
             cwd=str(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except Exception as e:
@@ -978,7 +980,29 @@ def git_hooks_channel(root: Path) -> list:
     hooksPath failure path. Two sub-facts per required hook, both
     reported when true: not present in the index at all (untracked --
     a clone gets no gate whatsoever, worse than non-executable), or
-    present with a mode other than 100755 (committed non-executable)."""
+    present with a mode other than 100755 (committed non-executable).
+
+    B8 FIX (2026-08-10, sibling of the same class fixed in
+    toolkit/tools/wiring_check.py's `_run_git`): all THREE git
+    subprocess calls this module makes (this function's two, plus
+    `_try_hookspath_autofix`'s write) now pass
+    `encoding="utf-8", errors="replace"` instead of a bare `text=True`
+    -- on a non-UTF-8 console locale (this host: cp1251) `text=True`
+    alone lets Python decode git's always-UTF-8 output via
+    locale.getpreferredencoding(), silently MOJIBAKE-ing any non-ASCII
+    value (e.g. a Cyrillic core.hooksPath) before this channel ever
+    compares or reports it. The `git ls-files -s` call ALSO now runs
+    with `-c core.quotepath=false` (a per-invocation override, does not
+    touch the host repo's own config) -- git's default quotepath=true
+    would octal-escape a non-ASCII path in that output, which this
+    function's `Path(path_part).name` parsing does not recognize; no
+    live incident is known for THIS specific call today (both required
+    hook names are plain ASCII), but the fix is applied here too so the
+    class is closed uniformly rather than left latent for the day a
+    non-ASCII file lands under .githooks/. Behavior on the two required
+    hook names, and every existing warning string this channel
+    produces, is unchanged -- this is an encoding/quoting fix only, not
+    a change to what gets reported."""
     root = Path(root)
     expected = (root / _GITHOOKS_DIRNAME).resolve()
     reason = "journal_validator/mechanism_gate do not run on commits"
@@ -989,6 +1013,8 @@ def git_hooks_channel(root: Path) -> list:
             cwd=str(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except Exception as e:
@@ -1030,10 +1056,12 @@ def git_hooks_channel(root: Path) -> list:
     # already computed above (each fact stays independently reportable).
     try:
         ls_result = subprocess.run(
-            ["git", "ls-files", "-s", "--", _GITHOOKS_DIRNAME],
+            ["git", "-c", "core.quotepath=false", "ls-files", "-s", "--", _GITHOOKS_DIRNAME],
             cwd=str(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except Exception as e:

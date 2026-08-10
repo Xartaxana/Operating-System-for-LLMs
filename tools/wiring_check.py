@@ -137,16 +137,31 @@ def skills_casing_channel(root):
     timeout, non-zero exit -- e.g. run outside a git repo) folds into
     ONE warning naming the check as unverifiable, the same fold-to-
     warning contract session_context.git_hooks_channel() already uses
-    for its own `git ls-files -s` call."""
+    for its own `git ls-files -s` call.
+
+    B8 FIX (2026-08-10, sibling of the same class fixed in
+    session_context.git_hooks_channel() and toolkit/tools/wiring_check.py's
+    `_run_git`): passes `encoding="utf-8", errors="replace"` instead of a
+    bare `text=True` (a non-UTF-8 console locale -- cp1251 on this host --
+    would otherwise silently MOJIBAKE any non-ASCII git output before this
+    channel ever compares it), and runs with `-c core.quotepath=false` (a
+    per-invocation override, does not touch the host repo's own config) --
+    git's default quotepath=true octal-escapes a non-ASCII tracked path in
+    `ls-files` output, which this function's `Path(path_str).name` parsing
+    does not recognize, so a real mis-casing under a non-ASCII skill
+    directory would go unreported. Same choices, same rationale as the two
+    sibling fixes named above."""
     root = Path(root)
     unverifiable = "skills casing not verifiable"
 
     try:
         result = subprocess.run(
-            ["git", "ls-files", "--", ".claude/skills/"],
+            ["git", "-c", "core.quotepath=false", "ls-files", "--", ".claude/skills/"],
             cwd=str(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except Exception as e:

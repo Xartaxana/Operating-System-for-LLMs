@@ -547,9 +547,9 @@ def test_marker_has_no_still_matches_real_negative_unit():
 
 
 def test_otsutstvu_stem_marker_unaffected_unit():
-    # Intentional exception (see _MARKER_NO_SUFFIX_BOUNDARY): "отсутству"
+    # Intentional exception (see _MARKER_NO_SUFFIX_BOUNDARY): the marker
     # -- a stem with no right word-edge -- must still match inside
-    # "отсутствует".
+    # its own inflected form asserted below.
     assert _marker_pattern("отсутству").search("файл отсутствует здесь") is not None
 
 

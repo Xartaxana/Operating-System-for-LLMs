@@ -250,6 +250,19 @@ def decide(track: dict, cwd: str = ".") -> tuple[int, str, dict]:
     # .get() with a default (documented, not schema-guaranteed).
     if consecutive >= CONSECUTIVE_BLOCK_LIMIT:
         gate_state["consecutive_blocks"] = 0
+        # The safety valve above used to be invisible outside this file --
+        # the fact only lived in gate_log, which nothing reads on its own.
+        # A persistent fact in main_gate_state ITSELF (not just the
+        # append-only gate_log) is what a SessionStart-time reader can pick
+        # up on the next boot. It is NOT erased by a later successful run:
+        # the "not violation" branch above only touches "consecutive_blocks",
+        # never this key. It is a LIST ("unsafe_completions"), not a single
+        # overwritable dict -- an earlier version of this fix used one dict
+        # and a second valve trip in the same session silently overwrote the
+        # first occurrence; append only, never overwrite.
+        gate_state.setdefault("unsafe_completions", []).append(
+            {"ts": _now_iso(), "reason": reason}
+        )
         track.setdefault("gate_log", []).append(
             {
                 "action": "skipped_after_2_blocks",

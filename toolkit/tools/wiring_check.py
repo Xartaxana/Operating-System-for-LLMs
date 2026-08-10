@@ -175,6 +175,24 @@ exits 2, same as any other Python CLI built on argparse. No caller of
 this script is known to depend on the old silent-ignore behavior for
 any flag other than --check (checked at the review that raised this
 point) -- --check itself is still accepted and still a no-op.
+
+GIT SUBPROCESS ENCODING + QUOTEPATH (B8 finding, 2026-08-10): every git
+call in this module goes through the one shared `_run_git()` helper --
+see that function's own docstring for the two fixes it now applies
+(explicit `encoding="utf-8", errors="replace"` instead of a bare
+`text=True`, and `-c core.quotepath=false` on every invocation) and why
+each was needed. Class-wide effect on the checks above: check (1)
+(`check_git_hooks_path`) no longer mojibakes a non-ASCII
+`core.hooksPath` value under a non-UTF-8 console locale;
+check (6) (`check_skills_casing`) now actually SEES a non-ASCII tracked
+skill path instead of silently missing it (git's default quotepath
+octal-escaping broke this module's line-based basename parsing); check
+(5) (`check_untracked_enforcement_files`) no longer FALSELY reports a
+correctly-tracked non-ASCII-named `.githooks/` file as untracked for
+the same quotepath reason. check (2) (`check_required_hooks`, also an
+`ls-files -s` parser) gets the same quotepath protection for free
+through the shared helper, though no live incident is known for it
+today (the two required hook names are ASCII).
 """
 
 import argparse
@@ -225,13 +243,57 @@ def _run_git(args: list, root: Path):
     process (git missing from PATH, a timeout, a permissions error) --
     callers treat None as "could not determine this fact", distinct
     from a clean non-zero exit (which git itself can produce for benign
-    reasons, e.g. an unset config key)."""
+    reasons, e.g. an unset config key).
+
+    TWO fixes on top of the plain `text=True` capture this used to do
+    (B8 finding, repro confirmed on this host: locale.getpreferredencoding()
+    == cp1251):
+
+    (1) ENCODING: `text=True` alone lets Python pick
+    `locale.getpreferredencoding(False)` to decode git's stdout/stderr.
+    git itself always writes UTF-8 on this platform; on a non-UTF-8
+    console locale (cp1251 here) that decode step silently MOJIBAKEs any
+    non-ASCII byte sequence -- no exception, no None, just corrupted text
+    reaching every caller (e.g. a Cyrillic `core.hooksPath` value
+    round-tripped as garbage before `check_git_hooks_path` ever compares
+    it). `encoding="utf-8", errors="replace"` decodes git's actual output
+    encoding directly, independent of the console locale; `errors="replace"`
+    keeps the existing fail-open contract for the pathological case of
+    genuinely non-UTF-8 bytes (never raises UnicodeDecodeError into the
+    `except Exception: return None` branch, which would otherwise let a
+    decode failure masquerade as "git unavailable" -- every caller already
+    turns a None `_run_git` result into its own named issue string, so
+    this closes the class without adding a new reporting branch here).
+
+    (2) QUOTEPATH: every call now runs with `-c core.quotepath=false`
+    (a per-invocation override, does not touch the host repo's own
+    config). git's DEFAULT (quotepath=true) renders any tracked path
+    containing a non-ASCII byte as a double-quoted, octal-escaped
+    literal (e.g. `"\\320\\276...\\320\\261/skill.md"`) in `ls-files`
+    output -- this module's line-based parsing (`Path(line).name` etc.)
+    does not recognize that shape, so a non-ASCII tracked path was
+    invisible to check_skills_casing (a real mis-casing went unreported)
+    and could make check_untracked_enforcement_files FALSELY report a
+    correctly-tracked non-ASCII-named file as untracked (the on-disk
+    name, from pathlib, never matches the octal-quoted tracked name).
+    `-c core.quotepath=false` (not `-z`/NUL-terminated parsing) is the
+    fix: it is a single flag on the one shared subprocess wrapper every
+    check already routes through, so it fixes the class in one place
+    instead of rewriting the line-splitting logic of every caller that
+    parses `ls-files` output for `-z`'s NUL-terminated framing; `-c` as
+    a per-invocation config override has been supported by git since
+    1.7.2 (2010), long predating any git in active use today, so no
+    version gating is needed. NUL bytes in paths are not a concern this
+    flag choice has to handle (git rejects them outright; not a
+    real-world path byte)."""
     try:
         return subprocess.run(
-            ["git", *args],
+            ["git", "-c", "core.quotepath=false", *args],
             cwd=str(root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except Exception:

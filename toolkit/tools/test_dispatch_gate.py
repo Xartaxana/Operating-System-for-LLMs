@@ -124,9 +124,9 @@ def test_dod_marker_case_insensitive():
 
 
 # ---------------------------------------------------------------------
-# Write-indicator word-boundary behavior (Cyrillic root "правь"
+# Write-indicator word-boundary behavior (a Cyrillic root marker
 # matches only as a standalone word, not as a substring of
-# "поправь"/"исправь").
+# longer inflected words -- see WRITE_INDICATORS_RE / the test below).
 # ---------------------------------------------------------------------
 
 
@@ -492,10 +492,11 @@ def test_witness_echo_filename_substring_is_no_longer_a_dod_marker():
 
 
 def test_manifest_given_word_boundary_prodano_false_positive_fixed():
-    """The Russian word "продано" ("sold out") contains "дано" as a
-    substring but is not a given-marker -- a builder write dispatch
-    whose ONLY occurrence of that substring is inside "продано" (no
-    real given/owns markers) must still block check 2."""
+    """Covers the RU marker-pair false-positive case: a longer Russian
+    word containing the given-marker as a mere substring ("продано"
+    contains "дано") is not itself a given-marker -- a builder write
+    dispatch whose ONLY occurrence of that substring is inside "продано"
+    (no real given/owns markers) must still block check 2."""
     prompt = "DoD: witness present. На складе всё продано. owns: tools/x.py. Правь file x.py."
     exit_code, message = dispatch_gate.decide(_builder_payload(prompt, description="sonnet: fix"))
     assert exit_code == 2
@@ -503,10 +504,11 @@ def test_manifest_given_word_boundary_prodano_false_positive_fixed():
 
 
 def test_manifest_given_real_forms_unaffected_by_word_boundary():
-    """Legal given-marker forms ("Дано:", "дано --", "Given:") keep
-    matching after the word-boundary hardening -- their surrounding
-    characters (space/colon/dash) already provided a boundary before
-    this change."""
+    """Covers the RU marker-pair positive-control case: legal
+    given-marker forms (Given: and its Russian equivalents "Дано:",
+    "дано --") keep matching after the word-boundary hardening -- their
+    surrounding characters (space/colon/dash) already provided a
+    boundary before this change."""
     for prompt in (
         "DoD: witness present. Дано: репо целиком. owns: tools/x.py. Правь file x.py.",
         "DoD: witness present. дано -- репо целиком. owns: tools/x.py. Правь file x.py.",
