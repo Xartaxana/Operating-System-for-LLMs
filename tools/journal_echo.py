@@ -516,14 +516,24 @@ def _repo_root(file_path: str) -> Path:
 
 
 def _get_head_text(root: Path):
-    """git -C <root> show HEAD:logs/routing-log.jsonl -- ОДИН вызов,
+    """git -C <root> show HEAD:./logs/routing-log.jsonl -- ОДИН вызов,
     timeout ~5с. Возвращает stdout при returncode==0, иначе None (см.
     докстринг модуля за эмпирику всех трёх ошибочных форм -- не репо,
     файла нет на HEAD, каталог не существует -- returncode всегда
-    ненулевой; FileNotFoundError/TimeoutExpired -- тот же None)."""
+    ненулевой; FileNotFoundError/TimeoutExpired -- тот же None).
+
+    Префикс "./" в colon-path заставляет его резолвиться относительно
+    cwd самого `-C <root>` -- БЕЗ него голый "HEAD:<path>" резолвится
+    относительно ВЕРШИНЫ того git-репо, внутри которого лежит `root`,
+    что молча расходится с cwd-относительным резолвом всякий раз, когда
+    `root` -- подкаталог БОЛЬШЕГО репо, а не вершина сам по себе (см.
+    докстринг gateway/lead_replay.py.git_preimage за тот же класс,
+    эмпирически подтверждённый там же; в нашем репо `root` сам является
+    вершиной, так что "./" здесь no-op -- защита на случай вложенного
+    деплоя)."""
     try:
         proc = subprocess.run(
-            ["git", "-C", str(root), "show", "HEAD:logs/routing-log.jsonl"],
+            ["git", "-C", str(root), "show", "HEAD:./logs/routing-log.jsonl"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=GIT_TIMEOUT_SECONDS,
         )

@@ -50,25 +50,25 @@
   {
     "hq": "tools/hook_liveness_probe.py",
     "kit": "toolkit/tools/hook_liveness_probe.py",
-    "synced_hq_sha256": "4be5c3176e8c71b331e6f9cdb22ffbba2a8041a74db7fb316ea81ddce65e8021",
+    "synced_hq_sha256": "9122d4c14baee50e725944347082ea83d019d32d8b5b227704dda0f1de551909",
     "synced_kit_sha256": "8cba807fdc1c9df1305007e7490de09c944ea156b752d34cb384c946e40ddac9",
-    "synced_at": "2026-08-10T13:10:10",
+    "synced_at": "2026-08-10T13:57:52",
     "note": "pair added at the v0.8.0 full-mirror sync (CASES table adapted to the kit's own 12-command wiring — divergence by design)"
   },
   {
     "hq": "tools/test_hook_liveness_probe.py",
     "kit": "toolkit/tools/test_hook_liveness_probe.py",
-    "synced_hq_sha256": "c5c6907e4f61a8821305d7637ad1dc2c61af22429cc11fa09672e69d85bd4019",
+    "synced_hq_sha256": "452ba939f12a0bfc4245ae6752fef6a0756da87894498d1c0137e409c31fcce9",
     "synced_kit_sha256": "f27549f4d9e7c1537dab78567762729f9eb5ccb3b2f349692b00cb13a787e8b1",
-    "synced_at": "2026-08-10T13:10:10",
+    "synced_at": "2026-08-10T13:57:52",
     "note": "pair added at the v0.8.0 full-mirror sync"
   },
   {
     "hq": "tools/owns_verify.py",
     "kit": "toolkit/tools/owns_verify.py",
-    "synced_hq_sha256": "2e56877608dd127e4fb97e2124e5dae8edd998547eba8c0c1b7b994964015cf3",
+    "synced_hq_sha256": "6dbc4170ffb52b047e6459a453f8481e7c04fdcdea2600900895ef26d8fb8e3c",
     "synced_kit_sha256": "8a8d84b1a4de2ad4d7f334e049a9c3fa678874fc9442848176381ac6904a8b28",
-    "synced_at": "2026-08-10T13:10:10",
+    "synced_at": "2026-08-10T13:57:53",
     "note": "pair added at the v0.8.0 full-mirror sync (sibling-only import, collision class guard)"
   },
   {
@@ -98,9 +98,9 @@
   {
     "hq": "tools/token_usage_stats.py",
     "kit": "toolkit/tools/token_usage_stats.py",
-    "synced_hq_sha256": "55398b218639e73aafa52da86e3c8018a0e2a0b242d4dc6e176cb0fc2284847a",
+    "synced_hq_sha256": "1c6fed14a29b6799317f1b29f62e54a894a047519af4b361034640f91f5bbdc8",
     "synced_kit_sha256": "034970ce11d85c23e703a508d46523c2a93fb856ab7d3348091ea0bba015b32e",
-    "synced_at": "2026-08-10T13:10:11",
+    "synced_at": "2026-08-10T13:57:53",
     "note": "pair added at the v0.8.0 full-mirror sync"
   },
   {
@@ -138,17 +138,17 @@
   {
     "hq": "tools/exam_runner.py",
     "kit": "toolkit/tools/exam_runner.py",
-    "synced_hq_sha256": "a9c1f9b835e79d72ea97da82ce02895b415f39e6c879328009aef63c633209cc",
+    "synced_hq_sha256": "e700a5055c53f2da162adb8e1c70cd94e7186a082a666b6b270ec6f4caf79ae4",
     "synced_kit_sha256": "48d7225e2e54f069e578a63b8a787c9b30fd92e713e1e4f7cef5363bf1fd2718",
-    "synced_at": "2026-08-10T12:30:38",
+    "synced_at": "2026-08-10T13:57:53",
     "note": "pair added at the v0.8.0 full-mirror sync (+2 deliberate edge improvements over staff: fresh-polygon collect, empty fixture_dir)"
   },
   {
     "hq": "tools/test_exam_runner.py",
     "kit": "toolkit/tools/test_exam_runner.py",
-    "synced_hq_sha256": "d59726d76296969b905f9cf80990c7ef40e5990900ce305aa5347d12fc0fef3a",
+    "synced_hq_sha256": "1ab4e45167b3ea4591993794bd78b9ebbeff57bab0a85033faa9f6d9567b5ba5",
     "synced_kit_sha256": "f24f29f4c9c12ac8c7acf4aab61f673797412be150fd518fc5040f8f5866b7d9",
-    "synced_at": "2026-08-10T12:30:38",
+    "synced_at": "2026-08-10T13:57:53",
     "note": "pair added at the v0.8.0 full-mirror sync"
   },
   {
@@ -170,9 +170,9 @@
   {
     "hq": "gateway/lead_replay.py",
     "kit": "toolkit/gateway/lead_replay.py",
-    "synced_hq_sha256": "ba9bd4c3d8c3a013376ae5a34faf06681214bc76aaf7d74fa79be87802d39a78",
+    "synced_hq_sha256": "e641abd4743b239d1dbf2dfb78de3130871662a07392bf4f9d8fe15ad041185c",
     "synced_kit_sha256": "6fe15fbcf8735f72f218e774e41d18b14a1b2fd5f5ebaf76cfb4d02406713055",
-    "synced_at": "2026-08-10T12:30:38",
+    "synced_at": "2026-08-10T13:57:52",
     "note": "pair added at the v0.8.0 full-mirror sync (kit side carries the ./-prefix git_preimage fix — staff port queued)"
   },
   {
@@ -180,7 +180,7 @@
     "kit": "toolkit/gateway/test_lead_replay.py",
     "synced_hq_sha256": "8e64cc1a8aa66f6fd6e513bd0dc29eff9045ad178ded748eab1d4735ad8105ca",
     "synced_kit_sha256": "30343cd52287a1601607e26c3ff8d9661e228f84e39e8616d805bdc5fbb1a99f",
-    "synced_at": "2026-08-10T13:10:11",
+    "synced_at": "2026-08-10T13:57:53",
     "note": "pair added at the v0.8.0 full-mirror sync (template-corpus tests: placeholder + fixture-repo form)"
   },
   {
@@ -410,17 +410,17 @@
   {
     "hq": "tools/journal_echo.py",
     "kit": "toolkit/tools/journal_echo.py",
-    "synced_hq_sha256": "ff7c57933a838012cbbcfdf8e2ad2d9f695c37e8ed63de87b34616b083f7debe",
+    "synced_hq_sha256": "77bbc93b0df3933eb4a10aad8a90004712efb77358cffca286a52d3f46b1430c",
     "synced_kit_sha256": "d9998b6266b989b3603206f34c6351653831c5e7500341cb9b885c88fabfcf0b",
-    "synced_at": "2026-08-10T13:10:11",
+    "synced_at": "2026-08-10T13:57:52",
     "note": ""
   },
   {
     "hq": "tools/journal_validator.py",
     "kit": "toolkit/tools/journal_validator.py",
-    "synced_hq_sha256": "c1460b86757902ead615de6b4639f2317bd90617a3354276bd0379971e12b7ab",
+    "synced_hq_sha256": "3cea1c64e7bc29e2a901a18a14a8e5b58211ce5e7f199ccb2286a48b75db40dd",
     "synced_kit_sha256": "6c2f1bf5cc127dddc141b64250c9c5e19cdb1f3f53ab68bc79bd8998e5d684df",
-    "synced_at": "2026-08-10T13:10:11",
+    "synced_at": "2026-08-10T13:57:52",
     "note": ""
   },
   {

@@ -156,7 +156,20 @@ def verify(owns_decl: list, paths: list) -> list:
     return violations
 
 
+def _reconfigure_stdout_utf8():
+    """cp1251/узкая консоль (командная гигиена) -- см.
+    tools/hygiene_gate.py._reconfigure_stdout_utf8; этот CLI печатает
+    вызывающе-заданные пути (OUT-OF-OWNS-строки), чьи символы узкая
+    консольная кодовая страница может не суметь закодировать (порт
+    кит-фикса)."""
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
 def main(argv=None) -> int:
+    _reconfigure_stdout_utf8()
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("--owns")
     parser.add_argument("--paths", default="")

@@ -946,12 +946,21 @@ def is_journal_staged(journal_path: str = JOURNAL_PATH) -> bool:
 
 
 def get_staged_text(journal_path: str = JOURNAL_PATH) -> str:
-    proc = _git("show", f":{journal_path}")
+    """Префикс "./" в colon-path заставляет его резолвиться относительно
+    cwd самого _git -- БЕЗ него голый ":<path>" резолвится относительно
+    ВЕРШИНЫ того git-репо, внутри которого лежит cwd, что молча
+    расходится с cwd-относительным резолвом всякий раз, когда cwd --
+    подкаталог БОЛЬШЕГО репо, а не вершина сам по себе (см. докстринг
+    gateway/lead_replay.py.git_preimage за тот же класс, эмпирически
+    подтверждённый там же; в нашем репо cwd сам является вершиной, так
+    что "./" здесь no-op)."""
+    proc = _git("show", f":./{journal_path}")
     return proc.stdout if proc.returncode == 0 else ""
 
 
 def get_head_text(journal_path: str = JOURNAL_PATH) -> str:
-    proc = _git("show", f"HEAD:{journal_path}")
+    """Тот же resolве-мотив "./", что get_staged_text выше."""
+    proc = _git("show", f"HEAD:./{journal_path}")
     return proc.stdout if proc.returncode == 0 else ""
 
 

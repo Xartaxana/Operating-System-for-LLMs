@@ -442,7 +442,16 @@ def prepare(manifest, dry_run=False):
     clones/pins each of them under its own _src/template[_<armname>]
     dir and VERIFYs each one's HEAD, same as the pre-t-141 single
     _src/template did. An arm without an override reads the default
-    _src/template exactly as before (byte-identical behavior)."""
+    _src/template exactly as before (byte-identical behavior).
+
+    needs=todo requires a non-empty src['fixture_dir'] (порт кит-фикса):
+    отсутствующая ИЛИ пустая директория фикстур -- ИМЕНОВАННЫЙ отказ
+    (RuntimeError с путём и task id), не тихий no-op -- свежий деплой,
+    указавший на директорию фикстур, которую забыл наполнить, обязан
+    упасть громко на prepare(), а не породить сэндбоксы без фикстуры
+    задачи без единого сигнала где-либо ниже по конвейеру. dry-run
+    валидацию не проходит вовсе -- needs=todo лежит в теле, недостижимом
+    при dry_run (см. `continue` выше по функции)."""
     polygon_root = Path(manifest["polygon_root"])
     src = manifest["src"]
     actions = []
@@ -511,9 +520,21 @@ def prepare(manifest, dry_run=False):
                     actions.append(f"{click_dest} already present at pin, skipping copy")
             if "todo" in needs:
                 fixture_dir = Path(src["fixture_dir"])
-                for f in sorted(fixture_dir.iterdir()):
-                    if f.is_file():
-                        shutil.copy2(f, sandbox / f.name)
+                if not fixture_dir.is_dir():
+                    raise RuntimeError(
+                        f"fixture_dir {fixture_dir} does not exist or is not a "
+                        f"directory -- task {task['id']!r} needs=['todo'] has "
+                        f"nothing to copy; populate it before running prepare"
+                    )
+                fixture_files = [f for f in sorted(fixture_dir.iterdir()) if f.is_file()]
+                if not fixture_files:
+                    raise RuntimeError(
+                        f"fixture_dir {fixture_dir} exists but contains no "
+                        f"files -- task {task['id']!r} needs=['todo'] has "
+                        f"nothing to copy; populate it before running prepare"
+                    )
+                for f in fixture_files:
+                    shutil.copy2(f, sandbox / f.name)
 
             baseline_manifest[key] = sorted(_relative_file_set(sandbox))
             actions.append(f"prepared {sandbox}")
@@ -972,12 +993,36 @@ def collect(manifest, dry_run=False):
     fixes 1-4); (3) window load table for OTHER projects in the exam's
     [min..max] ts window; (4) writes <polygon_root>/dossier.{md,json}.
     No verdicts, no Runs-log write (non-goal). --dry-run: no-op (no
-    side effects), per DoD."""
+    side effects), per DoD.
+
+    FRESH-POLYGON short-circuit (порт кит-фикса): когда И run_log.json,
+    И baseline_manifest.json отсутствуют/пусты под polygon_root -- т.е.
+    ни prepare(), ни run() здесь ещё ничего не произвели -- собирать
+    осмысленно нечего; печатается ясное сообщение с именем polygon_root
+    и возвращается None БЕЗ прикосновения к БД транскриптов и без
+    записи файлов досье, вместо тихого прохода по каждой паре
+    (task, arm) до всё-нулевого досье, выглядящего так, будто задачи
+    выполнялись и ничего не сделали. run_log.json хотя бы с одной
+    записью, ИЛИ baseline_manifest.json (даже в одиночку -- напр.
+    сэндбокс, собранный вручную, минуя run()), идёт обычным путём ниже."""
     if dry_run:
         _print("[dry-run] collect skipped (no side effects)")
         return None
 
     polygon_root = Path(manifest["polygon_root"])
+
+    run_log_path = polygon_root / "run_log.json"
+    baseline_path = polygon_root / "baseline_manifest.json"
+    run_log_entries = []
+    if run_log_path.exists():
+        run_log_entries = json.loads(run_log_path.read_text(encoding="utf-8"))
+    if not run_log_entries and not baseline_path.exists():
+        _print(
+            f"No exam runs found under {polygon_root} (run_log.json and "
+            f"baseline_manifest.json are both absent or empty) -- nothing "
+            f"to collect. Run prepare/run first."
+        )
+        return None
 
     rows_imported, sessions_seen, warnings = usage_report.import_transcripts(
         usage_report.transcript_glob(), usage_report.db_path()
@@ -986,15 +1031,12 @@ def collect(manifest, dry_run=False):
     conn = sqlite3.connect(usage_report.db_path())
     try:
         baseline_manifest = {}
-        baseline_path = polygon_root / "baseline_manifest.json"
         if baseline_path.exists():
             baseline_manifest = json.loads(baseline_path.read_text(encoding="utf-8"))
 
-        run_log_by_key = {}
-        run_log_path = polygon_root / "run_log.json"
-        if run_log_path.exists():
-            for entry in json.loads(run_log_path.read_text(encoding="utf-8")):
-                run_log_by_key[(entry["arm"], entry["task_id"])] = entry
+        run_log_by_key = {
+            (entry["arm"], entry["task_id"]): entry for entry in run_log_entries
+        }
 
         results = []
         exclude_projects = []

@@ -97,8 +97,19 @@ def git_preimage(commit_hash: str, path: str) -> str | None:
     """Content of path as it stood immediately BEFORE commit_hash (i.e. in
     commit_hash^). Returns None for a path that did not exist in the parent
     commit -- the new-file case (corpus candidate #1, t-040): callers must
-    treat None as "new file, empty pre-image", not as an extraction error."""
-    result = _git("show", f"{commit_hash}^:{path}")
+    treat None as "new file, empty pre-image", not as an extraction error.
+
+    The "./" prefix on the colon-path makes it resolve relative to _git's
+    own cwd (REPO_ROOT), matching git_reference_diff's pathspec (which git
+    resolves relative to cwd too, per `git show <rev> -- <pathspec>`
+    semantics) -- WITHOUT it, bare "<rev>:<path>" resolves relative to the
+    top of whatever git repo REPO_ROOT sits inside, which silently diverges
+    from cwd-relative resolution whenever REPO_ROOT is a subdirectory of a
+    larger repo rather than a repo root itself (порт кит-фикса, тот же класс,
+    что tools/journal_echo.py._get_head_text -- в нашем репо REPO_ROOT сам
+    является вершиной git-репо, так что "./" здесь no-op, но защита нужна на
+    случай вложенного деплоя, тот же паттерн, что и у соседа)."""
+    result = _git("show", f"{commit_hash}^:./{path}")
     if result.returncode != 0:
         return None
     return result.stdout

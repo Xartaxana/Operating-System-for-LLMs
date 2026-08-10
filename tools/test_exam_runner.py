@@ -11,6 +11,7 @@ Run from repo root (canonical form): python -m pytest tools/ gateway/ -q
 """
 
 import json
+import re
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -448,6 +449,63 @@ def test_prepare_dry_run_has_no_side_effects(tmp_path):
 
     polygon = Path(manifest["polygon_root"])
     assert not polygon.exists()
+
+
+# ---------------------------------------------------------------------------
+# 3a. prepare() needs=todo fixture_dir existence/emptiness (порт кит-фикса) --
+#     a missing or empty fixture directory is a NAMED refusal, not a silent
+#     no-op that produces a sandbox missing its task fixture with no
+#     signal anywhere downstream. Boundary-beyond control: the
+#     non-empty fixture_dir path is already exercised (and asserted
+#     successful) by test_prepare_layouts_readme_overwrite_and_git_exclusion
+#     above.
+# ---------------------------------------------------------------------------
+
+
+def test_prepare_missing_fixture_dir_raises_named_error(tmp_path):
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    template_repo = tmp_path / "fake_template"
+    template_sha = _make_local_repo(template_repo, {"README.md": "TEMPLATE README"})
+    missing_fixture_dir = tmp_path / "does_not_exist"
+
+    manifest = _base_manifest(
+        tmp_path, click_repo, click_sha, template_repo, template_sha, missing_fixture_dir
+    )
+    with pytest.raises(RuntimeError, match=re.escape(str(missing_fixture_dir))):
+        prepare(manifest, dry_run=False)
+
+
+def test_prepare_empty_fixture_dir_raises_named_error(tmp_path):
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    template_repo = tmp_path / "fake_template"
+    template_sha = _make_local_repo(template_repo, {"README.md": "TEMPLATE README"})
+    empty_fixture_dir = tmp_path / "empty_fixture"
+    empty_fixture_dir.mkdir()
+
+    manifest = _base_manifest(
+        tmp_path, click_repo, click_sha, template_repo, template_sha, empty_fixture_dir
+    )
+    with pytest.raises(RuntimeError, match=re.escape(str(empty_fixture_dir))):
+        prepare(manifest, dry_run=False)
+
+
+def test_prepare_dry_run_skips_fixture_dir_validation(tmp_path):
+    # Boundary-beyond control in the OTHER direction: dry-run never
+    # touches the filesystem, so a missing fixture_dir must NOT raise
+    # under --dry-run (existing dry-run contract: no side effects, no
+    # deep validation).
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    template_repo = tmp_path / "fake_template"
+    template_sha = _make_local_repo(template_repo, {"README.md": "TEMPLATE README"})
+    missing_fixture_dir = tmp_path / "does_not_exist"
+
+    manifest = _base_manifest(
+        tmp_path, click_repo, click_sha, template_repo, template_sha, missing_fixture_dir
+    )
+    prepare(manifest, dry_run=True)  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -1531,3 +1589,93 @@ def test_collect_artifact_warning_false_when_no_multi_session_stdout_has_url(tmp
 
     row = dossier["sandboxes"][0]
     assert row["artifact_warning"] is False
+
+
+# ---------------------------------------------------------------------------
+# 12. collect() FRESH-POLYGON short-circuit (порт кит-фикса): a fresh
+#     install with zero exam runs (run_log.json and baseline_manifest.json
+#     both absent, or run_log.json present but an empty list, with no
+#     baseline either) returns None and prints a clear "no runs" message
+#     instead of walking every (task, arm) pair to an all-zero dossier
+#     that looks like tasks ran and produced nothing. Boundary-beyond
+#     control: test_collect_wires_artifact_warning_test_scoping_and_
+#     like_metrics above (baseline_manifest.json present, no
+#     run_log.json) and the multi-session collect() tests (run_log.json
+#     present with entries) both already exercise the NORMAL path and
+#     must keep passing unaffected by this short-circuit.
+# ---------------------------------------------------------------------------
+
+
+def _fresh_polygon_manifest(polygon_root, fixture_dir):
+    return {
+        "polygon_root": str(polygon_root),
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": str(fixture_dir),
+        },
+        "model": "haiku",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "text": "hi", "needs": []}],
+        "order": {"t1": ["A"]},
+    }
+
+
+def test_collect_returns_none_when_polygon_never_prepared_or_run(tmp_path, monkeypatch, capsys):
+    _collect_db_setup(tmp_path, monkeypatch)
+    polygon_root = tmp_path / "polygon"  # never created: no prepare(), no run()
+    manifest = _fresh_polygon_manifest(polygon_root, tmp_path)
+    validate_manifest(manifest)
+
+    result = collect(manifest, dry_run=False)
+
+    assert result is None
+    out = capsys.readouterr().out
+    assert "no exam runs" in out.lower()
+    assert str(polygon_root) in out
+    assert not (polygon_root / "dossier.json").exists()
+
+
+def test_collect_returns_none_when_run_log_is_empty_list_and_no_baseline(tmp_path, monkeypatch):
+    _collect_db_setup(tmp_path, monkeypatch)
+    polygon_root = tmp_path / "polygon"
+    polygon_root.mkdir(parents=True)
+    (polygon_root / "run_log.json").write_text("[]", encoding="utf-8")
+    manifest = _fresh_polygon_manifest(polygon_root, tmp_path)
+    validate_manifest(manifest)
+
+    result = collect(manifest, dry_run=False)
+
+    assert result is None
+    assert not (polygon_root / "dossier.json").exists()
+
+
+def test_collect_does_not_short_circuit_when_baseline_manifest_present_alone(tmp_path, monkeypatch):
+    # Boundary-beyond control: baseline_manifest.json ALONE (prepare()
+    # ran, run_log.json absent -- e.g. a hand-assembled dossier-wiring
+    # fixture) must NOT trigger the short-circuit.
+    _collect_db_setup(tmp_path, monkeypatch)
+    polygon_root = tmp_path / "polygon"
+    (polygon_root / "A" / "t1").mkdir(parents=True)
+    (polygon_root / "baseline_manifest.json").write_text(
+        json.dumps({"A/t1": []}), encoding="utf-8"
+    )
+    manifest = _fresh_polygon_manifest(polygon_root, tmp_path)
+    validate_manifest(manifest)
+
+    result = collect(manifest, dry_run=False)
+
+    assert result is not None
+    assert (polygon_root / "dossier.json").exists()
+
+
+def test_collect_dry_run_still_takes_precedence_over_fresh_polygon_check(tmp_path):
+    # --dry-run stays a pure no-op even on a fresh, never-prepared
+    # polygon -- the dry-run early return fires before the new check.
+    polygon_root = tmp_path / "polygon"
+    manifest = _fresh_polygon_manifest(polygon_root, tmp_path)
+    validate_manifest(manifest)
+
+    result = collect(manifest, dry_run=True)
+
+    assert result is None
+    assert not polygon_root.exists()

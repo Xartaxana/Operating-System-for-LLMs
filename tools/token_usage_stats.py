@@ -76,7 +76,9 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+_TOOLS_DIR = str(Path(__file__).resolve().parent)
+if _TOOLS_DIR not in sys.path:
+    sys.path.insert(0, _TOOLS_DIR)
 from usage_report import (  # noqa: E402
     CACHE_WRITE_MULTIPLIER,
     CACHE_READ_MULTIPLIER,
@@ -392,7 +394,19 @@ def _is_safe_to_write(output_path: Path) -> bool:
     return True
 
 
+def _reconfigure_stdout_utf8():
+    """cp1251/узкая консоль (командная гигиена) -- см.
+    tools/hygiene_gate.py._reconfigure_stdout_utf8; этот CLI печатает
+    файловые пути (путь вывода xlsx), чьи символы узкая консольная
+    кодовая страница может не суметь закодировать (порт кит-фикса)."""
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
 def main(argv=None) -> int:
+    _reconfigure_stdout_utf8()
     parser = argparse.ArgumentParser(
         description="Monthly token-usage statistics -> xlsx (append-only)."
     )

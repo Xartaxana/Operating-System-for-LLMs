@@ -331,8 +331,11 @@ def test_load_settings_hook_commands_reads_real_settings():
 def test_run_all_no_cases(monkeypatch):
     monkeypatch.setattr(hlp, "CASES", [])
     report = hlp.run_all()
-    assert report["no_cases"] is True
-    assert hlp.overall_ok(report) is False
+    try:
+        assert report["no_cases"] is True
+        assert hlp.overall_ok(report) is False
+    finally:
+        hlp._cleanup_temp_dirs(report)
 
 
 def test_format_human_report_no_cases_line():
@@ -399,18 +402,21 @@ def test_overall_ok_true_when_everything_clean():
 
 def test_live_run_of_all_cases_is_ok():
     report = hlp.run_all()
-    assert report["no_cases"] is False
-    assert report["settings_unreadable"] is False
-    assert report["case_missing"] == [], report["case_missing"]
-    assert report["stale_case"] == [], report["stale_case"]
-    assert report["live_state_diff"] == [], report["live_state_diff"]
-    assert report["import_findings"] == [], report["import_findings"]
+    try:
+        assert report["no_cases"] is False
+        assert report["settings_unreadable"] is False
+        assert report["case_missing"] == [], report["case_missing"]
+        assert report["stale_case"] == [], report["stale_case"]
+        assert report["live_state_diff"] == [], report["live_state_diff"]
+        assert report["import_findings"] == [], report["import_findings"]
 
-    non_ok = [r for r in report["results"] if r["verdict"] != hlp.OK]
-    assert non_ok == [], non_ok
-    assert len(report["results"]) == 13
+        non_ok = [r for r in report["results"] if r["verdict"] != hlp.OK]
+        assert non_ok == [], non_ok
+        assert len(report["results"]) == 13
 
-    assert hlp.overall_ok(report) is True
+        assert hlp.overall_ok(report) is True
+    finally:
+        hlp._cleanup_temp_dirs(report)
 
 
 def test_main_cli_exit_code_zero_on_live_gates(capsys):

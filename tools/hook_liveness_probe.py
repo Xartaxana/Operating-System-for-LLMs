@@ -207,7 +207,13 @@ def format_excerpt(s, max_chars: int = OUTPUT_EXCERPT_MAX_CHARS) -> str:
 
 # --- gate module imports (for the const-non-empty sanity check) ----------
 
-sys.path.insert(0, TOOLS_DIR)
+# Каноническая форма guard'а (tools/owns_gate.py:278, порт кит-фикса) --
+# .resolve() + условная вставка, чтобы повторный импорт этого модуля
+# (или вызывающий код, уже положивший tools/ в sys.path сам) никогда не
+# растил sys.path дублирующей записью.
+_TOOLS_DIR_RESOLVED = str(Path(TOOLS_DIR).resolve())
+if _TOOLS_DIR_RESOLVED not in sys.path:
+    sys.path.insert(0, _TOOLS_DIR_RESOLVED)
 
 _GATE_MODULE_NAMES = (
     "dispatch_gate",
@@ -1143,7 +1149,23 @@ def format_human_report(report: dict) -> str:
     return "\n".join(lines)
 
 
+def _reconfigure_stdout_utf8():
+    """cp1251/узкая консоль (командная гигиена): и stdout, И stderr
+    переконфигурируются -- человекочитаемый отчёт и --json отчёт оба
+    печатаются в stdout, но консольная кодовая страница, не умеющая
+    закодировать байт отчёта, роняет UnicodeEncodeError на любом из
+    потоков одинаково; errors="replace" fail-open (испорченные символы),
+    а не падение пробы посреди отчёта -- тот же паттерн, что
+    tools/hygiene_gate.py._reconfigure_stdout_utf8 (порт кит-фикса)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def main(argv=None) -> int:
+    _reconfigure_stdout_utf8()
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
