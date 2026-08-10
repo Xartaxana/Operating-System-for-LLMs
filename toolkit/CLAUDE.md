@@ -70,6 +70,29 @@ vocabulary; the mapping between the two vocabularies is documented in
    time (enforcement-file review rule; a precedent where an unreviewed
    hook gated work before anyone reviewed it) — otherwise unreviewed
    code gates work ahead of its own review.
+
+   DRAFTING → designer BY DEFAULT (following a calibration measurement
+   that found the designer function existed but was rarely actually
+   routed to): a WRITING dispatch whose spec carries 3 OR MORE
+   numbered items, OR touches 3 or more files, is DRAFTED by the
+   designer from a Lead intent brief; the Lead self-drafting it anyway
+   is legal ONLY with a `dispatch_skipped` event (agent = designer,
+   reason mandatory) — the same form rule 1 gives scout. This skip
+   obligation holds regardless of the tier relationship between
+   designer and Lead in your deployment's binding: the routing motive
+   here is CONTEXT ISOLATION and an independent drafting context, not
+   model price, and the universal skip rule's obligation (rule 8)
+   follows the MOTIVE, not a price gap. Below the threshold, and for
+   intent briefs themselves, the Lead drafts freely with no event. The
+   threshold counts the task's PRIMARY draft. A RESUBMISSION after a
+   `rejected` — a retry under the SAME task_id — is a CONTINUATION of
+   the existing spec: the Lead edits that spec ITSELF, with no
+   designer dispatch and no `dispatch_skipped` event, regardless of
+   the threshold (an explicit operator decision, recorded the same way
+   any such override is). Work re-badged under a NEW task_id is a NEW
+   task and the threshold applies to it as usual; parts produced after
+   a `decomposable` event take new task_ids and each is judged against
+   the threshold on its own.
 3. critic — a MANDATORY acceptance gate: builder diffs over roughly
    100 lines, or touching the data schema / core / money accounting;
    unclear bugs — BEFORE Lead starts debugging them itself. The first
@@ -87,7 +110,9 @@ vocabulary; the mapping between the two vocabularies is documented in
    re-run of what's attached is legitimate, investigating the
    mechanics by reading is not. A layer not attached: critic returns
    the dispatcher a request for the layer, it does not execute it
-   itself. Critic-on-plan: when a
+   itself. Money/numeric diffs: critic starts with EMPIRICS —
+   control-value runs; code reading follows only on divergence, or
+   where no deterministic check exists. Critic-on-plan: when a
    recon deliverable will itself serve as the SPEC for implementation
    worth more than roughly 30 minutes of work, it gets a critic review
    of the PLAN before any code starts — not just a review of the code
@@ -160,7 +185,12 @@ vocabulary; the mapping between the two vocabularies is documented in
 8. Universal skip rule (silent-skip violation class): a task that
    maps to a cheap tier, done by Lead itself, is legitimate ONLY with
    a `dispatch_skipped` event (agent = the skipped tier, reason
-   mandatory) — on any tier. Waiver: skipping critic on a small diff
+   mandatory) — on any tier. The rule follows the ROUTING MOTIVE, not
+   the price gap: where a function is routed to for CONTEXT ISOLATION
+   or an independent context rather than for a cheaper model, the skip
+   event is owed just the same — a same-tier function absorbed by the
+   coordinator is still an absorbed function. Standing case: designer
+   drafting (rule 2). Waiver: skipping critic on a small diff
    is a note inside `accepted`. SMALL-WORK BATCHING: a small
    builder-class edit that does NOT block the next step is not
    self-executed by the coordinator one at a time — it accumulates in
@@ -280,9 +310,22 @@ vocabulary; the mapping between the two vocabularies is documented in
    conflict, the expected behavior is stated — or the fork is
    returned as an explicit question; a spec silent on an edge that
    its own requirements create is a dispatcher defect, not a guess
-   left to the performer. A task with an INTERACTIVE surface (a CLI/UI that accepts
+   left to the performer. Two sub-classes of that edge are both
+   dispatcher defects when silent: (i) TEMPORAL — an artifact the
+   change itself brings into existence (a config, file or flag absent
+   at spec time, present after): the behavior is stated for BOTH
+   worlds, before and after it exists, and the spec says which move
+   creates it; (ii) POSITIONAL — when the spec prescribes WHERE in
+   existing logic a branch goes (order, precedence, before/after which
+   check), it states the INVARIANT that position must preserve (what
+   stays unreachable, what must still be refused), not the location
+   alone: a position without its invariant is the dispatcher's guess
+   handed to the performer as fact. A task with an INTERACTIVE surface (a CLI/UI that accepts
    user input) has a DoD that includes an adversarial mini-battery:
-   magnitude, nesting, encoding, empty/broken input. scout: an
+   magnitude, nesting, encoding, empty/broken input; every
+   limit/boundary the code introduces gets a test AT and BEYOND it.
+   SCOPE CEILING: test volume = acceptance keys + the battery + the
+   boundaries — a full regress beyond that is not required. scout: an
    explicit question(s) and a completeness criterion; "X is nowhere to
    be found" is a valid outcome, and it requires a trail (trail-based
    acceptance rule). critic: what to review against — the dispatch
@@ -551,9 +594,11 @@ role using Lead-class work):
 Acceptance is only from ABOVE: `accepted` is legitimate when the
 acceptor's tier is strictly above the executor's tier, OR the
 decision carries input from a tier above (a critic verdict), OR
-acceptance is explicitly queued for the full Lead (a note in notes).
-Acceptance by an equal/higher tier without that input is the session
-self-certifying (self-certification violation class). Matrix by the
+acceptance is explicitly queued for the full Lead (a note in notes),
+OR a calibrated-judge verdict on a leaf-class dispatch (basis
+"judge", rule 13). Acceptance by an equal/higher tier without that
+input is the session self-certifying (self-certification violation
+class). Matrix by the
 coordinator's actual tier:
 
 - **Top tier** (the model bound to Lead; subscription default:
@@ -667,3 +712,15 @@ operator. For all sessions and subagents in this repo:
    registries put the verdict at the END of a multi-section entry, so
    a truncated window systematically shows the problem without its
    resolution.
+7. Temporary corruption (a mutation probe, a red-probe, "corrupt and
+   restore") is rolled back by a BYTE COPY, never by `git checkout` /
+   `git restore`: (a) take the copy BEFORE corrupting, and restore
+   FROM IT; (b) `git checkout` / `git restore` is legal only when
+   `git status --porcelain -- <file>` was EMPTY before the corruption
+   — check it, don't assume; skipping the check risks wiping another
+   session's uncommitted changes to that file along with the
+   corruption; (c) the rollback's witness is the VERBATIM output of
+   the comparison (a hash or a diff), not the word "restored"; (d) a
+   live artifact (a ledger, a registry, a money table) is not
+   corrupted at ALL when a pure function's verdict proves the same
+   point — corrupt a COPY of the tree instead.

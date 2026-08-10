@@ -46,6 +46,7 @@ only (scout/builder/critic/designer/lead), never in model names.
 | gateway/judge_calibration.json + PROCESS/JUDGE_CALIBRATION_PROTOCOL.md | judge (api-keys contour) |
 | witness-based acceptance on every task — NO set, by design | builder |
 | Lead acceptance of every draft — NO set, by design; auto-binds to the critic's model and inherits its exam when the model is the same | designer |
+| PROCESS/DEPLOYMENT_ECONOMY_EXAM.md (runner tools/exam_runner.py; the doc carries its own Runs-log section) | the deployment as a whole |
 
 A change to the exam DISCIPLINE itself (keys pre-registered before
 dispatch, unmarked delivery, contamination check, re-run triggers,
@@ -55,6 +56,10 @@ this map in the same commit. The builder row is a recorded decision
 (execution-based acceptance beats a one-time set), not an omission;
 so is the designer row (every draft passes Lead acceptance before any
 dispatch uses it, and a same-model binding inherits the critic exam).
+The DEPLOYMENT_ECONOMY_EXAM.md row's doc<->runner pairing is
+test-pinned on BOTH sides (tools/test_exam_runner.py) — a doc-format
+drift the runner no longer parses, or a runner change the doc no
+longer describes, fails there, not silently.
 
 ## Keeping the map up to date
 

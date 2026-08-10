@@ -12,6 +12,7 @@ corrupt/unreadable ledger failing OPEN (a WARN, not a crash).
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -775,3 +776,177 @@ def test_mode_installed_wrong_root_diagnostic_survives_narrow_console_codepage(c
     assert "UnicodeEncodeError" not in result.stderr
     assert result.returncode == 1
     assert "does not look like an installed host" in result.stdout
+
+
+# ---------------------------------------------------------------------
+# EXTERNAL-VALUE SANITIZATION (2026-08-10 fix): the CLI MESSAGE ENCODING
+# invariant above covers strings this module's own code authored; it did
+# NOT by itself cover an external value (git output, JSON/ledger content,
+# an on-disk filename, a --host-root/--kit-root CLI path) interpolated
+# RAW into an issue string -- found by a parallel-branch probe: a
+# Cyrillic core.hooksPath produced a non-ASCII issue string. Every site
+# that interpolates such a value now runs it through `_ascii_safe()`
+# (plain values) or the `ascii()` builtin (values that used `!r`
+# quoting). These tests cover the class, not just the one instance:
+# check_git_hooks_path (the finding itself), check_harness_hooks (the
+# named sibling), check_untracked_enforcement_files, check_skills_casing,
+# check_adoption_ledger, and main()'s wrong-root diagnostic.
+# ---------------------------------------------------------------------
+
+
+def _assert_ascii_clean(s: str):
+    # Raises UnicodeEncodeError if `s` carries any non-ASCII character --
+    # the same invariant check the pre-existing
+    # test_skills_casing_issue_text_is_ascii_only uses.
+    s.encode("ascii")
+
+
+def test_ascii_safe_is_identity_on_ascii_input():
+    for value in ["", "tools/foo.py", "C:/plain/ascii/path", "hook 'quoted' text --x"]:
+        assert wiring_check._ascii_safe(value) == value
+
+
+def test_ascii_safe_escapes_non_ascii_readably():
+    escaped = wiring_check._ascii_safe("\u0434\u043e\u043c")  # "дом"
+    _assert_ascii_clean(escaped)
+    assert "\\u0434" in escaped
+    assert "\\u043e" in escaped
+    assert "\\u043c" in escaped
+
+
+def test_hookspath_non_ascii_value_is_ascii_clean_and_readable(repo):
+    # NOTE (environment finding, out of this task's class -- see report):
+    # _run_git()'s subprocess.run(..., text=True) has no explicit
+    # encoding, so on a non-UTF8-locale Windows host (this one:
+    # locale.getpreferredencoding() == cp1251) a non-ASCII git config
+    # value round-trips MOJIBAKE'd before this check ever sees it --
+    # confirmed empirically (git itself stores/returns the value
+    # correctly; only the Python<->git pipe under cp1251 corrupts it).
+    # That is a separate, pre-existing subprocess-encoding defect in
+    # _run_git, not this task's class (interpolating a value into an
+    # issue string without ASCII-sanitizing it) -- so this test does not
+    # assert the exact Cyrillic codepoints survived the pipe, only that
+    # WHATEVER non-ASCII value arrives is rendered ASCII-clean and in a
+    # generically readable backslash-escape form, which is the actual
+    # invariant this fix guarantees.
+    _git(["config", "--local", "core.hooksPath", "\u0434\u0440\u0443\u0433\u043e\u0439"], repo)
+    issues = wiring_check.check_git_hooks_path(repo)
+    assert len(issues) == 1
+    _assert_ascii_clean(issues[0])
+    assert "does not resolve to" in issues[0]
+    assert re.search(r"\\u[0-9a-fA-F]{4}", issues[0]), issues[0]
+
+
+def test_hookspath_ascii_value_message_unchanged_byte_for_byte(repo):
+    # Regression pin: the ASCII path (already covered by
+    # test_hookspath_wrong_target_is_an_issue) is untouched byte-for-byte
+    # by the new sanitization -- same exact message shape as before,
+    # including the `!r`-quoted form ascii() reproduces on pure-ASCII
+    # input.
+    _git(["config", "--local", "core.hooksPath", "some/other/dir"], repo)
+    issues = wiring_check.check_git_hooks_path(repo)
+    expected = (repo / ".githooks").resolve()
+    assert issues == [f"core.hooksPath='some/other/dir' does not resolve to {expected}"]
+
+
+def test_harness_hooks_non_ascii_filename_is_ascii_clean(repo):
+    _write_settings(repo, ["python tools/\u0444\u0430\u0439\u043b.py"])  # "файл.py"
+    issues = wiring_check.check_harness_hooks(repo)
+    assert len(issues) == 1
+    _assert_ascii_clean(issues[0])
+    assert issues[0].startswith("hook file not found: tools/")
+    assert "\\u0444" in issues[0]
+
+
+def test_untracked_enforcement_file_non_ascii_name_is_ascii_clean(repo):
+    _add_githook(repo, "pre-commit", executable=True)
+    (repo / ".githooks" / "\u0441\u043a\u0440\u0438\u043f\u0442.sh").write_text(
+        "echo hi\n", encoding="utf-8"
+    )
+    issues = wiring_check.check_untracked_enforcement_files(repo)
+    assert len(issues) == 1
+    _assert_ascii_clean(issues[0])
+    assert issues[0].startswith("untracked enforcement file: .githooks/")
+    assert "\\u0441" in issues[0]
+
+
+def test_skills_casing_non_ascii_dir_is_ascii_clean(repo):
+    # core.quotepath=false: git's DEFAULT (true) reports a non-ASCII
+    # tracked path in a quoted-octal form ("\NNN\NNN...") that this
+    # check's raw-line parsing does not recognize as ending in
+    # "skill.md" at all -- a separate, pre-existing scope gap in
+    # check_skills_casing's git-output parsing (documented finding, out
+    # of this task's class), not the interpolation-sanitization bug
+    # this test targets. Disabling quoting isolates that gap so this
+    # test exercises only the sanitization fix: once the check DOES
+    # recognize the casing violation, is the resulting issue string
+    # ASCII-clean.
+    _git(["config", "--local", "core.quotepath", "false"], repo)
+    _add_skill(repo, ".claude/skills/onboarding_\u043d\u0431/skill.md")
+    issues = wiring_check.check_skills_casing(repo)
+    assert len(issues) == 1
+    _assert_ascii_clean(issues[0])
+    assert issues[0].startswith("skill file '.claude/skills/onboarding_")
+    assert re.search(r"\\u[0-9a-fA-F]{4}", issues[0]), issues[0]
+
+
+def test_ledger_non_ascii_mechanism_row_is_ascii_clean(repo):
+    text = (
+        "| Kit mechanism | Status | Basis / trigger |\n"
+        "|---|---|---|\n"
+        "| \u041c\u0435\u0445\u0430\u043d\u0438\u0437\u043c (`.githooks/commit-msg`) | adopt | |\n"
+    )
+    (repo / "ADOPTION_LEDGER.md").write_text(text, encoding="utf-8")
+    issues = wiring_check.check_adoption_ledger(repo, ["core.hooksPath not set"], [])
+    assert len(issues) == 1
+    _assert_ascii_clean(issues[0])
+    assert "\\u041c" in issues[0]
+
+
+def test_mode_installed_wrong_root_non_ascii_host_root_is_ascii_clean(tmp_path):
+    bad_root = tmp_path / "\u043f\u043b\u043e\u0445\u043e\u0439_\u043f\u0443\u0442\u044c"
+    bad_root.mkdir()
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--mode", "installed", "--host-root", str(bad_root)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 1
+    result.stdout.encode("ascii")
+    assert "does not look like an installed host" in result.stdout
+    assert "\\u043f" in result.stdout
+
+
+def test_check_wiring_all_issues_ascii_clean_under_adversarial_non_ascii_repo(repo):
+    # Adversarial battery (D-0054/R11 edge coverage): several non-ASCII
+    # sources fire AT ONCE (hooksPath, settings.json hook filename,
+    # untracked .githooks file, ADOPTION_LEDGER.md row) -- every issue
+    # string check_wiring() aggregates must still individually pass the
+    # module's own ASCII-only invariant.
+    _git(["config", "--local", "core.hooksPath", "\u0434\u0440\u0443\u0433\u043e\u0439"], repo)
+    _write_settings(repo, ["python tools/\u0444\u0430\u0439\u043b.py"])
+    githooks = repo / ".githooks"
+    githooks.mkdir()
+    (githooks / "\u0441\u043a\u0440\u0438\u043f\u0442.sh").write_text("x\n", encoding="utf-8")
+    ledger_text = (
+        "| Kit mechanism | Status | Basis / trigger |\n"
+        "|---|---|---|\n"
+        "| \u041c\u0435\u0445\u0430\u043d\u0438\u0437\u043c (`.githooks/commit-msg`) | adopt | |\n"
+    )
+    (repo / "ADOPTION_LEDGER.md").write_text(ledger_text, encoding="utf-8")
+    result = wiring_check.check_wiring(repo)
+    assert result["ok"] is False
+    assert result["issues"]
+    for issue in result["issues"]:
+        _assert_ascii_clean(issue)
+
+
+def test_empty_string_non_ascii_input_boundary(repo):
+    # Boundary at the edge of the non-ASCII class: an empty string and a
+    # single non-ASCII character are both handled without raising --
+    # _ascii_safe has no length/content precondition.
+    assert wiring_check._ascii_safe("") == ""
+    single = wiring_check._ascii_safe("\u0434")
+    _assert_ascii_clean(single)
+    assert single == "\\u0434"

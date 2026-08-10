@@ -38,6 +38,41 @@ for the period, and diffs to DECISIONS.md.
    violation (self-declaration failed). An empty window (no skip
    events, or no class repeated within one session) is noted
    explicitly — "no within-session recurrence".
+   (c) DISPATCHER THRESHOLD OF THE DESIGNER (the detector for rule 2's
+   designer-drafting threshold clause): every WRITING `delegated` of
+   the window whose spec carries 3 OR MORE numbered items, OR touches
+   3 or more files (counted from the dispatch's `owns` line and from
+   the diff of the accepted work), is obligated to carry EITHER a
+   paired `delegated(designer)` before it, OR a
+   `dispatch_skipped(agent=designer)` with a named reason. Neither of
+   the two = a silent absorption of the function by the coordinator —
+   the same violation class as self-reading instead of dispatching
+   scout. A measure alongside, for TREND not violation: the count of
+   designer dispatches in the window against the count of writing
+   dispatches above the threshold. Track this ratio over time: a rule
+   can exist on paper and still see zero real use until routing
+   default forces it — a rising share is the rule's own goal; no rise
+   while the rule is live is a leak, a finding.
+   (d) THE "RESUBMISSION = CONTINUATION OF THE SPEC" EXCEPTION (rule
+   2's own carve-out) — detector: a `delegated` with `attempt`>=2
+   under the SAME `task_id` after a `rejected` is a continuation of an
+   already-written spec; a designer dispatch and a
+   `dispatch_skipped(agent=designer)` are NOT required for it, and
+   threshold (c) above does not project onto it. LEAKAGE OF THE
+   EXCEPTION: re-badging the continuation under a NEW `task_id` — a
+   window task whose subject and `owns` set match a just-rejected task
+   (adjacent `ts`, the same path owner), with no paired
+   `delegated(designer)` and no `dispatch_skipped(agent=designer)` —
+   is a leak of the exception (the norm bypassed by swapping the
+   task_id). REVERSE LEAKAGE: a skip event whose reason names
+   "resubmission" as its class means the norm is misunderstood —
+   either it really was a new task (a designer dispatch was owed and
+   the event was filed wrong), or the event itself is superfluous (the
+   exception already frees a resubmission with no events at all);
+   either case is a finding. An empty window (no rejected-then-
+   resubmitted tasks under threshold (c), no re-badging under an
+   adjacent task_id, no skip events of class "resubmission") is noted
+   explicitly — "no resubmissions".
 2. **Rule 3 — critic on large diffs.** Commits in the period with
    over roughly 100 changed lines, accepted with no
    `delegated(critic)` and no "critic: skipped, <reason>" note in the
@@ -343,7 +378,13 @@ for the period, and diffs to DECISIONS.md.
     the queue until the second pass happens.
 17. Reserved for deployment-specific checks (register yours here —
     see the mechanism rule: every mechanism registers its failure
-    detector).
+    detector). Example candidates for this slot: an integration gate
+    your own host layers on top of the shipped ones (a CI check, a
+    deploy-time smoke test), or a threshold rule for your own workers
+    that this protocol has no generic check for (a domain-specific
+    limit, a local escalation trigger) — register the check here
+    rather than leaving that mechanism's detector-registration
+    question unanswered.
 18. **Economic trend (Rule #1 applied to the whole system) — "are we
     actually saving, and which way is the trend going."** Every run:
     `python tools/savings_report.py --until <end of window>` (full
@@ -368,11 +409,25 @@ for the period, and diffs to DECISIONS.md.
     script's own failure mode is caught by tests in the canonical
     suite run.
 
-19. **Policy-as-code gates.** Posture: `.claude/settings.json` carries
-    all five hooks (dispatch_gate + critic_snapshot on PreToolUse,
-    dod_track on PostToolUse, dod_gate on SubagentStop, main_gate on
-    Stop) -- a missing entry is itself a finding (a rule that used to
-    be enforced by discipline alone has silently reverted to that).
+19. **Policy-as-code gates.** Posture: this check compares
+    `.claude/settings.json` against its OWN state AT RUN TIME — every
+    SessionStart/PreToolUse/PostToolUse/SubagentStop/Stop entry, the
+    full list of `command` strings — not against a fixed list in this
+    protocol, which is a dated reference snapshot and goes stale the
+    moment a hook is added or removed; a mismatch between the
+    reference snapshot below and the file's actual content is itself a
+    finding, even when the added/missing hook isn't touched by any
+    other sub-check here. REFERENCE SNAPSHOT (navigation only, not the
+    source of truth): twelve command hooks — session_context
+    (SessionStart); dispatch_gate/critic_snapshot/owns_gate (PreToolUse
+    Task|Agent); hygiene_gate (PreToolUse Bash|PowerShell);
+    claim_control_gate (PreToolUse Edit|Write); dod_track/journal_echo
+    (PostToolUse Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell);
+    search_control_gate (PostToolUse Bash|PowerShell|Grep|Glob|Read);
+    negative_lint (PostToolUse Task|Agent); dod_gate (SubagentStop);
+    main_gate (Stop) — a missing entry against the actual file is
+    itself a finding (a rule that used to be enforced by discipline
+    alone has silently reverted to that).
     Liveness: with live dispatches in the window, `.claude/dod_track/`
     is non-empty for at least one session, and any accumulated
     `gate_log` entries are non-empty; every gate silent while
@@ -415,6 +470,32 @@ for the period, and diffs to DECISIONS.md.
     neither the full nor the partial form of (2), nor the excusing
     form (3) — is itself a finding.
 
+    (a) PROBE OF GATE-CODE LIVENESS: run
+    `python tools/hook_liveness_probe.py` from the repo root and
+    attach its output VERBATIM. The probe feeds each command hook of
+    `.claude/settings.json` — including claim_control_gate,
+    search_control_gate and negative_lint — a deliberately triggering
+    stdin payload inside an isolated temporary tree, and asserts the
+    expected trace: a printed reply carrying an anchor and a declared
+    exit code, or a file artifact for gates that are silent by design.
+    The run itself is the INDEPENDENT fact-trigger: the trace is
+    obligated, so a gate's silence is distinguishable from "no
+    violations happened" — closing exactly the gap PER-GATE ACCOUNTING
+    names above for a category-(2) check that only cross-references
+    existing records. Any verdict other than OK (DEAD / MISMATCH /
+    CRASH / HUNG / MISSING / CASE-MISSING / STALE-CASE /
+    LIVE-STATE-TOUCHED / SETTINGS-UNREADABLE) is a posture finding
+    addressed BY GATE NAME. No attached output = this check is NOT
+    done. KNOWN BENIGN FLAKE: a LIVE-STATE-TOUCHED verdict on the
+    CURRENT session's own ledger file during a long run can be a
+    timing coincidence with that same session's own PostToolUse hook
+    writing — rerun; a PERSISTENT repeat is a genuine finding. LIMIT,
+    STATED EXPLICITLY: the probe proves CODE liveness, not WIRING
+    liveness (registration in `.claude/settings.json`, the matcher,
+    `core.hooksPath`) — wiring stays with the Posture paragraph above
+    and `tools/wiring_check.py`; crediting Posture through this probe
+    is forbidden.
+
 Numbering note: checks 20 and 21 below are this deployment's own
 sequence, continuing straight on from 19 (no numbering gap) -- they are
 the local equivalents of a source deployment's checks 30 and 31, ported
@@ -423,6 +504,23 @@ matching numbers, since this protocol's own sequence has never mirrored
 a source protocol number-for-number (see checks 15/17, reserved
 placeholders unique to this file). The correspondence is recorded here,
 once, rather than in every cross-reference below.
+
+Checks 23-29 continue the same pattern (source checks ported under this
+file's own continuous numbering, not reproduced under matching
+numbers): source check 0 -> 23; source check 20 -> 24; source check 21
+-> 25; source check 24 -> 26; source check 25 -> 27; source check 29 ->
+28; source check 32 -> 29 (recast from the adopting/receiving side to
+the REDISTRIBUTOR side -- see check 29's own applicability clause; the
+receiving side is check 22, already ported earlier). Source check 26's
+liveness-probe sub-point lands inside THIS file's existing check
+19, as a new lettered sub-point, rather than as its own numbered check
+(its subject -- hook-code liveness -- is a posture detail of check 19's
+own gate list). Source check 1's designer-threshold / resubmission
+sub-points land inside THIS file's existing check 1, as sub-points (c)/
+(d), for the same reason. Source checks 15/17/27/28 are NOT ported (15
+duplicates this file's own already-ported check 15; 17 is a reserved
+placeholder in both files independently; 27/28 are specific to a
+sibling deployment this deployment does not run).
 
 20. **Leaf-routing judge acceptance (rule 13).** Mechanism: rule 13 of
     CLAUDE.md's core policy, a `"judge"` value in the journal
@@ -481,8 +579,9 @@ once, rather than in every cross-reference below.
     install, one-off). Violation: an "adopt" row
     whose mechanism is absent or stale in the tree; a template row
     missing from the ledger entirely (a dropped row hides forever —
-    the F-52 class); a recorded revision no upgrade batch has
-    reconciled. Window check: (a) every current template row has a
+    the class of a row silently dropped from the host's own mirror of
+    the template nomenclature); a recorded revision no upgrade batch
+    has reconciled. Window check: (a) every current template row has a
     ledger row (completeness); (b) spot-check adopt rows against the
     tree (mechanism present, wired); (c) the recorded kit revision
     exists, and the last upgrade batch's delta was decided row by
@@ -497,6 +596,181 @@ once, rather than in every cross-reference below.
     check, on the side of whoever maintains the kit you're adopting
     from, is their own port-batch delta check (their calibration
     protocol).
+
+23. **Closing out the previous run (retro-contour).** Open the notes
+    of the last `calibrated` event and that run's findings: each is
+    closed by a mechanism/decision, OR sits queued with a NAMED
+    trigger that has not fired yet. A queue item (the CURRENT_CONTEXT
+    queue, or the deployment's FINDINGS log) whose trigger fired, with
+    the work neither started nor re-decided, is a finding OF THE
+    CURRENT run. Sources: the journal's `calibrated` events, the
+    FINDINGS log for the window, the CURRENT_CONTEXT queue. A fresh
+    deployment with no prior `calibrated` event has nothing to close —
+    note it explicitly: "no previous run".
+
+24. **Gate walk by `defect_found`.** For each `defect_found` of the
+    window: list the gates that stood on the path of the defect
+    (witness, the critic entry, trail-based acceptance, code gates),
+    and name which stayed silent and why (a discipline leak / a check
+    blind spot / a new class). A silent gate is a finding and a
+    candidate for promotion into a code gate (rule 10's
+    code-gates-execution clause); the breakdown line goes into the
+    `calibrated` event's notes. An empty window (0 `defect_found`) is
+    noted explicitly.
+
+25. **Cost crossover of escalations (Update Rule 4 of the assignment
+    table).** For every escalated task of the window (`escalated` plus
+    its `task_id` chain): the actual full cost of every attempt
+    (sidechains of the attempts, plus Lead overhead of acceptance)
+    against the estimate of a direct dispatch to the tier where the
+    task was accepted. A systematic loss by category (a cheap tier
+    with retries costing more) is evidence for revising the delegation
+    boundary (a table row / rule 6). An empty window (0 escalations)
+    is noted explicitly.
+
+26. **Freshness of navigation documents.** Direct pass: window events
+    (phase/task closures, decisions, status moves — from the journal
+    and git log) are reflected in their OWNER documents: DECISIONS.md
+    (decisions), CURRENT_CONTEXT.md (the live task/queue),
+    DELEGATION_TABLE.md (tier statuses), README.md (navigation),
+    docs/SIBLING_MAP.md (the axis map). OWNERSHIP PASS: the same list
+    of owners is read in REVERSE — for every block of the boot-path
+    files, ask "is this fact at its OWN owner?" A block whose owner is
+    a DIFFERENT document is a finding of the same class even when it's
+    fresh and not duplicated: it is paid for by every session, but
+    lives in the wrong place. Separately verify that a calibration
+    run's OWN findings land in the `calibrated` event's notes, and
+    CURRENT_CONTEXT keeps only the UNRESOLVED decision, one line per
+    item — a finding written to the journal AND duplicated in prose in
+    the queue bloats the live file and evades the boot-diet skill's
+    size/dedup steps, since it is neither closed nor a duplicate of
+    another boot file. Reverse pass: load-bearing claims of the boot
+    path ("waiting on X", "next is Y", dates) are spot-checked against
+    fact; a stale claim is a finding of this same class. The verdict
+    is a semantic judgment for the calibrating Lead; a weekly cadence
+    is enough. Distinct from check 10: that one watches the SIZE of
+    live files, this one watches whether their CONTENT still matches
+    fact, and whether it lives in the right place. Execution: both
+    passes are carried out by a scout dispatch (walking documents is
+    recon, rule 1); DoD — a line-by-line verdict "fresh / staleness
+    candidate" per document with a trail, "no staleness" is a valid
+    outcome with a trail; digest acceptance follows the trail-based
+    acceptance rule. An off-cycle run of this check is legal at any
+    time on the operator's word. A fresh deployment with no closed
+    phases/decisions yet has nothing to check against — note it
+    explicitly: "no events to reconcile".
+
+27. **Permission/hygiene audit of the window.** Run
+    `python tools/permission_audit.py --minutes <window>` (or `--all`)
+    against transcripts of the period; the walkthrough steps are
+    `.claude/skills/permission-audit/SKILL.md`. `--summary` prints the
+    "hygiene class breakdown" — a count by the FOUR classes (`2>&1`,
+    `cd`/`Set-Location`, `python -c`/heredoc, "journal bypassing
+    Edit/Write") across ALL scanned calls, with the suspect sub-count
+    alongside each, plus a "commands with >=1 class" line. The first
+    run of this check records ITS OWN baseline (there is no prior data
+    point on a fresh deployment); later runs compare against it. An
+    empty window (no transcripts, or a fresh deployment with none yet)
+    is noted explicitly — "no calls to audit". Two categories: (a)
+    hygiene VIOLATIONS themselves (the right-hand column of the
+    skill's step 2 table: a `cd` prefix/`2>&1`, a hand-built journal
+    line bypassing Edit/Write, an ad-hoc read bypassing Read/Grep,
+    bypassing the canonical pytest form, poll loops, a RELATIVE NUMBER
+    WITH NO NAMED BASE, a REGISTRY ENTRY'S STATUS CLAIMED FROM A
+    PARTIAL READ (command hygiene point 6: the entry's status line was
+    never reached)) — fix at the source; the count and class go into
+    the calibration report. (b) `settings.local.json` curation
+    (MASKED-by-broad-allowlist rules, duplicates, one-off entries) —
+    the skill's steps 3-5; narrowing broad rules is an operator
+    decision.
+    (c) UNSAFE ROLLBACK OF CORRUPTION: window transcripts are searched
+    for `git checkout --` / `git restore` NEAR a mutation probe (a
+    file corruption, a red-probe, "corrupt then restore"). Every hit
+    is checked: was a byte copy taken BEFORE the corruption, and was
+    the file clean per `git status --porcelain` beforehand? If not,
+    that is a violation of command hygiene point 7 (the byte-copy
+    rollback rule), and a finding — independent of whether harm
+    actually occurred that time. A positive-form control of the search itself
+    is mandatory (command hygiene point 6). An empty window (no
+    rollback-adjacent `git checkout`/`git restore` calls found) is
+    noted explicitly — "no rollback events".
+    (d) THE "TRUNCATED REGISTRY WINDOW -> STATUS CLAIM" LINK: an
+    address scan of window transcripts for the combination of reading
+    a registry (escalations/decisions/tasks/ledgers) through a
+    truncated/limited window (a `Read` with `limit`/`offset`, a
+    headline grep that never reaches the entry's status line) followed
+    by a status claim about that SAME entry in a summary or report
+    with NO re-read of the status field. A hit is a finding plus a
+    reminder of command hygiene point 6. HONEST CAVEAT: this class's
+    base detector is INCIDENTAL (an operator's question exposes the
+    mismatch by fact, not by rule) — this transcript scan only
+    SUPPLEMENTS the incidental layer, it does not replace it with a
+    machine one; do not present one as the other. An empty window (the
+    combination never occurred) is noted explicitly — "no truncated
+    status claims".
+
+28. **Completeness of workers' final messages.** Mechanism: the rule
+    "the final message is the FULL report/digest/verdict, and a
+    resubmission restates it from scratch" lives in the role files
+    (`.claude/agents/builder.md` point 7, `scout.md` point 9,
+    `critic.md` point 16, `designer.md` point 5, `judge.md` point 3)
+    plus the resubmission hint in `tools/dod_gate.py`'s
+    `BLOCK_MESSAGE` (substring "COMPLETE final report"). Window check:
+    (a) liveness — the five anchors are in place (a point lookup); (b)
+    failure — window events marked with a content re-request ("repeat
+    the report", "re-requested", "prior messages not delivered") in
+    journal notes, AND/OR a usage-record sidechain with a large volume
+    of work whose final message is empty or truncated, is a leak of
+    the rule — a finding. The first window that measures this records
+    its OWN baseline (rate per day/week); later windows compare
+    against it — growth is grounds to revise the mechanism's form (a
+    candidate: a code layer on SubagentStop, the same class dod_gate
+    already applies on Stop), a decline toward zero is the healthy
+    direction. (c) siblings — every role file on Axis 1 of
+    `docs/SIBLING_MAP.md` carries the rule; a new tier/role file added
+    later gets the same line in the same commit (Axis 1's own
+    same-commit maintenance duty) — a role file missing it is a
+    finding of this check, not just of Axis 1's own upkeep. An empty
+    window (no re-request events, no truncated-message sidechains) is
+    noted explicitly — "no re-requests".
+
+29. **Upgrade delivery by delta-per-revision — the REDISTRIBUTOR
+    side.** Applicable ONLY when this deployment itself further
+    redistributes its (adapted) copy of the template to one or more
+    downstream sub-deployments; a deployment that only ADOPTS from an
+    upstream kit and never ships its own template onward has nothing
+    to check here — note explicitly "not applicable: this deployment
+    does not redistribute" and stop. The RECEIVING side of the same
+    duty (this deployment reconciling deltas from whatever it adopted
+    FROM) is check 22 above — do not conflate the two directions.
+    Mechanism, mirrored outward: a port-batch shipped to a downstream
+    sub-deployment is assembled as a delta from that sub-deployment's
+    OWN recorded snapshot revision of your template; role files travel
+    as diffable CONTENT of the delivery, not just their `model:`
+    frontmatter. Violation: a batch shipped with new/changed
+    mechanisms since the recorded revision carrying no corresponding
+    ledger-delta lines in the target's own carrier — a mechanism
+    invisible to the delivery (role-file content changes are the
+    highest-risk case: a content-only edit with no frontmatter change
+    can stay invisible to a delta check that only looks at
+    frontmatter, and the blind spot can live for a long time before
+    anyone notices). Window check, per outgoing port-batch: (a) the
+    target's recorded snapshot revision exists; (b) your delta from
+    that revision (a diff of your own template tree) is matched,
+    position by position, against the ledger-delta lines in the
+    target's handoff carrier — an uncovered position is a finding; (c)
+    accepted role changes at the target are accompanied by their own
+    exam gate; (d) SEALED DELIVERY OF THE CONTROL CHAIN: a delta
+    position that changes an EXECUTABLE file of the control chain (a
+    git hook, a hook script invoked by one) carries the FULL target
+    content, not a delta line; the batch's acceptance carries a
+    liveness-probe witness (an invalid input is rejected, and the
+    probe state is rolled back afterward); and the target's required
+    hook files land in git's index at mode 100755 — a mode of 100644
+    ships a silently dead gate on Linux even though the file itself is
+    present and looks installed. An empty window (no port-batches
+    shipped in the period) is noted explicitly — "no outgoing
+    batches".
 
 ## Closing out a run
 

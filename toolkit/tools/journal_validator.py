@@ -797,12 +797,20 @@ def is_journal_staged(journal_path: str = JOURNAL_PATH) -> bool:
 
 
 def get_staged_text(journal_path: str = JOURNAL_PATH) -> str:
-    proc = _git("show", f":{journal_path}")
+    """The "./" prefix on the colon-path makes it resolve relative to
+    _git's own cwd -- WITHOUT it, bare ":<path>" resolves relative to
+    the top of whatever git repo the cwd sits inside, which silently
+    diverges from cwd-relative resolution whenever the cwd is a
+    subdirectory of a larger repo rather than a repo root itself (see
+    gateway/lead_replay.py's git_preimage docstring for the same
+    class, verified empirically there)."""
+    proc = _git("show", f":./{journal_path}")
     return proc.stdout if proc.returncode == 0 else ""
 
 
 def get_head_text(journal_path: str = JOURNAL_PATH) -> str:
-    proc = _git("show", f"HEAD:{journal_path}")
+    """Same "./" prefix rationale as get_staged_text above."""
+    proc = _git("show", f"HEAD:./{journal_path}")
     return proc.stdout if proc.returncode == 0 else ""
 
 

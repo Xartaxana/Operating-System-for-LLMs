@@ -24,6 +24,30 @@ roles:
       model:           # e.g. claude-opus-4-8, llama-3.3-70b-versatile
       api_key_env:     # e.g. ANTHROPIC_API_KEY
 
+  # OPTIONAL: a rung ABOVE lead, summoned only by the operator's own
+  # word for the hardest cases (never routed to automatically). Absent
+  # key = no reserve rung — this is true before AND after you bind
+  # one; leaving it commented out changes nothing else in this file.
+  # Resolved by the shipped gate's role ladder (tools/mechanism_gate.py):
+  # that ladder is what turns this key into an actual rung above lead,
+  # not this file by itself. `designer` deliberately has NO row here
+  # (see the onboarding skill's binding step) — it auto-binds to the
+  # critic-tier model in the role file's own frontmatter instead of a
+  # config row; reserve is the opposite case, a rung with no role
+  # profile of its own to bind, so it lives here and only here.
+  # To CHANGE which model sits at lead (a rebinding, not a first bind):
+  # rewalk the onboarding skill's binding step for `lead`, re-run that
+  # step's exam gate against the new model, and record the swap as its
+  # own decision-log line, same as any other binding change — this
+  # key does not change automatically when `lead` above changes.
+  # reserve:
+  #   subscription:
+  #     model: claude-fable-5
+  #   api:
+  #     provider:
+  #     model:
+  #     api_key_env:
+
   # Mandatory acceptance gate for builder-class diffs (CLAUDE.md rule 3).
   critic:
     subscription:

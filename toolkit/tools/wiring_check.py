@@ -144,7 +144,27 @@ host machines with unknown console codepages, and it is not a
 mechanism this repo's own dogfooding session controls the codepage
 of -- so every printed string here follows the ASCII-only invariant
 already used by tools/session_context.py's own printed lines, not
-this repo's (Russian-language) CLAUDE.md/journal convention.
+this repo's own CLAUDE.md/journal convention.
+
+EXTERNAL-VALUE SANITIZATION (2026-08-10 fix, found by a parallel-branch
+probe): the ASCII invariant above covers strings this module's OWN
+code writes; it does not by itself cover an external value
+interpolated RAW into an issue string -- a git config value
+(core.hooksPath), a JSON hook command or a filename extracted from
+it, a tracked git path, an on-disk filename, an ADOPTION_LEDGER.md
+row, or a --host-root/--kit-root CLI argument can each carry
+non-ASCII bytes the host repo or its operator chose, entirely outside
+this module's control. Every interpolation site of that kind now
+routes the value through `_ascii_safe()` (`str.encode("ascii",
+"backslashreplace")`, no quoting) or, where the message already used
+Python's `!r` formatting, through the `ascii()` builtin (`repr()`
+plus the same escaping). Both are the IDENTITY transform on
+already-ASCII input -- existing ASCII-only issue strings are
+unchanged byte-for-byte -- so only genuinely non-ASCII input is
+rendered as readable `\\xNN`/`\\uNNNN` escapes instead of raw bytes
+that could crash `print()` under a narrow console codepage, the same
+failure class the CLI MESSAGE ENCODING fix above addressed for this
+module's own literals.
 
 ARGPARSE CONTRACT CHANGE (also from that review): the previous
 hand-rolled arg handling ignored argv entirely (`_ = sys.argv[1:]`),
@@ -176,6 +196,23 @@ _ADOPTION_LEDGER_NAME = "ADOPTION_LEDGER.md"
 # deliberately allows spaces in the filename so a path-with-spaces
 # command is still recognized and checked, not silently misparsed.
 _HOOK_COMMAND_RE = re.compile(r"^python tools/([^/\\]+\.py)$")
+
+
+def _ascii_safe(value) -> str:
+    """Renders `value` (via `str()`) as plain ASCII, escaping any
+    non-ASCII character to a readable `\\xNN`/`\\uNNNN` form instead of
+    passing it through raw -- see the module docstring's EXTERNAL-VALUE
+    SANITIZATION section. Identity on already-ASCII input (regression
+    pin: test_ascii_safe_is_identity_on_ascii_input): apply this
+    unconditionally at every issue-string site that interpolates a
+    value this module did not itself author (git output, JSON/ledger
+    file content, on-disk filenames, CLI path arguments) with no risk
+    of changing already-ASCII output. Not a replacement for `!r`
+    formatting -- callers that were using `!r` for quoting use the
+    `ascii()` builtin instead (repr() plus the same escaping), since
+    wrapping this function's unquoted output in `!r` would double-
+    escape any backslash the escaping itself introduced."""
+    return str(value).encode("ascii", "backslashreplace").decode("ascii")
 
 
 def repo_root() -> Path:
@@ -223,7 +260,9 @@ def check_git_hooks_path(root: Path) -> list:
     except OSError:
         configured_resolved = configured
     if configured_resolved != expected:
-        return [f"core.hooksPath={raw!r} does not resolve to {expected}"]
+        return [
+            f"core.hooksPath={ascii(raw)} does not resolve to {_ascii_safe(expected)}"
+        ]
     return []
 
 
@@ -301,26 +340,26 @@ def check_harness_hooks(root: Path) -> list:
         # saved with invalid UTF-8 bytes raises UnicodeDecodeError (a
         # ValueError subclass, not an OSError) -- must fail open the
         # same as a permissions/missing-file error, not escape uncaught.
-        return [f"{settings_path} not readable ({type(e).__name__})"]
+        return [f"{_ascii_safe(settings_path)} not readable ({type(e).__name__})"]
 
     try:
         settings = json.loads(text)
     except Exception as e:
-        return [f"{settings_path} not valid JSON ({type(e).__name__})"]
+        return [f"{_ascii_safe(settings_path)} not valid JSON ({type(e).__name__})"]
 
     issues = []
     seen = set()
     for command in _parse_hook_commands(settings):
         m = _HOOK_COMMAND_RE.match(command.strip())
         if not m:
-            issues.append(f"unparsed hook command: {command.strip()}")
+            issues.append(f"unparsed hook command: {_ascii_safe(command.strip())}")
             continue
         filename = m.group(1)
         if filename in seen:
             continue
         seen.add(filename)
         if not (root / "tools" / filename).is_file():
-            issues.append(f"hook file not found: tools/{filename}")
+            issues.append(f"hook file not found: tools/{_ascii_safe(filename)}")
     return issues
 
 
@@ -356,7 +395,7 @@ def check_skills_casing(root: Path) -> list:
         basename = Path(line).name
         if basename.lower() == "skill.md" and basename != "SKILL.md":
             issues.append(
-                f"skill file '{line}' has non-canonical casing (expected exactly "
+                f"skill file '{_ascii_safe(line)}' has non-canonical casing (expected exactly "
                 "'SKILL.md' -- a case-insensitive filesystem silently no-ops "
                 "'git add' on a case-only rename)"
             )
@@ -383,7 +422,10 @@ def check_untracked_enforcement_files(root: Path) -> list:
 
     tracked = {Path(line).name for line in (result.stdout or "").splitlines() if line.strip()}
     untracked = sorted(on_disk - tracked)
-    return [f"untracked enforcement file: {_GITHOOKS_DIRNAME}/{name}" for name in untracked]
+    return [
+        f"untracked enforcement file: {_GITHOOKS_DIRNAME}/{_ascii_safe(name)}"
+        for name in untracked
+    ]
 
 
 # See module docstring, check (4): deliberately narrow keyword sets --
@@ -447,13 +489,14 @@ def check_adoption_ledger(root: Path, git_issues: list, harness_issues: list) ->
     has_harness_issue = bool(harness_issues)
     for mechanism in adopt_rows:
         low = mechanism.lower()
+        safe_mechanism = _ascii_safe(mechanism)
         if has_git_issue and any(k in low for k in _GIT_HOOKS_ROW_KEYWORDS):
             issues.append(
-                f"adoption ledger row '{mechanism}' is 'adopt' but git-hooks wiring has an open issue"
+                f"adoption ledger row '{safe_mechanism}' is 'adopt' but git-hooks wiring has an open issue"
             )
         if has_harness_issue and any(k in low for k in _HARNESS_HOOKS_ROW_KEYWORDS):
             issues.append(
-                f"adoption ledger row '{mechanism}' is 'adopt' but harness-hooks wiring has an open issue"
+                f"adoption ledger row '{safe_mechanism}' is 'adopt' but harness-hooks wiring has an open issue"
             )
     return issues
 
@@ -595,7 +638,7 @@ def main(argv=None) -> int:
         if not (root / _GITHOOKS_DIRNAME).is_dir() and not (root / ".claude").is_dir():
             bad_root = True
             print(
-                f"host-root {root} does not look like an installed host "
+                f"host-root {_ascii_safe(root)} does not look like an installed host "
                 "(no .githooks and no .claude) -- likely run from the wrong "
                 "root; use --mode source to check kit source instead"
             )

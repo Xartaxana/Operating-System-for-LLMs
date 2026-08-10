@@ -1,5 +1,325 @@
 [
   {
+    "hq": "tools/claim_control_gate.py",
+    "kit": "toolkit/tools/claim_control_gate.py",
+    "synced_hq_sha256": "0ffc24f175f9c9c7297c9110c46d034aafb669df911e1ac4e6b783047f8d600e",
+    "synced_kit_sha256": "1889763e202df1a6a45aba8a365af40ca3ff36b78e11a57f7c95e2d67d662236",
+    "synced_at": "2026-08-10T12:30:36",
+    "note": "pair added at the v0.8.0 full-mirror sync (ROOT_FILES rescoped to kit root)"
+  },
+  {
+    "hq": "tools/test_claim_control_gate.py",
+    "kit": "toolkit/tools/test_claim_control_gate.py",
+    "synced_hq_sha256": "9fd9f3423c2efbcd71107cde62dade7a405a2aaedc4e02195329c7abd5f95063",
+    "synced_kit_sha256": "9a74686f834b17686ea87dfd80283d62d7488ca0d9149515828062d22d6a8ec3",
+    "synced_at": "2026-08-10T12:30:36",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "tools/search_control_gate.py",
+    "kit": "toolkit/tools/search_control_gate.py",
+    "synced_hq_sha256": "1c173da0daaafde571e90a70beefe3bfe5b535794fc1cd737b82b5b4339de150",
+    "synced_kit_sha256": "98ad168fcd5b00d637c468910e6478648798645e65a392be2000b899686a8a6a",
+    "synced_at": "2026-08-10T12:30:36",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "tools/test_search_control_gate.py",
+    "kit": "toolkit/tools/test_search_control_gate.py",
+    "synced_hq_sha256": "d269e59eeefb221949ba412201033ab308495a4faa93bf93342be73f4532c753",
+    "synced_kit_sha256": "e1d4d1a89ef141948f31c72b6a2f978de2e95ff9362a60485f95313a29a55f62",
+    "synced_at": "2026-08-10T12:30:36",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "tools/negative_lint.py",
+    "kit": "toolkit/tools/negative_lint.py",
+    "synced_hq_sha256": "2538a5c9baffbeb1458d99a81d93747ae87406cdf9218bde69dd15fb28f73750",
+    "synced_kit_sha256": "4ffbdb225cfe19f577605fba0f4f50369ffda75f5b55ce96c63f1164789a2911",
+    "synced_at": "2026-08-10T12:30:37",
+    "note": "pair added at the v0.8.0 full-mirror sync (RU prose translated)"
+  },
+  {
+    "hq": "tools/test_negative_lint.py",
+    "kit": "toolkit/tools/test_negative_lint.py",
+    "synced_hq_sha256": "51942813fadcc9ce86136da7da756c6fd83f3d3764c218e703e6952e55802d61",
+    "synced_kit_sha256": "915328164015af070996b98be51de90bf04e42e18932b625c1fa129d39f8f899",
+    "synced_at": "2026-08-10T12:30:37",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "tools/hook_liveness_probe.py",
+    "kit": "toolkit/tools/hook_liveness_probe.py",
+    "synced_hq_sha256": "4be5c3176e8c71b331e6f9cdb22ffbba2a8041a74db7fb316ea81ddce65e8021",
+    "synced_kit_sha256": "8cba807fdc1c9df1305007e7490de09c944ea156b752d34cb384c946e40ddac9",
+    "synced_at": "2026-08-10T13:10:10",
+    "note": "pair added at the v0.8.0 full-mirror sync (CASES table adapted to the kit's own 12-command wiring — divergence by design)"
+  },
+  {
+    "hq": "tools/test_hook_liveness_probe.py",
+    "kit": "toolkit/tools/test_hook_liveness_probe.py",
+    "synced_hq_sha256": "c5c6907e4f61a8821305d7637ad1dc2c61af22429cc11fa09672e69d85bd4019",
+    "synced_kit_sha256": "f27549f4d9e7c1537dab78567762729f9eb5ccb3b2f349692b00cb13a787e8b1",
+    "synced_at": "2026-08-10T13:10:10",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "tools/owns_verify.py",
+    "kit": "toolkit/tools/owns_verify.py",
+    "synced_hq_sha256": "2e56877608dd127e4fb97e2124e5dae8edd998547eba8c0c1b7b994964015cf3",
+    "synced_kit_sha256": "8a8d84b1a4de2ad4d7f334e049a9c3fa678874fc9442848176381ac6904a8b28",
+    "synced_at": "2026-08-10T13:10:10",
+    "note": "pair added at the v0.8.0 full-mirror sync (sibling-only import, collision class guard)"
+  },
+  {
+    "hq": "tools/test_owns_verify.py",
+    "kit": "toolkit/tools/test_owns_verify.py",
+    "synced_hq_sha256": "76421703ce261ea02b4fe99bde9756bd6b82f63ecc3aa70695f765fb63760a1f",
+    "synced_kit_sha256": "30b1a7256fee42b05f68f56fc89fb2fef6068ca8ab62c396e63dbc5c16981a16",
+    "synced_at": "2026-08-10T12:30:37",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "tools/judge_calib_sanitize.py",
+    "kit": "toolkit/tools/judge_calib_sanitize.py",
+    "synced_hq_sha256": "963532645d4ade2d1b07c5f2919037cdb7d42c5d254e1cff1fb254ce85ce7506",
+    "synced_kit_sha256": "0097cb376e19e3e9f34d36aa7d53f7ceb4928ad1d750095e020edf98efe22313",
+    "synced_at": "2026-08-10T12:30:37",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "tools/test_judge_calib_sanitize.py",
+    "kit": "toolkit/tools/test_judge_calib_sanitize.py",
+    "synced_hq_sha256": "ac156d860b1d1d7b22b313ec8eda3b72e90c54643f6c46b27abdf33709fca528",
+    "synced_kit_sha256": "00ea848c4febee5f484894bda27e3858097f7ec6191ff77512e7bde17bf03d2c",
+    "synced_at": "2026-08-10T12:30:37",
+    "note": "pair added at the v0.8.0 full-mirror sync (real-path leg points at the kit's own calibration set)"
+  },
+  {
+    "hq": "tools/token_usage_stats.py",
+    "kit": "toolkit/tools/token_usage_stats.py",
+    "synced_hq_sha256": "55398b218639e73aafa52da86e3c8018a0e2a0b242d4dc6e176cb0fc2284847a",
+    "synced_kit_sha256": "034970ce11d85c23e703a508d46523c2a93fb856ab7d3348091ea0bba015b32e",
+    "synced_at": "2026-08-10T13:10:11",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "tools/test_token_usage_stats.py",
+    "kit": "toolkit/tools/test_token_usage_stats.py",
+    "synced_hq_sha256": "bcfb5b015033cb3e627a811a23a5909d02acacf989ab30c04fec30242e171c05",
+    "synced_kit_sha256": "309595bde6d902917818fcfe02e4b4f86cb881c898aca91583949d8f70460670",
+    "synced_at": "2026-08-10T12:30:38",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "tools/test_critic_snapshot.py",
+    "kit": "toolkit/tools/test_critic_snapshot.py",
+    "synced_hq_sha256": "c28a6812c83939ce6c9c3e99a8c98192df9a101e86bebae42a6693b1315ef61d",
+    "synced_kit_sha256": "e8a63312db2bd94d82ac5f1c96dc27d9aa545a9d31f7b78a5643543e3dfc71c4",
+    "synced_at": "2026-08-10T12:30:38",
+    "note": "pair added at the v0.8.0 full-mirror sync (loud fail-open generation)"
+  },
+  {
+    "hq": "tools/test_session_context_wiring.py",
+    "kit": "toolkit/tools/test_session_context_wiring.py",
+    "synced_hq_sha256": "147d34bf8392672a1278cebf6004e48180c0233ea4f5d98da940f82e3adb5de1",
+    "synced_kit_sha256": "1bafc5cea52b4d5f363c4de3a21bd352071957ee42a4b227915f1386d837d1f5",
+    "synced_at": "2026-08-10T12:30:38",
+    "note": "pair added at the v0.8.0 full-mirror sync (ported by CHANNELS — kit tree diverged; python-channel absent in kit by design)"
+  },
+  {
+    "hq": "tools/test_findings_form.py",
+    "kit": "toolkit/tools/test_findings_form.py",
+    "synced_hq_sha256": "f38c4f2d6bdf82b7b2dfa77b22a3dffde8d0d4cecaee06c789ff6a89f4303fa6",
+    "synced_kit_sha256": "9482d580aba9d17e1fa5bbc25bc84dc9d0af9b5df741d8f7f4382384b41e1cc9",
+    "synced_at": "2026-08-10T12:30:38",
+    "note": "pair added at the v0.8.0 full-mirror sync (EN markers, no date cutoff — divergence by design)"
+  },
+  {
+    "hq": "tools/exam_runner.py",
+    "kit": "toolkit/tools/exam_runner.py",
+    "synced_hq_sha256": "a9c1f9b835e79d72ea97da82ce02895b415f39e6c879328009aef63c633209cc",
+    "synced_kit_sha256": "48d7225e2e54f069e578a63b8a787c9b30fd92e713e1e4f7cef5363bf1fd2718",
+    "synced_at": "2026-08-10T12:30:38",
+    "note": "pair added at the v0.8.0 full-mirror sync (+2 deliberate edge improvements over staff: fresh-polygon collect, empty fixture_dir)"
+  },
+  {
+    "hq": "tools/test_exam_runner.py",
+    "kit": "toolkit/tools/test_exam_runner.py",
+    "synced_hq_sha256": "d59726d76296969b905f9cf80990c7ef40e5990900ce305aa5347d12fc0fef3a",
+    "synced_kit_sha256": "f24f29f4c9c12ac8c7acf4aab61f673797412be150fd518fc5040f8f5866b7d9",
+    "synced_at": "2026-08-10T12:30:38",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "tools/wiring_check.py",
+    "kit": "toolkit/tools/wiring_check.py",
+    "synced_hq_sha256": "19617f78877e339a8555e5b08a9b4e80a71605f1e8344edf314666c83f175ba0",
+    "synced_kit_sha256": "9ce3f5cca5d72ae234f8ec72a810ae956ac250fddb9d8da0a73544a38faba1e0",
+    "synced_at": "2026-08-10T13:10:11",
+    "note": "pre-existing twin, pair added at the v0.8.0 sync; kit side carries the external-value ASCII sanitization fix — staff port queued"
+  },
+  {
+    "hq": "tools/test_wiring_check.py",
+    "kit": "toolkit/tools/test_wiring_check.py",
+    "synced_hq_sha256": "a461d30cb3439a0cbafc5835dd26a890687605c740c6fd4a5e7ce76db1d75f29",
+    "synced_kit_sha256": "ca80ef6a068a8361fb6511fa0c202c8bfcf38dcfe1da869ee3f431af95c85f8c",
+    "synced_at": "2026-08-10T12:30:38",
+    "note": "pre-existing twin, pair added at the v0.8.0 sync"
+  },
+  {
+    "hq": "gateway/lead_replay.py",
+    "kit": "toolkit/gateway/lead_replay.py",
+    "synced_hq_sha256": "ba9bd4c3d8c3a013376ae5a34faf06681214bc76aaf7d74fa79be87802d39a78",
+    "synced_kit_sha256": "6fe15fbcf8735f72f218e774e41d18b14a1b2fd5f5ebaf76cfb4d02406713055",
+    "synced_at": "2026-08-10T12:30:38",
+    "note": "pair added at the v0.8.0 full-mirror sync (kit side carries the ./-prefix git_preimage fix — staff port queued)"
+  },
+  {
+    "hq": "gateway/test_lead_replay.py",
+    "kit": "toolkit/gateway/test_lead_replay.py",
+    "synced_hq_sha256": "8e64cc1a8aa66f6fd6e513bd0dc29eff9045ad178ded748eab1d4735ad8105ca",
+    "synced_kit_sha256": "30343cd52287a1601607e26c3ff8d9661e228f84e39e8616d805bdc5fbb1a99f",
+    "synced_at": "2026-08-10T13:10:11",
+    "note": "pair added at the v0.8.0 full-mirror sync (template-corpus tests: placeholder + fixture-repo form)"
+  },
+  {
+    "hq": "gateway/test_regression_runner.py",
+    "kit": "toolkit/gateway/test_regression_runner.py",
+    "synced_hq_sha256": "b6a302abeb2af7f09e08364bea58bc28dae92519a0c0d435840fa15217c40424",
+    "synced_kit_sha256": "a0f6bfb0a306038c613ddeb9eaa3639aa355ac608f3f0d45ee5f4266983562ae",
+    "synced_at": "2026-08-10T12:30:38",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "gateway/test_live_migration_check.py",
+    "kit": "toolkit/gateway/test_live_migration_check.py",
+    "synced_hq_sha256": "70d992a00c735e56587638c6d82f3889418c10182c6fa51007e933dcfc4c1711",
+    "synced_kit_sha256": "78726803c3b38d665b64194806b4a651564a00fe3b341464c63d61f432a26862",
+    "synced_at": "2026-08-10T12:30:39",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "gateway/test_stream_cache_logging.py",
+    "kit": "toolkit/gateway/test_stream_cache_logging.py",
+    "synced_hq_sha256": "018fe41e77cb0acf6bac538ab06a313fdd44412aae3a1b7a5e7a914e8f0e12ff",
+    "synced_kit_sha256": "a1a35476a61c2603b5490b8763512eb26ec6f3329f58eb9fcf1758d79f0cc16a",
+    "synced_at": "2026-08-10T12:30:39",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "gateway/regression_runner.py",
+    "kit": "toolkit/gateway/regression_runner.py",
+    "synced_hq_sha256": "1f4ea5a7bad83c41358e00d2295b6207e0433af374174e5dbfabe359d4ecb6b8",
+    "synced_kit_sha256": "fc7238a644e3c991e8c2e82af308edea87d97da3e53a2b3a589453f7a7f1adeb",
+    "synced_at": "2026-08-10T12:30:39",
+    "note": "pre-existing twin, pair added at the v0.8.0 sync"
+  },
+  {
+    "hq": "gateway/analyst.py",
+    "kit": "toolkit/gateway/analyst.py",
+    "synced_hq_sha256": "0b6f741bdc870e1aaf8ead58ba9834ec75b5dbbecc6f3454dcf35e0edabc406b",
+    "synced_kit_sha256": "c6bfdc83c6da51010618af704b1162845d0c5311ee4b87dc11d2fbd9c4c1a33c",
+    "synced_at": "2026-08-10T12:30:39",
+    "note": "pre-existing twin, pair added at the v0.8.0 sync"
+  },
+  {
+    "hq": "gateway/test_analyst.py",
+    "kit": "toolkit/gateway/test_analyst.py",
+    "synced_hq_sha256": "64ae1850259888d12fd4226a1fda4f195a430618539fd5eadb457c88b0ea23d9",
+    "synced_kit_sha256": "64ae1850259888d12fd4226a1fda4f195a430618539fd5eadb457c88b0ea23d9",
+    "synced_at": "2026-08-10T12:30:39",
+    "note": "pre-existing twin, pair added at the v0.8.0 sync"
+  },
+  {
+    "hq": "gateway/metrics.py",
+    "kit": "toolkit/gateway/metrics.py",
+    "synced_hq_sha256": "38b5ab4dce7245faacdfaf7c78e0c7e586dc6c1a8839af83193d5295309c3cea",
+    "synced_kit_sha256": "d929e9bead276f77561558feb630330de6e83764ebf006b9900e6640d478a2c1",
+    "synced_at": "2026-08-10T12:30:39",
+    "note": "pre-existing twin, pair added at the v0.8.0 sync (kit side reference-pointer divergences by design)"
+  },
+  {
+    "hq": "gateway/test_metrics.py",
+    "kit": "toolkit/gateway/test_metrics.py",
+    "synced_hq_sha256": "5c231d121bde3ef468ddf5af7f99f4d704157c58aff58ebd757e70ac2d969516",
+    "synced_kit_sha256": "c9043e46c4fe149faf3552616b1f402950d01ab9bf0b58470423a13360660f52",
+    "synced_at": "2026-08-10T12:30:39",
+    "note": "pre-existing twin, pair added at the v0.8.0 sync"
+  },
+  {
+    "hq": "gateway/sqlite_logger.py",
+    "kit": "toolkit/gateway/sqlite_logger.py",
+    "synced_hq_sha256": "c5bacfe3eb48c2d0b28cb1395b0c2bda6889bafdf3b7513c53009df641a3b9e4",
+    "synced_kit_sha256": "efa9c015362863953bbc0b97374d0285773cd151f09038268c69b3f9694c4fe1",
+    "synced_at": "2026-08-10T12:30:39",
+    "note": "pre-existing twin, pair added at the v0.8.0 sync (kit default: raw-text logging disabled — divergence by design)"
+  },
+  {
+    "hq": "gateway/test_sqlite_logger.py",
+    "kit": "toolkit/gateway/test_sqlite_logger.py",
+    "synced_hq_sha256": "c16a5282b17e8e290485ec946c71674fd2986f4b37a367fdd0e3e271f4dc39fe",
+    "synced_kit_sha256": "fbcdb41aad646a239deba0eccd059b5f8363927084862e00dc1f63285bc47692",
+    "synced_at": "2026-08-10T12:30:39",
+    "note": "pre-existing twin, pair added at the v0.8.0 sync"
+  },
+  {
+    "hq": "gateway/test_shadow_eval.py",
+    "kit": "toolkit/gateway/test_shadow_eval.py",
+    "synced_hq_sha256": "91121922fa6c2cbeb332d6c5e3da877dad68d9c20d3521d00e94c04e4221131f",
+    "synced_kit_sha256": "dde9b7be185e74f7b8f4b1612fd6e3b3686b801532907ea19458186cf054abdb",
+    "synced_at": "2026-08-10T12:30:39",
+    "note": "pre-existing twin, pair added at the v0.8.0 sync"
+  },
+  {
+    "hq": "PROCESS/DOCUMENTATION_PROTOCOL.md",
+    "kit": "toolkit/PROCESS/DOCUMENTATION_PROTOCOL.md",
+    "synced_hq_sha256": "46042a2b865b9843e17716c61f6297e663330f1180f5a08488ae550c831e474b",
+    "synced_kit_sha256": "c3f0431b324209761063994c2fe466430be4eaa05332b7ae1e5351967234aa7b",
+    "synced_at": "2026-08-10T12:30:40",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "PROCESS/PATCH_PROTOCOL.md",
+    "kit": "toolkit/PROCESS/PATCH_PROTOCOL.md",
+    "synced_hq_sha256": "adf0ad636b930cc20e2be5a98af02e81ec5c6f5df1483807c9770706597400d6",
+    "synced_kit_sha256": "d4148b0999f1a9c1a5b0941d65311002691e7ab7400a942bb9b80c649b03989d",
+    "synced_at": "2026-08-10T12:30:40",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "PROCESS/PRE_COMMIT_PROTOCOL.md",
+    "kit": "toolkit/PROCESS/PRE_COMMIT_PROTOCOL.md",
+    "synced_hq_sha256": "2b6338eb2ce4227ff6bdba622ba4783fbc8c0fbd69330204a7acb55a2514f921",
+    "synced_kit_sha256": "7bd6c934953b9ff8d1652b35579aad184ab87de9cc4f8db8c846f879708fa7b7",
+    "synced_at": "2026-08-10T12:30:40",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "PROCESS/ZERO_CONTEXT_PROTOCOL.md",
+    "kit": "toolkit/PROCESS/ZERO_CONTEXT_PROTOCOL.md",
+    "synced_hq_sha256": "f2f4952267fd2de69595d498aa491c5842936745bb2720068a48bcc1176b3410",
+    "synced_kit_sha256": "cb2d4fde656d96957ebe4634fa68fde5ef941e65175067a67c52c7df507d9b03",
+    "synced_at": "2026-08-10T12:30:40",
+    "note": "pair added at the v0.8.0 full-mirror sync"
+  },
+  {
+    "hq": "PROCESS/README.md",
+    "kit": "toolkit/PROCESS/README.md",
+    "synced_hq_sha256": "4e61e73bfc6aea8272128b712124d9285313162aa453be2ce71ad42874ce44af",
+    "synced_kit_sha256": "70840f920bab6535d03e5baab0cd640b3ac9b18572c7475e0b6d92594ebbe469",
+    "synced_at": "2026-08-10T12:30:40",
+    "note": "pair added at the v0.8.0 full-mirror sync (file list = each side's own directory — divergence by design)"
+  },
+  {
+    "hq": "PROCESS/DEPLOYMENT_ECONOMY_EXAM.md",
+    "kit": "toolkit/PROCESS/DEPLOYMENT_ECONOMY_EXAM.md",
+    "synced_hq_sha256": "0f0fbc1297dc785dd99928ce7f39be919fc0c272d3e6cb8a27cc2b3ff5535e6a",
+    "synced_kit_sha256": "16639dbf6634ea3eceb414a721cd426fcd3aeffceb78956e93f33e00a7139e5e",
+    "synced_at": "2026-08-10T12:30:40",
+    "note": "pair added at the v0.8.0 full-mirror sync (host frame rewrite — divergence by design; the runner-heading coupling is test-pinned on both sides)"
+  },
+  {
     "hq": "tools/owns_gate.py",
     "kit": "toolkit/tools/owns_gate.py",
     "synced_hq_sha256": "742bec2b954eb23cc4bbae505553fbf6c2db1b514c53ace221f4332a652b7faa",
@@ -34,9 +354,9 @@
   {
     "hq": "tools/critic_snapshot.py",
     "kit": "toolkit/tools/critic_snapshot.py",
-    "synced_hq_sha256": "b31e71b706fb2eadb3a56a83617891de2f872cc036051188072817fd4e3b2f96",
-    "synced_kit_sha256": "7a088952fa163787fd37e684aee037cb86602d47faa93c4b0a9600021c2e5655",
-    "synced_at": "2026-07-24T09:08:17",
+    "synced_hq_sha256": "1f358e51ecdd5ae085fab8eaad3c3c3daeb3a67dce291fc6ff0922709a436d2d",
+    "synced_kit_sha256": "bb1115403ae24c2220baea5b23fc1090b241dc8d5860babc46cbd38645a06677",
+    "synced_at": "2026-08-10T12:30:40",
     "note": ""
   },
   {
@@ -91,16 +411,16 @@
     "hq": "tools/journal_echo.py",
     "kit": "toolkit/tools/journal_echo.py",
     "synced_hq_sha256": "ff7c57933a838012cbbcfdf8e2ad2d9f695c37e8ed63de87b34616b083f7debe",
-    "synced_kit_sha256": "097c46927df99f7f3cdd4a9ca80c8e43c26ccfa9b5519b4d2f5c507bb7931e8f",
-    "synced_at": "2026-08-10T03:50:33",
+    "synced_kit_sha256": "d9998b6266b989b3603206f34c6351653831c5e7500341cb9b885c88fabfcf0b",
+    "synced_at": "2026-08-10T13:10:11",
     "note": ""
   },
   {
     "hq": "tools/journal_validator.py",
     "kit": "toolkit/tools/journal_validator.py",
     "synced_hq_sha256": "c1460b86757902ead615de6b4639f2317bd90617a3354276bd0379971e12b7ab",
-    "synced_kit_sha256": "65456146219f2fd35fc8ed4d0a352215d2baa999f5ad98382b1c67377457da7f",
-    "synced_at": "2026-08-10T03:50:35",
+    "synced_kit_sha256": "6c2f1bf5cc127dddc141b64250c9c5e19cdb1f3f53ab68bc79bd8998e5d684df",
+    "synced_at": "2026-08-10T13:10:11",
     "note": ""
   },
   {
@@ -131,8 +451,8 @@
     "hq": "tools/mechanism_gate.py",
     "kit": "toolkit/tools/mechanism_gate.py",
     "synced_hq_sha256": "9680d056de9dbfe0c16630cd0deee1f58f5a337546483c9b38d4367e75508103",
-    "synced_kit_sha256": "8ed76d1b649ef982b67140df6e9c84ca474d178a95fb646721bc83bcb57b5602",
-    "synced_at": "2026-08-10T03:50:35",
+    "synced_kit_sha256": "35f028a830a2da29bc198db1b25eea6eccc3cebb9092e56b57cbf94137cda9fa",
+    "synced_at": "2026-08-10T12:30:40",
     "note": ""
   },
   {
@@ -283,8 +603,8 @@
     "hq": "tools/test_mechanism_gate.py",
     "kit": "toolkit/tools/test_mechanism_gate.py",
     "synced_hq_sha256": "27ec0632bdcafe73f9ae7cbbec38e10837167313277884168f9936aa9146ea71",
-    "synced_kit_sha256": "c21b68d6b16199292d4f0a435e8fc7162907339539c78c8b8334463523713a01",
-    "synced_at": "2026-08-10T03:50:36",
+    "synced_kit_sha256": "85f6ace6707f81c7a0389f231c5b68560b7a0d4ca904f513a18ad3b6a0e203e7",
+    "synced_at": "2026-08-10T13:10:11",
     "note": ""
   },
   {
@@ -410,17 +730,17 @@
   {
     "hq": "PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md",
     "kit": "toolkit/PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md",
-    "synced_hq_sha256": "becb1196c3ad17d0a676977276b10fd435bc183ea450c4298b25aae34962f69e",
-    "synced_kit_sha256": "d5f4a96f6e3db7e567e6a63bf0309a88c36e1ef50f6041ab6d6c9f2ffa9a533f",
-    "synced_at": "2026-08-10T03:50:36",
+    "synced_hq_sha256": "31a2413daeb294da28dc870829c1bb77110f72f3be327b1fb3dccaa855cdb277",
+    "synced_kit_sha256": "2afdde0b4e352171ecd53fdb87c37dc28e796238e798976c8e181cc01b9309ab",
+    "synced_at": "2026-08-10T13:10:11",
     "note": ""
   },
   {
     "hq": "CLAUDE.md",
     "kit": "toolkit/CLAUDE.md",
     "synced_hq_sha256": "be2bb58c6de6992fae56a03b7050dfecac31917aa6acb06ebd8068bdb522c90d",
-    "synced_kit_sha256": "499343c5594f88d39d2fbbce0dae5f68746a0bb3e8932d811c89e52e9f0d9547",
-    "synced_at": "2026-08-10T03:50:36",
+    "synced_kit_sha256": "35961f41b7b4d2d9f40b8572290c72bc5b698ee9e9bc6d39a9976d341bc5900f",
+    "synced_at": "2026-08-10T12:30:40",
     "note": ""
   },
   {

@@ -128,8 +128,11 @@ MECHANISM_PREFIXES = (
     "tools/critic_snapshot.py",     # PreToolUse Task|Agent hook
     "tools/owns_gate.py",           # PreToolUse Task|Agent hook
     "tools/hygiene_gate.py",        # PreToolUse Bash|PowerShell hook
+    "tools/claim_control_gate.py",  # PreToolUse Edit|Write hook
     "tools/dod_track.py",           # PostToolUse hook
     "tools/journal_echo.py",        # PostToolUse hook
+    "tools/search_control_gate.py", # PostToolUse Bash|PowerShell|Grep|Glob|Read hook
+    "tools/negative_lint.py",       # PostToolUse Task|Agent hook
     "tools/dod_gate.py",            # SubagentStop hook
     "tools/main_gate.py",           # Stop hook
     "tools/journal_validator.py",   # .githooks/pre-commit
@@ -254,13 +257,205 @@ def find_tier_declaration(msg: str) -> str | None:
     return declarations[0] if declarations else None
 
 
-def tier_declared_ok(declared: str, binding: str) -> bool:
+# --- config onboarding ladder (a full mirror of HQ's own gate logic):
+# roles.{scout,builder,critic,lead,reserve} in delegation.config.yaml,
+# in this FIXED functional order -- reserve (a Fable-class reserve
+# tier) is the ONE rung STRICTLY ABOVE lead; roles.judge/roles.analyst
+# are not coordination roles and are not part of the ladder.
+# roles.designer is ALSO not a ladder rung -- designer is a standing
+# function at the same tier as critic (see .claude/agents/designer.md)
+# but is NOT a coordination role in the sense of this hierarchy (it
+# coordinates specs, not dispatches work); like judge/analyst, its key
+# is simply absent from ROLE_RANKS and build_role_ladder() does not
+# read it by construction -- see test_build_role_ladder_ignores_designer.
+ROLE_RANKS = {"scout": 0, "builder": 1, "critic": 2, "lead": 3, "reserve": 4}
+
+
+def _resolve_role_model(role_data) -> str | None:
+    """The model of ONE role, by the same subscription/api priority as
+    resolve_lead_binding() -- but WITHOUT the "fable" default: a role
+    with no model (the key is absent, or subscription.model/api.model
+    are both empty) simply produces no ladder rung; that is not the
+    same thing as the lead binding specifically (whose absence IS a
+    meaningful subscription-contour default)."""
+    if not isinstance(role_data, dict):
+        return None
+    model = ((role_data.get("subscription") or {}).get("model")
+             or (role_data.get("api") or {}).get("model"))
+    return model or None
+
+
+def build_role_ladder(config_text: str | None) -> list[tuple[int, str]]:
+    """[(rank, model_id)] per ROLE_RANKS, in the fixed order
+    (scout=0 ... reserve=4) -- built from roles.* in config_text; a
+    role with no configured model produces no rung. An empty/broken/
+    absent config_text -> an empty ladder (fails open into the
+    existing family heuristic in tier_declared_ok, which knows nothing
+    about the ladder and works exactly as before)."""
+    if not config_text:
+        return []
+    try:
+        data = yaml.safe_load(config_text) or {}
+    except yaml.YAMLError:
+        return []
+    roles = data.get("roles")
+    if not isinstance(roles, dict):
+        return []
+    ladder = []
+    for role_name, rank in ROLE_RANKS.items():
+        model = _resolve_role_model(roles.get(role_name))
+        if model:
+            ladder.append((rank, model))
+    return ladder
+
+
+def _resolve_ladder_rank(declared: str, config_text: str | None) -> int | None:
+    """Resolves a tier declaration into a ladder rank.
+
+    The ladder path is legal ONLY when the ladder actually HAS a
+    "lead" rung (roles.lead is configured with a model) -- without it
+    there is no reference rank to call "above/at lead" relative to; an
+    empty ladder OR a ladder without a lead rung -> None unconditionally,
+    neither (a) nor (b) below is even tried (edge: roles.lead absent
+    but reserve=opus configured -- "tier: opus" does not resolve via
+    the ladder at all; the non-ladder "nothing above fable" pin from
+    the existing branches still holds even with a config present, not
+    only with config_text=None).
+
+    (a) An EXACT match with some rung's model_id resolves to its rank
+        -- when the SAME model_id sits on SEVERAL rungs (an admin
+        literally duplicated the model), the MAXIMUM rank among all
+        exact matches is taken, not the first one in ladder order
+        (works for a non-Claude rung too -- "tier:
+        llama-3.3-70b-versatile" matches a non-Claude lead rung by
+        exact id). A family-strength guard (the same one branch (b)
+        below already has) also applies HERE: when BOTH the lead
+        rung's family and the candidate rung's family resolve to a
+        non-empty LEAD_FAMILIES value, and the candidate's family is
+        WEAKER than the lead rung's family, the exact match is
+        DISCARDED (a nonsense config -- e.g. reserve configured with a
+        model weaker than lead -- must not silently inherit rank 4
+        through an exact-id match either). When the candidate rung's
+        family is UNRESOLVABLE (a non-Claude model_id that happens to
+        match `declared` exactly), the guard stays silent and TRUSTS
+        THE LADDER'S POSITION (the config is the operator's word: if
+        the admin put exactly that id on exactly that rung, there is
+        nothing to compare against -- the position is authoritative).
+        Likewise, when the lead rung's OWN family does not resolve
+        (a non-Claude lead), the guard stays silent too (nothing to
+        compare against).
+    (b) Otherwise, when declared IS a Claude model (lead_family(declared)
+        is not None), a family match of EXACTLY ONE ladder rung of
+        that same family resolves to its rank -- AMBIGUITY (2+ rungs
+        of the same family) does NOT resolve via this path at all (a
+        documented fork: "when there is exactly one such rung").
+        ADDITIONALLY the candidate rung's family must be NO WEAKER (by
+        LEAD_FAMILIES ordinal, where index 0 is the strongest family
+        "fable") than the lead rung's OWN family -- otherwise a
+        nonsense config (e.g. reserve configured with a model weaker
+        than lead, even though POSITIONALLY reserve is above) must not
+        silently inherit the positional rank 4 through the family
+        heuristic. The guard applies ONLY when the lead rung's family
+        resolves (a Claude lead); with a non-Claude lead (the lead
+        rung's family unresolved) there is nothing to compare against
+        -- the guard does not block (the already-covered "reserve at a
+        non-Claude lead" case).
+    None -- a ladder with no lead rung, or declared resolves via
+    neither (a) nor (b) (including a non-Claude declared with no exact
+    id match -- the family path is simply undefined for it)."""
+    ladder = build_role_ladder(config_text)
+    lead_rank = ROLE_RANKS["lead"]
+    lead_models = [model_id for rank, model_id in ladder if rank == lead_rank]
+    if not lead_models:
+        return None  # no lead rung -- the ladder path resolves NOTHING
+    lead_model = lead_models[0]
+    lead_fam = lead_family(lead_model)
+
+    # Family-strength guard, ALSO on the exact-id-match path -- see the
+    # docstring above, "(a) An EXACT match", for the full breakdown
+    # (comparable families -> guard active; an unresolvable candidate
+    # family -> trust the ladder's position).
+    exact_matches = []
+    for rank, model_id in ladder:
+        if declared != model_id:
+            continue
+        cand_fam = lead_family(model_id)
+        if lead_fam is not None and cand_fam is not None:
+            if LEAD_FAMILIES.index(cand_fam) > LEAD_FAMILIES.index(lead_fam):
+                continue  # nonsense: this rung is weaker than lead by family -- discard
+        exact_matches.append(rank)
+    if exact_matches:
+        return max(exact_matches)  # the maximum rank among exact matches
+
+    declared_fam = lead_family(declared)
+    if declared_fam is None:
+        return None
+    candidates = []
+    for rank, model_id in ladder:
+        if lead_family(model_id) != declared_fam:
+            continue
+        # The guard is active only when the lead rung's family is known
+        # (a Claude lead) -- a candidate rung is forbidden from being
+        # WEAKER than lead by LEAD_FAMILIES ordinal (a larger index =
+        # weaker).
+        if lead_fam is not None:
+            cand_fam = lead_family(model_id)
+            if LEAD_FAMILIES.index(cand_fam) > LEAD_FAMILIES.index(lead_fam):
+                continue  # nonsense: positionally >= lead, but weaker by family
+        candidates.append(rank)
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
+def tier_declared_ok(declared: str, binding: str, config_text: str | None = None) -> bool:
+    """config_text (optional, default None): the config's onboarding
+    ladder STRICTLY EXTENDS the existing paths below, never narrows
+    them (see the docstrings of _resolve_ladder_rank/build_role_ladder
+    above). The exact-match branch and the family-strictly-above-
+    binding branch immediately below are a full mirror of HQ's own
+    gate logic (a full-mirror-of-the-gate-logic port, not deployment
+    history specific to HQ): the RESERVE-ABOVE-BINDING concept
+    (a tier strictly above the current lead binding is still a full
+    lead -- the same reasoning the config onboarding ladder itself
+    encodes via its own "reserve" rung, one position above "lead") is
+    the concept this template's own delegation.config.yaml ships too
+    (roles.reserve, see CONFIG_LADDER_OPUS_LEAD_FABLE_RESERVE in the
+    test twin) -- it is not gated on roles.reserve actually being
+    configured. The ladder resolution (step below) is tried in
+    ADDITION: a non-Claude binding with a non-Claude ladder resolves by
+    exact id (see the "lead: llama-3.3-70b-versatile" case in the test
+    twin)."""
     if declared == binding:
         return True
     fam = lead_family(binding)
-    if fam is None:
-        return False
-    return fam in declared.lower()
+    if fam is not None:
+        if fam in declared.lower():
+            return True
+        # A declaration of a family STRICTLY ABOVE the binding's own
+        # family is also legal -- the reserve-above-binding concept:
+        # a tier above the current lead binding is a full lead itself
+        # (the transitional commit re-binding Lead is committed BY a
+        # session of the old, higher tier). Rank is the family's
+        # position in LEAD_FAMILIES (index 0 = the strongest family,
+        # "fable"); "strictly above" means a SMALLER index. A "fable"
+        # binding has index 0 already -- no index is smaller than 0,
+        # so this branch is silent for it without a separate check:
+        # the "nothing above fable" regression pin holds automatically
+        # by the index arithmetic. A non-Claude DECLARATION
+        # (declared_fam is None) does not match this branch -- only an
+        # exact match (step 1 above) or the ladder (step 4 below)
+        # apply to it.
+        declared_fam = lead_family(declared)
+        if declared_fam is not None and LEAD_FAMILIES.index(declared_fam) < LEAD_FAMILIES.index(fam):
+            return True
+    # The config's onboarding ladder: a declared rank >= the "lead"
+    # rung's FIXED position (ROLE_RANKS, independent of which rungs
+    # happen to be configured today) is accepted.
+    declared_rank = _resolve_ladder_rank(declared, config_text)
+    if declared_rank is not None and declared_rank >= ROLE_RANKS["lead"]:
+        return True
+    return False
 
 
 def _tier_queue_note() -> str:
@@ -323,7 +518,7 @@ def decide_full(msg: str, block_extra: str, staged: list[str],
         return 1, ("commit touches mechanism files:\n  " + "\n  ".join(hits)
                     + "\nNo \"tier: <value>\" line (lead binding: "
                     + binding + ") -- " + _tier_queue_note())
-    bad = [d for d in declared_list if not tier_declared_ok(d, binding)]
+    bad = [d for d in declared_list if not tier_declared_ok(d, binding, config_text)]
     if bad:
         return 1, ("commit touches mechanism files:\n  " + "\n  ".join(hits)
                     + "\nNot lead tier: \"tier: " + bad[0]

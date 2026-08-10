@@ -473,15 +473,23 @@ def _repo_root(file_path: str) -> Path:
 
 
 def _get_head_text(root: Path):
-    """git -C <root> show HEAD:logs/routing-log.jsonl -- ONE call,
+    """git -C <root> show HEAD:./logs/routing-log.jsonl -- ONE call,
     timeout ~5s. Returns stdout when returncode==0, otherwise None (see
     the module docstring for the empirics of all three error forms --
     not a repo, the file isn't on HEAD, the directory doesn't exist --
     returncode is always non-zero; FileNotFoundError/TimeoutExpired --
-    also None)."""
+    also None).
+
+    The "./" prefix on the colon-path makes it resolve relative to
+    `-C <root>`'s own cwd -- WITHOUT it, bare "HEAD:<path>" resolves
+    relative to the top of whatever git repo `root` sits inside, which
+    silently diverges from cwd-relative resolution whenever `root` is
+    a subdirectory of a larger repo rather than a repo root itself
+    (see gateway/lead_replay.py's git_preimage docstring for the same
+    class, verified empirically there)."""
     try:
         proc = subprocess.run(
-            ["git", "-C", str(root), "show", "HEAD:logs/routing-log.jsonl"],
+            ["git", "-C", str(root), "show", "HEAD:./logs/routing-log.jsonl"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=GIT_TIMEOUT_SECONDS,
         )

@@ -17,6 +17,12 @@
         "hooks": [
           { "type": "command", "command": "python tools/hygiene_gate.py" }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": "python tools/claim_control_gate.py" }
+        ]
       }
     ],
     "PostToolUse": [
@@ -25,6 +31,18 @@
         "hooks": [
           { "type": "command", "command": "python tools/dod_track.py" },
           { "type": "command", "command": "python tools/journal_echo.py" }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell|Grep|Glob|Read",
+        "hooks": [
+          { "type": "command", "command": "python tools/search_control_gate.py" }
+        ]
+      },
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          { "type": "command", "command": "python tools/negative_lint.py" }
         ]
       }
     ],

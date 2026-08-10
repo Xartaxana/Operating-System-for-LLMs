@@ -1,0 +1,1768 @@
+"""Tests for tools/exam_runner.py. No network, no `claude` invocations
+(prohibited by the runner's own non-goals) -- prepare()'s git
+operations are exercised against LOCAL fixture-factory git repos built
+inside tmp_path (a `git clone <local-path> <dest>` is a filesystem-only
+operation, no network I/O): the fake local repos ARE the mock,
+exercising the real clone+checkout code path offline.
+
+Run from tools/: python -m pytest test_exam_runner.py
+Run from repo root (canonical form): python -m pytest tools/ -q
+"""
+
+import json
+import re
+import sqlite3
+import subprocess
+from pathlib import Path
+
+import pytest
+
+import usage_report
+from exam_runner import (
+    HEADLESS_PROXY_SECTION_HEADING,
+    build_launch_plan,
+    collect,
+    detect_artifact_deliverable,
+    extract_doc_section,
+    load_manifest,
+    prepare,
+    project_slug,
+    run,
+    run_dossier_tests,
+    sandbox_metrics,
+    stall_estimate,
+    validate_manifest,
+    window_load,
+)
+from usage_report import SCHEMA
+
+
+# ---------------------------------------------------------------------------
+# fixture-factory helpers (local-only git repos, no network)
+# ---------------------------------------------------------------------------
+
+
+def _git(args, cwd):
+    result = subprocess.run(
+        ["git", *args], cwd=str(cwd),
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    assert result.returncode == 0, f"git {args} failed in {cwd}: {result.stderr}"
+    return result.stdout.strip()
+
+
+def _make_local_repo(root, files):
+    """Creates a real local git repo at `root` with `files` (dict of
+    relative-path -> content), one commit, and returns its HEAD sha.
+    Fully local -- no network involved (fixture factory)."""
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    for rel, content in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    _git(["init"], root)
+    _git(["-c", "user.name=test", "-c", "user.email=test@example.com", "add", "-A"], root)
+    _git(["-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-m", "init"], root)
+    return _git(["rev-parse", "HEAD"], root)
+
+
+def _base_manifest(tmp_path, click_repo, click_sha, template_repo, template_sha, fixture_dir):
+    return {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": str(click_repo),
+            "click_pin": click_sha,
+            "template_git": str(template_repo),
+            "template_ref": template_sha,
+            "fixture_dir": str(fixture_dir),
+        },
+        "model": "sonnet",
+        "parallel": 1,
+        "arms": [
+            {"name": "A", "layout": "empty", "prefix": "", "suffix": ""},
+            {"name": "B", "layout": "template", "prefix": "", "suffix": ""},
+            {"name": "C", "layout": "empty", "prefix": "WORKFLOW-PREFIX\n\n", "suffix": ""},
+        ],
+        "tasks": [
+            {"id": "t1", "needs": [], "text": "Write me a calculator"},
+            {"id": "t2", "needs": ["click"], "text": "recon click"},
+            {"id": "t3", "needs": ["todo"], "text": "fix todo"},
+        ],
+        "order": {"t1": ["B", "A", "C"], "t2": ["C", "B", "A"], "t3": ["A", "C", "B"]},
+    }
+
+
+# ---------------------------------------------------------------------------
+# 1. manifest parsing / validation
+# ---------------------------------------------------------------------------
+
+
+def test_load_manifest_valid_sets_parallel_default(tmp_path):
+    manifest = {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y",
+            "fixture_dir": str(tmp_path),
+        },
+        "model": "sonnet",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "text": "hi", "needs": []}],
+        "order": {"t1": ["A"]},
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    loaded = load_manifest(path)
+    assert loaded["parallel"] == 1
+
+
+def test_validate_manifest_missing_required_field_raises():
+    manifest = {
+        "src": {}, "model": "sonnet", "arms": [], "tasks": [], "order": {},
+    }
+    with pytest.raises(ValueError, match="polygon_root"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_missing_src_field_raises():
+    manifest = {
+        "polygon_root": "x",
+        "src": {"click_git": "x"},
+        "model": "sonnet",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "text": "hi"}],
+        "order": {"t1": ["A"]},
+    }
+    with pytest.raises(ValueError, match="src"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_unknown_layout_raises():
+    manifest = {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+        "arms": [{"name": "D", "layout": "bogus_layout"}],
+        "tasks": [{"id": "t1", "text": "hi"}],
+        "order": {"t1": ["D"]},
+    }
+    with pytest.raises(ValueError, match="unknown layout"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_arm_template_override_one_field_only_raises():
+    manifest = {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+        "arms": [{"name": "B", "layout": "template", "template_git": "alt-repo"}],
+        "tasks": [{"id": "t1", "text": "hi"}],
+        "order": {"t1": ["B"]},
+    }
+    with pytest.raises(ValueError, match="template_git.*template_ref"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_arm_template_override_ref_only_raises():
+    manifest = {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+        "arms": [{"name": "B", "layout": "template", "template_ref": "deadbeef"}],
+        "tasks": [{"id": "t1", "text": "hi"}],
+        "order": {"t1": ["B"]},
+    }
+    with pytest.raises(ValueError, match="template_git.*template_ref"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_arm_template_override_both_fields_ok():
+    manifest = {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+        "arms": [
+            {"name": "B", "layout": "template", "template_git": "alt-repo", "template_ref": "deadbeef"},
+        ],
+        "tasks": [{"id": "t1", "text": "hi"}],
+        "order": {"t1": ["B"]},
+    }
+    validate_manifest(manifest)  # must not raise
+
+
+def test_validate_manifest_order_references_unknown_arm_raises():
+    manifest = {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "text": "hi"}],
+        "order": {"t1": ["ZZZ"]},
+    }
+    with pytest.raises(ValueError, match="unknown arm"):
+        validate_manifest(manifest)
+
+
+# ---------------------------------------------------------------------------
+# 1a. arm/task id hyphen invariant: sandbox_metrics's LIKE '<slug>-%'
+#     sub-slug match only distinguishes a real sub-project from an
+#     unrelated one when the raw arm/task id is hyphen-free --
+#     validate_manifest rejects a hyphenated id early with a message
+#     naming the field and value.
+# ---------------------------------------------------------------------------
+
+
+def _hyphen_check_base_manifest():
+    return {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+    }
+
+
+def test_validate_manifest_arm_name_with_hyphen_raises():
+    manifest = {
+        **_hyphen_check_base_manifest(),
+        "arms": [{"name": "A-bad", "layout": "empty"}],
+        "tasks": [{"id": "t1", "text": "hi"}],
+        "order": {"t1": ["A-bad"]},
+    }
+    with pytest.raises(ValueError, match=r"arm 'name'.*'A-bad'"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_task_id_with_hyphen_raises():
+    manifest = {
+        **_hyphen_check_base_manifest(),
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "C-t2", "text": "hi"}],
+        "order": {"C-t2": ["A"]},
+    }
+    with pytest.raises(ValueError, match=r"task 'id'.*'C-t2'"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_hyphen_free_ids_ok():
+    # Boundary control: plain (hyphen-free) arm/task ids pass through
+    # validate_manifest unchanged -- proves the new check is scoped to
+    # '-' specifically, not e.g. rejecting valid ids generally.
+    manifest = {
+        **_hyphen_check_base_manifest(),
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "text": "hi"}],
+        "order": {"t1": ["A"]},
+    }
+    validate_manifest(manifest)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# 2. launch-plan generation (dry-run path)
+# ---------------------------------------------------------------------------
+
+
+def test_build_launch_plan_order_and_content(tmp_path):
+    manifest = {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": str(tmp_path),
+        },
+        "model": "sonnet",
+        "parallel": 1,
+        "arms": [
+            {"name": "A", "layout": "empty", "prefix": "", "suffix": ""},
+            {"name": "B", "layout": "template", "prefix": "PFX: ", "suffix": " :SFX"},
+        ],
+        "tasks": [
+            {"id": "t1", "text": "task one", "needs": []},
+            {"id": "t2", "text": "task two", "needs": []},
+        ],
+        "order": {"t1": ["B", "A"], "t2": ["A", "B"]},
+    }
+    plan = build_launch_plan(manifest)
+
+    assert len(plan) == 4
+    # t1 first (manifest task order), arm order B then A within t1.
+    assert [(p["task_id"], p["arm"]) for p in plan] == [
+        ("t1", "B"), ("t1", "A"), ("t2", "A"), ("t2", "B"),
+    ]
+    assert [p["order_index"] for p in plan] == [0, 1, 2, 3]
+
+    b_t1 = plan[0]
+    assert b_t1["text"] == "PFX: task one :SFX"
+    assert "sonnet" in b_t1["cmd"]
+    # The prompt must NOT be an argv element: claude.cmd is a batch
+    # shim and cmd.exe truncates batch arguments at the first newline
+    # (an early bug lost every C-arm task after the prefix's \n\n).
+    # The text travels via stdin (_execute_launch input=), so
+    # multi-line messages arrive byte-exact.
+    assert "PFX: task one :SFX" not in b_t1["cmd"]
+    assert "-p" in b_t1["cmd"]
+    assert "--dangerously-skip-permissions" in b_t1["cmd"]
+    assert b_t1["cwd"] == str(Path(manifest["polygon_root"]) / "B" / "t1")
+
+    a_t1 = plan[1]
+    assert a_t1["text"] == "task one"
+    assert a_t1["cwd"] == str(Path(manifest["polygon_root"]) / "A" / "t1")
+
+
+# ---------------------------------------------------------------------------
+# 3. prepare() on tmp_path with fake local git src (no network)
+# ---------------------------------------------------------------------------
+
+
+def test_prepare_layouts_readme_overwrite_and_git_exclusion(tmp_path):
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+
+    template_repo = tmp_path / "fake_template"
+    template_sha = _make_local_repo(template_repo, {
+        "README.md": "TEMPLATE README",
+        "CLAUDE.md": "template policy",
+    })
+
+    fixture_dir = tmp_path / "todo_fixture"
+    fixture_dir.mkdir()
+    (fixture_dir / "todo.py").write_text("# todo cli", encoding="utf-8")
+    (fixture_dir / "README.md").write_text("FIXTURE README", encoding="utf-8")
+
+    manifest = _base_manifest(tmp_path, click_repo, click_sha, template_repo, template_sha, fixture_dir)
+    prepare(manifest, dry_run=False)
+
+    polygon = Path(manifest["polygon_root"])
+
+    # A/t1: layout=empty, needs=[] -> nothing laid down.
+    a_t1 = polygon / "A" / "t1"
+    assert a_t1.exists()
+    assert list(a_t1.iterdir()) == []
+
+    # B/t1: layout=template -> template files present, .git NOT copied.
+    b_t1 = polygon / "B" / "t1"
+    assert (b_t1 / "README.md").read_text(encoding="utf-8") == "TEMPLATE README"
+    assert (b_t1 / "CLAUDE.md").exists()
+    assert not (b_t1 / ".git").exists()
+
+    # A/t2: layout=empty, needs=[click] -> click copied WITH .git.
+    a_t2 = polygon / "A" / "t2"
+    assert (a_t2 / "click" / "click_marker.txt").read_text(encoding="utf-8") == "click contents"
+    assert (a_t2 / "click" / ".git").exists()
+
+    # B/t3: layout=template + needs=[todo] -> fixture README OVERWRITES
+    # the template README (fixture copied after the template layout).
+    b_t3 = polygon / "B" / "t3"
+    assert (b_t3 / "README.md").read_text(encoding="utf-8") == "FIXTURE README"
+    assert (b_t3 / "todo.py").exists()
+    assert (b_t3 / "CLAUDE.md").exists()  # rest of the template layout untouched
+    assert not (b_t3 / ".git").exists()
+
+    # C/t3: layout=empty + needs=[todo] -> only fixture files, no template noise.
+    c_t3 = polygon / "C" / "t3"
+    assert (c_t3 / "README.md").read_text(encoding="utf-8") == "FIXTURE README"
+    assert not (c_t3 / "CLAUDE.md").exists()
+
+    # baseline_manifest.json recorded for every sandbox.
+    baseline = json.loads((polygon / "baseline_manifest.json").read_text(encoding="utf-8"))
+    assert "B/t3" in baseline
+    assert "README.md" in baseline["B/t3"]
+    assert "todo.py" in baseline["B/t3"]
+
+
+def test_prepare_is_idempotent(tmp_path):
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    template_repo = tmp_path / "fake_template"
+    template_sha = _make_local_repo(template_repo, {"README.md": "TEMPLATE README"})
+    fixture_dir = tmp_path / "todo_fixture"
+    fixture_dir.mkdir()
+    (fixture_dir / "todo.py").write_text("# todo cli", encoding="utf-8")
+    (fixture_dir / "README.md").write_text("FIXTURE README", encoding="utf-8")
+
+    manifest = _base_manifest(tmp_path, click_repo, click_sha, template_repo, template_sha, fixture_dir)
+
+    prepare(manifest, dry_run=False)
+    # second run must not raise (no re-clone/re-checkout errors), and
+    # the layout must remain correct.
+    prepare(manifest, dry_run=False)
+
+    polygon = Path(manifest["polygon_root"])
+    assert (polygon / "B" / "t1" / "README.md").read_text(encoding="utf-8") == "TEMPLATE README"
+    assert (polygon / "A" / "t2" / "click" / ".git").exists()
+
+
+def test_prepare_rejects_drifted_sandbox_click(tmp_path):
+    """skip-if-present must not silently accept a sandbox click clone
+    standing at a DIFFERENT commit than the pinned _src state --
+    content drift would be invisible to collect()'s name-level diff."""
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    template_repo = tmp_path / "fake_template"
+    template_sha = _make_local_repo(template_repo, {"README.md": "TEMPLATE README"})
+    fixture_dir = tmp_path / "todo_fixture"
+    fixture_dir.mkdir()
+    (fixture_dir / "todo.py").write_text("# todo cli", encoding="utf-8")
+    (fixture_dir / "README.md").write_text("FIXTURE README", encoding="utf-8")
+
+    manifest = _base_manifest(tmp_path, click_repo, click_sha, template_repo, template_sha, fixture_dir)
+    prepare(manifest, dry_run=False)
+
+    # Advance the SANDBOX clone by one commit: it now diverges from the
+    # pinned _src click while still having a .git (skip branch taken).
+    sandbox_click = Path(manifest["polygon_root"]) / "A" / "t2" / "click"
+    (sandbox_click / "drift.txt").write_text("drift", encoding="utf-8")
+    _git(["-c", "user.name=test", "-c", "user.email=test@example.com", "add", "-A"], sandbox_click)
+    _git(["-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-m", "drift"], sandbox_click)
+
+    with pytest.raises(RuntimeError, match="refusing"):
+        prepare(manifest, dry_run=False)
+
+
+def test_prepare_dry_run_has_no_side_effects(tmp_path):
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    template_repo = tmp_path / "fake_template"
+    template_sha = _make_local_repo(template_repo, {"README.md": "TEMPLATE README"})
+    fixture_dir = tmp_path / "todo_fixture"
+    fixture_dir.mkdir()
+    (fixture_dir / "todo.py").write_text("# todo cli", encoding="utf-8")
+
+    manifest = _base_manifest(tmp_path, click_repo, click_sha, template_repo, template_sha, fixture_dir)
+    prepare(manifest, dry_run=True)
+
+    polygon = Path(manifest["polygon_root"])
+    assert not polygon.exists()
+
+
+# ---------------------------------------------------------------------------
+# 3a. prepare() needs=todo fixture_dir existence/emptiness -- a missing
+#     or empty fixture directory is a NAMED refusal, not a silent
+#     no-op that produces a sandbox missing its task fixture with no
+#     signal anywhere downstream. Boundary-beyond control: the
+#     non-empty fixture_dir path is already exercised (and asserted
+#     successful) by test_prepare_layouts_readme_overwrite_and_git_exclusion
+#     above.
+# ---------------------------------------------------------------------------
+
+
+def test_prepare_missing_fixture_dir_raises_named_error(tmp_path):
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    template_repo = tmp_path / "fake_template"
+    template_sha = _make_local_repo(template_repo, {"README.md": "TEMPLATE README"})
+    missing_fixture_dir = tmp_path / "does_not_exist"
+
+    manifest = _base_manifest(
+        tmp_path, click_repo, click_sha, template_repo, template_sha, missing_fixture_dir
+    )
+    with pytest.raises(RuntimeError, match=re.escape(str(missing_fixture_dir))):
+        prepare(manifest, dry_run=False)
+
+
+def test_prepare_empty_fixture_dir_raises_named_error(tmp_path):
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    template_repo = tmp_path / "fake_template"
+    template_sha = _make_local_repo(template_repo, {"README.md": "TEMPLATE README"})
+    empty_fixture_dir = tmp_path / "empty_fixture"
+    empty_fixture_dir.mkdir()
+
+    manifest = _base_manifest(
+        tmp_path, click_repo, click_sha, template_repo, template_sha, empty_fixture_dir
+    )
+    with pytest.raises(RuntimeError, match=re.escape(str(empty_fixture_dir))):
+        prepare(manifest, dry_run=False)
+
+
+def test_prepare_dry_run_skips_fixture_dir_validation(tmp_path):
+    # Boundary-beyond control in the OTHER direction: dry-run never
+    # touches the filesystem, so a missing fixture_dir must NOT raise
+    # under --dry-run (existing dry-run contract: no side effects, no
+    # deep validation).
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    template_repo = tmp_path / "fake_template"
+    template_sha = _make_local_repo(template_repo, {"README.md": "TEMPLATE README"})
+    missing_fixture_dir = tmp_path / "does_not_exist"
+
+    manifest = _base_manifest(
+        tmp_path, click_repo, click_sha, template_repo, template_sha, missing_fixture_dir
+    )
+    prepare(manifest, dry_run=True)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# 3b. per-arm template override: an arm with layout=='template' may
+#     carry its own template_git/template_ref, overriding
+#     manifest.src's default for THAT arm only -- comparing two
+#     template variants (two different git repos) in one exam run.
+# ---------------------------------------------------------------------------
+
+
+def test_prepare_per_arm_template_override_lays_different_content(tmp_path):
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+
+    default_template_repo = tmp_path / "fake_template_default"
+    default_template_sha = _make_local_repo(default_template_repo, {
+        "README.md": "DEFAULT TEMPLATE README",
+    })
+
+    alt_template_repo = tmp_path / "fake_template_alt"
+    alt_template_sha = _make_local_repo(alt_template_repo, {
+        "README.md": "ALT TEMPLATE README",
+    })
+
+    fixture_dir = tmp_path / "todo_fixture"
+    fixture_dir.mkdir()
+    (fixture_dir / "todo.py").write_text("# todo cli", encoding="utf-8")
+
+    manifest = {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": str(click_repo),
+            "click_pin": click_sha,
+            "template_git": str(default_template_repo),
+            "template_ref": default_template_sha,
+            "fixture_dir": str(fixture_dir),
+        },
+        "model": "sonnet",
+        "parallel": 1,
+        "arms": [
+            {"name": "B", "layout": "template", "prefix": "", "suffix": ""},
+            {
+                "name": "D", "layout": "template", "prefix": "", "suffix": "",
+                "template_git": str(alt_template_repo),
+                "template_ref": alt_template_sha,
+            },
+        ],
+        "tasks": [{"id": "t1", "needs": [], "text": "hi"}],
+        "order": {"t1": ["B", "D"]},
+    }
+    validate_manifest(manifest)
+    actions = prepare(manifest, dry_run=False)
+
+    polygon = Path(manifest["polygon_root"])
+    # B: no override -> default template source.
+    assert (polygon / "B" / "t1" / "README.md").read_text(encoding="utf-8") == "DEFAULT TEMPLATE README"
+    # D: per-arm override -> DIFFERENT content from the alt source, not
+    # the default -- proves the override actually reaches this arm's
+    # sandbox rather than falling back silently.
+    assert (polygon / "D" / "t1" / "README.md").read_text(encoding="utf-8") == "ALT TEMPLATE README"
+
+    # Two separate _src clones: default at _src/template, override at
+    # _src/template_<armname> (existing-style naming extension).
+    assert (polygon / "_src" / "template" / "README.md").read_text(encoding="utf-8") == "DEFAULT TEMPLATE README"
+    assert (polygon / "_src" / "template_D" / "README.md").read_text(encoding="utf-8") == "ALT TEMPLATE README"
+    # _src clones keep their .git (only sandbox copies strip it).
+    assert (polygon / "_src" / "template" / ".git").exists()
+    assert (polygon / "_src" / "template_D" / ".git").exists()
+
+    # VERIFY line emitted for EACH source (default and override).
+    verify_lines = [a for a in actions if a.startswith("VERIFY")]
+    verify_names = {line.split(":")[0].split()[1] for line in verify_lines}
+    assert "template" in verify_names
+    assert "template_D" in verify_names
+    assert any(default_template_sha in line for line in verify_lines if line.startswith("VERIFY template:"))
+    assert any(alt_template_sha in line for line in verify_lines if line.startswith("VERIFY template_D:"))
+
+
+def test_prepare_per_arm_template_override_shares_clone_for_identical_source(tmp_path):
+    """Two arms overriding to the IDENTICAL (git, ref) pair share ONE
+    clone -- 'for each unique source, own clone', not one clone per
+    arm."""
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    default_template_repo = tmp_path / "fake_template_default"
+    default_template_sha = _make_local_repo(default_template_repo, {"README.md": "DEFAULT"})
+    alt_template_repo = tmp_path / "fake_template_alt"
+    alt_template_sha = _make_local_repo(alt_template_repo, {"README.md": "ALT"})
+    fixture_dir = tmp_path / "todo_fixture"
+    fixture_dir.mkdir()
+
+    manifest = {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": str(click_repo), "click_pin": click_sha,
+            "template_git": str(default_template_repo), "template_ref": default_template_sha,
+            "fixture_dir": str(fixture_dir),
+        },
+        "model": "sonnet",
+        "arms": [
+            {
+                "name": "D1", "layout": "template",
+                "template_git": str(alt_template_repo), "template_ref": alt_template_sha,
+            },
+            {
+                "name": "D2", "layout": "template",
+                "template_git": str(alt_template_repo), "template_ref": alt_template_sha,
+            },
+        ],
+        "tasks": [{"id": "t1", "needs": [], "text": "hi"}],
+        "order": {"t1": ["D1", "D2"]},
+    }
+    validate_manifest(manifest)
+    actions = prepare(manifest, dry_run=False)
+
+    polygon = Path(manifest["polygon_root"])
+    # Both arms' sandboxes get the alt content.
+    assert (polygon / "D1" / "t1" / "README.md").read_text(encoding="utf-8") == "ALT"
+    assert (polygon / "D2" / "t1" / "README.md").read_text(encoding="utf-8") == "ALT"
+    # Only ONE extra _src clone for the shared override source (keyed
+    # off the first arm, D1) -- D2 does not get its own _src/template_D2.
+    assert (polygon / "_src" / "template_D1").exists()
+    assert not (polygon / "_src" / "template_D2").exists()
+
+    verify_lines = [a for a in actions if a.startswith("VERIFY")]
+    verify_names = [line.split(":")[0].split()[1] for line in verify_lines]
+    assert verify_names.count("template_D1") == 1
+    assert "template_D2" not in verify_names
+
+
+def test_prepare_per_arm_template_override_dry_run_lists_both_sources(tmp_path):
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    default_template_repo = tmp_path / "fake_template_default"
+    default_template_sha = _make_local_repo(default_template_repo, {"README.md": "DEFAULT"})
+    alt_template_repo = tmp_path / "fake_template_alt"
+    alt_template_sha = _make_local_repo(alt_template_repo, {"README.md": "ALT"})
+    fixture_dir = tmp_path / "todo_fixture"
+    fixture_dir.mkdir()
+
+    manifest = {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": str(click_repo), "click_pin": click_sha,
+            "template_git": str(default_template_repo), "template_ref": default_template_sha,
+            "fixture_dir": str(fixture_dir),
+        },
+        "model": "sonnet",
+        "arms": [
+            {"name": "B", "layout": "template"},
+            {
+                "name": "D", "layout": "template",
+                "template_git": str(alt_template_repo), "template_ref": alt_template_sha,
+            },
+        ],
+        "tasks": [{"id": "t1", "needs": [], "text": "hi"}],
+        "order": {"t1": ["B", "D"]},
+    }
+    validate_manifest(manifest)
+    actions = prepare(manifest, dry_run=True)
+
+    polygon = Path(manifest["polygon_root"])
+    assert not polygon.exists()  # dry-run: no side effects (existing guarantee)
+    dry_lines = [a for a in actions if "ensure" in a]
+    assert any(str(polygon / "_src" / "template") in a for a in dry_lines)
+    assert any(str(polygon / "_src" / "template_D") in a for a in dry_lines)
+
+
+def test_prepare_backward_compatible_no_override_still_uses_single_default_src(tmp_path):
+    """Backward compatibility: a manifest with NO per-arm overrides
+    lays down template content exactly as before -- single
+    _src/template clone, no stray template_<armname> dirs, VERIFY
+    'template' line still present."""
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    template_repo = tmp_path / "fake_template"
+    template_sha = _make_local_repo(template_repo, {"README.md": "TEMPLATE README"})
+    fixture_dir = tmp_path / "todo_fixture"
+    fixture_dir.mkdir()
+    (fixture_dir / "todo.py").write_text("# todo cli", encoding="utf-8")
+    (fixture_dir / "README.md").write_text("FIXTURE README", encoding="utf-8")
+
+    manifest = _base_manifest(tmp_path, click_repo, click_sha, template_repo, template_sha, fixture_dir)
+    actions = prepare(manifest, dry_run=False)
+
+    polygon = Path(manifest["polygon_root"])
+    assert (polygon / "_src" / "template").exists()
+    src_dirs = {p.name for p in (polygon / "_src").iterdir()}
+    assert src_dirs == {"click", "template"}  # no template_<arm> dirs appear
+
+    verify_lines = [a for a in actions if a.startswith("VERIFY")]
+    assert any(line.startswith("VERIFY template:") for line in verify_lines)
+    assert any(line.startswith("VERIFY click:") for line in verify_lines)
+
+
+# ---------------------------------------------------------------------------
+# 4. collect-aggregation (sandbox_metrics/window_load/stall_estimate)
+#    against a tmp sqlite db with synthetic cc_usage rows.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def cc_db(tmp_path):
+    db_file = tmp_path / "requests.db"
+    conn = sqlite3.connect(db_file)
+    conn.execute(SCHEMA)
+    conn.commit()
+    return conn
+
+
+def _insert_row(conn, project, session_id, dedupe_key, ts, output_tokens, cost, is_sidechain=0,
+                 input_tokens=100):
+    conn.execute(
+        """
+        INSERT INTO cc_usage
+            (ts, project, session_id, turn_index, model, input_tokens, output_tokens,
+             cache_creation_tokens, cache_read_tokens, accounted_cost_usd, traffic_kind,
+             is_sidechain, dedupe_key)
+        VALUES (?, ?, ?, 0, 'claude-sonnet-5', ?, ?, 0, 0, ?, 'real', ?, ?)
+        """,
+        (ts, project, session_id, input_tokens, output_tokens, cost, is_sidechain, dedupe_key),
+    )
+    conn.commit()
+
+
+def test_sandbox_metrics_cost_side_wall_stall(cc_db):
+    conn = cc_db
+    proj = "fake-polygon-B-t1"
+    # gap 1 (row1->row2): 70s, but row2's output (3000 tok) "eats" it
+    # via the expected-generation-time formula (3000/40 + 10 = 85s >
+    # 70s) -> stall contribution 0 for this gap.
+    _insert_row(conn, proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.01)
+    _insert_row(conn, proj, "s1", "s1:r2", "2026-07-07T12:01:10.000Z", 3000, 0.05)
+    # gap 2 (row2->row3): 200s, row3 output small (40 tok) -> expected
+    # gen = 40/40 + 10 = 11s -> stall = 200 - 11 = 189s. row3 is a
+    # sidechain (subagent) turn.
+    _insert_row(conn, proj, "s1", "s1:r3", "2026-07-07T12:04:30.000Z", 40, 0.02, is_sidechain=1)
+
+    metrics = sandbox_metrics(conn, proj)
+
+    assert metrics["turns"] == 3
+    assert metrics["cost_usd"] == pytest.approx(0.08)
+    assert metrics["side_cost_usd"] == pytest.approx(0.02)
+    assert metrics["side_share"] == pytest.approx(0.25)
+    assert metrics["wall_start"] == "2026-07-07T12:00:00.000Z"
+    assert metrics["wall_end"] == "2026-07-07T12:04:30.000Z"
+    assert metrics["stall_est_seconds"] == pytest.approx(189.0)
+
+
+def test_stall_estimate_gap_fully_eaten_by_generation_is_zero():
+    turns = [
+        ("2026-07-07T12:00:00.000Z", 50),
+        ("2026-07-07T12:01:10.000Z", 3000),  # 70s gap, 85s expected gen
+    ]
+    assert stall_estimate(turns) == pytest.approx(0.0)
+
+
+def test_stall_estimate_short_gaps_ignored():
+    # Gaps <=60s never count, regardless of output size.
+    turns = [
+        ("2026-07-07T12:00:00.000Z", 5),
+        ("2026-07-07T12:00:59.000Z", 5),
+    ]
+    assert stall_estimate(turns) == pytest.approx(0.0)
+
+
+def test_window_load_separates_foreign_projects_and_respects_window(cc_db):
+    conn = cc_db
+    exam_proj = "fake-polygon-B-t1"
+    other_in_window = "some-other-repo"
+    other_outside_window = "another-repo-outside"
+
+    _insert_row(conn, exam_proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.01)
+    _insert_row(conn, exam_proj, "s1", "s1:r2", "2026-07-07T12:05:00.000Z", 50, 0.01)
+
+    # Foreign project active INSIDE the exam window -> must be counted.
+    _insert_row(conn, other_in_window, "s2", "s2:r1", "2026-07-07T12:02:00.000Z", 400, 0.02)
+    _insert_row(conn, other_in_window, "s2", "s2:r2", "2026-07-07T12:03:00.000Z", 600, 0.03)
+
+    # Foreign project active OUTSIDE the exam window -> must be excluded.
+    _insert_row(conn, other_outside_window, "s3", "s3:r1", "2026-07-07T13:30:00.000Z", 100, 0.01)
+
+    load = window_load(
+        conn, exclude_projects=[exam_proj],
+        window_start="2026-07-07T12:00:00.000Z", window_end="2026-07-07T12:05:00.000Z",
+    )
+
+    projects_seen = {row["project"] for row in load}
+    assert other_in_window in projects_seen
+    assert exam_proj not in projects_seen
+    assert other_outside_window not in projects_seen
+
+    row = next(r for r in load if r["project"] == other_in_window)
+    assert row["turns"] == 2
+    assert row["out_tokens"] == 1000
+
+
+# ---------------------------------------------------------------------------
+# 4a. window_load() sub-slug exclusion: a sandboxed session's own
+#     subagent can log under a distinct '<exclude_project>-<suffix>'
+#     slug -- that sub-slug must NOT show up as foreign 'window load',
+#     same as sandbox_metrics already folds it into the sandbox's OWN
+#     metrics via LIKE.
+# ---------------------------------------------------------------------------
+
+
+def test_window_load_excludes_exact_exclude_slug(cc_db):
+    # Boundary (1): the exact exclude-slug row itself stays excluded --
+    # existing NOT IN behavior must not be broken by adding NOT LIKE.
+    conn = cc_db
+    exam_proj = "fake-polygon-B-t1"
+
+    _insert_row(conn, exam_proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.01)
+
+    load = window_load(
+        conn, exclude_projects=[exam_proj],
+        window_start="2026-07-07T12:00:00.000Z", window_end="2026-07-07T12:05:00.000Z",
+    )
+
+    assert {row["project"] for row in load} == set()
+
+
+def test_window_load_excludes_sub_slug_of_exclude_project(cc_db):
+    # Boundary (2): a sub-slug '<exclude>-C-t2' (e.g. a subagent's own
+    # distinct ~/.claude/projects slug) is now ALSO excluded -- it is
+    # not genuinely foreign load, it's the same sandboxed session.
+    conn = cc_db
+    exam_proj = "fake-polygon-B-t1"
+    sub_slug = exam_proj + "-C-t2"
+
+    _insert_row(conn, exam_proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.01)
+    _insert_row(conn, sub_slug, "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 30, 0.02)
+
+    load = window_load(
+        conn, exclude_projects=[exam_proj],
+        window_start="2026-07-07T12:00:00.000Z", window_end="2026-07-07T12:05:00.000Z",
+    )
+
+    assert {row["project"] for row in load} == set()
+
+
+def test_window_load_does_not_false_exclude_unrelated_similar_prefix(cc_db):
+    # Boundary (3): a project sharing only a bare prefix with the
+    # exclude slug, WITHOUT the '-' boundary right after it
+    # (e.g. exam_proj + "X..." rather than exam_proj + "-..."), is a
+    # genuinely unrelated project and must still show up as foreign
+    # load -- LIKE '<exclude>-%' requires the literal '-' next char.
+    conn = cc_db
+    exam_proj = "fake-polygon-B-t1"
+    unrelated = exam_proj + "X-more"  # no '-' immediately after exam_proj
+
+    _insert_row(conn, exam_proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.01)
+    _insert_row(conn, unrelated, "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 999, 9.99)
+
+    load = window_load(
+        conn, exclude_projects=[exam_proj],
+        window_start="2026-07-07T12:00:00.000Z", window_end="2026-07-07T12:05:00.000Z",
+    )
+
+    projects_seen = {row["project"] for row in load}
+    assert unrelated in projects_seen
+    assert exam_proj not in projects_seen
+
+    row = next(r for r in load if r["project"] == unrelated)
+    assert row["turns"] == 1
+    assert row["out_tokens"] == 999
+
+
+# ---------------------------------------------------------------------------
+# 5. project-name slug (~/.claude/projects encoding) -- a pure-function
+#    regex-substitution test. Verify the transform against your own
+#    machine's real ~/.claude/projects listing before relying on it in
+#    a live run; the naming scheme is Claude Code's own and may change
+#    between versions.
+# ---------------------------------------------------------------------------
+
+
+def test_project_slug_replaces_every_non_alnum_character():
+    assert project_slug("C:/example/project/A/t1") == "C--example-project-A-t1"
+    assert project_slug("C:\\example\\project\\A\\t1") == "C--example-project-A-t1"
+    assert project_slug("/example/project/B0/t2") == "-example-project-B0-t2"
+    assert project_slug("example_project/C/t3") == "example-project-C-t3"
+
+
+# ---------------------------------------------------------------------------
+# 6. run() persists FULL stdout to a file, tail-only in run_log.json.
+#    subprocess.run is monkeypatched -- `claude` itself is never
+#    invoked here.
+# ---------------------------------------------------------------------------
+
+
+def _minimal_run_manifest(tmp_path, model="haiku"):
+    return {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": str(tmp_path),
+        },
+        "model": model,
+        "parallel": 1,
+        "arms": [{"name": "A", "layout": "empty", "prefix": "", "suffix": ""}],
+        "tasks": [{"id": "t1", "text": "hi", "needs": []}],
+        "order": {"t1": ["A"]},
+    }
+
+
+def test_run_persists_full_stdout_and_truncates_run_log_tail(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    long_stdout = ("X" * 3000) + "END_MARKER"
+
+    class FakeProc:
+        returncode = 0
+        stdout = long_stdout
+
+    def fake_subprocess_run(cmd, **kwargs):
+        return FakeProc()
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", fake_subprocess_run)
+
+    manifest = _minimal_run_manifest(tmp_path)
+    results = run(manifest, dry_run=False)
+
+    polygon_root = Path(manifest["polygon_root"])
+    stdout_file = polygon_root / "stdout" / "A-t1.txt"
+    assert stdout_file.exists()
+    assert stdout_file.read_text(encoding="utf-8") == long_stdout
+
+    run_log = json.loads((polygon_root / "run_log.json").read_text(encoding="utf-8"))
+    assert run_log[0]["stdout_file"] == str(stdout_file)
+    assert run_log[0]["stdout_tail"] == long_stdout[-2000:]
+    assert len(run_log[0]["stdout_tail"]) == 2000
+    assert results[0]["stdout_file"] == str(stdout_file)
+    # Non-empty stdout -> the marker key must be ABSENT, not False
+    # (backward-compat run_log shape).
+    assert "empty_stdout" not in run_log[0]
+    assert "empty_stdout" not in results[0]
+
+
+# ---------------------------------------------------------------------------
+# 6a. empty_stdout marker: a persisted stdout that is empty (or
+#     whitespace-only) after .strip() gets flagged in the run_log
+#     record so a silently-idle session is distinguishable from lost
+#     output; the flag is set independent of rc, and the key is
+#     omitted entirely when stdout is non-empty.
+# ---------------------------------------------------------------------------
+
+
+def test_run_empty_stdout_flag_set_for_empty_string(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda cmd, **kw: FakeProc())
+
+    manifest = _minimal_run_manifest(tmp_path)
+    results = run(manifest, dry_run=False)
+
+    polygon_root = Path(manifest["polygon_root"])
+    run_log = json.loads((polygon_root / "run_log.json").read_text(encoding="utf-8"))
+    assert run_log[0]["empty_stdout"] is True
+    assert results[0]["empty_stdout"] is True
+
+
+def test_run_empty_stdout_flag_set_for_whitespace_only(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    class FakeProc:
+        returncode = 0
+        stdout = "\n \t"
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda cmd, **kw: FakeProc())
+
+    manifest = _minimal_run_manifest(tmp_path)
+    results = run(manifest, dry_run=False)
+
+    polygon_root = Path(manifest["polygon_root"])
+    run_log = json.loads((polygon_root / "run_log.json").read_text(encoding="utf-8"))
+    assert run_log[0]["empty_stdout"] is True
+    assert results[0]["empty_stdout"] is True
+
+
+def test_run_empty_stdout_flag_absent_for_nonempty_stdout(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    class FakeProc:
+        returncode = 0
+        stdout = "hello"
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda cmd, **kw: FakeProc())
+
+    manifest = _minimal_run_manifest(tmp_path)
+    results = run(manifest, dry_run=False)
+
+    polygon_root = Path(manifest["polygon_root"])
+    run_log = json.loads((polygon_root / "run_log.json").read_text(encoding="utf-8"))
+    # Key must be ABSENT, not present-and-False.
+    assert "empty_stdout" not in run_log[0]
+    assert "empty_stdout" not in results[0]
+
+
+def test_run_empty_stdout_flag_set_even_when_rc_nonzero(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    class FakeProc:
+        returncode = 1
+        stdout = ""
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda cmd, **kw: FakeProc())
+
+    manifest = _minimal_run_manifest(tmp_path)
+    results = run(manifest, dry_run=False)
+
+    polygon_root = Path(manifest["polygon_root"])
+    run_log = json.loads((polygon_root / "run_log.json").read_text(encoding="utf-8"))
+    assert run_log[0]["rc"] == 1
+    assert run_log[0]["empty_stdout"] is True
+    assert results[0]["empty_stdout"] is True
+
+
+def test_run_multi_session_empty_stdout_flag_on_affected_session_only(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    def fake_subprocess_run(cmd, **kwargs):
+        idx = fake_subprocess_run.calls
+        fake_subprocess_run.calls += 1
+
+        class FakeProc:
+            returncode = 0
+            stdout = "" if idx == 1 else f"session {idx} ok"
+        return FakeProc()
+    fake_subprocess_run.calls = 0
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", fake_subprocess_run)
+
+    manifest = _multi_session_manifest(tmp_path, ["s1 ok", "s2 empty", "s3 ok"])
+    results = run(manifest, dry_run=False)
+
+    entry = results[0]
+    assert len(entry["sessions"]) == 3
+    assert "empty_stdout" not in entry["sessions"][0]
+    assert entry["sessions"][1]["empty_stdout"] is True
+    assert "empty_stdout" not in entry["sessions"][2]
+
+
+# ---------------------------------------------------------------------------
+# 7. run_dossier_tests() scopes discovery to session-created, non-click
+#    test files. Precedent: a real dossier run once swept in 33 of
+#    click's own upstream test_*.py files.
+# ---------------------------------------------------------------------------
+
+
+def test_run_dossier_tests_scopes_to_new_non_click_files(tmp_path):
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+
+    # Part of the prepared baseline layout (e.g. a template test file)
+    # -- present in baseline_files, must NOT run.
+    (sandbox / "test_baseline.py").write_text("def test_x():\n    assert True\n", encoding="utf-8")
+
+    # Session-created at top level -- MUST run.
+    (sandbox / "test_new.py").write_text("def test_y():\n    assert True\n", encoding="utf-8")
+
+    # Session-created INSIDE a needs=click clone subtree -- must NOT
+    # run even though it is "new" relative to baseline, proving the
+    # click/** exclusion is independent of (in addition to) the diff.
+    click_dir = sandbox / "click"
+    click_dir.mkdir()
+    (click_dir / "test_click_new.py").write_text("def test_z():\n    assert True\n", encoding="utf-8")
+
+    baseline_files = {"test_baseline.py"}
+    results = run_dossier_tests(sandbox, baseline_files)
+
+    assert {r["file"] for r in results} == {"test_new.py"}
+
+
+# ---------------------------------------------------------------------------
+# 7a. run_dossier_tests() "empty_stdout_warn" marker: rc==0 with fully
+#     empty (or whitespace-only) captured stdout is not a silent
+#     success -- it is surfaced via "empty_stdout_warn": True.
+#     Boundary per DoD: (a) rc==0 + non-empty -> no key; (b) rc==0 +
+#     empty -> WARN; (c) rc!=0 -> unchanged (no key), regardless of
+#     stdout content. subprocess.run is monkeypatched (same technique
+#     as section 6/6a) so real pytest's own stdout shape can't mask the
+#     boundary being tested.
+# ---------------------------------------------------------------------------
+
+
+def _dossier_sandbox_with_one_test(tmp_path):
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    (sandbox / "test_new.py").write_text("def test_y():\n    assert True\n", encoding="utf-8")
+    return sandbox
+
+
+def test_run_dossier_tests_warns_on_empty_stdout_at_rc_zero(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    sandbox = _dossier_sandbox_with_one_test(tmp_path)
+
+    class FakeProc:
+        returncode = 0
+        stdout = ""
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda *a, **k: FakeProc())
+    results = run_dossier_tests(sandbox, baseline_files=set())
+
+    assert len(results) == 1
+    assert results[0]["rc"] == 0
+    assert results[0]["empty_stdout_warn"] is True
+
+
+def test_run_dossier_tests_warns_on_whitespace_only_stdout_at_rc_zero(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    sandbox = _dossier_sandbox_with_one_test(tmp_path)
+
+    class FakeProc:
+        returncode = 0
+        stdout = "   \n\t\n"
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda *a, **k: FakeProc())
+    results = run_dossier_tests(sandbox, baseline_files=set())
+
+    assert len(results) == 1
+    assert results[0]["rc"] == 0
+    assert results[0]["empty_stdout_warn"] is True
+
+
+def test_run_dossier_tests_no_warn_on_nonempty_stdout_at_rc_zero(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    sandbox = _dossier_sandbox_with_one_test(tmp_path)
+
+    class FakeProc:
+        returncode = 0
+        stdout = "1 passed in 0.01s\n"
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda *a, **k: FakeProc())
+    results = run_dossier_tests(sandbox, baseline_files=set())
+
+    assert len(results) == 1
+    assert results[0]["rc"] == 0
+    assert "empty_stdout_warn" not in results[0]
+
+
+def test_run_dossier_tests_no_warn_on_empty_stdout_at_rc_nonzero(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    sandbox = _dossier_sandbox_with_one_test(tmp_path)
+
+    class FakeProc:
+        returncode = 1
+        stdout = ""
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda *a, **k: FakeProc())
+    results = run_dossier_tests(sandbox, baseline_files=set())
+
+    assert len(results) == 1
+    assert results[0]["rc"] == 1
+    assert "empty_stdout_warn" not in results[0]
+
+
+# ---------------------------------------------------------------------------
+# 8. sandbox_metrics() LIKE-slug aggregation. Precedent: a real
+#    ~/.claude/projects dir '<slug>-C-t2-click' next to '<slug>-C-t2'
+#    -- a sub-slug the plain equality match missed.
+# ---------------------------------------------------------------------------
+
+
+def test_sandbox_metrics_like_folds_in_sub_slug(cc_db):
+    conn = cc_db
+    proj = "fake-polygon-C-t2"
+    sub_slug = proj + "-click"
+
+    _insert_row(conn, proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.10)
+    _insert_row(conn, sub_slug, "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 30, 0.05)
+
+    metrics = sandbox_metrics(conn, proj)
+
+    assert metrics["turns"] == 2
+    assert metrics["cost_usd"] == pytest.approx(0.15)
+
+
+def test_sandbox_metrics_like_does_not_match_unrelated_project(cc_db):
+    conn = cc_db
+    proj = "fake-polygon-C-t2"
+    unrelated = "fake-polygon-C-t20"  # no '-' boundary after 't2' -> must NOT match
+
+    _insert_row(conn, proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.10)
+    _insert_row(conn, unrelated, "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 999, 9.99)
+
+    metrics = sandbox_metrics(conn, proj)
+
+    assert metrics["turns"] == 1
+    assert metrics["cost_usd"] == pytest.approx(0.10)
+
+
+# ---------------------------------------------------------------------------
+# 9. artifact-deliverable detection + full collect() wiring. Real
+#    precedent: a dossier whose deliverable was an Artifact link (dead
+#    outside the operator's own account) -- see
+#    PROCESS/DEPLOYMENT_ECONOMY_EXAM.md's 'evidence dies with the
+#    session' class.
+# ---------------------------------------------------------------------------
+
+
+def test_detect_artifact_deliverable():
+    assert detect_artifact_deliverable("built it: https://claude.ai/code/artifact/abc123") is True
+    assert detect_artifact_deliverable("done, see gateway/test_metrics.py") is False
+    assert detect_artifact_deliverable("") is False
+    assert detect_artifact_deliverable(None) is False
+
+
+def test_collect_wires_artifact_warning_test_scoping_and_like_metrics(tmp_path, monkeypatch):
+    polygon_root = tmp_path / "polygon"
+    sandbox = polygon_root / "A" / "t1"
+    sandbox.mkdir(parents=True)
+    (sandbox / "test_new.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+
+    (polygon_root / "baseline_manifest.json").write_text(
+        json.dumps({"A/t1": []}), encoding="utf-8"
+    )
+
+    stdout_dir = polygon_root / "stdout"
+    stdout_dir.mkdir()
+    (stdout_dir / "A-t1.txt").write_text(
+        "report: https://claude.ai/code/artifact/deadbeef", encoding="utf-8"
+    )
+
+    db_file = tmp_path / "requests.db"
+    conn = sqlite3.connect(db_file)
+    conn.execute(SCHEMA)
+    conn.commit()
+    project = project_slug(sandbox)
+    _insert_row(conn, project, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.10)
+    _insert_row(conn, project + "-click", "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 30, 0.05)
+    conn.close()
+
+    monkeypatch.setattr(usage_report, "db_path", lambda: db_file)
+    monkeypatch.setattr(usage_report, "transcript_glob", lambda: [])
+
+    manifest = {
+        "polygon_root": str(polygon_root),
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": str(tmp_path),
+        },
+        "model": "haiku",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "text": "hi", "needs": []}],
+        "order": {"t1": ["A"]},
+    }
+    validate_manifest(manifest)
+
+    dossier = collect(manifest, dry_run=False)
+
+    row = dossier["sandboxes"][0]
+    assert row["cost_usd"] == pytest.approx(0.15)  # sub-slug folded in
+    assert row["artifact_warning"] is True
+    assert {t["file"] for t in row["tests"]} == {"test_new.py"}
+
+    md = (polygon_root / "dossier.md").read_text(encoding="utf-8")
+    assert "deliverable = external artifact (may be unreachable outside the account it was created in)" in md
+
+
+# ---------------------------------------------------------------------------
+# 10. multi-session tasks: task['sessions'] is an alternative to
+#     task['text'] -- N separate headless sessions run SEQUENTIALLY in
+#     the same (task, arm) sandbox cwd, with per-session run_log
+#     accounting and a default stop-the-chain on nonzero rc.
+# ---------------------------------------------------------------------------
+
+
+def test_validate_manifest_task_with_sessions_ok(tmp_path):
+    manifest = {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": str(tmp_path),
+        },
+        "model": "haiku",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "sessions": ["do X", "do Y"], "needs": []}],
+        "order": {"t1": ["A"]},
+    }
+    validated = validate_manifest(manifest)
+    assert validated["parallel"] == 1
+
+
+def test_validate_manifest_task_missing_text_and_sessions_raises():
+    manifest = {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1"}],
+        "order": {"t1": ["A"]},
+    }
+    with pytest.raises(ValueError, match="'text' or 'sessions'"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_task_both_text_and_sessions_raises():
+    manifest = {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "text": "hi", "sessions": ["hi"]}],
+        "order": {"t1": ["A"]},
+    }
+    with pytest.raises(ValueError, match="both 'text' and 'sessions'"):
+        validate_manifest(manifest)
+
+
+def test_validate_manifest_task_sessions_empty_list_raises():
+    manifest = {
+        "polygon_root": "x",
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": "x",
+        },
+        "model": "sonnet",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "sessions": []}],
+        "order": {"t1": ["A"]},
+    }
+    with pytest.raises(ValueError, match="non-empty list of strings"):
+        validate_manifest(manifest)
+
+
+def test_build_launch_plan_sessions_wraps_each_with_arm_prefix_suffix(tmp_path):
+    manifest = {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": str(tmp_path),
+        },
+        "model": "haiku",
+        "parallel": 1,
+        "arms": [{"name": "C", "layout": "empty", "prefix": "PFX\n\n", "suffix": "\n\nSFX"}],
+        "tasks": [{"id": "t1", "sessions": ["session one", "session two"], "needs": []}],
+        "order": {"t1": ["C"]},
+    }
+    plan = build_launch_plan(manifest)
+    assert len(plan) == 1
+    launch = plan[0]
+    # The arm's prefix/suffix (the same mechanism the headless-escalation
+    # proxy suffix travels through, PROCESS/DEPLOYMENT_ECONOMY_EXAM.md)
+    # is applied to EVERY session, not just the first.
+    assert launch["sessions"] == ["PFX\n\nsession one\n\nSFX", "PFX\n\nsession two\n\nSFX"]
+    # backward-compat 'text' field mirrors the first session.
+    assert launch["text"] == launch["sessions"][0]
+    assert launch["cwd"] == str(Path(manifest["polygon_root"]) / "C" / "t1")
+
+
+def _multi_session_manifest(tmp_path, texts, model="haiku"):
+    return {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": str(tmp_path),
+        },
+        "model": model,
+        "parallel": 1,
+        "arms": [{"name": "A", "layout": "empty", "prefix": "", "suffix": ""}],
+        "tasks": [{"id": "t1", "sessions": texts, "needs": []}],
+        "order": {"t1": ["A"]},
+    }
+
+
+def test_run_multi_session_sequential_same_cwd_and_per_session_accounting(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    calls = []
+
+    def fake_subprocess_run(cmd, **kwargs):
+        calls.append({"cwd": kwargs.get("cwd"), "input": kwargs.get("input")})
+
+        class FakeProc:
+            returncode = 0
+            stdout = f"ok session {len(calls)}"
+        return FakeProc()
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", fake_subprocess_run)
+
+    manifest = _multi_session_manifest(tmp_path, ["do ping", "do pong"])
+    results = run(manifest, dry_run=False)
+
+    assert len(results) == 1
+    entry = results[0]
+    assert entry["sessions_total"] == 2
+    assert entry["stopped_early"] is False
+    assert len(entry["sessions"]) == 2
+    assert entry["rc"] == 0
+
+    # Both claude invocations targeted the SAME sandbox cwd (spec: one
+    # cwd for the whole multi-session task).
+    assert calls[0]["cwd"] == calls[1]["cwd"] == entry["cwd"]
+    # Prompts delivered in session order via stdin (session N+1 only
+    # after N -- guaranteed here by the plain in-process loop, verified
+    # by the ordered fake_subprocess_run call log).
+    assert calls[0]["input"] == "do ping"
+    assert calls[1]["input"] == "do pong"
+
+    polygon_root = Path(manifest["polygon_root"])
+    s1 = entry["sessions"][0]
+    s2 = entry["sessions"][1]
+    assert s1["session_index"] == 0
+    assert s2["session_index"] == 1
+    assert s1["stdout_file"] == str(polygon_root / "stdout" / "A-t1-s1.txt")
+    assert s2["stdout_file"] == str(polygon_root / "stdout" / "A-t1-s2.txt")
+    assert Path(s1["stdout_file"]).read_text(encoding="utf-8") == "ok session 1"
+    assert Path(s2["stdout_file"]).read_text(encoding="utf-8") == "ok session 2"
+    assert s1["start_ts"] and s1["end_ts"]
+    assert s2["start_ts"] and s2["end_ts"]
+
+    run_log = json.loads((polygon_root / "run_log.json").read_text(encoding="utf-8"))
+    assert run_log[0]["sessions_total"] == 2
+    assert run_log[0]["stopped_early"] is False
+
+
+def test_run_multi_session_stops_chain_on_nonzero_rc(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    def fake_subprocess_run(cmd, **kwargs):
+        idx = fake_subprocess_run.calls
+        fake_subprocess_run.calls += 1
+
+        class FakeProc:
+            returncode = 1 if idx == 1 else 0
+            stdout = f"session {idx}"
+        return FakeProc()
+    fake_subprocess_run.calls = 0
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", fake_subprocess_run)
+
+    manifest = _multi_session_manifest(tmp_path, ["s1 ok", "s2 fails", "s3 never runs"])
+    results = run(manifest, dry_run=False)
+
+    entry = results[0]
+    assert entry["sessions_total"] == 3
+    assert entry["stopped_early"] is True
+    assert len(entry["sessions"]) == 2  # s3 never launched -- chain stopped on s2's rc=1
+    assert entry["rc"] == 1
+    assert entry["sessions"][0]["rc"] == 0
+    assert entry["sessions"][1]["rc"] == 1
+
+    polygon_root = Path(manifest["polygon_root"])
+    stdout_dir = polygon_root / "stdout"
+    assert (stdout_dir / "A-t1-s1.txt").exists()
+    assert (stdout_dir / "A-t1-s2.txt").exists()
+    assert not (stdout_dir / "A-t1-s3.txt").exists()  # never invoked
+    assert fake_subprocess_run.calls == 2
+
+
+def test_run_classic_single_text_task_unaffected_by_sessions_feature(tmp_path, monkeypatch):
+    """Backward compatibility: a classic single-'text' task's run_log
+    entry keeps the exact classic flat shape -- no
+    'sessions'/'sessions_total'/'stopped_early' keys leak in."""
+    import exam_runner as exam_runner_module
+
+    class FakeProc:
+        returncode = 0
+        stdout = "classic ok"
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", lambda cmd, **kw: FakeProc())
+
+    manifest = _minimal_run_manifest(tmp_path)
+    results = run(manifest, dry_run=False)
+
+    entry = results[0]
+    assert "sessions" not in entry
+    assert "sessions_total" not in entry
+    assert "stopped_early" not in entry
+    assert entry["rc"] == 0
+    assert set(entry.keys()) == {
+        "order_index", "task_id", "arm", "cwd",
+        "start_ts", "end_ts", "rc", "stdout_tail", "stdout_file",
+    }
+
+
+# ---------------------------------------------------------------------------
+# 11. collect() artifact-deliverable detection for multi-session tasks:
+#     the classic '<arm>-<task>.txt' filename reconstruction never
+#     matches a multi-session task's '-sN.txt' stdout files, so the
+#     detector was silently False for every multi-session sandbox until
+#     fixed by reading stdout_file paths off run_log.json's own entry
+#     (flat for classic, per-session list for multi-session) instead of
+#     reconstructing a name.
+# ---------------------------------------------------------------------------
+
+
+def _collect_db_setup(tmp_path, monkeypatch):
+    """Empty cc_usage db + no real transcripts to import -- collect()
+    still needs SOMETHING at usage_report.db_path()/transcript_glob()
+    to run its import/metrics steps without touching the real machine
+    state (same pattern as test_collect_wires_artifact_warning...)."""
+    db_file = tmp_path / "requests.db"
+    conn = sqlite3.connect(db_file)
+    conn.execute(SCHEMA)
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(usage_report, "db_path", lambda: db_file)
+    monkeypatch.setattr(usage_report, "transcript_glob", lambda: [])
+
+
+def test_collect_artifact_warning_true_when_any_multi_session_stdout_has_url(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    def fake_subprocess_run(cmd, **kwargs):
+        call = fake_subprocess_run.calls
+        fake_subprocess_run.calls += 1
+
+        class FakeProc:
+            returncode = 0
+            # No marker in session 1's stdout; session 2's carries the
+            # Artifact URL -- this is the exact shape the old
+            # reconstruction missed (it only ever looked at a
+            # '<arm>-<task>.txt' file that a multi-session run never
+            # writes).
+            stdout = (
+                "session 1: nothing to see here"
+                if call == 0
+                else "session 2: report at https://claude.ai/code/artifact/deadbeef"
+            )
+        return FakeProc()
+    fake_subprocess_run.calls = 0
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", fake_subprocess_run)
+
+    manifest = _multi_session_manifest(tmp_path, ["s1 text", "s2 text"])
+    run(manifest, dry_run=False)  # writes run_log.json + per-session stdout files
+
+    _collect_db_setup(tmp_path, monkeypatch)
+    dossier = collect(manifest, dry_run=False)
+
+    row = dossier["sandboxes"][0]
+    assert row["artifact_warning"] is True
+
+
+def test_collect_artifact_warning_false_when_no_multi_session_stdout_has_url(tmp_path, monkeypatch):
+    import exam_runner as exam_runner_module
+
+    def fake_subprocess_run(cmd, **kwargs):
+        class FakeProc:
+            returncode = 0
+            stdout = "plain text, no deliverable link in any session"
+        return FakeProc()
+
+    monkeypatch.setattr(exam_runner_module.subprocess, "run", fake_subprocess_run)
+
+    manifest = _multi_session_manifest(tmp_path, ["s1 text", "s2 text"])
+    run(manifest, dry_run=False)
+
+    _collect_db_setup(tmp_path, monkeypatch)
+    dossier = collect(manifest, dry_run=False)
+
+    row = dossier["sandboxes"][0]
+    assert row["artifact_warning"] is False
+
+
+# ---------------------------------------------------------------------------
+# 12. collect() FRESH-POLYGON short-circuit: a fresh install with zero
+#     exam runs (run_log.json and baseline_manifest.json both absent,
+#     or run_log.json present but an empty list, with no baseline
+#     either) returns None and prints a clear "no runs" message instead
+#     of walking every (task, arm) pair to an all-zero dossier that
+#     looks like tasks ran and produced nothing. Boundary-beyond
+#     control: test_collect_wires_artifact_warning_test_scoping_and_
+#     like_metrics above (baseline_manifest.json present, no
+#     run_log.json) and the multi-session collect() tests (run_log.json
+#     present with entries) both already exercise the NORMAL path and
+#     must keep passing unaffected by this short-circuit.
+# ---------------------------------------------------------------------------
+
+
+def _fresh_polygon_manifest(polygon_root, fixture_dir):
+    return {
+        "polygon_root": str(polygon_root),
+        "src": {
+            "click_git": "x", "click_pin": "y",
+            "template_git": "x", "template_ref": "y", "fixture_dir": str(fixture_dir),
+        },
+        "model": "haiku",
+        "arms": [{"name": "A", "layout": "empty"}],
+        "tasks": [{"id": "t1", "text": "hi", "needs": []}],
+        "order": {"t1": ["A"]},
+    }
+
+
+def test_collect_returns_none_when_polygon_never_prepared_or_run(tmp_path, monkeypatch, capsys):
+    _collect_db_setup(tmp_path, monkeypatch)
+    polygon_root = tmp_path / "polygon"  # never created: no prepare(), no run()
+    manifest = _fresh_polygon_manifest(polygon_root, tmp_path)
+    validate_manifest(manifest)
+
+    result = collect(manifest, dry_run=False)
+
+    assert result is None
+    out = capsys.readouterr().out
+    assert "no exam runs" in out.lower()
+    assert str(polygon_root) in out
+    assert not (polygon_root / "dossier.json").exists()
+
+
+def test_collect_returns_none_when_run_log_is_empty_list_and_no_baseline(tmp_path, monkeypatch):
+    _collect_db_setup(tmp_path, monkeypatch)
+    polygon_root = tmp_path / "polygon"
+    polygon_root.mkdir(parents=True)
+    (polygon_root / "run_log.json").write_text("[]", encoding="utf-8")
+    manifest = _fresh_polygon_manifest(polygon_root, tmp_path)
+    validate_manifest(manifest)
+
+    result = collect(manifest, dry_run=False)
+
+    assert result is None
+    assert not (polygon_root / "dossier.json").exists()
+
+
+def test_collect_does_not_short_circuit_when_baseline_manifest_present_alone(tmp_path, monkeypatch):
+    # Boundary-beyond control: baseline_manifest.json ALONE (prepare()
+    # ran, run_log.json absent -- e.g. a hand-assembled dossier-wiring
+    # fixture) must NOT trigger the short-circuit.
+    _collect_db_setup(tmp_path, monkeypatch)
+    polygon_root = tmp_path / "polygon"
+    (polygon_root / "A" / "t1").mkdir(parents=True)
+    (polygon_root / "baseline_manifest.json").write_text(
+        json.dumps({"A/t1": []}), encoding="utf-8"
+    )
+    manifest = _fresh_polygon_manifest(polygon_root, tmp_path)
+    validate_manifest(manifest)
+
+    result = collect(manifest, dry_run=False)
+
+    assert result is not None
+    assert (polygon_root / "dossier.json").exists()
+
+
+def test_collect_dry_run_still_takes_precedence_over_fresh_polygon_check(tmp_path):
+    # --dry-run stays a pure no-op even on a fresh, never-prepared
+    # polygon -- the dry-run early return fires before the new check.
+    polygon_root = tmp_path / "polygon"
+    manifest = _fresh_polygon_manifest(polygon_root, tmp_path)
+    validate_manifest(manifest)
+
+    result = collect(manifest, dry_run=True)
+
+    assert result is None
+    assert not polygon_root.exists()
+
+
+# ---------------------------------------------------------------------------
+# 13. doc <-> runner format sync: extract_doc_section() is a small,
+#     independently-testable utility; the shipped
+#     PROCESS/DEPLOYMENT_ECONOMY_EXAM.md must carry the exact heading
+#     named by HEADLESS_PROXY_SECTION_HEADING, and a manifest built per
+#     the doc's own recipe (three arms, needs=click/needs=todo, the
+#     doc's headless-escalation-proxy note as arm B's suffix) must
+#     actually prepare() successfully -- proving the doc's documented
+#     shape and the runner's actual expectations have not drifted
+#     apart.
+# ---------------------------------------------------------------------------
+
+_DOC_PATH = Path(__file__).resolve().parent.parent / "PROCESS" / "DEPLOYMENT_ECONOMY_EXAM.md"
+
+
+def test_extract_doc_section_returns_body():
+    text = "# Title\n\n## Section A\n\nbody line 1\nbody line 2\n\n## Section B\n\nother body\n"
+    assert extract_doc_section(text, "## Section A") == "body line 1\nbody line 2"
+    assert extract_doc_section(text, "## Section B") == "other body"
+
+
+def test_extract_doc_section_missing_heading_raises_named_error():
+    text = "# Title\n\n## Section A\n\nbody\n"
+    with pytest.raises(ValueError, match=re.escape("## Not Here")):
+        extract_doc_section(text, "## Not Here")
+
+
+def test_extract_doc_section_empty_body_raises_named_error():
+    # Broken-format edge: the heading exists but its body is blank
+    # (e.g. an accidental delete left the heading with nothing under
+    # it before the next heading) -- a caller building a manifest field
+    # from this must fail loudly, not paste an empty string in.
+    text = "# Title\n\n## Section A\n\n\n## Section B\n\nbody\n"
+    with pytest.raises(ValueError, match=re.escape("## Section A")):
+        extract_doc_section(text, "## Section A")
+
+
+def test_extract_doc_section_last_section_runs_to_end_of_doc():
+    # Boundary-beyond control: a heading with no FOLLOWING '## ' at all
+    # (the last section in the doc) still extracts correctly, not just
+    # ones followed by another heading.
+    text = "# Title\n\n## Only Section\n\nlast body\nmore text\n"
+    assert extract_doc_section(text, "## Only Section") == "last body\nmore text"
+
+
+def test_shipped_doc_has_headless_proxy_section_matching_runner_constant():
+    assert _DOC_PATH.exists(), f"shipped exam doc missing at {_DOC_PATH}"
+    text = _DOC_PATH.read_text(encoding="utf-8")
+    note = extract_doc_section(text, HEADLESS_PROXY_SECTION_HEADING)
+    assert note  # non-empty -- doc format not broken
+
+
+def test_manifest_built_from_doc_recipe_prepares_successfully(tmp_path):
+    """A synthetic manifest built per the doc's own recipe (three arms
+    A/B/C, needs=click on one task and needs=todo on another, the
+    doc's own headless-escalation-proxy note extracted and used as arm
+    B's suffix) actually prepares -- the doc's documented shape and the
+    runner's real expectations agree."""
+    text = _DOC_PATH.read_text(encoding="utf-8")
+    proxy_note = extract_doc_section(text, HEADLESS_PROXY_SECTION_HEADING)
+
+    click_repo = tmp_path / "fake_click"
+    click_sha = _make_local_repo(click_repo, {"click_marker.txt": "click contents"})
+    template_repo = tmp_path / "fake_template"
+    template_sha = _make_local_repo(template_repo, {"README.md": "TEMPLATE README"})
+    fixture_dir = tmp_path / "todo_fixture"
+    fixture_dir.mkdir()
+    (fixture_dir / "todo.py").write_text("# todo cli", encoding="utf-8")
+
+    manifest = {
+        "polygon_root": str(tmp_path / "polygon"),
+        "src": {
+            "click_git": str(click_repo),
+            "click_pin": click_sha,
+            "template_git": str(template_repo),
+            "template_ref": template_sha,
+            "fixture_dir": str(fixture_dir),
+        },
+        "model": "sonnet",
+        "arms": [
+            {"name": "A", "layout": "empty", "prefix": "", "suffix": ""},
+            {"name": "B", "layout": "template", "prefix": "", "suffix": "\n\n" + proxy_note},
+            {"name": "C", "layout": "empty", "prefix": "", "suffix": ""},
+        ],
+        "tasks": [
+            {"id": "t2", "needs": ["click"], "text": "recon click"},
+            {"id": "t3", "needs": ["todo"], "text": "fix todo"},
+        ],
+        "order": {"t2": ["A", "B", "C"], "t3": ["A", "B", "C"]},
+    }
+    validate_manifest(manifest)
+    prepare(manifest, dry_run=False)
+
+    polygon = Path(manifest["polygon_root"])
+    assert (polygon / "A" / "t2" / "click" / "click_marker.txt").exists()
+    assert (polygon / "B" / "t3" / "todo.py").exists()
+
+    plan = build_launch_plan(manifest)
+    b_t2 = next(p for p in plan if p["arm"] == "B" and p["task_id"] == "t2")
+    assert proxy_note in b_t2["text"]

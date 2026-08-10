@@ -94,10 +94,16 @@ add rows freely, never remove the standard ones without recording why):
 | Judge role-file pin (`tools/escape_check.py` judge_role_pin leg + `tools/escape_allowlist.template.json` section) | | |
 | DoD track / gate (`tools/dod_track.py`, `tools/dod_gate.py`) | | |
 | Main gate / Stop hook (`tools/main_gate.py`) | | |
-| Calibration / usage tooling (`tools/calibration_counts.py`, `tools/savings_report.py`, `tools/usage_report.py`, `tools/preflight_quota.py`) | | |
+| Calibration / usage tooling (`tools/calibration_counts.py`, `tools/savings_report.py`, `tools/usage_report.py`, `tools/preflight_quota.py`, `tools/token_usage_stats.py` — reuses `usage_report.py`'s own price table and cost formula, not a second ledger) | | |
 | Permission audit (`tools/permission_audit.py`) | | |
 | Non-Claude worker guard (`tools/pi_run_guard.py`, `gateway/PI_HARNESS.md`) | | |
 | Leaf-routing judge acceptance (rule 13, `gateway/judge_calibration.json`, `PROCESS/JUDGE_CALIBRATION_PROTOCOL.md`) | | |
+| Command-hygiene claim/search/negative-form hooks (`tools/claim_control_gate.py`, `tools/search_control_gate.py`, `tools/negative_lint.py` — command hygiene point 6, one row: all three mechanize the same claim/search/negative-form control class) | | |
+| Hook liveness probe (`tools/hook_liveness_probe.py` — proves gate-CODE liveness for the hook-backed gates above; wiring liveness stays the wiring-integrity-check row's job) | | |
+| Owns verification, layer 2 (`tools/owns_verify.py` — post-batch CLI companion to the owns-gate PreToolUse hook above, same manifest-overlap defense) | | |
+| Judge-calibration sanitize feed (`tools/judge_calib_sanitize.py` — key-stripped probe material for a live subscription-judge re-check against the leaf-routing calibration set above) | | |
+| Lead-replay shadow evaluation (`gateway/lead_replay.py`, `gateway/lead_replay_corpus.template.jsonl` — api-keys contour) | | |
+| FINDINGS form + machine check (`docs/FINDINGS.template.md`, `tools/test_findings_form.py`) | | |
 | Skills (`.claude/skills/*`) | | |
 | PROCESS docs (`PROCESS/*.md`) | | |
 | Boot sequence / decision log / delegation table (`BOOT.md`, `DECISIONS.md`, `DELEGATION_TABLE.md`) | | |

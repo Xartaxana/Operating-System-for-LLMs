@@ -1,0 +1,2 @@
+{"task": "1", "commit": "REPLACE-WITH-A-COMMIT-HASH-FROM-YOUR-REPO", "kind": "feature", "prompt": "Add gateway/requirements.txt pinning litellm[proxy] (>=1.70) and pytest (>=8) as the gateway's install requirements.", "paths": ["gateway/requirements.txt"]}
+{"task": "2", "commit": "REPLACE-WITH-A-COMMIT-HASH-FROM-YOUR-REPO", "kind": "docs-edit", "prompt": "Document, in gateway/README.md, that at raw-text-off the `error` column is truncated to the first ~200 chars of its first line, with a `...[truncated]` suffix when anything was cut.", "paths": ["gateway/README.md"]}
