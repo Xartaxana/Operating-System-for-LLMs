@@ -247,8 +247,21 @@ frontmatter, схема agent_output) проверяется по всей це�
   rules.yaml — триггер стратега); ГРАНУЛЯРНОСТЬ записей машинно не
   ловится (поле features честно заполнено) — её смотрит чек 27
   калибровки.
-
-## Ось 7 — Ядро метода ↔ публичный шаблон (D-0070, разделение 2026-07-11)
+- Персистентный Android-settings-стейт, выставляемый тестовой
+  обвязкой (внесено 2026-08-12, критик-вход AT-BUG-064): настройки
+  гостя, переживающие snapshot-boot эмулятора — `settings put global
+  http_proxy` (их framework/core/mitm.py), `settings put system
+  font_scale` и `cmd uimode night` (их framework/core/adb.py) —
+  снимаются только in-process teardown'ом (try/finally); аварийное
+  завершение между set и clear оставляет остаток, ломающий СЛЕДУЮЩУЮ
+  сессию (прецедент: остаточный прокси, их AT-BUG-064 —
+  ERR_PROXY_CONNECTION_FAILED на live без единого replay-теста).
+  Класс: вводишь новую персистентную настройку гостя — обязателен
+  fail-safe слой на подъёме сессии (образец: их
+  `mitm.ensure_no_residual_proxy` + session-autouse хук conftest +
+  перевзвод после device-liveness recovery), не только teardown.
+  Известный остаток: font_scale/night mode без fail-safe — их
+  AT-BUG-066 (заведён 2026-08-11).
 
 | Это репо (штаб разработки ядра) | github.com/Xartaxana/Supervised-Delegation (публичная поставка) |
 |---|---|
