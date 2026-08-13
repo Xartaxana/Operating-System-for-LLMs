@@ -365,6 +365,38 @@ def norm_worker_ref(worker_ref):
     return key or None
 
 
+_TIER_FAMILIES = ("haiku", "sonnet", "opus", "fable")
+
+
+def normalize_tier_family(model_declared) -> tuple:
+    """model_declared -> (family, reason) for M10/D4 grouping (B3 point-
+    fix, finding 8в.1: journal model_declared drifts across near-
+    synonyms of the SAME tier -- fable / fable-5 / claude-fable-5 --
+    fragmenting M10/D4 into several window_series rows for what is one
+    tier). SUBSTRING match (case-insensitive) against the four
+    CLAUDE.md tier words (haiku/sonnet/opus/fable): "fable-5" and
+    "claude-fable-5" both contain "fable" and collapse to it. A string
+    matching NONE of the four (e.g. "gpt-5", a real future case per
+    spec section 8а's GPT-portability note) is returned RAW and
+    UNCHANGED -- never silently remapped, never dropped (spec's own
+    "не теряется и не мапится молча"). An empty/None model_declared
+    buckets into the literal string "unknown" with a reason (spec's
+    own wording, point 2) -- note _m10 below already filters falsy
+    model_declared out BEFORE grouping (pre-existing behaviour, out of
+    this point-fix's scope), so this branch is never actually reached
+    from _m10 on live data; it exists so the function's OWN contract is
+    TOTAL (every input has a defined output), independently verified by
+    its own boundary tests rather than relying on a caller's
+    pre-filtering to avoid it."""
+    if not model_declared:
+        return "unknown", "н/д (модель не указана)"
+    s = model_declared.lower()
+    for fam in _TIER_FAMILIES:
+        if fam in s:
+            return fam, None
+    return model_declared, None
+
+
 _STAGE_KIND_COLLAPSE = {
     "critic-вход": "critic",
     "retry": "retry",
@@ -974,9 +1006,12 @@ def render_selftest(report: dict) -> str:
 #     table is the MODEL name (haiku/sonnet/opus/fable), carried by
 #     journal delegated.model / task_stage_costs.model_declared -- NOT
 #     the `agent` role field (builder/critic/scout/lead). Grouped by
-#     model_declared; a row's own denominator is "accepted tasks that
-#     had >=1 stage at that tier" (a multi-tier task can appear in
-#     several tiers' denominators).
+#     the NORMALIZED tier FAMILY (normalize_tier_family, B3 point-fix
+#     8в.1 -- collapses model_declared drift like fable-5/claude-fable-5
+#     into one "fable" row), not the raw model_declared string; a row's
+#     own denominator is "accepted tasks that had >=1 stage at that
+#     tier" (a multi-tier task can appear in several tiers'
+#     denominators).
 #   - M13's "ПРОКСИ" caveat and M4b's "не-задачную работу координатора"
 #     caveat are permanent, not conditional on value presence -- both
 #     are folded into the `reason` field even when value is not None
@@ -1414,9 +1449,13 @@ def _m10(task_rows: list, stage_rows: list) -> dict:
     task_tiers = defaultdict(set)
     by_tier_cost = defaultdict(list)
     for s in stage_rows:
-        tier = s.get("model_declared")
-        if not tier:
+        raw_tier = s.get("model_declared")
+        if not raw_tier:
             continue
+        # B3 point-fix (8в.1): group by the NORMALIZED tier family, not
+        # the raw declaration -- fable/fable-5/claude-fable-5 must land
+        # in the same M10/D4 row (normalize_tier_family above).
+        tier, _reason = normalize_tier_family(raw_tier)
         task_tiers[(s["deploy"], s["task_id"])].add(tier)
         by_tier_cost[tier].append(s["cost_usd"])
     if not by_tier_cost:

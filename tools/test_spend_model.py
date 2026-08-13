@@ -1100,6 +1100,71 @@ def test_m10_no_model_declared_stages():
 
 
 # -----------------------------------------------------------------------
+# normalize_tier_family (B3 point-fix, finding 8в.1) -- 5 boundary tests
+# named verbatim by the spec DoD: fable, fable-5, claude-fable-5, gpt-5,
+# empty/None.
+# -----------------------------------------------------------------------
+def test_normalize_tier_family_exact_fable():
+    assert sm.normalize_tier_family("fable") == ("fable", None)
+
+
+def test_normalize_tier_family_fable_5_collapses():
+    assert sm.normalize_tier_family("fable-5") == ("fable", None)
+
+
+def test_normalize_tier_family_claude_fable_5_collapses():
+    assert sm.normalize_tier_family("claude-fable-5") == ("fable", None)
+
+
+def test_normalize_tier_family_unknown_string_stays_raw_not_lost():
+    # gpt-5 matches none of the 4 tier words -- returned AS-IS, never
+    # silently mapped, never dropped (spec's own "не теряется и не
+    # мапится молча").
+    assert sm.normalize_tier_family("gpt-5") == ("gpt-5", None)
+
+
+def test_normalize_tier_family_empty_or_none_buckets_unknown_with_reason():
+    fam, reason = sm.normalize_tier_family("")
+    assert fam == "unknown"
+    assert reason is not None
+    fam2, reason2 = sm.normalize_tier_family(None)
+    assert fam2 == "unknown"
+    assert reason2 is not None
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("haiku", "haiku"), ("sonnet", "sonnet"), ("opus", "opus"),
+    ("HAIKU", "haiku"), ("Claude-Sonnet-5", "sonnet"),
+])
+def test_normalize_tier_family_other_tiers_and_case_insensitivity(raw, expected):
+    assert sm.normalize_tier_family(raw)[0] == expected
+
+
+def test_m10_d4_collapse_drifted_fable_declarations_into_one_row():
+    """Live finding 8в.1 reproduced with a fixture: model_declared drift
+    (fable / fable-5 / claude-fable-5) across 3 stages of 3 DIFFERENT
+    tasks must land in ONE M10:fable row (and one D4:fable row via
+    _compute_detectors' M10-key mirroring), not three fragmented rows."""
+    tasks = [_task(task_id="t-1", accepted=1), _task(task_id="t-2", accepted=1),
+             _task(task_id="t-3", accepted=1)]
+    stages = [
+        _stage(task_id="t-1", cost_usd=1.0, model_declared="fable"),
+        _stage(task_id="t-2", cost_usd=2.0, model_declared="fable-5"),
+        _stage(task_id="t-3", cost_usd=3.0, model_declared="claude-fable-5"),
+    ]
+    out = sm._m10(tasks, stages)
+    assert list(out.keys()) == ["M10:fable"]
+    assert out["M10:fable"]["value"] == pytest.approx(6.0 / 3)
+    metrics = dict(out)
+    metrics.update({"M1": sm._metric(1.0), "M2": sm._metric(1.0),
+                     "M3": sm._metric(0.0), "M4": sm._metric(0.5)})
+    detectors = sm._compute_detectors(metrics, {})
+    assert "D4:fable" in detectors
+    assert "D4:fable-5" not in detectors
+    assert "D4:claude-fable-5" not in detectors
+
+
+# -----------------------------------------------------------------------
 # M11 -- git numstat (real tmp git repos; subprocess allowed, section 9)
 # -----------------------------------------------------------------------
 def _git(*args, cwd, env=None):
