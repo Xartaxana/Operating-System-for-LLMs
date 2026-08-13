@@ -14,8 +14,8 @@
 | N2 | Разведка: телеметрия Claude Code (OTel agent.name/skill.name) | scout-класс (sonnet, guide) | done (t-418) |
 | N3 | Драфт спеки | designer (opus) | done (t-419, принят Lead 08-13; спека ниже) |
 | N4 | Решение развилок (а)–(з) | оператор + Lead | **ждёт слова оператора** |
-| N5=B1 | Ядро связи и производные таблицы | builder | queued; owns: tools/spend_model.py, tools/test_spend_model.py |
-| N6=B2 | Метрики M1–M14 и детекторы D1–D9 | builder | queued (после B1) |
+| N5=B1 | Ядро связи и производные таблицы | builder | done (t-420, принят 08-13; канон 2532, selftest: ключ = снятие agent:, слаги OK, сходимость с token_usage_stats до цента по 3 проектам, импорт 18.3с) |
+| N6=B2 | Метрики M1–M14+M4b и детекторы D1–D9 | builder | dispatched (t-421) |
 | N7=B3 | Отчёт и CLI (адверсариальная батарея) | builder | queued (после B2); owns: tools/spend_report.py, tools/test_spend_report.py |
 | N8=B4 | Реестр прогонов: импорт run_units.jsonl + правки 3 SKILL.md (kit-release, boot-diet, permission-audit) | builder | queued (после B2; решение (б) 08-13) |
 | N9=B5 | Проводка в калибровку (чек 18) | builder, doc-dispatch witness | queued (после B2/B3) |
@@ -460,6 +460,29 @@ history.jsonl живого Codex (поля usage, модель, границы �
 образцу import_transcripts с дедупом и E-краями B1; цены GPT-моделей
 — в PRICES с комментарием-источником (класс t-343 «новая модель → оба
 учёта, никогда молчаливый $0»).
+
+## 8б. Находки B1 на живых данных (2026-08-13, отчёт t-420)
+
+1. **Форма ключа**: norm = снятие префикса `agent:` у worker_ref;
+   cc_usage.agent_id несёт голый id БЕЗ `agent-`. Вторая нормализация
+   не понадобилась и сознательно не кодировалась. Числа: штаб 378/391,
+   AO3 286/327 (ненайденные — мёртвые диспатчи без транскрипта,
+   материал секции здоровья/D9), Dog 0/0.
+2. **Dog не заполняет worker_ref вообще** (26 delegated, ни одного
+   agent:) → их задачи в мониторинге без денег (E9-класс по
+   построению). КРОСС-ПУНКТ Dog (D-0082, при безопасном касании их
+   носителя): передать фактом + вопросом «хотите ли join — пишите
+   worker_ref».
+3. **У AO3 ноль событий calibrated** → у них только monthly-окна;
+   calibrated_windows=[] — легальное состояние, покрыто тестом.
+4. cc_usage была несвежей (max ts 08-05) — ленивый импорт (18.3с)
+   догнал; подтверждает выбор Г1 развилки (г).
+5. Решения builder в пределах люфта задокументированы в его отчёте
+   (window_id с deploy-префиксом; task_costs.window_id — только
+   calibrated-вид; ветки calibration_counts сверх 5 значений
+   stage_kind → other; фиктивный replacement считается rework).
+
+## 9. Мелкие выборы, закрытые дизайнером
 
 Два модуля (model/report — граница owns); имена таблиц из брифа;
 DELETE+INSERT транзакцией; reconfigure utf-8 обоих модулей (класс
