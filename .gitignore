@@ -18,3 +18,7 @@ logs/owns_registry.jsonl
 logs/.search-ledger/
 # handoff 07-30: Office-lock открытых у оператора xlsx (docs/~$EXAM_RESULTS.xlsx)
 ~$*.xlsx
+# spend-мониторинг 08-13 (ось 9 коммита 0b60500): дашборд/md-отчёты
+# генерируемы из window_series одной командой -- durable-истина в БД,
+# файлы не для истории
+logs/spend/
