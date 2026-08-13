@@ -15,8 +15,8 @@
 | N3 | Драфт спеки | designer (opus) | done (t-419, принят Lead 08-13; спека ниже) |
 | N4 | Решение развилок (а)–(з) | оператор + Lead | **ждёт слова оператора** |
 | N5=B1 | Ядро связи и производные таблицы | builder | done (t-420, принят 08-13; канон 2532, selftest: ключ = снятие agent:, слаги OK, сходимость с token_usage_stats до цента по 3 проектам, импорт 18.3с) |
-| N6=B2 | Метрики M1–M14+M4b и детекторы D1–D9 | builder | dispatched (t-421) |
-| N7=B3 | Отчёт и CLI (адверсариальная батарея) | builder | queued (после B2); owns: tools/spend_report.py, tools/test_spend_report.py |
+| N6=B2 | Метрики M1–M14+M4b и детекторы D1–D9 | builder | done (t-421, принят 08-13; канон 2604, живой JSON обоих окон, M4=0.632 против ручных 0.66 №6 — независимая формула) |
+| N7=B3 | Отчёт и CLI (адверсариальная батарея) + нормализация model_declared→семья для M10/D4 | builder | dispatched (t-424); owns: tools/spend_report.py, tools/test_spend_report.py + point-фикс spend_model |
 | N8=B4 | Реестр прогонов: импорт run_units.jsonl + правки 3 SKILL.md (kit-release, boot-diet, permission-audit) | builder | queued (после B2; решение (б) 08-13) |
 | N9=B5 | Проводка в калибровку (чек 18) | builder, doc-dispatch witness | queued (после B2/B3) |
 | N10=B6 | HTML-дашборд «агентская ОС» (цифры/графики/тренды/стоки/месячный отчёт) | builder | queued (после B3; решение (д) 08-13; UI-витнесс со скриншотом) |
@@ -481,6 +481,30 @@ history.jsonl живого Codex (поля usage, модель, границы �
    (window_id с deploy-префиксом; task_costs.window_id — только
    calibrated-вид; ветки calibration_counts сверх 5 значений
    stage_kind → other; фиктивный replacement считается rework).
+
+## 8в. Находки B2 (2026-08-13, отчёт t-421)
+
+1. **Дрейф деклараций модели в журнале**: model_declared несёт fable /
+   fable-5 / claude-fable-5 как РАЗНЫЕ значения → M10/D4 дробят ярус.
+   Фикс — нормализация в семью (haiku/sonnet/opus/fable) на стороне
+   M10/D4 — включён в скоуп B3 (t-424). Дисциплинарная сторона
+   (словарь model в журнале — ярусные слова) — копилка калибровки №7.
+2. **Класс «CREATE TABLE IF NOT EXISTS не добавляет колонку живой
+   таблице»** — живой инцидент B2 (is_rework не появлялся, чинено
+   guarded ALTER TABLE + 2 регресс-теста). Соседи того же идиома
+   свипнуты builder'ом: sqlite_logger, guard, usage_report — сейчас не
+   укушены. Счёт класса в РАЗНЫХ артефактах = 1 → в реестр режимов
+   отказа НЕ вносится (порог D-0100 ≥2), в очередь: внести при
+   рецидиве.
+3. **Флаки-тесты test_hook_liveness_probe** (2 шт.,
+   таймингозависимые, жив/мёртв недетерминированно) — builder доказал
+   непричастность своего диффа git stash'ем. Копилка калибровки №7 /
+   flakiness-бэклог; witness-достоверность канона задета классом, не
+   инстансом.
+4. Судьбоносные решения слоя B2 (флаг='baseline' через
+   denominator_kind; M5 top-1 в series + функция top_n_tasks; M10 по
+   МОДЕЛИ, не по роли; D9 двумя строками) — на вход критик-гейта
+   батча.
 
 ## 9. Мелкие выборы, закрытые дизайнером
 

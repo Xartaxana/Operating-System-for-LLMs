@@ -66,7 +66,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sqlite3
+import subprocess
 import sys
 import time
 from collections import defaultdict
@@ -79,6 +81,7 @@ if _TOOLS_DIR not in sys.path:
 
 import calibration_counts as cc_counts  # noqa: E402
 import token_usage_stats as tus  # noqa: E402
+from savings_report import fable_counterfactual  # noqa: E402
 from usage_report import (  # noqa: E402
     accounted_cost,
     db_path as _cc_db_path,
@@ -138,9 +141,20 @@ CREATE TABLE IF NOT EXISTS task_stage_costs (
     models_measured TEXT,
     stage_kind TEXT,
     measurable INTEGER NOT NULL DEFAULT 0,
+    is_rework INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (deploy, task_id, stage_index)
 );
 """
+# is_rework (B2 addition, O1's "delegated ПОСЛЕ первого rejected,
+# replaces_worker НЕ реворк"): the SAME per-task classification
+# _build_task_row already computed to produce task_costs.rework_stages
+# (B1), now also recorded PER STAGE so M3 (cost of rework, not just its
+# COUNT) can be computed by a plain SQL filter instead of re-deriving
+# the journal-line comparison at every metrics run. Single source of
+# truth: stages_and_tasks_for_deploy computes first_rejected_line ONCE
+# per task and threads it into both this per-stage flag and
+# _build_task_row's rework_stages count (see that function -- it now
+# just sums this flag, no longer recomputes the comparison itself).
 
 SCHEMA_TASK_COSTS = """
 CREATE TABLE IF NOT EXISTS task_costs (
@@ -214,6 +228,16 @@ CREATE TABLE IF NOT EXISTS window_series (
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     for ddl in (SCHEMA_TASK_STAGE_COSTS, SCHEMA_TASK_COSTS, SCHEMA_RUN_UNITS, SCHEMA_WINDOW_SERIES):
         conn.execute(ddl)
+    # B2 migration: `CREATE TABLE IF NOT EXISTS` is a no-op on a table B1
+    # already created live (this repo's own gateway/requests.db, canon
+    # 2532 per t-420's accepted report) -- is_rework did not exist there.
+    # ALTER TABLE ADD COLUMN with a NOT NULL DEFAULT backfills existing
+    # rows legally in SQLite; guarded by PRAGMA table_info so a fresh
+    # (test) DB that already has the column via SCHEMA_TASK_STAGE_COSTS
+    # above is a no-op, never a duplicate-column error.
+    existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(task_stage_costs)")}
+    if "is_rework" not in existing_cols:
+        conn.execute("ALTER TABLE task_stage_costs ADD COLUMN is_rework INTEGER NOT NULL DEFAULT 0")
     conn.commit()
 
 
@@ -222,6 +246,7 @@ _STAGE_COLUMNS = [
     "model_declared", "worker_ref", "agent_key", "project", "turns",
     "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens",
     "cost_usd", "unpriced_turns", "models_measured", "stage_kind", "measurable",
+    "is_rework",
 ]
 _INSERT_STAGE_SQL = (
     "INSERT INTO task_stage_costs (" + ", ".join(_STAGE_COLUMNS) + ") VALUES ("
@@ -465,15 +490,12 @@ def _build_task_row(deploy: str, task_id: str, stages: list, task_events: list, 
 
     # Q1 rework_stages: delegated stages positioned after the task's
     # FIRST rejected, EXCLUDING replaces_worker legitimate replacements
-    # (O1: "replaces_worker НЕ реворк") -- mirrors calibration_counts'
-    # branch classification via the already-collapsed stage_kind.
-    first_rejected_line = min(rejected_lines) if rejected_lines else None
-    rework_stages = 0
-    if first_rejected_line is not None:
-        rework_stages = sum(
-            1 for s in stages_sorted
-            if s["journal_line"] > first_rejected_line and s["stage_kind"] != "replacement"
-        )
+    # (O1: "replaces_worker НЕ реворк"). B2 now computes the underlying
+    # journal_line > first_rejected_line comparison ONCE, in
+    # stages_and_tasks_for_deploy, and stamps it on each stage as
+    # is_rework (single source of truth for both this COUNT and M3's
+    # cost-of-rework SUM) -- this is just the sum of that flag.
+    rework_stages = sum(1 for s in stages_sorted if s.get("is_rework"))
 
     win = _window_for_ts(windows, first_ts_dt) if first_ts_dt else None
     window_id = win["window_id"] if win else None
@@ -543,6 +565,13 @@ def stages_and_tasks_for_deploy(conn: sqlite3.Connection, deploy_key: str,
 
     for tid, pls in delegated_by_task.items():
         pls_sorted = sorted(pls, key=lambda pl: (pl.ts or datetime.min, pl.line_no))
+        # O1/is_rework (B2): first_rejected_line computed ONCE per task,
+        # from this task's own events -- the single source _build_task_row
+        # now reads back via the summed is_rework flag below.
+        rejected_lines_tid = [
+            e.line_no for e in events_by_task[tid] if e.data.get("event") == "rejected"
+        ]
+        first_rejected_line = min(rejected_lines_tid) if rejected_lines_tid else None
         stages = []
         for idx, pl in enumerate(pls_sorted, start=1):
             branch = branch_by_line.get(pl.line_no)
@@ -553,6 +582,9 @@ def stages_and_tasks_for_deploy(conn: sqlite3.Connection, deploy_key: str,
             stat = agent_stats.get(agent_key) if agent_key else None
             if agent_key:
                 matched_agent_keys.add(agent_key)
+            is_rework = 1 if (first_rejected_line is not None
+                               and pl.line_no > first_rejected_line
+                               and stage_kind != "replacement") else 0
             stage = {
                 "deploy": deploy_key, "task_id": tid, "stage_index": idx,
                 "journal_line": pl.line_no,
@@ -568,6 +600,7 @@ def stages_and_tasks_for_deploy(conn: sqlite3.Connection, deploy_key: str,
                 "unpriced_turns": stat["unpriced_turns"] if stat else 0,
                 "models_measured": stat["models_measured"] if stat else None,
                 "stage_kind": stage_kind, "measurable": measurable,
+                "is_rework": is_rework,
             }
             stages.append(stage)
             stage_rows.append(stage)
@@ -920,6 +953,916 @@ def render_selftest(report: dict) -> str:
     return "\n".join(lines)
 
 
+# ========================================================================
+# B2 -- METRICS (M1-M14 + M4b) AND DETECTORS (D1-D9), section 6 node B2.
+#
+# Every metric function returns a dict shaped exactly per accept key 3:
+#   {"value", "denominator_kind", "denominator_value", "unpriced_turns",
+#    "reason"} -- never a bare 0 for missing data (O3/E6): a `$` SUM
+# with zero priced rows returns value=None + reason, a legitimate
+# COUNT/SHARE of zero (e.g. "no rework happened") returns a real 0.0.
+#
+# Judgment calls made in this layer where the spec's own formulas don't
+# fully fix a design choice (documented here, not silently decided --
+# see the B2 handoff report for the same list with rationale):
+#   - M5 ("top-N задач -- вход детектора") doesn't fit window_series'
+#     one-scalar-per-metric_key shape; a single "M5" row stores the
+#     top-1 task's cost (denominator_kind names its task_id), and
+#     top_n_tasks() below is the full list for B3's report to consume
+#     directly (not persisted).
+#   - M10's "стадий agent=tier": 'ярус' per CLAUDE.md's Role != tier
+#     table is the MODEL name (haiku/sonnet/opus/fable), carried by
+#     journal delegated.model / task_stage_costs.model_declared -- NOT
+#     the `agent` role field (builder/critic/scout/lead). Grouped by
+#     model_declared; a row's own denominator is "accepted tasks that
+#     had >=1 stage at that tier" (a multi-tier task can appear in
+#     several tiers' denominators).
+#   - M13's "ПРОКСИ" caveat and M4b's "не-задачную работу координатора"
+#     caveat are permanent, not conditional on value presence -- both
+#     are folded into the `reason` field even when value is not None
+#     (reason is documented in the schema as "почему NULL", a generic
+#     TEXT field repurposed here for a standing caveat; no column for
+#     a separate caveat exists).
+#   - The window_series schema (B1, unchanged) has no `flag` column;
+#     accept key 4's "поле flag='baseline'" is the schema's own
+#     `denominator_kind` field (its comment already reads "'absolute'
+#     для абсолютных") -- D1-D6 write denominator_kind='baseline' with
+#     the delta in denominator_value; D7-D9 write denominator_kind=
+#     'absolute' with the comparison value (D7: fable counterfactual)
+#     in denominator_value. The boolean "flagged" verdict is then a
+#     trivial reader-side comparison (value vs denominator_value, or
+#     value>0), not a separate stored bit.
+#   - D9 ("доля вне задач / стадии без транскрипта") is stored as TWO
+#     labeled rows (D9:cost_outside_tasks, D9:stages_no_transcript)
+#     rather than one combined number -- the two components are not
+#     commensurable (a $ share and a stage-count share).
+# ========================================================================
+
+M4B_CAVEAT = ("M4b включает не-задачную работу координатора (диалог, бут, "
+              "калибровка, релизы)")
+
+PROTOCOL_PATH = REPO_ROOT / "PROCESS" / "WEEKLY_CALIBRATION_PROTOCOL.md"
+_CHECK_HEADER_RE = re.compile(r"^\d+\. \*\*", re.MULTILINE)
+
+
+def count_protocol_checks(path=None) -> "int | None":
+    """M12 denominator: greps the numbered check headers of the weekly
+    calibration protocol (same form the spec's own accept key uses to
+    verify "33"). Returns None (never 0) when the protocol file is
+    unreadable -- M12's own E-edge (accept key 7: "M12 при недоступном
+    протоколе -> None + reason")."""
+    p = Path(path) if path else PROTOCOL_PATH
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return len(_CHECK_HEADER_RE.findall(text))
+
+
+# --------------------------------------------------------------------
+# 13. Generic helpers -- sums that never silently fold missing prices
+#     to 0 (O3/E6), dict-shaped SQL rows, window-membership test.
+# --------------------------------------------------------------------
+def _metric(value=None, denominator_kind=None, denominator_value=None,
+            unpriced_turns=0, reason=None) -> dict:
+    return {"value": value, "denominator_kind": denominator_kind,
+            "denominator_value": denominator_value,
+            "unpriced_turns": unpriced_turns, "reason": reason}
+
+
+def _sum_optional(values) -> "float | None":
+    """SQL SUM()'s own null-handling, made explicit in Python: None
+    entries are skipped (not folded into 0); the result is None ONLY
+    when there was not a single non-None value (O3 -- a $0 result must
+    never be indistinguishable from "no priced data")."""
+    have_any = False
+    total = 0.0
+    for v in values:
+        if v is not None:
+            have_any = True
+            total += v
+    return total if have_any else None
+
+
+def _query_dicts(conn: sqlite3.Connection, sql: str, params=()) -> list:
+    cur = conn.execute(sql, params)
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def _ts_in_window(dt, window_start, window_end) -> bool:
+    """Half-open [start, end) -- mirrors _window_for_ts's own convention
+    (B1). dt=None is never "in" any window (E3-adjacent: unattributable,
+    not silently bucketed)."""
+    if dt is None:
+        return False
+    if window_start is not None and dt < window_start:
+        return False
+    if window_end is not None and dt >= window_end:
+        return False
+    return True
+
+
+def _tasks_in_window(conn: sqlite3.Connection, window_spec: dict) -> list:
+    """calibrated windows: task_costs.window_id already carries the
+    EXACT same calibrated_windows() id (B1 computed it identically) --
+    a plain equality filter, no ts re-derivation. monthly windows: no
+    such precomputed column (B1's finding 8б.5 -- window_id there is
+    calibrated-view only), so tasks are matched by first_delegated_ts
+    falling in [window_start, window_end)."""
+    deploys = window_spec["deploys"]
+    if window_spec["kind"] == "calibrated":
+        return _query_dicts(
+            conn, "SELECT * FROM task_costs WHERE deploy=? AND window_id=?",
+            (deploys[0], window_spec["window_id"]),
+        )
+    if not deploys:
+        return []
+    placeholders = ",".join("?" for _ in deploys)
+    rows = _query_dicts(conn, f"SELECT * FROM task_costs WHERE deploy IN ({placeholders})", deploys)
+    ws, we = window_spec["window_start"], window_spec["window_end"]
+    out = []
+    for r in rows:
+        dt = cc_counts.parse_ts(r.get("first_delegated_ts"))
+        if _ts_in_window(dt, ws, we):
+            out.append(r)
+    return out
+
+
+def _stages_for_tasks(conn: sqlite3.Connection, deploys: list, task_rows: list) -> list:
+    task_keys = {(t["deploy"], t["task_id"]) for t in task_rows}
+    if not task_keys or not deploys:
+        return []
+    placeholders = ",".join("?" for _ in deploys)
+    rows = _query_dicts(conn, f"SELECT * FROM task_stage_costs WHERE deploy IN ({placeholders})", deploys)
+    return [s for s in rows if (s["deploy"], s["task_id"]) in task_keys]
+
+
+def _cc_usage_rows_in_window(conn: sqlite3.Connection, projects: list, window_start, window_end) -> list:
+    if not projects:
+        return []
+    placeholders = ",".join("?" for _ in projects)
+    rows = _query_dicts(
+        conn,
+        "SELECT ts, project, model, is_sidechain, agent_id, accounted_cost_usd,"
+        " input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,"
+        f" session_id FROM cc_usage WHERE project IN ({placeholders})",
+        projects,
+    )
+    out = []
+    for r in rows:
+        dt = normalize_cc_ts_to_local_naive(r["ts"])
+        if _ts_in_window(dt, window_start, window_end):
+            out.append(r)
+    return out
+
+
+# --------------------------------------------------------------------
+# 14. Q1 -- M1/M2/M3/M4/M4b/M5 (section 1).
+# --------------------------------------------------------------------
+def _m1(task_rows: list) -> dict:
+    if not task_rows:
+        return _metric(reason="пустое окно (0 задач, E3)")
+    accepted = sum(t["accepted"] for t in task_rows)
+    stages = sum(t["stages"] for t in task_rows)
+    if accepted == 0:
+        return _metric(denominator_kind="accepted_tasks", denominator_value=0,
+                        reason="0 принятых задач в окне")
+    return _metric(stages / accepted, "accepted_tasks", accepted, 0, None)
+
+
+def _m2(task_rows: list) -> dict:
+    if not task_rows:
+        return _metric(reason="пустое окно (0 задач, E3)")
+    stages = sum(t["stages"] for t in task_rows)
+    unpriced = sum(t["unpriced_turns"] for t in task_rows)
+    if stages == 0:
+        return _metric(denominator_kind="stages", denominator_value=0,
+                        unpriced_turns=unpriced, reason="0 переключений в окне")
+    cost_sum = _sum_optional(t["cost_usd"] for t in task_rows)
+    if cost_sum is None:
+        return _metric(denominator_kind="stages", denominator_value=stages,
+                        unpriced_turns=unpriced, reason="все задачи окна без цены")
+    return _metric(cost_sum / stages, "stages", stages, unpriced, None)
+
+
+def _m3(task_rows: list, stage_rows: list) -> dict:
+    if not task_rows:
+        return _metric(reason="пустое окно (0 задач, E3)")
+    task_cost_sum = _sum_optional(t["cost_usd"] for t in task_rows)
+    unpriced = sum(t["unpriced_turns"] for t in task_rows)
+    if task_cost_sum is None:
+        return _metric(unpriced_turns=unpriced, reason="все задачи окна без цены")
+    if task_cost_sum == 0:
+        return _metric(denominator_kind="task_cost", denominator_value=0,
+                        unpriced_turns=unpriced, reason="нулевая стоимость задач окна")
+    rework_stage_costs = [s["cost_usd"] for s in stage_rows if s.get("is_rework")]
+    if not rework_stage_costs:
+        # No rework stages AT ALL this window -- a real, legitimate 0.0
+        # (not "missing data": M3's own numerator population is empty
+        # by construction, distinct from "rework happened but unpriced").
+        return _metric(0.0, "task_cost", task_cost_sum, unpriced, None)
+    rework_sum = _sum_optional(rework_stage_costs)
+    rework_unpriced = sum(1 for c in rework_stage_costs if c is None)
+    if rework_sum is None:
+        return _metric(denominator_kind="task_cost", denominator_value=task_cost_sum,
+                        unpriced_turns=unpriced + rework_unpriced,
+                        reason="переделочные стадии окна без цены")
+    return _metric(rework_sum / task_cost_sum, "task_cost", task_cost_sum,
+                    unpriced + rework_unpriced, None)
+
+
+def _m4(cc_rows: list) -> dict:
+    if not cc_rows:
+        return _metric(reason="пустое окно (нет cc_usage в диапазоне)")
+    unpriced = sum(1 for r in cc_rows if r["accounted_cost_usd"] is None)
+    denom = _sum_optional(r["accounted_cost_usd"] for r in cc_rows)
+    if denom is None or denom == 0:
+        return _metric(unpriced_turns=unpriced,
+                        reason="все ходы окна без цены" if denom is None else "нулевая стоимость окна")
+    main_rows = [r for r in cc_rows if not r["is_sidechain"]]
+    if not main_rows:
+        numer = 0.0  # real zero: no main-chain traffic at all this window
+    else:
+        numer = _sum_optional(r["accounted_cost_usd"] for r in main_rows)
+        if numer is None:
+            return _metric(denominator_kind="cc_usage_cost_all", denominator_value=denom,
+                            unpriced_turns=unpriced, reason="main-chain строки окна без цены")
+    return _metric(numer / denom, "cc_usage_cost_all", denom, unpriced, None)
+
+
+def _m4b(cc_rows: list, task_rows: list) -> dict:
+    accepted = sum(t["accepted"] for t in task_rows) if task_rows else 0
+    main_rows = [r for r in cc_rows if not r["is_sidechain"]]
+    by_model = defaultdict(list)
+    for r in main_rows:
+        by_model[r["model"] or "<нет>"].append(r["accounted_cost_usd"])
+    if not by_model:
+        return {"M4b": _metric(reason="нет main-chain трафика в окне")}
+    out = {}
+    for model, costs in sorted(by_model.items()):
+        key = f"M4b:{model}"
+        unpriced = sum(1 for c in costs if c is None)
+        if accepted == 0:
+            out[key] = _metric(denominator_kind="accepted_tasks", denominator_value=0,
+                                unpriced_turns=unpriced, reason="0 принятых задач в окне")
+            continue
+        cost_sum = _sum_optional(costs)
+        if cost_sum is None:
+            out[key] = _metric(denominator_kind="accepted_tasks", denominator_value=accepted,
+                                unpriced_turns=unpriced,
+                                reason=f"main-chain {model} без цены в окне")
+            continue
+        out[key] = _metric(cost_sum / accepted, "accepted_tasks", accepted, unpriced, M4B_CAVEAT)
+    return out
+
+
+def top_n_tasks(task_rows: list, top_n: int = 10) -> list:
+    """M5's full ranked list (top-N by cost, the columns section 1 asks
+    for) -- consumed directly by B3's R4.2 report, NOT persisted to
+    window_series (see the module-level judgment-call note)."""
+    priced = [t for t in task_rows if t.get("cost_usd") is not None]
+    ranked = sorted(priced, key=lambda t: t["cost_usd"], reverse=True)
+    return [
+        {"deploy": t["deploy"], "task_id": t["task_id"], "stages": t["stages"],
+         "rework_stages": t["rework_stages"], "critic_entries": t["critic_entries"],
+         "cost_usd": t["cost_usd"], "accepted": t["accepted"]}
+        for t in ranked[:top_n]
+    ]
+
+
+def _m5(task_rows: list) -> dict:
+    top1 = top_n_tasks(task_rows, top_n=1)
+    if not top1:
+        return {"M5": _metric(reason="нет ценённых задач в окне (топ-N пуст)")}
+    t = top1[0]
+    return {"M5": _metric(
+        t["cost_usd"], f"top1_task:{t['deploy']}:{t['task_id']}", None, 0,
+        "M5 хранит топ-1 задачи окна; полный топ-N -- top_n_tasks() для отчёта B3",
+    )}
+
+
+# --------------------------------------------------------------------
+# 15. Q2 -- M6/M7/M8/M12 (run_units-backed; E7: honest "н/д" while the
+#     registry table has zero rows -- B4 not dispatched yet).
+# --------------------------------------------------------------------
+def _session_cost_in_span(conn: sqlite3.Connection, projects: list, session_id,
+                           ts_start_dt, ts_end_dt):
+    """Returns (cost_or_None, unpriced_count, reason_or_None). Searches
+    ACROSS all `projects` in scope (run_units carries no project column
+    of its own -- session_id is the join key, matched against whichever
+    project it actually belongs to)."""
+    if not projects or not session_id or ts_start_dt is None or ts_end_dt is None:
+        return None, 0, "н/д (границы прогона неполны)"
+    placeholders = ",".join("?" for _ in projects)
+    rows = _query_dicts(
+        conn,
+        f"SELECT ts, accounted_cost_usd FROM cc_usage WHERE project IN ({placeholders}) AND session_id=?",
+        list(projects) + [session_id],
+    )
+    costs, unpriced = [], 0
+    for r in rows:
+        dt = normalize_cc_ts_to_local_naive(r["ts"])
+        if not _ts_in_window(dt, ts_start_dt, ts_end_dt):
+            continue
+        if r["accounted_cost_usd"] is None:
+            unpriced += 1
+        else:
+            costs.append(r["accounted_cost_usd"])
+    if not costs and unpriced == 0:
+        return None, 0, "нет строк cc_usage в границах прогона"
+    return (sum(costs) if costs else None), unpriced, None
+
+
+def m6_run_cost(conn: sqlite3.Connection, projects: list, run_row: dict) -> dict:
+    """M6 = Σ cost строк сессии в [ts_start, ts_end) прогона (section 1,
+    Q2). `run_row` is a run_units row (a run-LEVEL row, phase IS NULL,
+    per decision (б))."""
+    ts_start = cc_counts.parse_ts(run_row.get("ts_start"))
+    ts_end = cc_counts.parse_ts(run_row.get("ts_end"))
+    cost, unpriced, reason = _session_cost_in_span(conn, projects, run_row.get("session_id"),
+                                                     ts_start, ts_end)
+    if reason:
+        return _metric(unpriced_turns=unpriced, reason=reason)
+    if cost is None:
+        return _metric(unpriced_turns=unpriced, reason="строки прогона без цены")
+    return _metric(cost, "run_session_span", None, unpriced, None)
+
+
+def _run_units_level_rows_in_window(conn: sqlite3.Connection, ws, we) -> list:
+    rows = _query_dicts(conn, "SELECT * FROM run_units WHERE phase IS NULL")
+    out = []
+    for r in rows:
+        dt = cc_counts.parse_ts(r.get("ts_start"))
+        if dt is not None and _ts_in_window(dt, ws, we):
+            out.append(r)
+    return out
+
+
+def _run_units_phase_rows(conn: sqlite3.Connection, run_id) -> list:
+    return _query_dicts(conn, "SELECT * FROM run_units WHERE run_id=? AND phase IS NOT NULL", (run_id,))
+
+
+def _m6_m7_m8_m12(conn: sqlite3.Connection, projects: list, ws, we) -> dict:
+    """M6 (Σ cost/run, per skill), M7 (per-phase share within a skill's
+    runs), M8 ($/unit, per skill) and M12 ($/протокольный чек, one
+    run_kind='calibration' slice, decision (б)) -- all Σ/Σ over the
+    runs of each (run_kind, name) observed in the window, the same
+    aggregation shape M1/M2/M9/M10 already use elsewhere in this file.
+    E7 (run_units table/rows absent -- true today, B4 not dispatched):
+    every one of the four keys below comes back "н/д (реестра нет)",
+    never a crash, never a silent 0."""
+    total_rows = conn.execute("SELECT COUNT(*) FROM run_units").fetchone()[0]
+    na = _metric(reason="н/д (реестра нет)")
+    if total_rows == 0:
+        return {"M6": na, "M7": na, "M8": na, "M12": na}
+
+    level_rows = _run_units_level_rows_in_window(conn, ws, we)
+    if not level_rows:
+        na_win = _metric(reason="н/д (нет прогонов реестра в окне)")
+        return {"M6": na_win, "M7": na_win, "M8": na_win, "M12": na_win}
+
+    out = {}
+    by_kind_name = defaultdict(list)
+    calib_rows = []
+    for lr in level_rows:
+        cm = m6_run_cost(conn, projects, lr)
+        by_kind_name[(lr.get("run_kind"), lr.get("name"))].append((lr, cm))
+        if lr.get("run_kind") == "calibration":
+            calib_rows.append((lr, cm))
+
+    for (run_kind, name), items in sorted(by_kind_name.items(), key=lambda kv: (kv[0][0] or "", kv[0][1] or "")):
+        cost_sum = _sum_optional(m["value"] for _lr, m in items)
+        unpriced = sum(m["unpriced_turns"] for _lr, m in items)
+        key6 = f"M6:{run_kind}:{name}"
+        if cost_sum is None:
+            out[key6] = _metric(unpriced_turns=unpriced, reason="строки прогонов без цены")
+        else:
+            out[key6] = _metric(cost_sum, "run_count", len(items), unpriced, None)
+
+        unit_sum = sum((lr.get("unit_count") or 0) for lr, _m in items if lr.get("unit_count"))
+        key8 = f"M8:{run_kind}:{name}"
+        if cost_sum is None or not unit_sum:
+            out[key8] = _metric(unpriced_turns=unpriced, reason="нет unit_count или строки без цены")
+        else:
+            out[key8] = _metric(cost_sum / unit_sum, "unit_count", unit_sum, unpriced, None)
+
+        phase_totals = defaultdict(list)
+        for lr, _m in items:
+            for pr in _run_units_phase_rows(conn, lr["run_id"]):
+                phase_totals[pr.get("phase")].append(m6_run_cost(conn, projects, pr))
+        if not phase_totals:
+            out[f"M7:{run_kind}:{name}"] = _metric(reason="нет фазовых меток")
+        elif cost_sum:
+            for phase, pms in sorted(phase_totals.items()):
+                pc = _sum_optional(m["value"] for m in pms)
+                pu = sum(m["unpriced_turns"] for m in pms)
+                key7 = f"M7:{run_kind}:{name}:{phase}"
+                if pc is None:
+                    out[key7] = _metric(unpriced_turns=pu, reason="фазовые строки без цены")
+                else:
+                    out[key7] = _metric(pc / cost_sum, "run_cost", cost_sum, pu, None)
+
+    if calib_rows:
+        calib_cost = _sum_optional(m["value"] for _lr, m in calib_rows)
+        n_checks = count_protocol_checks()
+        if calib_cost is None:
+            out["M12"] = _metric(reason="строки калибровки без цены")
+        elif not n_checks:
+            out["M12"] = _metric(reason="протокол недоступен")
+        else:
+            out["M12"] = _metric(calib_cost / n_checks, "protocol_checks", n_checks, 0, None)
+    else:
+        out["M12"] = _metric(reason="н/д (нет прогона калибровки в окне)")
+
+    out.setdefault("M6", _metric(reason="н/д (нет прогонов в окне)"))
+    out.setdefault("M7", _metric(reason="нет фазовых меток"))
+    out.setdefault("M8", _metric(reason="нет unit_count"))
+    return out
+
+
+# --------------------------------------------------------------------
+# 16. Q3 -- M9/M10/M11/M13/M14 (section 1).
+# --------------------------------------------------------------------
+def _m9(sub_deploys_config: list, ws, we, m4_metric: dict) -> dict:
+    total_events = 0
+    any_journal = False
+    for _deploy_key, journal_path in sub_deploys_config:
+        try:
+            analysis = cc_counts.analyze_journal(
+                journal_path, ws, we, cc_counts.parse_ts(cc_counts.DEFAULT_BY_SINCE),
+            )
+        except OSError:
+            continue
+        any_journal = True
+        total_events += analysis["in_window_count"]
+    if not any_journal:
+        return _metric(reason="журналы окна недоступны")
+    if total_events == 0:
+        return _metric(denominator_kind="in_window_count", denominator_value=0,
+                        reason="0 событий журнала в окне")
+    total_cost = m4_metric["denominator_value"] if m4_metric["denominator_kind"] == "cc_usage_cost_all" else None
+    if total_cost is None:
+        return _metric(denominator_kind="in_window_count", denominator_value=total_events,
+                        unpriced_turns=m4_metric["unpriced_turns"], reason="нет ценённых ходов окна")
+    return _metric(total_cost / total_events, "in_window_count", total_events,
+                    m4_metric["unpriced_turns"], None)
+
+
+def _m10(task_rows: list, stage_rows: list) -> dict:
+    accepted_task_keys = {(t["deploy"], t["task_id"]) for t in task_rows if t["accepted"]}
+    task_tiers = defaultdict(set)
+    by_tier_cost = defaultdict(list)
+    for s in stage_rows:
+        tier = s.get("model_declared")
+        if not tier:
+            continue
+        task_tiers[(s["deploy"], s["task_id"])].add(tier)
+        by_tier_cost[tier].append(s["cost_usd"])
+    if not by_tier_cost:
+        return {"M10": _metric(reason="нет стадий с указанной моделью в окне")}
+    out = {}
+    for tier, costs in sorted(by_tier_cost.items()):
+        key = f"M10:{tier}"
+        unpriced = sum(1 for c in costs if c is None)
+        denom = sum(1 for tk, tiers in task_tiers.items() if tier in tiers and tk in accepted_task_keys)
+        if denom == 0:
+            out[key] = _metric(denominator_kind="accepted_tier_tasks", denominator_value=0,
+                                unpriced_turns=unpriced, reason=f"0 принятых задач яруса {tier} в окне")
+            continue
+        cost_sum = _sum_optional(costs)
+        if cost_sum is None:
+            out[key] = _metric(denominator_kind="accepted_tier_tasks", denominator_value=denom,
+                                unpriced_turns=unpriced, reason=f"стадии яруса {tier} без цены")
+            continue
+        out[key] = _metric(cost_sum / denom, "accepted_tier_tasks", denom, unpriced, None)
+    return out
+
+
+def _git_numstat_added_deleted(repo_root: str, since_dt, until_dt):
+    """subprocess is explicitly allowed for this one purpose (section 9).
+    Returns (total_added_plus_deleted, None) on success (0 is a REAL
+    value here, e.g. genuinely zero commits/changes -- the caller, M11,
+    decides how to fold that into "None" per accept key 7's literal
+    "M11 при нуле коммитов окна -> None"), or (None, reason) when git
+    itself is unavailable/errors -- never raises."""
+    cmd = ["git", "log", "--numstat", "--pretty=format:"]
+    if since_dt is not None:
+        cmd.append(f"--since={since_dt.isoformat()}")
+    if until_dt is not None:
+        cmd.append(f"--until={until_dt.isoformat()}")
+    try:
+        proc = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"git недоступен в {repo_root} ({exc})"
+    if proc.returncode != 0:
+        # A brand-new repo with literally zero commits ever is git's own
+        # "does not have any commits yet" failure (exit 128) -- a REAL
+        # zero (no history to diff), not a git/repo-access failure; any
+        # OTHER non-zero exit (not a repo, corrupted, etc.) stays a
+        # genuine failure -> None+reason.
+        if "does not have any commits yet" in (proc.stderr or ""):
+            return 0, None
+        return None, f"git log завершился с кодом {proc.returncode} в {repo_root}"
+    total = 0
+    for line in proc.stdout.splitlines():
+        parts = line.strip().split("\t")
+        if len(parts) < 2:
+            continue
+        for v in parts[0], parts[1]:
+            if v != "-":
+                try:
+                    total += int(v)
+                except ValueError:
+                    pass
+    return total, None
+
+
+def _m11(sub_deploys_config: list, stage_rows: list, ws, we) -> dict:
+    critic_costs = [s["cost_usd"] for s in stage_rows if s.get("agent") == "critic"]
+    if not critic_costs:
+        return _metric(reason="нет critic-стадий в окне")
+    cost_sum = _sum_optional(critic_costs)
+    unpriced = sum(1 for c in critic_costs if c is None)
+    if cost_sum is None:
+        return _metric(unpriced_turns=unpriced, reason="critic-стадии окна без цены")
+    total_lines = 0
+    any_success = False
+    failures = []
+    for _deploy_key, journal_path in sub_deploys_config:
+        repo_root = str(Path(journal_path).resolve().parent.parent)
+        lines, reason = _git_numstat_added_deleted(repo_root, ws, we)
+        if lines is None:
+            failures.append(reason)
+            continue
+        any_success = True
+        total_lines += lines
+    if not any_success:
+        return _metric(unpriced_turns=unpriced, reason="git diff недоступен: " + "; ".join(failures))
+    if total_lines == 0:
+        return _metric(unpriced_turns=unpriced, reason="0 коммитов в окне (M11 н/д)")
+    return _metric(cost_sum / total_lines, "diff_lines", total_lines, unpriced, None)
+
+
+def _m13(stage_rows: list) -> dict:
+    scout_rows = [s for s in stage_rows if s.get("agent") == "scout"]
+    if not scout_rows:
+        return _metric(reason="нет scout-стадий в окне (M13 ПРОКСИ)")
+    unpriced = sum(1 for s in scout_rows if s["cost_usd"] is None)
+    cost_sum = _sum_optional(s["cost_usd"] for s in scout_rows)
+    turns = sum(s.get("turns") or 0 for s in scout_rows)
+    if cost_sum is None or turns == 0:
+        return _metric(unpriced_turns=unpriced, reason="scout-стадии без цены/ходов (M13 ПРОКСИ)")
+    return _metric(cost_sum / turns, "scout_turns", turns, unpriced,
+                    "ПРОКСИ (байты чтения недоступны без нарушения приватностного контракта)")
+
+
+def _m14(task_rows: list, stage_rows: list) -> dict:
+    esc_tasks = [t for t in task_rows if (t.get("escalated_count") or 0) >= 1]
+    if not esc_tasks:
+        m = _metric(denominator_kind="escalated_tasks", denominator_value=0,
+                     reason="нет эскалаций в окне")
+        m["counterfactual_avg"] = None
+        return m
+    cost_sum = _sum_optional(t["cost_usd"] for t in esc_tasks)
+    unpriced = sum(t["unpriced_turns"] for t in esc_tasks)
+    count = len(esc_tasks)
+
+    tokens_by_task = defaultdict(lambda: [0, 0, 0, 0])
+    for s in stage_rows:
+        acc = tokens_by_task[(s["deploy"], s["task_id"])]
+        acc[0] += s.get("input_tokens") or 0
+        acc[1] += s.get("output_tokens") or 0
+        acc[2] += s.get("cache_creation_tokens") or 0
+        acc[3] += s.get("cache_read_tokens") or 0
+    cf_values = []
+    for t in esc_tasks:
+        i, o, cw, cr = tokens_by_task.get((t["deploy"], t["task_id"]), (0, 0, 0, 0))
+        cf = fable_counterfactual(i, o, cw, cr)
+        if cf is not None:
+            cf_values.append(cf)
+    cf_avg = (sum(cf_values) / len(cf_values)) if cf_values else None
+
+    if cost_sum is None:
+        m = _metric(denominator_kind="escalated_tasks", denominator_value=count,
+                     unpriced_turns=unpriced, reason="эскалированные задачи окна без цены")
+        m["counterfactual_avg"] = cf_avg
+        return m
+    m = _metric(cost_sum / count, "escalated_tasks", count, unpriced, None)
+    m["counterfactual_avg"] = cf_avg
+    return m
+
+
+# --------------------------------------------------------------------
+# 17. Q4 detectors -- D5/D7/D8/D9 (self-contained), D1/D2/D3/D4/D6
+#     (baseline deltas over M4/M3/M2/M10/M1, see _compute_detectors).
+# --------------------------------------------------------------------
+def _d5(cc_rows: list) -> dict:
+    """cache_read_share by cc_usage's DISJOINT columns (F-38) -- NOT
+    gateway/metrics.py's requests-table formula (its prompt_tokens is
+    INCLUSIVE of the cache columns, a different semantic entirely)."""
+    if not cc_rows:
+        return _metric(reason="пустое окно (нет cc_usage в диапазоне)")
+    inp = sum(r["input_tokens"] or 0 for r in cc_rows)
+    outp = sum(r["output_tokens"] or 0 for r in cc_rows)
+    cw = sum(r["cache_creation_tokens"] or 0 for r in cc_rows)
+    cr = sum(r["cache_read_tokens"] or 0 for r in cc_rows)
+    denom = inp + outp + cw + cr
+    if denom == 0:
+        return _metric(reason="0 токенов в окне")
+    return _metric(cr / denom, "tokens_all", denom, 0, None)
+
+
+def _d7(m14_metric: dict) -> dict:
+    cf = m14_metric.get("counterfactual_avg")
+    if m14_metric["value"] is None or cf is None:
+        return _metric(unpriced_turns=m14_metric["unpriced_turns"],
+                        reason=m14_metric["reason"] or "контрфакт недоступен")
+    return _metric(m14_metric["value"], "absolute", cf, m14_metric["unpriced_turns"], None)
+
+
+def _d8(cc_rows: list) -> dict:
+    if not cc_rows:
+        return _metric(reason="пустое окно (нет cc_usage в диапазоне)")
+    n_null = sum(1 for r in cc_rows if r["accounted_cost_usd"] is None)
+    return _metric(float(n_null), "absolute", float(len(cc_rows)), 0, None)
+
+
+def _d9(task_rows: list, stage_rows: list, cc_rows: list) -> dict:
+    out = {}
+    total_cost = _sum_optional(r["accounted_cost_usd"] for r in cc_rows)
+    if not cc_rows or total_cost is None:
+        out["D9:cost_outside_tasks"] = _metric(
+            reason="пустое окно / нет ценённых ходов" if not cc_rows else "все ходы окна без цены")
+    else:
+        measurable_keys = {s["agent_key"] for s in stage_rows if s.get("measurable") and s.get("agent_key")}
+        attributed = _sum_optional(
+            r["accounted_cost_usd"] for r in cc_rows if r.get("agent_id") in measurable_keys
+        ) or 0.0
+        outside = max(total_cost - attributed, 0.0)
+        out["D9:cost_outside_tasks"] = _metric(outside / total_cost, "cc_usage_cost_all",
+                                                total_cost, 0, None)
+    total_stages = len(stage_rows)
+    if total_stages == 0:
+        out["D9:stages_no_transcript"] = _metric(reason="нет стадий в окне")
+    else:
+        no_transcript = sum(1 for s in stage_rows if not s.get("measurable"))
+        out["D9:stages_no_transcript"] = _metric(no_transcript / total_stages, "stages",
+                                                   total_stages, 0, None)
+    return out
+
+
+def _baseline_delta(m: dict, prev_value) -> dict:
+    """D1-D6 (Е3 chosen, section 5): no threshold in v1 -- value/delta
+    only, denominator_kind='baseline' is the "flag" field (see the
+    module docstring note)."""
+    if m["value"] is None:
+        return _metric(None, "baseline", None, m["unpriced_turns"], m["reason"])
+    if prev_value is None:
+        return _metric(m["value"], "baseline", None, m["unpriced_turns"], "первое окно (нет прошлой точки ряда)")
+    return _metric(m["value"], "baseline", m["value"] - prev_value, m["unpriced_turns"], None)
+
+
+def _compute_detectors(metrics: dict, prev_snapshot: dict) -> dict:
+    mirrors = {"D1": "M4", "D2": "M3", "D3": "M2", "D6": "M1"}
+    out = {}
+    for dkey, mkey in mirrors.items():
+        out[dkey] = _baseline_delta(metrics[mkey], prev_snapshot.get(mkey))
+    for mkey, m in metrics.items():
+        if mkey.startswith("M10:"):
+            tier = mkey.split(":", 1)[1]
+            out[f"D4:{tier}"] = _baseline_delta(m, prev_snapshot.get(mkey))
+    return out
+
+
+# --------------------------------------------------------------------
+# 18. Window resolution + orchestration (compute_window_series).
+# --------------------------------------------------------------------
+def compute_all_window_metrics(conn: sqlite3.Connection, window_spec: dict,
+                                deploy_project: dict, deploys_config=None) -> dict:
+    deploys_config = DEPLOYS if deploys_config is None else deploys_config
+    deploy_keys = window_spec["deploys"]
+    projects = [p for p in (deploy_project.get(d) for d in deploy_keys) if p]
+    ws, we = window_spec["window_start"], window_spec["window_end"]
+
+    task_rows = _tasks_in_window(conn, window_spec)
+    stage_rows = _stages_for_tasks(conn, deploy_keys, task_rows)
+    cc_rows = _cc_usage_rows_in_window(conn, projects, ws, we)
+    sub_deploys_config = [(k, p) for k, p in deploys_config if k in deploy_keys]
+
+    out = {}
+    out["M1"] = _m1(task_rows)
+    out["M2"] = _m2(task_rows)
+    out["M3"] = _m3(task_rows, stage_rows)
+    out["M4"] = _m4(cc_rows)
+    out.update(_m4b(cc_rows, task_rows))
+    out.update(_m5(task_rows))
+    out.update(_m6_m7_m8_m12(conn, projects, ws, we))
+    out["M9"] = _m9(sub_deploys_config, ws, we, out["M4"])
+    out.update(_m10(task_rows, stage_rows))
+    out["M11"] = _m11(sub_deploys_config, stage_rows, ws, we)
+    out["M13"] = _m13(stage_rows)
+    out["M14"] = _m14(task_rows, stage_rows)
+    out["D5"] = _d5(cc_rows)
+    out.update(_d9(task_rows, stage_rows, cc_rows))
+    out["D7"] = _d7(out["M14"])
+    out["D8"] = _d8(cc_rows)
+    return out
+
+
+_WINDOW_SERIES_COLUMNS = [
+    "window_id", "window_start", "window_end", "partial", "scope", "metric_key",
+    "value", "denominator_kind", "denominator_value", "unpriced_turns", "reason", "computed_at",
+]
+_INSERT_WINDOW_SERIES_SQL = (
+    "INSERT INTO window_series (" + ", ".join(_WINDOW_SERIES_COLUMNS) + ") VALUES ("
+    + ", ".join("?" for _ in _WINDOW_SERIES_COLUMNS) + ")"
+)
+
+
+def _window_series_row(window_spec: dict, metric_key: str, m: dict, computed_at: str) -> dict:
+    return {
+        "window_id": window_spec["window_id"],
+        "window_start": window_spec["window_start"].isoformat() if window_spec["window_start"] else None,
+        "window_end": window_spec["window_end"].isoformat() if window_spec["window_end"] else None,
+        "partial": window_spec["partial"], "scope": window_spec["scope"],
+        "metric_key": metric_key, "value": m["value"],
+        "denominator_kind": m["denominator_kind"], "denominator_value": m["denominator_value"],
+        "unpriced_turns": m["unpriced_turns"], "reason": m["reason"], "computed_at": computed_at,
+    }
+
+
+def _window_series_to_tuple(row: dict) -> tuple:
+    return tuple(row.get(c) for c in _WINDOW_SERIES_COLUMNS)
+
+
+def _monthly_window_specs(conn: sqlite3.Connection, deploys_config: list, deploy_project: dict,
+                           scope: str, now: datetime) -> list:
+    if scope == "all":
+        deploy_keys = [k for k, _p in deploys_config]
+        projects = [p for p in (deploy_project.get(k) for k in deploy_keys) if p]
+        wid_prefix = "all"
+    else:
+        deploy_keys = [deploys_config[0][0]]
+        projects = [p for p in (deploy_project.get(deploy_keys[0]),) if p]
+        wid_prefix = deploy_keys[0]
+    keys = set()
+    if projects:
+        placeholders = ",".join("?" for _ in projects)
+        for (ts,) in conn.execute(f"SELECT DISTINCT ts FROM cc_usage WHERE project IN ({placeholders})", projects):
+            dt = normalize_cc_ts_to_local_naive(ts)
+            if dt is not None:
+                keys.add(tus.window_of(dt))
+    keys.add(tus.window_of(now))
+    specs = []
+    for wy, wm in sorted(keys):
+        start, end = _monthly_bounds(wy, wm)
+        label = tus.window_label(wy, wm)
+        specs.append({
+            "window_id": f"{wid_prefix}:monthly:{label}", "window_start": start, "window_end": end,
+            "partial": 1 if end > now else 0, "kind": "monthly", "scope": scope, "deploys": deploy_keys,
+        })
+    return specs
+
+
+def _process_window(conn: sqlite3.Connection, window_spec: dict, deploy_project: dict,
+                     deploys_config: list, series_prev: dict, all_rows: list, computed_at: str) -> None:
+    sid = f"{window_spec['kind']}:{window_spec['scope']}:{'+'.join(window_spec['deploys'])}"
+    prev_snapshot = {k: v for (s, k), v in series_prev.items() if s == sid}
+    metrics = compute_all_window_metrics(conn, window_spec, deploy_project, deploys_config)
+    detectors = _compute_detectors(metrics, prev_snapshot)
+    for mkey, m in metrics.items():
+        all_rows.append(_window_series_row(window_spec, mkey, m, computed_at))
+    for dkey, d in detectors.items():
+        all_rows.append(_window_series_row(window_spec, dkey, d, computed_at))
+    for mkey, m in metrics.items():
+        if m["value"] is not None:
+            series_prev[(sid, mkey)] = m["value"]
+
+
+def compute_window_series(conn: sqlite3.Connection, deploys=None, deploy_project=None, now=None) -> dict:
+    """Fills window_series for BOTH kinds and BOTH scopes (accept key 5):
+    per deploy -- its own calibrated windows (scope=deploy) AND its own
+    monthly windows (scope=deploy); PLUS one shared monthly series
+    (scope=all) across every deploy. DELETE+INSERT one transaction,
+    mirroring rebuild()'s own idempotency contract; computed_at is the
+    ONE field expected to differ between two rebuilds of identical data
+    -- _dump_window_series() (test helper) excludes it from the
+    byte-comparison the idempotency test runs."""
+    deploys = DEPLOYS if deploys is None else deploys
+    deploy_project = DEPLOY_PROJECT if deploy_project is None else deploy_project
+    now = now or datetime.now()
+    computed_at = now.isoformat()
+    _ensure_schema(conn)
+
+    all_rows = []
+    series_prev = {}
+    calibrated_counts = {}
+
+    for deploy_key, journal_path in deploys:
+        try:
+            lines = cc_counts.load_journal(journal_path)
+        except OSError:
+            calibrated_counts[deploy_key] = 0
+            continue
+        cal_tss = sorted(pl.ts for pl in lines
+                          if pl.data and pl.data.get("event") == "calibrated" and pl.ts)
+        windows = calibrated_windows(deploy_key, cal_tss)
+        calibrated_counts[deploy_key] = len(windows)
+        for w in windows:
+            w["kind"] = "calibrated"; w["scope"] = "deploy"; w["deploys"] = [deploy_key]
+            _process_window(conn, w, deploy_project, deploys, series_prev, all_rows, computed_at)
+
+        for w in _monthly_window_specs(conn, [(deploy_key, journal_path)], deploy_project, "deploy", now):
+            _process_window(conn, w, deploy_project, deploys, series_prev, all_rows, computed_at)
+
+    for w in _monthly_window_specs(conn, deploys, deploy_project, "all", now):
+        _process_window(conn, w, deploy_project, deploys, series_prev, all_rows, computed_at)
+
+    try:
+        conn.execute("DELETE FROM window_series")
+        conn.executemany(_INSERT_WINDOW_SERIES_SQL, [_window_series_to_tuple(r) for r in all_rows])
+    except Exception:
+        conn.rollback()
+        raise
+    else:
+        conn.commit()
+
+    return {"rows": len(all_rows), "calibrated_windows": calibrated_counts}
+
+
+def _dump_window_series(conn: sqlite3.Connection) -> str:
+    """Idempotency-test dump: excludes computed_at (the one column
+    expected to differ between two otherwise-identical rebuilds)."""
+    cols = [c for c in _WINDOW_SERIES_COLUMNS if c != "computed_at"]
+    rows = conn.execute(
+        f"SELECT {', '.join(cols)} FROM window_series ORDER BY window_id, metric_key"
+    ).fetchall()
+    return "\n".join(repr(r) for r in rows)
+
+
+def resolve_last_calibrated_window(conn: sqlite3.Connection, deploy_key: str, deploys=None):
+    deploys = DEPLOYS if deploys is None else deploys
+    journal_path = dict(deploys).get(deploy_key)
+    if not journal_path:
+        return None
+    try:
+        lines = cc_counts.load_journal(journal_path)
+    except OSError:
+        return None
+    cal_tss = sorted(pl.ts for pl in lines
+                      if pl.data and pl.data.get("event") == "calibrated" and pl.ts)
+    windows = calibrated_windows(deploy_key, cal_tss)
+    if not windows:
+        return None
+    w = windows[-1]
+    w["kind"] = "calibrated"; w["scope"] = "deploy"; w["deploys"] = [deploy_key]
+    return w
+
+
+def resolve_last_monthly_all_scope_window(conn: sqlite3.Connection, deploys=None,
+                                           deploy_project=None, now=None):
+    deploys = DEPLOYS if deploys is None else deploys
+    deploy_project = DEPLOY_PROJECT if deploy_project is None else deploy_project
+    now = now or datetime.now()
+    specs = _monthly_window_specs(conn, deploys, deploy_project, "all", now)
+    return specs[-1] if specs else None
+
+
+def window_metric_rows_from_db(conn: sqlite3.Connection, window_id: str) -> dict:
+    rows = _query_dicts(conn, "SELECT * FROM window_series WHERE window_id=? ORDER BY metric_key", (window_id,))
+    return {"window_id": window_id, "metrics": rows}
+
+
+def cmd_compute_window(db_file: Path, deploys=None, deploy_project=None,
+                        skip_import: bool = False, which: str = "last") -> dict:
+    deploys = DEPLOYS if deploys is None else deploys
+    deploy_project = DEPLOY_PROJECT if deploy_project is None else deploy_project
+    if not skip_import:
+        import_transcripts(transcript_glob(), db_file)
+    conn = sqlite3.connect(db_file)
+    try:
+        rebuild(conn, deploys, deploy_project)
+        compute_window_series(conn, deploys, deploy_project)
+        result = {}
+        if which == "last":
+            w1 = resolve_last_calibrated_window(conn, "shtab", deploys)
+            result["calibrated_last_shtab"] = (
+                window_metric_rows_from_db(conn, w1["window_id"]) if w1
+                else {"error": "нет calibrated-окон shtab"}
+            )
+            w2 = resolve_last_monthly_all_scope_window(conn, deploys, deploy_project)
+            result["monthly_all_scope_last"] = (
+                window_metric_rows_from_db(conn, w2["window_id"]) if w2
+                else {"error": "нет monthly-окон"}
+            )
+        else:
+            result["window"] = window_metric_rows_from_db(conn, which)
+        return result
+    finally:
+        conn.close()
+
+
 # --------------------------------------------------------------------
 # 12. CLI
 # --------------------------------------------------------------------
@@ -934,6 +1877,9 @@ def main(argv=None) -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--skip-import", action="store_true",
                          help="skip the lazy transcript import (tests/CI -- no real ~/.claude/projects scan)")
+    parser.add_argument("--compute-window", default=None,
+                         help="B2: 'last' (calibrated-last-shtab + monthly-all-scope-last) "
+                              "or an explicit window_id; rebuilds task tables + window_series first")
     args = parser.parse_args(argv)
 
     db_file = Path(args.db) if args.db else _cc_db_path()
@@ -952,6 +1898,20 @@ def main(argv=None) -> int:
             print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
         else:
             print(render_selftest(report))
+        return 0
+
+    if args.compute_window:
+        result = cmd_compute_window(db_file, skip_import=args.skip_import, which=args.compute_window)
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        else:
+            for label, section in result.items():
+                print(f"=== {label} ===")
+                if "error" in section:
+                    print(f"  {section['error']}")
+                    continue
+                for row in section["metrics"]:
+                    print(f"  {row['metric_key']}: value={row['value']} reason={row['reason']}")
         return 0
 
     parser.print_help()
