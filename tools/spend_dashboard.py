@@ -12,9 +12,12 @@ tested functions and RENDERS one standalone HTML file):
   2. Six sections, one per operator-decided composition (fork (д),
      spec section 8):
        (а) build_stat_tile_group x2  -- last calibrated window (shtab) +
-           last monthly all-scope window: $ окна / Σ M10 by tier /
-           M4 (+M4b by model) / D5, each with a delta arrow vs the prior
-           window of the SAME series.
+           last monthly all-scope window: $ окна / $/принятую (t-428
+           fix-batch item 1: Σ task_cost(window)/accepted(window), the
+           SAME denominator M1 uses -- NOT a sum of M10:<tier> ratios,
+           see _cost_per_accepted's own docstring) / M4 (+M4b by model,
+           + "из них <skill>" breakdown, item 5) / D5, each with a delta
+           arrow vs the prior window of the SAME series.
        (б) build_trends            -- SVG line charts over the last K
            windows (--k, default 6): M1, M2, M4b:<model>, M10:<tier>, D5.
            A NULL point breaks the line (gap), never renders as 0.
@@ -56,12 +59,14 @@ db_path, mirroring spend_report.main()'s own lazy-import shape).
 
 JUDGMENT CALLS (documented, not silently decided -- same convention
 B1/B2/B3 used for their own):
-  - "M10 суммарно" (spec section 8 fork (д) operator wording) has no
-    single-scalar metric in window_series (M10 is written per TIER as
-    M10:<tier> rows, B2's own judgment call) -- this tile SUMS every
-    non-None M10:<tier>/bare-M10 value present in the window, labeled
-    "Σ M10 по ярусам (приближение)" so the approximation is visible,
-    never silently presented as a single precise metric.
+  - "$/принятую" (spec section 8 fork (д) operator wording "M10
+    суммарно") was ORIGINALLY built by summing every non-None
+    M10:<tier>/bare-M10 value present in the window -- a sum of RATIOS
+    with DIFFERENT denominators each (per-tier accepted-task counts),
+    critic t-428 finding ($45.00 pre-fix vs $16.02 honest on live data).
+    t-428 fix-batch item 1 replaced it with _cost_per_accepted's own
+    Σ task_cost(window)/accepted(window) -- the SAME single denominator
+    M1 (spend_model._m1) already uses, no per-tier mixing.
   - Stat tiles are built for BOTH windows the spec names ("последнего
     calibrated-окна штаба + monthly all-scope") -- two independent tile
     GROUPS, not one merged group, since the spec lists both windows
@@ -84,6 +89,7 @@ import html as html_mod
 import sqlite3
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -137,16 +143,31 @@ def _metric_row(metric_rows: list, key: str):
     return next((r for r in metric_rows if r["metric_key"] == key), None)
 
 
-def _m10_summed(metric_rows: list):
-    rows = [r for r in metric_rows if r["metric_key"] == "M10" or r["metric_key"].startswith("M10:")]
-    valued = [r["value"] for r in rows if r["value"] is not None]
-    if not valued:
-        reason = rows[0]["reason"] if rows else "нет данных M10 в окне"
-        return None, reason
-    return sum(valued), None
+def _cost_per_accepted(conn: sqlite3.Connection, window_row) -> dict:
+    """t-428 fix-batch item 1: HONEST '$/принятую' -- Σ task_cost(window)
+    / accepted(window), the SAME accepted-tasks denominator M1 already
+    uses (sm._m1), NOT the pre-fix "sum of M10:<tier> ratios" (a sum of
+    ratios with DIFFERENT denominators each -- critic's own live
+    numbers: $45.00 pre-fix vs $16.02 honest, post blocker-0-fix
+    ~$14.40). Returns a dict shaped like sm._metric (value, reason,
+    unpriced_turns) so _build_tile's own unpriced-marker plumbing
+    (item 2) applies uniformly."""
+    spec = sr._window_spec_for_tasks(window_row)
+    task_rows = sm._tasks_in_window(conn, spec)
+    if not task_rows:
+        return {"value": None, "unpriced_turns": 0, "reason": "пустое окно (0 задач)"}
+    accepted = sum(t["accepted"] for t in task_rows)
+    unpriced = sum(t["unpriced_turns"] for t in task_rows)
+    if accepted == 0:
+        return {"value": None, "unpriced_turns": unpriced, "reason": "0 принятых задач в окне"}
+    cost_sum = sm._sum_optional(t["cost_usd"] for t in task_rows)
+    if cost_sum is None:
+        return {"value": None, "unpriced_turns": unpriced, "reason": "все задачи окна без цены"}
+    return {"value": cost_sum / accepted, "unpriced_turns": unpriced, "reason": None}
 
 
-def _build_tile(label: str, value, prev_value, reason=None, is_share: bool = False) -> dict:
+def _build_tile(label: str, value, prev_value, reason=None, is_share: bool = False,
+                 unpriced_turns: int = 0, unpriced_models=None) -> dict:
     if value is None:
         delta_display = "н/д"
         arrow = "="
@@ -157,9 +178,22 @@ def _build_tile(label: str, value, prev_value, reason=None, is_share: bool = Fal
         delta = value - prev_value
         arrow = sr._arrow(delta)
         delta_display = f"{delta:+.1%}" if is_share else f"{delta:+.4f}"
-    value_display = "н/д" if value is None else (f"{value:.1%}" if is_share else f"{value:.4f}")
+    if value is None:
+        value_display = "н/д"
+    else:
+        value_display = f"{value:.1%}" if is_share else f"{value:.4f}"
+        if unpriced_turns:
+            # t-428 fix-batch item 2: same partial-price marker as
+            # spend_report._fmt_num's ">= X *" -- a dashboard tile must
+            # not present an unpriced-inclusive sum as a precise number.
+            value_display = f">= {value_display} *"
     return {"label": label, "value_display": value_display, "delta_display": delta_display,
-            "arrow": arrow, "reason": reason, "extra": []}
+            "arrow": arrow, "reason": reason, "extra": [],
+            # only attach the unpriced-models note to a tile whose OWN
+            # value actually includes unpriced turns (item 2) -- not to
+            # every tile of the group just because SOME row in the
+            # window had one.
+            "unpriced_models": (unpriced_models or []) if unpriced_turns else []}
 
 
 # ========================================================================
@@ -173,17 +207,25 @@ def build_stat_tile_group(conn: sqlite3.Connection, window_row, metric_rows: lis
     prev_rows = sr._window_metric_rows(conn, prev_id) if prev_id else []
     tiles = []
 
+    any_unpriced = any(r.get("unpriced_turns") for r in metric_rows)
+    unpriced_models = sr._unpriced_models_in_window(conn, window_row) if any_unpriced else []
+
     m4 = _metric_row(metric_rows, "M4")
     prev_m4 = _metric_row(prev_rows, "M4")
     window_cost = m4["denominator_value"] if m4 else None
     prev_window_cost = prev_m4["denominator_value"] if prev_m4 else None
     tiles.append(_build_tile(
         "$ окна", window_cost, prev_window_cost,
-        reason=(m4["reason"] if (m4 and window_cost is None) else (None if m4 else "нет данных M4"))))
+        reason=(m4["reason"] if (m4 and window_cost is None) else (None if m4 else "нет данных M4")),
+        unpriced_turns=(m4["unpriced_turns"] if m4 else 0), unpriced_models=unpriced_models))
 
-    m10_sum, m10_reason = _m10_summed(metric_rows)
-    prev_m10_sum, _r = _m10_summed(prev_rows) if prev_rows else (None, None)
-    tiles.append(_build_tile("$/принятую (Σ M10 по ярусам, приближение)", m10_sum, prev_m10_sum, reason=m10_reason))
+    # item 1: Σ task_cost(window) / accepted(window) -- see
+    # _cost_per_accepted's own docstring for why this replaced the
+    # pre-fix "Σ M10 ratios" approximation.
+    cpa = _cost_per_accepted(conn, window_row)
+    prev_cpa = _cost_per_accepted(conn, prev_rows[0]) if prev_rows else {"value": None}
+    tiles.append(_build_tile("$/принятую", cpa["value"], prev_cpa.get("value"), reason=cpa["reason"],
+                              unpriced_turns=cpa["unpriced_turns"], unpriced_models=unpriced_models))
 
     m4_share = m4["value"] if m4 else None
     prev_m4_share = prev_m4["value"] if prev_m4 else None
@@ -193,6 +235,12 @@ def build_stat_tile_group(conn: sqlite3.Connection, window_row, metric_rows: lis
     m4_tile = _build_tile("доля координатора (M4)", m4_share, prev_m4_share, reason=m4_reason, is_share=True)
     m4_tile["extra"] = [{"label": r["metric_key"].split(":", 1)[1], "value": r["value"], "reason": r["reason"]}
                          for r in m4b_rows]
+    # item 5: "из них <skill>: $X" -- reuse spend_report's own primitive
+    # (M6:skill:* rows PRESENT in the window only, no "н/д" noise).
+    m4_tile["extra"] += [
+        {"label": f"из них {sb['name']}", "value": sb["value"], "reason": sb["reason"]}
+        for sb in sr._skill_cost_breakdown(metric_rows)
+    ]
     tiles.append(m4_tile)
 
     d5 = _metric_row(metric_rows, "D5")
@@ -316,7 +364,8 @@ def build_monthly_report_table(conn: sqlite3.Connection, now=None) -> dict:
 # ========================================================================
 # 6. Top-level data assembly + HTML rendering.
 # ========================================================================
-def build_dashboard_data(conn: sqlite3.Connection, k: int = DEFAULT_K, top_n: int = DEFAULT_TOP_N, now=None) -> dict:
+def build_dashboard_data(conn: sqlite3.Connection, k: int = DEFAULT_K, top_n: int = DEFAULT_TOP_N, now=None,
+                          pre_recompute_calibrated_window_ids: "set | None" = None) -> dict:
     now = now or datetime.now()
     data = {"generated_at": now.isoformat(timespec="seconds"), "git_rev": _git_short_rev()}
 
@@ -340,7 +389,7 @@ def build_dashboard_data(conn: sqlite3.Connection, k: int = DEFAULT_K, top_n: in
     data["trends"] = build_trends(conn, cal_window_row, k)
     data["sinks"] = build_sinks(conn, cal_window_row, cal_metric_rows, top_n, k)
     data["monthly_table"] = build_monthly_report_table(conn, now)
-    data["health"] = sr.build_r4_3(conn, "all")
+    data["health"] = sr.build_r4_3(conn, "all", pre_recompute_calibrated_window_ids)
     data["window_dates"] = {
         "calibrated": {"window_id": cal_window_id,
                         "start": cal_window_row.get("window_start") if cal_window_row else None,
@@ -484,11 +533,15 @@ def _tile_html(t: dict) -> str:
             row_parts.append(f'<div>{_esc(e["label"])}: {v_display}</div>')
         extra_html = f'<div class="tile-extra">{"".join(row_parts)}</div>'
     reason_html = f'<div class="tile-extra">{_esc(t["reason"])}</div>' if t.get("reason") else ""
+    # item 2: same partial-price marker class as spend_report's own R4.1
+    # -- the models with no price are named, not just flagged with "*".
+    unpriced_html = (f'<div class="tile-extra">без цены: {_esc(", ".join(t["unpriced_models"]))}</div>'
+                      if t.get("unpriced_models") else "")
     return (
         f'<div class="tile"><div class="tile-label">{_esc(t["label"])}</div>'
         f'<div class="tile-value">{_esc(t["value_display"])}</div>'
         f'<div class="tile-delta {arrow_cls}">{t["arrow"]} {_esc(t["delta_display"])}</div>'
-        f'{reason_html}{extra_html}</div>'
+        f'{reason_html}{unpriced_html}{extra_html}</div>'
     )
 
 
@@ -598,7 +651,8 @@ def _health_section(health: dict) -> str:
             f"<li>{_esc(dep)} line {c['line']}: {_esc(c['error'])}</li>"
             for dep, cands in health["unparsable_journal_lines"].items() for c in cands) + "</ul>"))
 
-    parts.append('<div><b>Пропущенные окна (calibrated без строк window_series):</b></div>')
+    parts.append('<div><b>Пропущенные окна (не имели строк window_series ДО пересчёта'
+                 ' ЭТИМ прогоном -- аудит старта прогона, t-428 item 3):</b></div>')
     _clean_or(bool(health["missing_calibrated_windows"]), lambda: parts.append(
         "<ul class='health-list'>" + "".join(
             f"<li>{_esc(dep)}: {_esc(', '.join(ids))}</li>"
@@ -614,11 +668,33 @@ def _health_section(health: dict) -> str:
         parts.append("<ul class='health-list'>" + "".join(
             f"<li>run_id={_esc(d['run_id'])} {_esc(d['run_kind'])}:{_esc(d['name'])}: {_esc(d['reason'])}</li>"
             for d in rwu["dead"]) + "</ul>")
+    no_sid = rwu.get("no_session_id") or []
+    parts.append('<div><b>Прогоны без session_id (фолбэк по времени проекта, не "мёртвый"):</b></div>')
+    if not no_sid:
+        parts.append('<div class="health-clean">чисто</div>')
+    else:
+        parts.append("<ul class='health-list'>" + "".join(
+            f"<li>run_id={_esc(d['run_id'])} {_esc(d['run_kind'])}:{_esc(d['name'])}:"
+            f" cost={'н/д' if d['cost_value'] is None else round(d['cost_value'], 4)} ({_esc(d['note'])})</li>"
+            for d in no_sid) + "</ul>")
     gaps = rwu.get("calibration_registry_gaps") or {}
     if gaps:
         parts.append("<div class='health-flag'>calibrated-окно(а) без строки реестра калибровки: "
                      + "; ".join(f"{_esc(dep)}: {_esc(', '.join(wids))}" for dep, wids in gaps.items())
                      + "</div>")
+
+    shk = health.get("shared_key_split") or {"stages": 0, "keys": 0, "cost_usd": 0.0}
+    parts.append(f'<div><b>Стадий, делящих ключ:</b> {shk["stages"]} ({shk["keys"]} ключей,'
+                 f' ${round(shk["cost_usd"], 4)} под раскладкой)'
+                 + ('' if shk["stages"] else ' -- <span class="health-clean">чисто</span>') + '</div>')
+    inv = health.get("agent_id_session_invariant") or {"violations": []}
+    parts.append('<div><b>Инвариант agent_id~session:</b></div>')
+    if not inv["violations"]:
+        parts.append('<div class="health-clean">чисто (0 нарушений)</div>')
+    else:
+        parts.append("<ul class='health-list'>" + "".join(
+            f"<li>ФЛАГ: agent_id={_esc(v['agent_id'])} project={_esc(v['project'])} сессий={v['sessions']}</li>"
+            for v in inv["violations"]) + "</ul>")
 
     parts.append('</section>')
     return "".join(parts)
@@ -662,14 +738,16 @@ def render_html(data: dict) -> str:
 # 7. Public entry point + CLI.
 # ========================================================================
 def generate_dashboard(conn: sqlite3.Connection, out_path=None, k: int = DEFAULT_K,
-                        top_n: int = DEFAULT_TOP_N, now=None) -> Path:
+                        top_n: int = DEFAULT_TOP_N, now=None,
+                        pre_recompute_calibrated_window_ids: "set | None" = None) -> Path:
     """PURE render (SELECT-only on conn, E12) -- caller is responsible for
     conn already having a fresh rebuild()/compute_window_series() run
     against it (spend_report.py's --dashboard flag reuses its OWN prior
     call; this module's own main() below does it itself for standalone
     use)."""
     out_path = Path(out_path) if out_path else DASHBOARD_PATH
-    data = build_dashboard_data(conn, k=k, top_n=top_n, now=now)
+    data = build_dashboard_data(conn, k=k, top_n=top_n, now=now,
+                                 pre_recompute_calibrated_window_ids=pre_recompute_calibrated_window_ids)
     text = render_html(data)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(text, encoding="utf-8")
@@ -698,21 +776,41 @@ def main(argv=None) -> int:
         return 2
 
     db_file = Path(args.db) if args.db else _cc_db_path()
+
+    # t-428 fix-batch item 6: t0 spans the FULL pipeline (import +
+    # rebuild + compute_window_series + render), printed UNCONDITIONALLY
+    # (E11's 60s threshold applies to the SUM).
+    t0 = time.time()
     if not args.skip_import:
         import_transcripts(transcript_glob(), db_file)
 
-    conn = sqlite3.connect(db_file)
+    conn = sm.connect_db(db_file)
     try:
         if not sr._cc_usage_table_exists(conn):
             print("spend_dashboard: в БД нет таблицы cc_usage -- отказ (E12 precondition;"
                   " запусти import_transcripts/usage_report сначала)", file=sys.stderr)
             return 2
+        # E10 loud refusal (item 6) -- scoped to the "shtab" project the
+        # calibrated stat-tile group is always built from (this CLI has
+        # no --deploy flag); see sm.resolve_project_or_refuse_if_data_
+        # elsewhere's own docstring for the narrower-than-blanket scoping
+        # rationale (preserves the adversarial battery's own pre-existing
+        # empty-DB "прогон жив" contract).
+        shtab_project = sm.DEPLOY_PROJECT.get("shtab")
+        if not sm.resolve_project_or_refuse_if_data_elsewhere(conn, shtab_project):
+            return 2
+        pre_recompute_calibrated_ids = sr.snapshot_calibrated_window_ids(conn)
         sm.rebuild(conn, sm.DEPLOYS, sm.DEPLOY_PROJECT)
         sm.compute_window_series(conn, sm.DEPLOYS, sm.DEPLOY_PROJECT)
-        out_path = generate_dashboard(conn, args.out, args.k, args.top)
+        out_path = generate_dashboard(conn, args.out, args.k, args.top,
+                                       pre_recompute_calibrated_window_ids=pre_recompute_calibrated_ids)
     finally:
         conn.close()
 
+    total_elapsed = time.time() - t0
+    over_note = " (>60с, E11)" if total_elapsed > 60 else ""
+    print(f"spend_dashboard: полный прогон (импорт+rebuild+window_series+рендер)"
+          f" занял {total_elapsed:.1f}с{over_note}", file=sys.stderr)
     print(f"spend_dashboard: written to {out_path}")
     return 0
 

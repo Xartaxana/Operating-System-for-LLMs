@@ -119,9 +119,14 @@ JSON-строка в logs/run_units.jsonl (Edit/Write, гигиена п.4/5); �
 раздел 2). run_id — единый для всех строк прогона, форма
 "permission-audit-<ts начала>". unit_kind/unit_count —
 `prompts_analyzed`, число разобранных вызовов (итог шага 1/сводки
-шага 6), пишется на `run_end`. session_id — id текущей сессии, если
-известен; иначе `null` (M6 для прогона тогда «н/д», это легально,
-E7).
+шага 6), пишется на `run_end`. session_id — если доступен из контекста
+запуска (путь транскрипта сессии / переменные окружения харнесса),
+иначе `null`; при `null` M6 использует ФОЛБЭК по времени всего проекта
+(cost по [ts_start,ts_end) без фильтра session_id, с пометкой в
+reason) — не тихое «н/д» (E7). Секция здоровья отчёта РАЗВОДИТ два
+класса: «прогон без session_id» (этот путь, cost может быть числом) и
+«мёртвый прогон» (нет run_end вовсе) — не путать (t-428 fix-batch
+item 4).
 
 Пример начала:
 `{"ts":"2026-08-13T15:00:00","run_id":"permission-audit-2026-08-13T15:00:00","run_kind":"skill","name":"permission-audit","phase":null,"event":"run_start","session_id":null,"unit_kind":null,"unit_count":null,"source":"permission-audit/SKILL.md"}`

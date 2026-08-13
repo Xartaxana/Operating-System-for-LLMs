@@ -347,6 +347,135 @@ def test_r4_3_unparsable_journal_line_is_surfaced(tmp_path, monkeypatch):
     assert r3["unparsable_journal_lines"]["shtab"][0]["line"] == 3
 
 
+def test_r4_3_wires_shared_key_split_and_invariant(tmp_path, monkeypatch):
+    """t-428 fix-batch item 0 wiring into R4.3."""
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    conn = sqlite3.connect(db)
+    sm.rebuild(conn, deploys, deploy_project)
+    r3 = sr.build_r4_3(conn, "shtab")
+    assert r3["shared_key_split"] == {"stages": 0, "keys": 0, "cost_usd": 0.0}  # fixture has no shared keys
+    assert r3["agent_id_session_invariant"] == {"violations": []}
+
+
+# ---------------------------------------------------------------------
+# t-428 fix-batch item 3: missing_calibrated_windows snapshot fix --
+# pre-fix, main()'s own compute_window_series() ALWAYS ran right before
+# build_report(), so the section structurally never fired; the snapshot
+# param restores real detection.
+# ---------------------------------------------------------------------
+def test_missing_calibrated_windows_uses_snapshot_when_given(tmp_path, monkeypatch):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    conn = sqlite3.connect(db)
+    # NO rebuild()/compute_window_series() yet -- window_series is empty.
+    # A snapshot taken NOW (before anything is computed) is also empty,
+    # so passing it explicitly must still report the gap (same as the
+    # live-table fallback when no snapshot is given).
+    snap = sr.snapshot_calibrated_window_ids(conn)
+    assert snap == set()
+    missing = sr._missing_calibrated_windows(conn, ["shtab"], snap)
+    assert missing == {"shtab": ["shtab:calibrated:1"]}
+
+
+def test_missing_calibrated_windows_snapshot_frozen_even_after_recompute(tmp_path, monkeypatch):
+    """The core of the fix: even though compute_window_series() below
+    backfills the gap, a snapshot taken BEFORE it still reports the
+    window as having been missing at the run's START."""
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    conn = sqlite3.connect(db)
+    snap = sr.snapshot_calibrated_window_ids(conn)  # empty, taken BEFORE recompute
+    sm.rebuild(conn, deploys, deploy_project)
+    sm.compute_window_series(conn, deploys, deploy_project)  # NOW window_series is fully populated
+    live_missing = sr._missing_calibrated_windows(conn, ["shtab"])  # no snapshot -> live table
+    assert live_missing == {}  # structurally never fires post-recompute (the pre-fix bug)
+    snapshot_missing = sr._missing_calibrated_windows(conn, ["shtab"], snap)
+    assert snapshot_missing == {"shtab": ["shtab:calibrated:1"]}  # snapshot restores detection
+
+
+def test_snapshot_calibrated_window_ids_reflects_prior_state(tmp_path, monkeypatch):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    conn = sqlite3.connect(db)
+    sm.rebuild(conn, deploys, deploy_project)
+    sm.compute_window_series(conn, deploys, deploy_project)
+    snap = sr.snapshot_calibrated_window_ids(conn)
+    assert "shtab:calibrated:1" in snap
+
+
+# ---------------------------------------------------------------------
+# t-428 fix-batch item 4: RUNS_WITHOUT_UNITS session_id/dead split.
+# ---------------------------------------------------------------------
+def test_runs_without_units_no_session_id_not_counted_as_dead(tmp_path, monkeypatch):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    conn = sqlite3.connect(db)
+    sm.rebuild(conn, deploys, deploy_project)
+    sm._ensure_schema(conn)
+    conn.execute(
+        "INSERT INTO run_units (run_id, run_kind, name, phase, ts_start, ts_end,"
+        " session_id, unit_kind, unit_count, source) VALUES"
+        " ('r-nosid', 'skill', 'next-task', NULL, '2026-07-01T00:00:00',"
+        " '2026-07-01T00:10:00', NULL, NULL, 1, 'test')"
+    )
+    conn.commit()
+    r3 = sr.build_r4_3(conn, "shtab")
+    rwu = r3["runs_without_units"]
+    assert not any(d["run_id"] == "r-nosid" for d in rwu["dead"])
+    assert any(d["run_id"] == "r-nosid" for d in rwu["no_session_id"])
+
+
+def test_runs_without_units_open_run_no_end_is_dead(tmp_path, monkeypatch):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    conn = sqlite3.connect(db)
+    sm.rebuild(conn, deploys, deploy_project)
+    sm._ensure_schema(conn)
+    conn.execute(
+        "INSERT INTO run_units (run_id, run_kind, name, phase, ts_start, ts_end,"
+        " session_id, unit_kind, unit_count, source) VALUES"
+        " ('r-open', 'skill', 'kit-release', NULL, '2026-07-01T00:00:00',"
+        " NULL, 's-1', NULL, NULL, 'test')"
+    )
+    conn.commit()
+    r3 = sr.build_r4_3(conn, "shtab")
+    rwu = r3["runs_without_units"]
+    dead = next(d for d in rwu["dead"] if d["run_id"] == "r-open")
+    assert "run_end" in dead["reason"]
+    assert not any(d["run_id"] == "r-open" for d in rwu["no_session_id"])
+
+
+# ---------------------------------------------------------------------
+# t-428 fix-batch item 5: "из них <skill>: $X" near M4b.
+# ---------------------------------------------------------------------
+def test_skill_cost_breakdown_only_lists_skills_present_in_window():
+    metric_rows = [
+        {"metric_key": "M4", "value": 1.0, "reason": None},
+        {"metric_key": "M6:skill:boot-diet", "value": 3.5, "reason": None},
+        {"metric_key": "M6:calibration:calibration", "value": 1.0, "reason": None},  # NOT a skill
+    ]
+    out = sr._skill_cost_breakdown(metric_rows)
+    assert out == [{"name": "boot-diet", "value": 3.5, "reason": None}]
+
+
+def test_skill_cost_breakdown_empty_when_no_skill_ran():
+    assert sr._skill_cost_breakdown([{"metric_key": "M4", "value": 1.0, "reason": None}]) == []
+
+
+def test_build_r4_1_carries_skill_breakdown_key(tmp_path, monkeypatch):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    conn = sqlite3.connect(db)
+    sm.rebuild(conn, deploys, deploy_project)
+    sm.compute_window_series(conn, deploys, deploy_project)
+    window_id, _err = sr.resolve_window(conn, "shtab", "last")
+    metric_rows = sr._window_metric_rows(conn, window_id)
+    window_row = metric_rows[0]
+    r1 = sr.build_r4_1(conn, window_row, metric_rows)
+    assert r1["skill_breakdown"] == []  # no run_units registry in this fixture -- nothing printed
+
+
 # ---------------------------------------------------------------------
 # JSON validity with None values (accept key 1)
 # ---------------------------------------------------------------------
@@ -480,8 +609,17 @@ def test_battery_empty_line_and_one_unparsable_line_prints_candidate_stays_alive
 def test_battery_cp1251_console_does_not_crash(tmp_path, monkeypatch):
     """Class t-408: PYTHONIOENCODING=cp1251 -- run as a REAL subprocess
     (the module's own reconfigure() only fires once at import time in a
-    fresh interpreter, so an in-process call would not exercise it)."""
+    fresh interpreter, so an in-process call would not exercise it) --
+    DEPLOYS/DEPLOY_PROJECT monkeypatching does NOT cross the subprocess
+    boundary, so this test's --deploy shtab resolves via the REAL
+    sm.DEPLOY_PROJECT mapping; a cc_usage row under that REAL project
+    name is added so the t-428 item-6 E10 guard does not refuse (this
+    db already has non-empty cc_usage under "projA" for OTHER
+    assertions -- E10 fires precisely because some project has rows and
+    the resolved one doesn't, unless this row is present)."""
     db, deploys, deploy_project, j = _three_task_fixture(tmp_path)
+    insert_cc_row(db, "2026-07-01T00:00:30Z", sm.DEPLOY_PROJECT["shtab"], agent_id="real-shtab-a1",
+                  model="claude-sonnet-5", dedupe_suffix="real-shtab-1")
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "cp1251"
     env["PYTHONPATH"] = str(Path(__file__).resolve().parent)
@@ -523,8 +661,54 @@ def test_battery_db_without_cc_usage_table_exits_2(tmp_path, monkeypatch):
 
 
 def test_battery_db_with_cc_usage_table_passes(tmp_path, monkeypatch):
-    db = make_db(tmp_path)  # has cc_usage (empty)
+    db = make_db(tmp_path)  # has cc_usage (empty) -- legitimate bootstrap state, stays alive
     rc = sr.main(["--skip-import", "--db", str(db), "--deploy", "shtab"])
+    assert rc == 0
+
+
+# ---------------------------------------------------------------------
+# t-428 fix-batch item 6: E10 loud refusal, SCOPED (sm.resolve_project_
+# or_refuse_if_data_elsewhere) -- boundary AT (0 rows for the resolved
+# project, but OTHER projects on this "machine" have data -> refuse)
+# and BEYOND (>=1 row for the resolved project -> passes).
+# ---------------------------------------------------------------------
+def test_battery_e10_zero_rows_for_project_others_have_data_refuses(tmp_path, monkeypatch):
+    db = make_db(tmp_path)
+    insert_cc_row(db, "2026-06-01T00:00:00Z", "someOtherProject", agent_id="a1")
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [])
+    _patch_deploys(monkeypatch, [("shtab", str(j))], {"shtab": "projA"})
+    rc = sr.main(["--skip-import", "--db", str(db), "--deploy", "shtab"])
+    assert rc == 2
+
+
+def test_battery_e10_beyond_boundary_project_has_rows_passes(tmp_path, monkeypatch):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    rc = sr.main(["--skip-import", "--db", str(db), "--deploy", "shtab"])
+    assert rc == 0
+
+
+def test_battery_e10_totally_empty_db_is_bootstrap_not_refused(tmp_path, monkeypatch):
+    """Control: cc_usage has ZERO rows for EVERY project -- the
+    legitimate first-run state, must stay alive (this is what
+    test_battery_db_with_cc_usage_table_passes already covers; repeated
+    here explicitly as the E10 predicate's own negative control)."""
+    db = make_db(tmp_path)
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [])
+    _patch_deploys(monkeypatch, [("shtab", str(j))], {"shtab": "projA"})
+    rc = sr.main(["--skip-import", "--db", str(db), "--deploy", "shtab"])
+    assert rc == 0
+
+
+def test_battery_e10_deploy_all_skips_the_check(tmp_path, monkeypatch):
+    db = make_db(tmp_path)
+    insert_cc_row(db, "2026-06-01T00:00:00Z", "someOtherProject", agent_id="a1")
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [])
+    _patch_deploys(monkeypatch, [("shtab", str(j))], {"shtab": "projA"})
+    rc = sr.main(["--skip-import", "--db", str(db), "--deploy", "all"])
     assert rc == 0
 
 
@@ -558,3 +742,52 @@ def test_out_flag_writes_file_not_stdout(tmp_path, monkeypatch, capsys):
     assert rc == 0
     assert out_path.exists()
     json.loads(out_path.read_text(encoding="utf-8"))  # valid JSON on disk
+
+
+# ---------------------------------------------------------------------
+# t-428 fix-batch item 6: full-pipeline runtime print (E11 threshold on
+# the SUM, not just import) -- boundary AT 60s (no marker) and BEYOND
+# (>60s -> marker), plus the print is now UNCONDITIONAL.
+# ---------------------------------------------------------------------
+def test_full_runtime_printed_unconditionally_under_60s(tmp_path, monkeypatch, capsys):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    rc = sr.main(["--skip-import", "--db", str(db), "--deploy", "shtab"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "полный прогон" in err
+    assert "E11" not in err
+
+
+def test_full_runtime_e11_boundary_at_60s_no_marker(tmp_path, monkeypatch, capsys):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    calls = {"n": 0}
+    real_time = sr.time.time
+
+    def fake_time():
+        calls["n"] += 1
+        return 1000.0 if calls["n"] == 1 else 1060.0  # exactly 60.0s elapsed
+
+    monkeypatch.setattr(sr.time, "time", fake_time)
+    rc = sr.main(["--skip-import", "--db", str(db), "--deploy", "shtab"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "60.0" in err
+    assert "E11" not in err
+
+
+def test_full_runtime_e11_boundary_beyond_60s_has_marker(tmp_path, monkeypatch, capsys):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    calls = {"n": 0}
+
+    def fake_time():
+        calls["n"] += 1
+        return 1000.0 if calls["n"] == 1 else 1060.1  # one tenth of a second beyond
+
+    monkeypatch.setattr(sr.time, "time", fake_time)
+    rc = sr.main(["--skip-import", "--db", str(db), "--deploy", "shtab"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "E11" in err

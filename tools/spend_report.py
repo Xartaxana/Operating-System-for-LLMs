@@ -289,6 +289,12 @@ def _flag_for_row(mkey: str, row: dict, prev: "dict | None") -> str:
         if row["value"] is None:
             return row.get("reason") or "н/д"
         return "ФЛАГ: есть ходы с молчаливым $0" if row["value"] > 0 else "чисто"
+    if mkey.startswith("M10") and row.get("reason"):
+        # t-428 fix-batch item 6 "мелочь": M10's own reason ALWAYS carries
+        # something meaningful now (either sm.M10_CAVEAT on a real value,
+        # or a genuine н/д reason on a missing one) -- surfaced in the
+        # flag column since M-rows otherwise print no reason at all.
+        return row["reason"]
     if mkey.startswith("M"):
         return ""  # plain metric, not a detector -- no flag formula in the spec
     # D1-D6 / D4:<tier> / D5 / D9:* -- "> X" threshold undetermined (развилка е,
@@ -314,13 +320,31 @@ def _r4_1_row(mkey: str, row: dict, prev: "dict | None") -> dict:
     }
 
 
+def _skill_cost_breakdown(metric_rows: list) -> list:
+    """t-428 fix-batch item 5 (fork (а) resolution): 'из них <skill>:
+    $X' -- one line per run_kind='skill' M6 key ACTUALLY PRESENT in the
+    window (i.e. >=1 run_units row existed for that skill this window,
+    from spend_model._m6_m7_m8_m12); a skill that never ran this window
+    prints NOTHING at all (not 'н/д' noise, this task's own wording --
+    contrast M6 itself, whose OWN absence when the registry is entirely
+    empty is a single blanket 'н/д (реестра нет)', a different case)."""
+    out = []
+    for r in sorted(metric_rows, key=lambda r: r["metric_key"]):
+        mkey = r["metric_key"]
+        if not mkey.startswith("M6:skill:"):
+            continue
+        out.append({"name": mkey.split(":", 2)[2], "value": r["value"], "reason": r["reason"]})
+    return out
+
+
 def build_r4_1(conn: sqlite3.Connection, window_row: dict, metric_rows: list) -> dict:
     prev_id = _resolve_prev_window_id(conn, window_row)
     prev_map = {r["metric_key"]: r for r in _window_metric_rows(conn, prev_id)} if prev_id else {}
     any_unpriced = any(r.get("unpriced_turns") for r in metric_rows)
     unpriced_models = _unpriced_models_in_window(conn, window_row) if any_unpriced else []
     rows = [_r4_1_row(r["metric_key"], r, prev_map.get(r["metric_key"])) for r in metric_rows]
-    return {"rows": rows, "unpriced_models": unpriced_models}
+    return {"rows": rows, "unpriced_models": unpriced_models,
+            "skill_breakdown": _skill_cost_breakdown(metric_rows)}
 
 
 # ========================================================================
@@ -376,12 +400,29 @@ def _unparsable_candidates(deploys: list) -> dict:
     return out
 
 
-def _missing_calibrated_windows(conn: sqlite3.Connection, deploy_keys: list) -> dict:
+def _missing_calibrated_windows(conn: sqlite3.Connection, deploy_keys: list,
+                                 pre_recompute_present: "set | None" = None) -> dict:
     """Section 2's own detector: calibrated windows the journal implies
-    (fresh calibrated_windows() recompute) that have no row in
-    window_series -- a staleness/partial-write safety net, independent
-    of whether THIS run already rebuilt everything (guards a future
-    --skip-import / partial-crash run too)."""
+    (fresh calibrated_windows() recompute) that had no row in
+    window_series -- t-428 fix-batch item 3: `pre_recompute_present`
+    (when given) is a SNAPSHOT of window_series' own distinct window_ids
+    taken by the CALLER BEFORE this run's own rebuild()/
+    compute_window_series() call. Without it (the pre-fix shape, still
+    the fallback when this function is called directly/standalone --
+    e.g. build_r4_3() called on its own in a test, without a full
+    main()-style recompute having just run), this queries the LIVE
+    table as-is, which main()'s own call chain ALWAYS finds fully
+    populated (compute_window_series() runs unconditionally right
+    before build_report()) -- meaning this section STRUCTURALLY never
+    fired in the CLI's normal path (critic t-428 finding, item 3): by
+    the time the report is built, the very run building it has already
+    backfilled every gap. The snapshot restores real detective value:
+    it reports windows that were missing AT THE START of this
+    invocation (a genuine staleness signal -- e.g. this DB hadn't been
+    through a spend_report run since a NEW `calibrated` event was
+    logged) even though, by print time, this same run's own recompute
+    has already fixed them -- see render_text's own wording for this
+    "audit of the run's start state, not a live watchdog" caveat."""
     missing = {}
     deploys_map = dict(sm.DEPLOYS)
     for deploy_key in deploy_keys:
@@ -395,14 +436,31 @@ def _missing_calibrated_windows(conn: sqlite3.Connection, deploy_keys: list) -> 
         cal_tss = sorted(pl.ts for pl in lines
                           if pl.data and pl.data.get("event") == "calibrated" and pl.ts)
         expected = {w["window_id"] for w in sm.calibrated_windows(deploy_key, cal_tss)}
-        present = {r[0] for r in conn.execute(
-            "SELECT DISTINCT window_id FROM window_series WHERE window_id LIKE ?",
-            (f"{deploy_key}:calibrated:%",),
-        )}
+        if pre_recompute_present is not None:
+            present = {wid for wid in pre_recompute_present if wid.startswith(f"{deploy_key}:calibrated:")}
+        else:
+            present = {r[0] for r in conn.execute(
+                "SELECT DISTINCT window_id FROM window_series WHERE window_id LIKE ?",
+                (f"{deploy_key}:calibrated:%",),
+            )}
         gap = sorted(expected - present)
         if gap:
             missing[deploy_key] = gap
     return missing
+
+
+def snapshot_calibrated_window_ids(conn: sqlite3.Connection) -> set:
+    """t-428 fix-batch item 3: called by the CLI orchestration BEFORE
+    its own rebuild()/compute_window_series() call, so _missing_
+    calibrated_windows (via build_r4_3/build_report) can report the
+    STATE THIS RUN STARTED WITH, not the state it just produced.
+    sm._ensure_schema is idempotent/cheap (CREATE TABLE IF NOT EXISTS)
+    -- safe to call on a DB that has never had window_series populated
+    at all yet (first-ever run, legitimately empty snapshot)."""
+    sm._ensure_schema(conn)
+    return {r[0] for r in conn.execute(
+        "SELECT DISTINCT window_id FROM window_series WHERE window_id LIKE '%:calibrated:%'"
+    )}
 
 
 def _calibration_registry_gaps(conn: sqlite3.Connection) -> dict:
@@ -413,17 +471,33 @@ def _calibration_registry_gaps(conn: sqlite3.Connection) -> dict:
     tested data primitive) IN ADDITION TO the bare "реестр пуст" stub
     below -- names the SPECIFIC calibrated window(s) a deploy's journal
     attests to but the run_units registry carries no run_kind='calibration'
-    row for AT ALL. Window IDs are reconstructed from the returned
-    (sorted-ascending) timestamps via the SAME calibrated_windows()
-    numbering spend_model itself uses (i-th ascending calibrated ts ->
-    window i) -- no new numbering scheme, no re-derivation of the ts-list
-    sort spend_model.calibrated_windows() already performs on its own
-    input. Searches ALL THREE deploys (sm.DEPLOYS), same cross-deploy
-    scope _runs_without_units below already uses for its `dead` list."""
+    row for AT ALL. Window IDs are reconstructed by mapping each
+    returned (missing) ts to its TRUE position in the deploy's FULL
+    ascending calibrated-ts list (calibrated_windows()'s own
+    i-th-ascending-ts -> window i numbering) -- NOT by enumerating the
+    (possibly PARTIAL, t-428 fix-batch item 3) `missing` subset itself:
+    since spend_model.calibration_runs_missing_from_registry now
+    reports PER WINDOW (not all-or-nothing), a naive
+    enumerate(sorted(ts_list), start=1) over just the missing subset
+    would mislabel window 2 as "window 1" whenever window 1 happened to
+    be covered -- this re-derives the REAL index from the deploy's own
+    full calibrated-event list instead. Searches ALL THREE deploys
+    (sm.DEPLOYS), same cross-deploy scope _runs_without_units below
+    already uses for its `dead` list."""
     missing = sm.calibration_runs_missing_from_registry(conn, sm.DEPLOYS)
     out = {}
+    deploys_map = dict(sm.DEPLOYS)
     for deploy_key, ts_list in missing.items():
-        out[deploy_key] = [f"{deploy_key}:calibrated:{i}" for i, _ts in enumerate(sorted(ts_list), start=1)]
+        journal_path = deploys_map.get(deploy_key)
+        try:
+            lines = cc_counts.load_journal(journal_path) if journal_path else []
+        except OSError:
+            lines = []
+        full_tss = sorted(pl.ts for pl in lines
+                           if pl.data and pl.data.get("event") == "calibrated" and pl.ts)
+        index_by_iso = {ts.isoformat(): i for i, ts in enumerate(full_tss, start=1)}
+        out[deploy_key] = [f"{deploy_key}:calibrated:{index_by_iso[ts]}"
+                            for ts in ts_list if ts in index_by_iso]
     return out
 
 
@@ -436,25 +510,50 @@ def _runs_without_units(conn: sqlite3.Connection) -> dict:
     `calibration_registry_gaps` (B6) is always attached alongside --
     ADDITIVE, never replaces `status`/`dead` (D-0100 minimal-risk choice:
     an existing accepted test pins `status`'s literal wording on the
-    total==0 branch)."""
+    total==0 branch).
+
+    t-428 fix-batch item 4: TWO previously-conflated classes are now
+    reported SEPARATELY (never double-counted between them):
+      - `dead` = genuinely мёртвый прогон -- ts_end is None (open, never
+        closed) OR (session_id WAS present and the run STILL found no
+        cost). This is narrower than pre-fix (which put every
+        session_id-absent run here too, mislabeling a legitimate
+        fallback path as "dead").
+      - `no_session_id` = run_units rows with session_id absent -- these
+        go through spend_model.m6_run_cost's own project-wide TIME-SPAN
+        fallback (item 4's "довести до работы", spec B4) instead of an
+        automatic "н/д"; listed here purely informationally (cost_value
+        may be a real number OR None -- either way it is NOT folded
+        into `dead`)."""
     total = conn.execute("SELECT COUNT(*) FROM run_units").fetchone()[0]
     calibration_registry_gaps = _calibration_registry_gaps(conn)
     if total == 0:
-        return {"status": "реестр пуст, метрики скиллов н/д", "dead": [],
+        return {"status": "реестр пуст, метрики скиллов н/д", "dead": [], "no_session_id": [],
                 "calibration_registry_gaps": calibration_registry_gaps}
     all_projects = [p for p in sm.DEPLOY_PROJECT.values() if p]
     level_rows = sm._query_dicts(conn, "SELECT * FROM run_units WHERE phase IS NULL")
     dead = []
+    no_session_id = []
     for lr in level_rows:
+        if not lr.get("ts_end"):
+            dead.append({"run_id": lr.get("run_id"), "run_kind": lr.get("run_kind"),
+                         "name": lr.get("name"), "reason": "мёртвый прогон (нет run_end)"})
+            continue
         m = sm.m6_run_cost(conn, all_projects, lr)
+        if not lr.get("session_id"):
+            no_session_id.append({"run_id": lr.get("run_id"), "run_kind": lr.get("run_kind"),
+                                   "name": lr.get("name"), "cost_value": m["value"],
+                                   "note": m["reason"] or sm.SESSION_ID_FALLBACK_NOTE})
+            continue
         if m["value"] is None:
             dead.append({"run_id": lr.get("run_id"), "run_kind": lr.get("run_kind"),
                          "name": lr.get("name"), "reason": m["reason"]})
     return {"status": "чисто" if not dead else "есть прогоны без денег", "dead": dead,
-            "calibration_registry_gaps": calibration_registry_gaps}
+            "no_session_id": no_session_id, "calibration_registry_gaps": calibration_registry_gaps}
 
 
-def build_r4_3(conn: sqlite3.Connection, deploy: str) -> dict:
+def build_r4_3(conn: sqlite3.Connection, deploy: str,
+                pre_recompute_calibrated_window_ids: "set | None" = None) -> dict:
     deploy_keys = list(dict(sm.DEPLOYS).keys()) if deploy == "all" else [deploy]
     projects = [p for p in (sm.DEPLOY_PROJECT.get(d) for d in deploy_keys) if p]
 
@@ -494,8 +593,14 @@ def build_r4_3(conn: sqlite3.Connection, deploy: str) -> dict:
     section["unparsable_journal_lines"] = _unparsable_candidates(
         [(k, p) for k, p in sm.DEPLOYS if k in deploy_keys]
     )
-    section["missing_calibrated_windows"] = _missing_calibrated_windows(conn, deploy_keys)
+    section["missing_calibrated_windows"] = _missing_calibrated_windows(
+        conn, deploy_keys, pre_recompute_calibrated_window_ids
+    )
     section["runs_without_units"] = _runs_without_units(conn)
+    # t-428 fix-batch item 0: raskladka witness + invariant guard, both
+    # deploy/project-scoped like this section's other subsections.
+    section["shared_key_split"] = sm.shared_key_health(conn, deploy_keys)
+    section["agent_id_session_invariant"] = sm.agent_id_session_invariant(conn, projects)
     return section
 
 
@@ -516,11 +621,12 @@ def build_series(conn: sqlite3.Connection, window_id: str, mkey: str, k: int) ->
 # ========================================================================
 def build_report(conn: sqlite3.Connection, deploy: str, window_which: str, compare: bool,
                   top_n: int, series_key, series_last: int,
-                  ws_dt=None, we_dt=None, trend_k: int = DEFAULT_TREND_WINDOWS) -> dict:
+                  ws_dt=None, we_dt=None, trend_k: int = DEFAULT_TREND_WINDOWS,
+                  pre_recompute_calibrated_window_ids: "set | None" = None) -> dict:
     # R4.3 health FIRST and unconditionally -- accept key 3 ("Секция
     # здоровья печатается всегда"): a window-resolution failure below
     # must never suppress it.
-    report = {"r4_3": build_r4_3(conn, deploy)}
+    report = {"r4_3": build_r4_3(conn, deploy, pre_recompute_calibrated_window_ids)}
 
     if ws_dt is not None or we_dt is not None:
         window_spec, metrics = _custom_window_metrics(conn, deploy, ws_dt, we_dt)
@@ -590,6 +696,11 @@ def render_text(report: dict, deploy: str) -> str:
                              f" {str(delta_s):>10}  {flag_s}")
             if r1["unpriced_models"]:
                 lines.append("  * без цены в этом окне: " + ", ".join(r1["unpriced_models"]))
+            if r1["skill_breakdown"]:
+                lines.append("  из них по скиллам (M6, только реально прогнанные в окне):")
+                for sb in r1["skill_breakdown"]:
+                    val_s = _fmt_num(sb["value"]) if sb["value"] is not None else (sb["reason"] or "н/д")
+                    lines.append(f"    {sb['name']}: {val_s}")
 
         if "r4_2" in report:
             r2 = report["r4_2"]
@@ -630,7 +741,9 @@ def render_text(report: dict, deploy: str) -> str:
     for dep, cands in r3["unparsable_journal_lines"].items():
         for c in cands:
             lines.append(f"    {dep} line {c['line']}: {c['error']}")
-    lines.append("  Пропущенные окна (calibrated без строк window_series):")
+    lines.append("  Пропущенные окна (calibrated-окна, не имевшие строк window_series"
+                 " ДО пересчёта ЭТИМ прогоном -- аудит состояния на старте прогона,"
+                 " не постоянный сторож текущего состояния БД, t-428 item 3):")
     if not r3["missing_calibrated_windows"]:
         lines.append("    чисто")
     for dep, ids in r3["missing_calibrated_windows"].items():
@@ -644,10 +757,29 @@ def render_text(report: dict, deploy: str) -> str:
     else:
         for d in rwu["dead"]:
             lines.append(f"    run_id={d['run_id']} {d['run_kind']}:{d['name']}: {d['reason']}")
+    lines.append("  Прогоны без session_id (M6 -- фолбэк по времени всего проекта, не 'мёртвый'):")
+    no_sid = rwu.get("no_session_id") or []
+    if not no_sid:
+        lines.append("    чисто")
+    for d in no_sid:
+        cost_s = "н/д" if d["cost_value"] is None else round(d["cost_value"], 4)
+        lines.append(f"    run_id={d['run_id']} {d['run_kind']}:{d['name']}: cost={cost_s} ({d['note']})")
     gaps = rwu.get("calibration_registry_gaps") or {}
     if gaps:
         for dep, wids in gaps.items():
             lines.append(f"    calibrated-окно(а) без строки реестра калибровки: {dep}: {', '.join(wids)}")
+
+    shk = r3.get("shared_key_split") or {"stages": 0, "keys": 0, "cost_usd": 0.0}
+    lines.append(f"  Стадий, делящих ключ: {shk['stages']} ({shk['keys']} ключей,"
+                 f" ${round(shk['cost_usd'], 4)} под раскладкой)" + ("" if shk["stages"] else " -- чисто"))
+    inv = r3.get("agent_id_session_invariant") or {"violations": []}
+    lines.append("  Инвариант agent_id~session (агент_id уникален в рамках session+project):")
+    if not inv["violations"]:
+        lines.append("    чисто (0 нарушений)")
+    else:
+        for v in inv["violations"]:
+            lines.append(f"    ФЛАГ: agent_id={v['agent_id']} project={v['project']}"
+                         f" сессий={v['sessions']}")
 
     if "series" in report:
         s = report["series"]
@@ -711,26 +843,41 @@ def main(argv=None) -> int:
 
     db_file = Path(args.db) if args.db else _cc_db_path()
 
+    # t-428 fix-batch item 6: t0 now spans the FULL pipeline (import +
+    # rebuild + compute_window_series + render [+ dashboard]) -- E11's
+    # 60s threshold applies to the SUM, not just the import step; the
+    # full elapsed time is printed UNCONDITIONALLY (not only when it
+    # exceeds the threshold), matching "печать ПОЛНОГО времени прогона".
     t0 = time.time()
     if not args.skip_import:
         import_transcripts(transcript_glob(), db_file)
-    elapsed = time.time() - t0
-    if elapsed > 60:
-        # E11: the number goes to the Lead, never a silent optimization.
-        print(f"spend_report: ленивый импорт занял {elapsed:.1f}с (>60с, E11)", file=sys.stderr)
 
-    conn = sqlite3.connect(db_file)
+    conn = sm.connect_db(db_file)
     try:
         if not _cc_usage_table_exists(conn):
             print("spend_report: в БД нет таблицы cc_usage -- отказ (E12 precondition;"
                   " запусти import_transcripts/usage_report сначала)", file=sys.stderr)
             return 2
 
+        # E10 loud refusal (item 6), scoped: see
+        # sm.resolve_project_or_refuse_if_data_elsewhere's own docstring
+        # for why this is narrower than a blanket "0 rows -> refuse"
+        # (a totally-empty cc_usage table is a legitimate bootstrap/
+        # first-run state, preserved by the adversarial battery's own
+        # pre-existing "пустой журнал -> прогон жив" contract).
+        if args.deploy != "all":
+            project = sm.DEPLOY_PROJECT.get(args.deploy)
+            if not sm.resolve_project_or_refuse_if_data_elsewhere(conn, project):
+                return 2
+
+        pre_recompute_calibrated_ids = snapshot_calibrated_window_ids(conn)
+
         sm.rebuild(conn, sm.DEPLOYS, sm.DEPLOY_PROJECT)
         sm.compute_window_series(conn, sm.DEPLOYS, sm.DEPLOY_PROJECT)
 
         report = build_report(conn, args.deploy, args.window, bool(args.compare), args.top,
-                               args.series, args.last, ws_dt, we_dt)
+                               args.series, args.last, ws_dt, we_dt,
+                               pre_recompute_calibrated_window_ids=pre_recompute_calibrated_ids)
 
         dashboard_path = None
         if args.dashboard:
@@ -741,9 +888,17 @@ def main(argv=None) -> int:
             # AS-IS (already rebuilt + compute_window_series'd above by
             # this same call) -- no second rebuild.
             import spend_dashboard
-            dashboard_path = spend_dashboard.generate_dashboard(conn, top_n=args.top)
+            dashboard_path = spend_dashboard.generate_dashboard(
+                conn, top_n=args.top, pre_recompute_calibrated_window_ids=pre_recompute_calibrated_ids
+            )
     finally:
         conn.close()
+
+    total_elapsed = time.time() - t0
+    over_note = " (>60с, E11)" if total_elapsed > 60 else ""
+    print(f"spend_report: полный прогон (импорт+rebuild+window_series+рендер"
+          f"{'+дашборд' if args.dashboard else ''}) занял {total_elapsed:.1f}с{over_note}",
+          file=sys.stderr)
 
     text = (json.dumps(report, ensure_ascii=False, indent=2, default=str)
             if args.json else render_text(report, args.deploy))

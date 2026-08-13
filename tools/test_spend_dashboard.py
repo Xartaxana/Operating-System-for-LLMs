@@ -218,6 +218,79 @@ def test_stat_tile_empty_window_shows_na_not_zero(tmp_path, monkeypatch):
     conn.close()
 
 
+# ---------------------------------------------------------------------
+# t-428 fix-batch item 1: honest "$/принятую" tile (Σ task_cost/accepted,
+# not a sum of M10:<tier> ratios).
+# ---------------------------------------------------------------------
+def test_cost_per_accepted_tile_matches_task_cost_over_accepted(tmp_path, monkeypatch):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    conn = _rebuild_all(db, deploys, deploy_project)
+    window_id, _err = sr.resolve_window(conn, "shtab", "last")
+    metric_rows = sr._window_metric_rows(conn, window_id)
+    window_row = metric_rows[0]
+
+    spec = sr._window_spec_for_tasks(window_row)
+    task_rows = sm._tasks_in_window(conn, spec)
+    accepted = sum(t["accepted"] for t in task_rows)
+    total_cost = sm._sum_optional(t["cost_usd"] for t in task_rows)
+    expected = total_cost / accepted
+
+    cal_group = next(g for g in sd.build_dashboard_data(conn)["stat_tiles"] if g["window_id"] == window_id)
+    tile = next(t for t in cal_group["tiles"] if t["label"] == "$/принятую")
+    assert float(tile["value_display"].lstrip(">= ").rstrip(" *")) == pytest.approx(expected, abs=1e-3)
+    conn.close()
+
+
+def test_cost_per_accepted_helper_zero_accepted_boundary(tmp_path, monkeypatch):
+    db = make_db(tmp_path)
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [
+        ev("2026-07-01T00:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-1", category="implementation", worker_ref="agent:a1", notes="n"),
+        ev("2026-07-05T00:00:00", "calibrated", agent="lead", model="opus",
+           category="calibration", notes="1"),
+    ])
+    insert_cc_row(db, "2026-07-01T00:00:30Z", "projA", agent_id="a1", dedupe_suffix="1")
+    _patch_deploys(monkeypatch, [("shtab", str(j))], {"shtab": "projA"})
+    conn = _rebuild_all(db, [("shtab", str(j))], {"shtab": "projA"})
+    window_id, _err = sr.resolve_window(conn, "shtab", "last")
+    window_row = sr._window_metric_rows(conn, window_id)[0]
+    cpa = sd._cost_per_accepted(conn, window_row)
+    assert cpa["value"] is None
+    assert "0 принятых" in cpa["reason"]
+    conn.close()
+
+
+# ---------------------------------------------------------------------
+# t-428 fix-batch item 2: partial-price marker on stat tiles (mirrors
+# spend_report's own ">= X *" form) -- fixture with an unpriced model.
+# ---------------------------------------------------------------------
+def test_stat_tile_shows_partial_price_marker_and_unpriced_model(tmp_path, monkeypatch):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    # one MORE cc_usage row, unpriced, in the SAME window as the fixture's
+    # own main-chain traffic.
+    insert_cc_row(db, "2026-07-01T02:30:00Z", "projA", agent_id=None, is_sidechain=0,
+                  model="unknown-model-xyz", force_unpriced=True, dedupe_suffix="unpriced-1")
+    conn = _rebuild_all(db, deploys, deploy_project)
+    window_id, _err = sr.resolve_window(conn, "shtab", "last")
+    metric_rows = sr._window_metric_rows(conn, window_id)
+    window_row = metric_rows[0]
+    group = sd.build_stat_tile_group(conn, window_row, metric_rows, "test")
+    money_tile = next(t for t in group["tiles"] if t["label"] == "$ окна")
+    assert money_tile["value_display"].startswith(">=")
+    assert money_tile["value_display"].endswith("*")
+    assert "unknown-model-xyz" in money_tile["unpriced_models"]
+    conn.close()
+
+
+def test_build_tile_no_marker_when_unpriced_turns_zero():
+    t = sd._build_tile("X", 1.0, None, unpriced_turns=0, unpriced_models=["m"])
+    assert "*" not in t["value_display"]
+    assert t["unpriced_models"] == []
+
+
 def test_svg_line_chart_null_breaks_into_separate_segments():
     chart = {
         "title": "T",
@@ -316,6 +389,41 @@ def test_health_section_reuses_r4_3_calibration_registry_gaps(tmp_path, monkeypa
     conn.close()
 
 
+def test_health_section_carries_shared_key_split_and_invariant_and_html(tmp_path, monkeypatch):
+    """t-428 fix-batch item 0 wiring into the dashboard's own health
+    section, incl. HTML rendering (never crashes on the clean case)."""
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    conn = _rebuild_all(db, deploys, deploy_project)
+    data = sd.build_dashboard_data(conn)
+    assert data["health"]["shared_key_split"] == {"stages": 0, "keys": 0, "cost_usd": 0.0}
+    assert data["health"]["agent_id_session_invariant"] == {"violations": []}
+    html = sd.render_html(data)
+    assert "Стадий, делящих ключ" in html
+    assert "Инвариант agent_id" in html
+    conn.close()
+
+
+def test_health_section_no_session_id_bucket_rendered(tmp_path, monkeypatch):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    conn = _rebuild_all(db, deploys, deploy_project)
+    sm._ensure_schema(conn)
+    conn.execute(
+        "INSERT INTO run_units (run_id, run_kind, name, phase, ts_start, ts_end,"
+        " session_id, unit_kind, unit_count, source) VALUES"
+        " ('r-nosid', 'skill', 'next-task', NULL, '2026-07-01T00:00:00',"
+        " '2026-07-01T00:10:00', NULL, NULL, 1, 'test')"
+    )
+    conn.commit()
+    data = sd.build_dashboard_data(conn)
+    no_sid = data["health"]["runs_without_units"]["no_session_id"]
+    assert any(d["run_id"] == "r-nosid" for d in no_sid)
+    html = sd.render_html(data)
+    assert "Прогоны без session_id" in html
+    conn.close()
+
+
 # ---------------------------------------------------------------------
 # E12 -- cc_usage/requests untouched (SELECT-only), narrow rerun of the
 # B1 invariant guard for THIS module's own read path.
@@ -372,8 +480,15 @@ def test_battery_cyrillic_project_and_path(tmp_path, monkeypatch):
 
 def test_battery_cp1251_console_does_not_crash(tmp_path, monkeypatch):
     """Class t-408: PYTHONIOENCODING=cp1251 -- run as a REAL subprocess
-    (mirrors test_spend_report.py's own equivalent test)."""
+    (mirrors test_spend_report.py's own equivalent test). DEPLOYS/
+    DEPLOY_PROJECT monkeypatching does not cross the subprocess boundary
+    -- this CLI always resolves the "shtab" project via the REAL
+    sm.DEPLOY_PROJECT, so a cc_usage row under that real project name is
+    added (t-428 item-6 E10 guard would otherwise refuse: "projA" has
+    rows, the real shtab project does not)."""
     db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    insert_cc_row(db, "2026-07-01T00:00:30Z", sm.DEPLOY_PROJECT["shtab"], agent_id="real-shtab-a1",
+                  model="claude-sonnet-5", dedupe_suffix="real-shtab-1")
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "cp1251"
     env["PYTHONPATH"] = str(Path(__file__).resolve().parent)
@@ -466,3 +581,50 @@ def test_spend_report_dashboard_flag_writes_html(tmp_path, monkeypatch):
     assert out.exists()
     text = out.read_text(encoding="utf-8")
     assert "data-section=\"header\"" in text
+
+
+# ---------------------------------------------------------------------
+# t-428 fix-batch item 6: standalone spend_dashboard.py CLI -- full
+# runtime printed unconditionally, E11 threshold boundary AT/BEYOND 60s.
+# ---------------------------------------------------------------------
+def test_dashboard_full_runtime_printed_unconditionally_under_60s(tmp_path, monkeypatch, capsys):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    rc = sd.main(["--skip-import", "--db", str(db), "--out", str(tmp_path / "d.html")])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "полный прогон" in err
+    assert "E11" not in err
+
+
+def test_dashboard_full_runtime_e11_boundary_at_60s_no_marker(tmp_path, monkeypatch, capsys):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    calls = {"n": 0}
+
+    def fake_time():
+        calls["n"] += 1
+        return 1000.0 if calls["n"] == 1 else 1060.0
+
+    monkeypatch.setattr(sd.time, "time", fake_time)
+    rc = sd.main(["--skip-import", "--db", str(db), "--out", str(tmp_path / "d.html")])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "60.0" in err
+    assert "E11" not in err
+
+
+def test_dashboard_full_runtime_e11_boundary_beyond_60s_has_marker(tmp_path, monkeypatch, capsys):
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    calls = {"n": 0}
+
+    def fake_time():
+        calls["n"] += 1
+        return 1000.0 if calls["n"] == 1 else 1060.1
+
+    monkeypatch.setattr(sd.time, "time", fake_time)
+    rc = sd.main(["--skip-import", "--db", str(db), "--out", str(tmp_path / "d.html")])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "E11" in err

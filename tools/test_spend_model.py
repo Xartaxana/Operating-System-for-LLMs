@@ -292,6 +292,260 @@ def test_orphan_sidechain_bucket_none_when_all_matched(tmp_path):
 
 
 # ---------------------------------------------------------------------
+# t-428 fix-batch BLOCKER 0: shared-key cc_usage rows must be split by
+# TIME across the stages that reused a key, not aggregated whole onto
+# EVERY one of them (the double/triple-counting bug).
+# ---------------------------------------------------------------------
+def _sonnet_row_cost():
+    cost, _w = usage_report.accounted_cost("claude-sonnet-5", 100, 50, 0, 0)
+    return cost
+
+
+def test_fix0_assign_rows_unparsable_ts_clamps_to_last_slot():
+    slots = [{"ts_dt": datetime(2026, 7, 1, 0, 0, 0), "rows": []},
+             {"ts_dt": datetime(2026, 7, 1, 1, 0, 0), "rows": []}]
+    rows = [{"ts_dt": None, "cost_usd": 1.0}]
+    sm._assign_rows_to_stage_slots(slots, rows)
+    assert slots[0]["rows"] == []
+    assert slots[1]["rows"] == rows
+
+
+def test_fix0_assign_rows_no_ts_having_slot_is_noop():
+    slots = [{"ts_dt": None, "rows": []}]
+    rows = [{"ts_dt": datetime(2026, 7, 1), "cost_usd": 1.0}]
+    sm._assign_rows_to_stage_slots(slots, rows)
+    assert slots[0]["rows"] == []
+
+
+def test_fix0_aggregate_cc_rows_empty_is_all_zero_null():
+    agg = sm._aggregate_cc_rows([])
+    assert agg == {"turns": 0, "input_tokens": 0, "output_tokens": 0,
+                    "cache_creation_tokens": 0, "cache_read_tokens": 0,
+                    "cost_usd": None, "unpriced_turns": 0, "models_measured": None}
+
+
+def test_fix0_shared_key_two_stages_same_task_no_double_count(tmp_path):
+    """The blocker itself: 2 delegated stages reuse ONE worker_ref (a
+    retry landing on the same dispatch id), 2 cc_usage rows exist for
+    that key -- Σ task_cost must equal the TWO rows' real cost, never
+    4x (pre-fix: each of the 2 stages got the WHOLE 2-row aggregate)."""
+    db = make_db(tmp_path)
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [
+        ev("2026-07-01T00:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-1", category="implementation", worker_ref="agent:shared1", notes="n"),
+        ev("2026-07-01T00:10:00", "rejected", agent="builder", model="sonnet",
+           task_id="t-1", attempt=1, failure_class="spec", category="implementation", notes="n"),
+        ev("2026-07-01T00:20:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-1", category="implementation", worker_ref="agent:shared1",
+           attempt=2, notes="n"),
+    ])
+    insert_cc_row(db, _utc_z_for_local(datetime(2026, 7, 1, 0, 5, 0)), "projA",
+                  agent_id="shared1", dedupe_suffix="1")
+    insert_cc_row(db, _utc_z_for_local(datetime(2026, 7, 1, 0, 25, 0)), "projA",
+                  agent_id="shared1", dedupe_suffix="2")
+    conn = sqlite3.connect(db)
+    stage_rows, task_rows, _r = sm.stages_and_tasks_for_deploy(conn, "d", str(j), "projA")
+    assert len(stage_rows) == 2
+    one_row_cost = _sonnet_row_cost()
+    total = sum(s["cost_usd"] or 0 for s in stage_rows)
+    assert total == pytest.approx(one_row_cost * 2)  # NOT 4x (the pre-fix bug)
+    assert task_rows[0]["cost_usd"] == pytest.approx(one_row_cost * 2)
+    s1 = next(s for s in stage_rows if s["stage_index"] == 1)
+    s2 = next(s for s in stage_rows if s["stage_index"] == 2)
+    assert s1["cost_usd"] == pytest.approx(one_row_cost)
+    assert s2["cost_usd"] == pytest.approx(one_row_cost)
+
+
+def test_fix0_shared_key_cross_task_not_doubled(tmp_path):
+    """O1's own 'кросс-задачное' -- the SAME key reused across TWO
+    DIFFERENT tasks; the second task must not also inherit the first
+    task's money."""
+    db = make_db(tmp_path)
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [
+        ev("2026-07-01T00:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-1", category="implementation", worker_ref="agent:shared2", notes="n"),
+        ev("2026-07-02T00:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-2", category="implementation", worker_ref="agent:shared2", notes="n"),
+    ])
+    insert_cc_row(db, _utc_z_for_local(datetime(2026, 7, 1, 0, 5, 0)), "projA",
+                  agent_id="shared2", dedupe_suffix="1")
+    insert_cc_row(db, _utc_z_for_local(datetime(2026, 7, 2, 0, 5, 0)), "projA",
+                  agent_id="shared2", dedupe_suffix="2")
+    conn = sqlite3.connect(db)
+    _stage_rows, task_rows, _r = sm.stages_and_tasks_for_deploy(conn, "d", str(j), "projA")
+    by_task = {t["task_id"]: t for t in task_rows}
+    one_row_cost = _sonnet_row_cost()
+    assert by_task["t-1"]["cost_usd"] == pytest.approx(one_row_cost)
+    assert by_task["t-2"]["cost_usd"] == pytest.approx(one_row_cost)
+    assert (by_task["t-1"]["cost_usd"] + by_task["t-2"]["cost_usd"]) == pytest.approx(one_row_cost * 2)
+
+
+def test_fix0_stage_after_last_row_gets_null_cost_not_zero(tmp_path):
+    db = make_db(tmp_path)
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [
+        ev("2026-07-01T00:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-1", category="implementation", worker_ref="agent:shared3", notes="n"),
+        ev("2026-07-01T01:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-1", category="implementation", worker_ref="agent:shared3",
+           attempt=2, notes="n"),
+    ])
+    insert_cc_row(db, _utc_z_for_local(datetime(2026, 7, 1, 0, 5, 0)), "projA",
+                  agent_id="shared3", dedupe_suffix="1")
+    conn = sqlite3.connect(db)
+    stage_rows, _t, _r = sm.stages_and_tasks_for_deploy(conn, "d", str(j), "projA")
+    s1 = next(s for s in stage_rows if s["stage_index"] == 1)
+    s2 = next(s for s in stage_rows if s["stage_index"] == 2)
+    assert s1["cost_usd"] is not None
+    assert s2["cost_usd"] is None  # no row landed in stage 2's slot -- NULL, never 0
+    assert s2["turns"] == 0
+
+
+def test_fix0_row_ts_exact_boundary_goes_to_later_stage(tmp_path):
+    """Boundary AT: row.ts == later stage's own ts -> the LATER stage
+    (half-open interval, O1's 'ts_local <= ts строки' -- the LAST
+    qualifying stage wins)."""
+    db = make_db(tmp_path)
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [
+        ev("2026-07-01T00:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-1", category="implementation", worker_ref="agent:shared4", notes="n"),
+        ev("2026-07-01T01:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-1", category="implementation", worker_ref="agent:shared4",
+           attempt=2, notes="n"),
+    ])
+    ts_at_boundary = _utc_z_for_local(datetime(2026, 7, 1, 1, 0, 0))
+    insert_cc_row(db, ts_at_boundary, "projA", agent_id="shared4", dedupe_suffix="1")
+    conn = sqlite3.connect(db)
+    stage_rows, _t, _r = sm.stages_and_tasks_for_deploy(conn, "d", str(j), "projA")
+    s1 = next(s for s in stage_rows if s["stage_index"] == 1)
+    s2 = next(s for s in stage_rows if s["stage_index"] == 2)
+    assert s1["cost_usd"] is None
+    assert s2["cost_usd"] is not None
+
+
+def test_fix0_row_ts_one_second_before_boundary_goes_to_earlier_stage(tmp_path):
+    """Boundary BEYOND (one second earlier): row.ts < later stage's ts
+    -> the EARLIER stage."""
+    db = make_db(tmp_path)
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [
+        ev("2026-07-01T00:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-1", category="implementation", worker_ref="agent:shared5", notes="n"),
+        ev("2026-07-01T01:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-1", category="implementation", worker_ref="agent:shared5",
+           attempt=2, notes="n"),
+    ])
+    ts_before = _utc_z_for_local(datetime(2026, 7, 1, 0, 59, 59))
+    insert_cc_row(db, ts_before, "projA", agent_id="shared5", dedupe_suffix="1")
+    conn = sqlite3.connect(db)
+    stage_rows, _t, _r = sm.stages_and_tasks_for_deploy(conn, "d", str(j), "projA")
+    s1 = next(s for s in stage_rows if s["stage_index"] == 1)
+    s2 = next(s for s in stage_rows if s["stage_index"] == 2)
+    assert s1["cost_usd"] is not None
+    assert s2["cost_usd"] is None
+
+
+def test_fix0_row_ts_before_all_stages_clamps_to_first_stage(tmp_path):
+    """A row's ts precedes EVERY stage sharing the key (R12 journal-
+    write batching lag) -- clamps to the FIRST stage, money never
+    silently dropped (O3)."""
+    db = make_db(tmp_path)
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [
+        ev("2026-07-01T01:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-1", category="implementation", worker_ref="agent:shared6", notes="n"),
+        ev("2026-07-01T02:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-1", category="implementation", worker_ref="agent:shared6",
+           attempt=2, notes="n"),
+    ])
+    ts_early = _utc_z_for_local(datetime(2026, 7, 1, 0, 30, 0))
+    insert_cc_row(db, ts_early, "projA", agent_id="shared6", dedupe_suffix="1")
+    conn = sqlite3.connect(db)
+    stage_rows, _t, _r = sm.stages_and_tasks_for_deploy(conn, "d", str(j), "projA")
+    s1 = next(s for s in stage_rows if s["stage_index"] == 1)
+    s2 = next(s for s in stage_rows if s["stage_index"] == 2)
+    assert s1["cost_usd"] is not None
+    assert s2["cost_usd"] is None
+
+
+def test_fix0_single_use_key_unaffected_fast_path(tmp_path):
+    """Regression guard: the overwhelming common case (a key used by
+    exactly ONE stage) must produce the IDENTICAL number the pre-fix
+    whole-key-aggregate path gave -- fix 0 changes nothing here."""
+    db = make_db(tmp_path)
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [
+        ev("2026-07-01T00:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-1", category="implementation", worker_ref="agent:solo1", notes="n"),
+    ])
+    insert_cc_row(db, "2026-07-01T00:05:00Z", "projA", agent_id="solo1", dedupe_suffix="1")
+    insert_cc_row(db, "2026-07-01T00:06:00Z", "projA", agent_id="solo1", dedupe_suffix="2")
+    conn = sqlite3.connect(db)
+    stage_rows, _t, _r = sm.stages_and_tasks_for_deploy(conn, "d", str(j), "projA")
+    assert len(stage_rows) == 1
+    assert stage_rows[0]["cost_usd"] == pytest.approx(_sonnet_row_cost() * 2)
+    assert stage_rows[0]["turns"] == 2
+
+
+# ---------------------------------------------------------------------
+# shared_key_health / agent_id_session_invariant (t-428 item 0 witness).
+# ---------------------------------------------------------------------
+def test_shared_key_health_counts_only_groups_over_one(tmp_path):
+    db, deploys, deploy_project = _two_deploy_fixture(tmp_path)
+    j_shared = tmp_path / "shared.jsonl"
+    write_journal(j_shared, [
+        ev("2026-07-01T00:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-shared", category="implementation", worker_ref="agent:hh1", notes="n"),
+        ev("2026-07-01T01:00:00", "delegated", agent="builder", model="sonnet",
+           task_id="t-shared", category="implementation", worker_ref="agent:hh1",
+           attempt=2, notes="n"),
+    ])
+    insert_cc_row(db, _utc_z_for_local(datetime(2026, 7, 1, 0, 5, 0)), "projShared",
+                  agent_id="hh1", dedupe_suffix="s1")
+    deploys = deploys + [("shared", str(j_shared))]
+    deploy_project = dict(deploy_project, shared="projShared")
+    conn = sqlite3.connect(db)
+    sm.rebuild(conn, deploys, deploy_project)
+    h = sm.shared_key_health(conn, ["shared"])
+    assert h["keys"] == 1
+    assert h["stages"] == 2
+    assert h["cost_usd"] == pytest.approx(_sonnet_row_cost())
+    # dep1 in the base fixture has a single-use key only -- not counted.
+    h_dep1 = sm.shared_key_health(conn, ["dep1"])
+    assert h_dep1 == {"stages": 0, "keys": 0, "cost_usd": 0.0}
+
+
+def test_shared_key_health_empty_deploy_keys_boundary():
+    assert sm.shared_key_health(None, []) == {"stages": 0, "keys": 0, "cost_usd": 0.0}
+
+
+def test_agent_id_session_invariant_clean_when_one_session_per_key(tmp_path):
+    db = make_db(tmp_path)
+    insert_cc_row(db, "2026-06-01T00:00:00Z", "projA", agent_id="a1", session_id="s-1", dedupe_suffix="1")
+    insert_cc_row(db, "2026-06-01T00:05:00Z", "projA", agent_id="a1", session_id="s-1", dedupe_suffix="2")
+    conn = sqlite3.connect(db)
+    assert sm.agent_id_session_invariant(conn, ["projA"]) == {"violations": []}
+
+
+def test_agent_id_session_invariant_flags_two_sessions_same_key(tmp_path):
+    """Boundary: exactly 2 distinct session_ids for one (agent_id,
+    project) -- flags; 1 session (above test) does not."""
+    db = make_db(tmp_path)
+    insert_cc_row(db, "2026-06-01T00:00:00Z", "projA", agent_id="a1", session_id="s-1", dedupe_suffix="1")
+    insert_cc_row(db, "2026-06-01T01:00:00Z", "projA", agent_id="a1", session_id="s-2", dedupe_suffix="2")
+    conn = sqlite3.connect(db)
+    result = sm.agent_id_session_invariant(conn, ["projA"])
+    assert result["violations"] == [{"agent_id": "a1", "project": "projA", "sessions": 2}]
+
+
+def test_agent_id_session_invariant_empty_projects_boundary():
+    assert sm.agent_id_session_invariant(None, []) == {"violations": []}
+
+
+# ---------------------------------------------------------------------
 # stages_and_tasks_for_deploy -- E4 (self_exec), E9, E13, E14, stage
 # ordering / stage_kind / rework_stages (replacement excluded).
 # ---------------------------------------------------------------------
@@ -538,8 +792,9 @@ def test_e12_cc_usage_invariant_unchanged_by_rebuild(tmp_path):
 
 
 def test_e12_cc_usage_invariant_holds_on_empty_cc_usage(tmp_path):
-    # boundary: zero cc_usage rows at all -- invariant (0, None) must
-    # still match before/after, no crash.
+    # boundary: zero cc_usage rows at all -- invariant (0, None, empty
+    # hash) must still match before/after, no crash. row_hash of zero
+    # rows is sha256() of nothing -- computed, not hardcoded (item 6).
     db = make_db(tmp_path)
     j = tmp_path / "j.jsonl"
     write_journal(j, [])
@@ -547,7 +802,23 @@ def test_e12_cc_usage_invariant_holds_on_empty_cc_usage(tmp_path):
     before = sm.cc_usage_invariant(conn)
     sm.rebuild(conn, [("d", str(j))], {"d": "projX"})
     after = sm.cc_usage_invariant(conn)
-    assert before == after == {"count": 0, "sum": None}
+    assert before == after == {"count": 0, "sum": None, "row_hash": sm.cc_usage_row_hash(conn)}
+
+
+def test_cc_usage_row_hash_detects_row_level_change_invisible_to_count_sum(tmp_path):
+    """t-428 fix-batch item 6: count+sum alone is BLIND to a mutation
+    that swaps row CONTENT without changing the total row count or the
+    total priced cost -- the hash must still catch it."""
+    db = make_db(tmp_path)
+    insert_cc_row(db, "2026-06-01T00:00:00Z", "projA", agent_id="a1")
+    conn = sqlite3.connect(db)
+    before = sm.cc_usage_invariant(conn)
+    conn.execute("UPDATE cc_usage SET session_id = 'changed-session-id'")
+    conn.commit()
+    after = sm.cc_usage_invariant(conn)
+    assert before["count"] == after["count"]
+    assert before["sum"] == after["sum"]
+    assert before["row_hash"] != after["row_hash"]
 
 
 def test_rebuild_creates_run_units_and_window_series_empty(tmp_path):
@@ -1101,6 +1372,11 @@ def test_m10_per_tier_basic():
     out = sm._m10(tasks, stages)
     assert out["M10:sonnet"]["value"] == pytest.approx(10.0 / 2)
     assert out["M10:opus"]["value"] == pytest.approx(8.0 / 1)
+    # t-428 fix-batch "мелочь": M10's caveat rides alongside a real
+    # value too (same convention as M4B_CAVEAT), never silent about a
+    # multi-tier task landing in several M10 denominators.
+    assert out["M10:sonnet"]["reason"] == sm.M10_CAVEAT
+    assert out["M10:opus"]["reason"] == sm.M10_CAVEAT
 
 
 def test_m10_zero_accepted_for_tier_boundary():
@@ -1701,13 +1977,37 @@ def test_calibration_runs_missing_from_registry_reports_calibrated_events(tmp_pa
 
 def test_calibration_runs_missing_from_registry_clean_when_registry_has_calibration(tmp_path):
     db = _run_units_db(tmp_path)
+    # ts_start must PRECEDE the calibrated event's own ts (window end is
+    # exclusive, half-open [start,end)) -- a real calibration run always
+    # runs BEFORE the `calibrated` line that closes its window (item 3's
+    # per-window fix, t-428).
     _insert_run_unit(db, run_id="rc", run_kind="calibration", name="calibration",
-                      unit_kind=None, unit_count=None)
+                      unit_kind=None, unit_count=None,
+                      ts_start="2026-06-30T23:00:00", ts_end="2026-06-30T23:30:00")
     j = tmp_path / "j.jsonl"
     write_journal(j, [ev("2026-07-01T00:00:00", "calibrated", notes="n")])
     conn = sqlite3.connect(db)
     out = sm.calibration_runs_missing_from_registry(conn, deploys=[("d", str(j))])
     assert out == {}
+
+
+def test_calibration_runs_missing_from_registry_per_window_not_all_or_nothing(tmp_path):
+    """t-428 fix-batch item 3's own regression: TWO calibrated windows,
+    a registry row covers only the FIRST -- pre-fix, ANY registry row
+    anywhere silenced the WHOLE deploy's list; post-fix, the SECOND
+    window (uncovered) must still be reported."""
+    db = _run_units_db(tmp_path)
+    _insert_run_unit(db, run_id="rc", run_kind="calibration", name="calibration",
+                      unit_kind=None, unit_count=None,
+                      ts_start="2026-06-25T00:00:00", ts_end="2026-06-25T00:30:00")
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [
+        ev("2026-07-01T00:00:00", "calibrated", notes="n"),   # window 1: covered
+        ev("2026-07-08T00:00:00", "calibrated", notes="n"),   # window 2: NOT covered
+    ])
+    conn = sqlite3.connect(db)
+    out = sm.calibration_runs_missing_from_registry(conn, deploys=[("d", str(j))])
+    assert out == {"d": ["2026-07-08T00:00:00"]}
 
 
 def test_calibration_runs_missing_from_registry_no_calibrated_events_is_clean(tmp_path):

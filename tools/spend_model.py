@@ -65,6 +65,8 @@ itself never creates/touches cc_usage (Rule 0.2 / E12) -- it CREATEs
 from __future__ import annotations
 
 import argparse
+import bisect
+import hashlib
 import json
 import re
 import sqlite3
@@ -96,6 +98,20 @@ except AttributeError:
     pass
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# t-428 fix-batch item 6: every real (non-test) connection this module's
+# own CLI orchestration opens against the shared gateway/requests.db goes
+# through this, so a concurrent writer (another session's own report/
+# import run) gets a bounded wait instead of an immediate "database is
+# locked" -- test fixtures keep using bare sqlite3.connect() directly
+# (single-process, no concurrency to guard against there).
+BUSY_TIMEOUT_MS = 5000
+
+
+def connect_db(db_file) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_file)
+    conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
+    return conn
 
 # --------------------------------------------------------------------
 # 1. DEPLOYS config + empirical deploy -> cc_usage.project mapping
@@ -455,6 +471,135 @@ def _agent_stats_for_project(conn: sqlite3.Connection, project: str) -> dict:
     return stats
 
 
+# --------------------------------------------------------------------
+# 6a. SHARED-KEY TIME SPLIT (t-428 critic verdict, blocker fix 0).
+#
+# BUG (pre-fix): _agent_stats_for_project's per-agent_id AGGREGATE was
+# assigned WHOLE to EVERY stage that referenced that agent_key -- a
+# worker_ref reused across >1 delegated line (a retry landing on the
+# same dispatch id, several delegated lines of one worker, a key reused
+# across DIFFERENT tasks) multiplied that key's real money by the
+# number of stages sharing it. Live numbers (critic t-428): shtab 27
+# reused keys double-counted $281.15 of $1270.87; ao3 21 keys $360.96
+# (42.2%); window shtab:calibrated:6 both rework stages of t-344#2/
+# t-350#3 were byte-identical COPIES of stage #1's numbers.
+#
+# FIX: cc_usage rows of a key used by >1 stage of the SAME deploy
+# (cross-task, per O1's own "кросс-задачное") are split by TIME --
+# each row goes to the LAST stage (among ALL stages of the deploy
+# sharing the key) whose own ts_local is <= the row's ts (normalized
+# via normalize_cc_ts_to_local_naive, E1). A stage that receives zero
+# rows this way gets cost_usd=NULL (O3 -- "cost NULL честно", never a
+# silent 0). The single-stage-per-key case (the overwhelming majority)
+# is UNCHANGED -- it still reads _agent_stats_for_project's cheap
+# whole-key aggregate directly, no per-row fetch/sort for it.
+#
+# INVARIANT ASSUMPTION this split leans on (critic empirics 2026-08-13,
+# 0 of 2135 live (agent_id, project) pairs violate it): an agent_id is
+# unique within (session, project) -- i.e. a given agent_id, scoped to
+# one project, maps to exactly ONE session_id, never two unrelated
+# interleaved worker sessions coincidentally sharing an id. This is
+# what makes "sort this key's rows by ts and hand each to the
+# time-nearest stage" a CORRECT reconstruction of one continuous
+# worker timeline rather than an arbitrary interleaving of unrelated
+# sessions. Guarded, not just assumed -- see agent_id_session_invariant()
+# below (a health-section detector, not a silent trust).
+# --------------------------------------------------------------------
+def _agent_rows_for_project(conn: sqlite3.Connection, project: str, agent_ids) -> dict:
+    """Individual cc_usage ROWS (not pre-aggregated) for the given
+    agent_ids of one project -- fetched ONLY for the SHARED keys (used
+    by >1 stage of the deploy) that need per-row time splitting; the
+    common single-stage-per-key path never calls this (stays on
+    _agent_stats_for_project's cheap aggregate)."""
+    if not project or not agent_ids:
+        return {}
+    placeholders = ",".join("?" for _ in agent_ids)
+    rows = conn.execute(
+        f"""
+        SELECT agent_id, ts, input_tokens, output_tokens, cache_creation_tokens,
+               cache_read_tokens, accounted_cost_usd, model
+        FROM cc_usage WHERE project = ? AND agent_id IN ({placeholders})
+        """,
+        [project] + list(agent_ids),
+    ).fetchall()
+    out = defaultdict(list)
+    for agent_id, ts, inp, outp, cw, cr, cost, model in rows:
+        out[agent_id].append({
+            "ts_dt": normalize_cc_ts_to_local_naive(ts),
+            "input_tokens": inp or 0, "output_tokens": outp or 0,
+            "cache_creation_tokens": cw or 0, "cache_read_tokens": cr or 0,
+            "cost_usd": cost, "model": model,
+        })
+    return out
+
+
+def _aggregate_cc_rows(rows: list) -> dict:
+    """Same aggregate SHAPE/null-semantics as _agent_stats_for_project's
+    own per-key dict (cost_usd is NULL iff not even one priced row among
+    `rows`, E6/O3) -- computed here over an arbitrary ROW SUBSET (one
+    stage's time-sliced share of a shared key) instead of a whole key's
+    SQL GROUP BY. An empty `rows` list (a stage that received nothing
+    from the time split) returns the all-zero/NULL shape -- O3's
+    "cost NULL честно", never folded into a real 0 by a caller."""
+    if not rows:
+        return {"turns": 0, "input_tokens": 0, "output_tokens": 0,
+                "cache_creation_tokens": 0, "cache_read_tokens": 0,
+                "cost_usd": None, "unpriced_turns": 0, "models_measured": None}
+    priced = [r["cost_usd"] for r in rows if r["cost_usd"] is not None]
+    models = sorted({r["model"] for r in rows if r["model"]})
+    return {
+        "turns": len(rows),
+        "input_tokens": sum(r["input_tokens"] for r in rows),
+        "output_tokens": sum(r["output_tokens"] for r in rows),
+        "cache_creation_tokens": sum(r["cache_creation_tokens"] for r in rows),
+        "cache_read_tokens": sum(r["cache_read_tokens"] for r in rows),
+        "cost_usd": sum(priced) if priced else None,
+        "unpriced_turns": sum(1 for r in rows if r["cost_usd"] is None),
+        "models_measured": ",".join(models) if models else None,
+    }
+
+
+def _assign_rows_to_stage_slots(stage_slots: list, rows: list) -> None:
+    """Blocker fix 0's core assignment. `stage_slots`: dicts carrying
+    'ts_dt' (the STAGE's own journal ts, possibly None) and a mutable
+    'rows' accumulator list, ALL stages of the deploy that share one
+    agent_key (cross-task, O1). Each cc_usage `row` (dict with 'ts_dt')
+    is appended to EXACTLY ONE slot -- O1's own formula applied
+    literally: the LAST slot (by ts_dt) whose own ts_dt <= the row's
+    ts_dt. Two extensions, both needed for TOTAL correctness (a row is
+    NEVER silently dropped, O3) and both mirroring an EXISTING
+    convention already in this module rather than inventing a new one:
+      - a row whose ts precedes EVERY slot's own ts (clock skew, or
+        R12's journal-write BATCHING lag -- a `delegated` line's ts is
+        stamped at WRITE time, which can trail the worker's actual
+        first turns) clamps to the FIRST (earliest) slot -- the same
+        "extend the earliest bucket backward to -inf" shape
+        calibrated_windows() already uses for its own first window.
+      - a row with an unparsable/absent ts (should not occur on live
+        data -- cc_usage.ts is machine-written -- but must never crash)
+        clamps to the LAST slot, boundary-tested in test_spend_model.py.
+    A slot with ts_dt=None (the STAGE's own journal ts failed to parse)
+    is EXCLUDED from receiving rows at all -- O3's "стадия, которой не
+    досталось строк -- cost NULL честно", not a guess dressed as one.
+    If EVERY slot of this key lacks a parseable ts (degenerate, not
+    observed live), this is a no-op -- the caller's rows then simply
+    never get assigned anywhere for this key (would need a dedicated
+    orphan path if it ever occurs; not invented here per this module's
+    own "no fallback that empirically never fires" convention, see
+    module docstring KEY-FORM PROBE)."""
+    ordered = sorted((s for s in stage_slots if s["ts_dt"] is not None), key=lambda s: s["ts_dt"])
+    if not ordered:
+        return
+    stage_tss = [s["ts_dt"] for s in ordered]
+    for row in rows:
+        rts = row["ts_dt"]
+        if rts is None:
+            idx = len(ordered) - 1
+        else:
+            idx = max(bisect.bisect_right(stage_tss, rts) - 1, 0)
+        ordered[idx]["rows"].append(row)
+
+
 def _orphan_sidechain_bucket(conn: sqlite3.Connection, project: str, matched_keys: set):
     """E5: sidechain (subagent) cc_usage traffic whose agent_id is NEVER
     referenced by any journal delegated worker_ref of this deploy
@@ -591,10 +736,13 @@ def stages_and_tasks_for_deploy(conn: sqlite3.Connection, deploy_key: str,
 
     agent_stats = _agent_stats_for_project(conn, project)
 
-    stage_rows = []
-    task_rows = []
-    matched_agent_keys = set()
-
+    # ---- PASS 1: stage SKELETONS (everything except cc_usage-derived
+    # fields) -- built per task exactly as before, but cost/turns/tokens
+    # are filled in PASS 2 below, only once EVERY stage of the deploy
+    # sharing a key is known (fix 0 needs the full picture to decide
+    # fast-path vs time-split per key -- see section 6a above).
+    skeletons_by_task = {}
+    all_skeletons = []
     for tid, pls in delegated_by_task.items():
         pls_sorted = sorted(pls, key=lambda pl: (pl.ts or datetime.min, pl.line_no))
         # O1/is_rework (B2): first_rejected_line computed ONCE per task,
@@ -604,25 +752,55 @@ def stages_and_tasks_for_deploy(conn: sqlite3.Connection, deploy_key: str,
             e.line_no for e in events_by_task[tid] if e.data.get("event") == "rejected"
         ]
         first_rejected_line = min(rejected_lines_tid) if rejected_lines_tid else None
-        stages = []
+        skeletons = []
         for idx, pl in enumerate(pls_sorted, start=1):
             branch = branch_by_line.get(pl.line_no)
             stage_kind = _stage_kind(branch)
             worker_ref = pl.data.get("worker_ref")
             agent_key = norm_worker_ref(worker_ref)
             measurable = 1 if agent_key is not None else 0
-            stat = agent_stats.get(agent_key) if agent_key else None
-            if agent_key:
-                matched_agent_keys.add(agent_key)
             is_rework = 1 if (first_rejected_line is not None
                                and pl.line_no > first_rejected_line
                                and stage_kind != "replacement") else 0
-            stage = {
+            skeletons.append({
                 "deploy": deploy_key, "task_id": tid, "stage_index": idx,
                 "journal_line": pl.line_no,
                 "ts_local": pl.data.get("ts"), "ts_dt": pl.ts,
                 "agent": pl.data.get("agent"), "model_declared": pl.data.get("model"),
                 "worker_ref": worker_ref, "agent_key": agent_key, "project": project,
+                "stage_kind": stage_kind, "measurable": measurable,
+                "is_rework": is_rework, "rows": [],
+            })
+        skeletons_by_task[tid] = skeletons
+        all_skeletons.extend(skeletons)
+
+    # ---- PASS 2: cc_usage join. Fast path (a key used by exactly ONE
+    # stage of this deploy -- the overwhelming common case) reads
+    # _agent_stats_for_project's cheap whole-key aggregate unchanged;
+    # a SHARED key (>1 stage) gets its individual cc_usage rows fetched
+    # once (batched across all shared keys of this deploy) and split by
+    # time via _assign_rows_to_stage_slots (fix 0, blocker t-428).
+    by_key = defaultdict(list)
+    for sk in all_skeletons:
+        if sk["agent_key"] is not None:
+            by_key[sk["agent_key"]].append(sk)
+
+    shared_keys = [k for k, sks in by_key.items() if len(sks) > 1]
+    shared_rows_by_key = _agent_rows_for_project(conn, project, shared_keys) if shared_keys else {}
+    for key in shared_keys:
+        _assign_rows_to_stage_slots(by_key[key], shared_rows_by_key.get(key, []))
+
+    stage_rows = []
+    for sk in all_skeletons:
+        key = sk["agent_key"]
+        if key is None:
+            agg = _aggregate_cc_rows([])
+        elif key in shared_keys:
+            agg = _aggregate_cc_rows(sk.pop("rows"))
+        else:
+            sk.pop("rows", None)
+            stat = agent_stats.get(key)
+            agg = {
                 "turns": stat["turns"] if stat else 0,
                 "input_tokens": stat["input_tokens"] if stat else 0,
                 "output_tokens": stat["output_tokens"] if stat else 0,
@@ -631,13 +809,16 @@ def stages_and_tasks_for_deploy(conn: sqlite3.Connection, deploy_key: str,
                 "cost_usd": stat["cost_usd"] if stat else None,
                 "unpriced_turns": stat["unpriced_turns"] if stat else 0,
                 "models_measured": stat["models_measured"] if stat else None,
-                "stage_kind": stage_kind, "measurable": measurable,
-                "is_rework": is_rework,
             }
-            stages.append(stage)
-            stage_rows.append(stage)
+        sk.pop("rows", None)
+        sk.update(agg)
+        stage_rows.append(sk)
 
-        task_rows.append(_build_task_row(deploy_key, tid, stages, events_by_task[tid], windows))
+    matched_agent_keys = set(by_key.keys())
+
+    task_rows = []
+    for tid, skeletons in skeletons_by_task.items():
+        task_rows.append(_build_task_row(deploy_key, tid, skeletons, events_by_task[tid], windows))
 
     orphan = _orphan_sidechain_bucket(conn, project, matched_agent_keys)
     if orphan is not None:
@@ -871,13 +1052,94 @@ def _dump_derived_tables(conn: sqlite3.Connection) -> str:
     return "\n".join(parts)
 
 
+def cc_usage_row_hash(conn: sqlite3.Connection) -> str:
+    """t-428 fix-batch item 6: STRONGER E12 witness than count+sum alone
+    -- a sha256 over every cc_usage row (ordered by its own PK `id`),
+    so a mutation that preserves COUNT and SUM(cost) (e.g. two rows'
+    session_id/model swapped, or any non-cost column edited) is still
+    caught. See test_cc_usage_row_hash_detects_row_level_change_
+    invisible_to_count_sum for the fixture proving this beyond what
+    count+sum alone would catch."""
+    rows = conn.execute(
+        "SELECT id, ts, project, session_id, turn_index, model, input_tokens, output_tokens,"
+        " cache_creation_tokens, cache_read_tokens, accounted_cost_usd, traffic_kind,"
+        " is_sidechain, agent_id, agent_type, dedupe_key FROM cc_usage ORDER BY id"
+    ).fetchall()
+    h = hashlib.sha256()
+    for r in rows:
+        h.update(repr(r).encode("utf-8"))
+    return h.hexdigest()
+
+
 def cc_usage_invariant(conn: sqlite3.Connection) -> dict:
     """E12's guard witness: COUNT(*) / SUM(COALESCE(accounted_cost_usd,0))
-    of cc_usage -- compare before/after rebuild()."""
+    of cc_usage, PLUS a full row-content hash (item 6 strengthening,
+    see cc_usage_row_hash) -- compare before/after rebuild()."""
     row = conn.execute(
         "SELECT COUNT(*), SUM(COALESCE(accounted_cost_usd, 0)) FROM cc_usage"
     ).fetchone()
-    return {"count": row[0], "sum": row[1]}
+    return {"count": row[0], "sum": row[1], "row_hash": cc_usage_row_hash(conn)}
+
+
+# --------------------------------------------------------------------
+# 8a. t-428 fix-batch item 0 (health witness) + item 6 (invariant guard).
+# --------------------------------------------------------------------
+def shared_key_health(conn: sqlite3.Connection, deploy_keys: list) -> dict:
+    """Blocker fix 0's own health witness line ("стадий, делящих ключ:
+    N (M ключей, $X под раскладкой)") -- computed from the STORED
+    task_stage_costs table post-rebuild (deploy-scoped, matching
+    build_r4_3's other subsections' "по всей истории деплоя(ев)"
+    convention), never re-derived from the join. N=total stages sharing
+    a key with >=1 sibling stage, M=distinct (deploy, agent_key) groups,
+    $X=Σ cost_usd of those stages (informational total -- COALESCE to 0
+    per row, matching cc_usage_invariant's own aggregate style; this is
+    a descriptive count line, not one of O3's protected metric
+    outputs)."""
+    if not deploy_keys:
+        return {"stages": 0, "keys": 0, "cost_usd": 0.0}
+    placeholders = ",".join("?" for _ in deploy_keys)
+    rows = conn.execute(
+        f"""
+        SELECT deploy, agent_key, COUNT(*), SUM(COALESCE(cost_usd, 0))
+        FROM task_stage_costs
+        WHERE agent_key IS NOT NULL AND deploy IN ({placeholders})
+        GROUP BY deploy, agent_key
+        HAVING COUNT(*) > 1
+        """,
+        deploy_keys,
+    ).fetchall()
+    return {"stages": sum(r[2] for r in rows), "keys": len(rows),
+            "cost_usd": sum(r[3] for r in rows)}
+
+
+def agent_id_session_invariant(conn: sqlite3.Connection, projects: list) -> dict:
+    """t-428 fix-batch item 0's invariant-assumption guard. Assumption
+    (critic empirics 2026-08-13: 0 of 2135 live (agent_id, project)
+    pairs violate it, comment above section 6a): within one project, an
+    agent_id maps to exactly ONE session_id -- the load-bearing premise
+    behind the shared-key TIME split (sorting one key's cc_usage rows
+    by ts and handing each to the time-nearest stage is only a correct
+    reconstruction of ONE continuous worker timeline if all of that
+    key's rows genuinely belong to that one timeline, not two unrelated
+    sessions coincidentally sharing an id). A violation does not crash
+    anything (rows still get *some* time-ordered assignment) but would
+    silently degrade the split's correctness -- surfaced LOUDLY here
+    (O3/D-0063: a detector, not a silent trust) rather than assumed
+    forever. Empty `violations` list = clean."""
+    if not projects:
+        return {"violations": []}
+    placeholders = ",".join("?" for _ in projects)
+    rows = conn.execute(
+        f"""
+        SELECT agent_id, project, COUNT(DISTINCT session_id)
+        FROM cc_usage
+        WHERE agent_id IS NOT NULL AND project IN ({placeholders})
+        GROUP BY agent_id, project
+        HAVING COUNT(DISTINCT session_id) > 1
+        """,
+        projects,
+    ).fetchall()
+    return {"violations": [{"agent_id": r[0], "project": r[1], "sessions": r[2]} for r in rows]}
 
 
 # --------------------------------------------------------------------
@@ -941,6 +1203,34 @@ def resolve_project_or_refuse(conn: sqlite3.Connection, project: str) -> bool:
         return True
     print(f"spend_model: 0 строк в cc_usage для project={project!r} -- отказ (E10)",
           file=sys.stderr)
+    print_distinct_projects(conn)
+    return False
+
+
+def resolve_project_or_refuse_if_data_elsewhere(conn: sqlite3.Connection, project: str) -> bool:
+    """t-428 fix-batch item 6's E10 discipline for spend_report.py/
+    spend_dashboard.py's CLI entry points -- DELIBERATELY NARROWER than
+    resolve_project_or_refuse above (which refuses on ANY 0-row project,
+    used only via spend_model's own explicit user-typed --project
+    string): fires ONLY when cc_usage has data for SOME OTHER project
+    but ZERO for the requested one -- a genuine misconfiguration signal
+    (E10's own class, "коллизия agent_id между проектами машины" implies
+    other project data on this SAME machine). An entirely-empty cc_usage
+    table (0 rows for EVERY project) is a legitimate bootstrap/first-run
+    state and stays alive -- documented judgment call (t-428 report):
+    the literal "any 0-row project refuses" reading would have broken
+    the adversarial battery's own PRE-EXISTING, already-accepted
+    "пустой журнал -> прогон жив" contract (test_battery_empty_journal_
+    stays_alive / test_battery_empty_window_series_shows_no_data_not_
+    crash, both from the ORIGINAL v1 spec's DoD) -- this predicate
+    resolves that conflict rather than silently picking one side."""
+    if project_has_rows(conn, project):
+        return True
+    total = conn.execute("SELECT COUNT(*) FROM cc_usage").fetchone()[0]
+    if total == 0:
+        return True  # bootstrap/first-run -- legal, not E10
+    print(f"spend_report/spend_dashboard: 0 строк в cc_usage для project={project!r},"
+          f" но другие проекты этой машины данные ИМЕЮТ -- отказ (E10)", file=sys.stderr)
     print_distinct_projects(conn)
     return False
 
@@ -1051,7 +1341,7 @@ def run_selftest(db_file: Path, deploys=None, deploy_project=None, skip_import: 
         "sessions": len(sessions), "warnings": warnings, "over_60s": elapsed > 60,
     }
 
-    conn = sqlite3.connect(db_file)
+    conn = connect_db(db_file)
     try:
         report["key_probe"] = probe_key_form(conn, deploys, deploy_project)
         report["slug_mapping"] = _slug_mapping_report(conn, deploys, deploy_project)
@@ -1070,6 +1360,21 @@ def run_selftest(db_file: Path, deploys=None, deploy_project=None, skip_import: 
         }
         report["run_units_import"] = stats2["run_units"]  # B4 (accept key 1: candidates printed)
         report["cc_usage_invariant"] = {"before": before, "after": after, "match": before == after}
+
+        # t-428 fix-batch item 0: raskladka witness numbers, per deploy
+        # ("стадий, делящих ключ: N (M ключей, $X под раскладкой)").
+        shared_health = {}
+        for deploy_key, _journal_path in deploys:
+            shared_health[deploy_key] = shared_key_health(conn, [deploy_key])
+        report["shared_key_health"] = shared_health
+
+        # item 0's invariant-assumption guard, per project.
+        invariant_by_project = {}
+        for deploy_key, _journal_path in deploys:
+            project = deploy_project.get(deploy_key)
+            if project and project not in invariant_by_project:
+                invariant_by_project[project] = agent_id_session_invariant(conn, [project])
+        report["agent_id_session_invariant"] = invariant_by_project
 
         windows_report = {}
         for deploy_key, journal_path in deploys:
@@ -1138,6 +1443,20 @@ def render_selftest(report: dict) -> str:
     cci = report["cc_usage_invariant"]
     lines.append(f"  cc_usage invariant before/after match: {cci['match']} "
                  f"(before={cci['before']}, after={cci['after']})")
+
+    lines.append("")
+    lines.append("[раскладка разделяемых ключей, t-428 fix 0]")
+    for deploy_key, h in report.get("shared_key_health", {}).items():
+        lines.append(f"  {deploy_key}: стадий, делящих ключ: {h['stages']}"
+                     f" ({h['keys']} ключей, ${round(h['cost_usd'], 4)} под раскладкой)")
+
+    lines.append("")
+    lines.append("[инвариант agent_id~session, t-428 fix 0]")
+    for project, inv in report.get("agent_id_session_invariant", {}).items():
+        if inv["violations"]:
+            lines.append(f"  {project}: НАРУШЕНИЙ {len(inv['violations'])}: {inv['violations']}")
+        else:
+            lines.append(f"  {project}: чисто (0 нарушений)")
 
     lines.append("")
     lines.append("[run_units import, B4]")
@@ -1222,6 +1541,9 @@ def render_selftest(report: dict) -> str:
 #     rather than one combined number -- the two components are not
 #     commensurable (a $ share and a stage-count share).
 # ========================================================================
+
+M10_CAVEAT = ("многоярусная задача входит в несколько знаменателей M10"
+              " (denominator = 'принятые задачи, имевшие >=1 стадию яруса')")
 
 M4B_CAVEAT = ("M4b включает не-задачную работу координатора (диалог, бут, "
               "калибровка, релизы)")
@@ -1471,20 +1793,43 @@ def _m5(task_rows: list) -> dict:
 # 15. Q2 -- M6/M7/M8/M12 (run_units-backed; E7: honest "н/д" while the
 #     registry table has zero rows -- B4 not dispatched yet).
 # --------------------------------------------------------------------
+SESSION_ID_FALLBACK_NOTE = "фолбэк по времени всего проекта (session_id недоступен)"
+
+
 def _session_cost_in_span(conn: sqlite3.Connection, projects: list, session_id,
                            ts_start_dt, ts_end_dt):
-    """Returns (cost_or_None, unpriced_count, reason_or_None). Searches
+    """Returns (cost_or_None, unpriced_count, note_or_None). Searches
     ACROSS all `projects` in scope (run_units carries no project column
     of its own -- session_id is the join key, matched against whichever
-    project it actually belongs to)."""
-    if not projects or not session_id or ts_start_dt is None or ts_end_dt is None:
+    project it actually belongs to).
+
+    t-428 fix-batch item 4: when `session_id` is absent, this no longer
+    refuses outright ("border bounds present but no session_id" used to
+    collapse straight to "н/д (границы прогона неполны)", identical to
+    the genuinely-missing-bounds case) -- it FALLS BACK to every
+    cc_usage row of the project(s) in [ts_start, ts_end), unfiltered by
+    session (spec B4's own documented, previously undelivered path --
+    "довести до работы"). `note` then carries SESSION_ID_FALLBACK_NOTE
+    even when a real cost value IS found (mirrors M13's permanent
+    'ПРОКСИ' caveat / M4b's standing caveat convention -- a caveat can
+    ride alongside a real value, not just an error)."""
+    if not projects or ts_start_dt is None or ts_end_dt is None:
         return None, 0, "н/д (границы прогона неполны)"
     placeholders = ",".join("?" for _ in projects)
-    rows = _query_dicts(
-        conn,
-        f"SELECT ts, accounted_cost_usd FROM cc_usage WHERE project IN ({placeholders}) AND session_id=?",
-        list(projects) + [session_id],
-    )
+    if session_id:
+        rows = _query_dicts(
+            conn,
+            f"SELECT ts, accounted_cost_usd FROM cc_usage WHERE project IN ({placeholders}) AND session_id=?",
+            list(projects) + [session_id],
+        )
+        note = None
+    else:
+        rows = _query_dicts(
+            conn,
+            f"SELECT ts, accounted_cost_usd FROM cc_usage WHERE project IN ({placeholders})",
+            list(projects),
+        )
+        note = SESSION_ID_FALLBACK_NOTE
     costs, unpriced = [], 0
     for r in rows:
         dt = normalize_cc_ts_to_local_naive(r["ts"])
@@ -1495,8 +1840,9 @@ def _session_cost_in_span(conn: sqlite3.Connection, projects: list, session_id,
         else:
             costs.append(r["accounted_cost_usd"])
     if not costs and unpriced == 0:
-        return None, 0, "нет строк cc_usage в границах прогона"
-    return (sum(costs) if costs else None), unpriced, None
+        empty_reason = "нет строк cc_usage в границах прогона"
+        return None, 0, (f"{note}; {empty_reason}" if note else empty_reason)
+    return (sum(costs) if costs else None), unpriced, note
 
 
 def m6_run_cost(conn: sqlite3.Connection, projects: list, run_row: dict) -> dict:
@@ -1505,13 +1851,11 @@ def m6_run_cost(conn: sqlite3.Connection, projects: list, run_row: dict) -> dict
     per decision (б))."""
     ts_start = cc_counts.parse_ts(run_row.get("ts_start"))
     ts_end = cc_counts.parse_ts(run_row.get("ts_end"))
-    cost, unpriced, reason = _session_cost_in_span(conn, projects, run_row.get("session_id"),
-                                                     ts_start, ts_end)
-    if reason:
-        return _metric(unpriced_turns=unpriced, reason=reason)
+    cost, unpriced, note = _session_cost_in_span(conn, projects, run_row.get("session_id"),
+                                                  ts_start, ts_end)
     if cost is None:
-        return _metric(unpriced_turns=unpriced, reason="строки прогона без цены")
-    return _metric(cost, "run_session_span", None, unpriced, None)
+        return _metric(unpriced_turns=unpriced, reason=note or "строки прогона без цены")
+    return _metric(cost, "run_session_span", None, unpriced, note)
 
 
 def _run_units_level_rows_in_window(conn: sqlite3.Connection, ws, we) -> list:
@@ -1616,18 +1960,27 @@ def calibration_runs_missing_from_registry(conn: sqlite3.Connection, deploys=Non
     in the B4 handoff report as an owns-boundary question, not silently
     decided by editing a file outside owns.
 
-    Per deploy: every journal.event=="calibrated" line (a VISIBLE,
-    journal-attested calibration run) is reported as "missing" when the
-    run_units registry carries NO run_kind='calibration' row AT ALL --
-    deliberately CHEAP (v1, section 2's own word): no time-window
-    matching a specific calibrated event to a specific registry row
-    (that finer join is B5's own calibration-protocol wiring to make,
-    once it actually writes those rows -- "эта часть после B5 оживёт").
-    Returns {} when every in-scope deploy is clean (registry already has
-    >=1 calibration row) or has zero calibrated events; a deploy whose
-    journal is unreadable is silently skipped here (E14-adjacent,
-    matches this module's own established convention for an absent
-    journal -- not this function's job to raise).
+    Per deploy, PER-WINDOW (t-428 fix-batch item 3, replacing the
+    pre-fix ALL-OR-NOTHING check): every journal.event=="calibrated"
+    line (a VISIBLE, journal-attested calibration run) is reported as
+    "missing" when NO run_kind='calibration' registry row's own
+    ts_start falls WITHIN that calibrated event's own window (the
+    half-open [window_start, window_end) calibrated_windows() already
+    computes -- a legit calibration run happens BEFORE the `calibrated`
+    journal line that closes it, so its registry row's ts_start must
+    precede that window's own end). Pre-fix bug: once ANY calibration
+    row existed ANYWHERE, EVERY deploy's list went permanently silent
+    (`registry_has_calibration` was a single machine-wide bool) -- a
+    window with a real gap stayed invisible as soon as some OTHER
+    window got its registry row. Deliberately still CHEAP (v1, section
+    2's own word) in one respect: it does not need a second join to a
+    SPECIFIC calibrated event beyond the window-membership test itself
+    (calibrated_windows()'s own boundaries already are that join).
+    Returns {} when every in-scope deploy has zero calibrated events (or
+    every calibrated window IS covered); a deploy whose journal is
+    unreadable is silently skipped (E14-adjacent, this module's own
+    established convention for an absent journal -- not this function's
+    job to raise).
 
     LIMITATION (documented per this task's point 4, not a detector):
     a skill run that never wrote a `calibrated`/`delegated` journal
@@ -1635,9 +1988,13 @@ def calibration_runs_missing_from_registry(conn: sqlite3.Connection, deploys=Non
     CONSTRUCTION -- a disciplinary-layer gap, not a machine-catchable
     one (check 18(д) class)."""
     deploys = DEPLOYS if deploys is None else deploys
-    registry_has_calibration = conn.execute(
-        "SELECT COUNT(*) FROM run_units WHERE run_kind='calibration' AND phase IS NULL"
-    ).fetchone()[0] > 0
+    calib_starts = []
+    for (ts_start,) in conn.execute(
+        "SELECT ts_start FROM run_units WHERE run_kind='calibration' AND phase IS NULL"
+    ):
+        dt = cc_counts.parse_ts(ts_start)
+        if dt is not None:
+            calib_starts.append(dt)
     out = {}
     for deploy_key, journal_path in deploys:
         try:
@@ -1648,8 +2005,15 @@ def calibration_runs_missing_from_registry(conn: sqlite3.Connection, deploys=Non
                       if pl.data and pl.data.get("event") == "calibrated" and pl.ts]
         if not cal_events:
             continue
-        if not registry_has_calibration:
-            out[deploy_key] = [pl.ts.isoformat() for pl in cal_events]
+        cal_tss = sorted(pl.ts for pl in cal_events)
+        windows = calibrated_windows(deploy_key, cal_tss)
+        missing_tss = []
+        for w, ts in zip(windows, cal_tss):
+            covered = any(_ts_in_window(cs, w["window_start"], w["window_end"]) for cs in calib_starts)
+            if not covered:
+                missing_tss.append(ts)
+        if missing_tss:
+            out[deploy_key] = [ts.isoformat() for ts in missing_tss]
     return out
 
 
@@ -1711,7 +2075,7 @@ def _m10(task_rows: list, stage_rows: list) -> dict:
             out[key] = _metric(denominator_kind="accepted_tier_tasks", denominator_value=denom,
                                 unpriced_turns=unpriced, reason=f"стадии яруса {tier} без цены")
             continue
-        out[key] = _metric(cost_sum / denom, "accepted_tier_tasks", denom, unpriced, None)
+        out[key] = _metric(cost_sum / denom, "accepted_tier_tasks", denom, unpriced, M10_CAVEAT)
     return out
 
 
@@ -2116,7 +2480,7 @@ def cmd_compute_window(db_file: Path, deploys=None, deploy_project=None,
     deploy_project = DEPLOY_PROJECT if deploy_project is None else deploy_project
     if not skip_import:
         import_transcripts(transcript_glob(), db_file)
-    conn = sqlite3.connect(db_file)
+    conn = connect_db(db_file)
     try:
         rebuild(conn, deploys, deploy_project)
         compute_window_series(conn, deploys, deploy_project)
@@ -2161,7 +2525,7 @@ def main(argv=None) -> int:
     db_file = Path(args.db) if args.db else _cc_db_path()
 
     if args.project is not None:
-        conn = sqlite3.connect(db_file)
+        conn = connect_db(db_file)
         try:
             if not resolve_project_or_refuse(conn, args.project):
                 return 2
