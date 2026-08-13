@@ -59,6 +59,27 @@ handoff проверяет вечером.
    FAIL чинится ДО закрытия сессии, а не записывается «на потом».
    Финальный коммит и push — последнее действие сессии.
 
+## Учёт прогона (spend-мониторинг)
+
+В НАЧАЛЕ прогона (перед шагом 1) и в КОНЦЕ (после шага 6) — одна
+JSON-строка в logs/run_units.jsonl (Edit/Write, гигиена п.4/5); форма
+дословно {"ts","run_id","run_kind","name","phase","event",
+"session_id","unit_kind","unit_count","source"}
+(docs/tasks/2026-08-13_spend-analytics.md раздел 2); `event` этого
+скилла — только "run_start"/"run_end" (фазовых меток этот скилл НЕ
+пишет, решение (б) спеки — только большие многофазные скиллы, `phase`
+всегда `null`). run_id — единый для всех строк прогона, форма
+"session-handoff-<ts начала>". unit_kind/unit_count — `checks_passed`,
+число пунктов 1–5 со статусом OK (шаг 6), пишется на `run_end`.
+session_id — id текущей сессии, если известен; иначе `null` (M6 для
+прогона тогда «н/д», это легально, E7).
+
+Пример начала:
+`{"ts":"2026-08-13T15:00:00","run_id":"session-handoff-2026-08-13T15:00:00","run_kind":"skill","name":"session-handoff","phase":null,"event":"run_start","session_id":null,"unit_kind":null,"unit_count":null,"source":"session-handoff/SKILL.md"}`
+
+Пример конца:
+`{"ts":"2026-08-13T15:05:00","run_id":"session-handoff-2026-08-13T15:00:00","run_kind":"skill","name":"session-handoff","phase":null,"event":"run_end","session_id":null,"unit_kind":"checks_passed","unit_count":5,"source":"session-handoff/SKILL.md"}`
+
 Детектор пропуска этого чека — Boot Report СЛЕДУЮЩЕЙ сессии
 (BOOT_REPORT_PROTOCOL.md, правило 6): грязное дерево или расхождение
 с origin на старте = прошлая сессия закрылась без handoff-проверки;

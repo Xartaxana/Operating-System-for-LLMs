@@ -23,6 +23,23 @@ import token_usage_stats as tus
 import usage_report
 
 
+@pytest.fixture(autouse=True)
+def _isolate_run_units_path(tmp_path, monkeypatch):
+    """B4: rebuild() now ALSO imports sm.RUN_UNITS_PATH internally (own
+    table, own transaction, E7-legal-absent) -- isolate EVERY test in
+    this module, including the pre-existing rebuild() call sites
+    (B1/B2), from the real repo's logs/run_units.jsonl, matching this
+    module's own stated isolation contract (module docstring: "no test
+    touches the real 3-deploy DEPLOYS config or the real
+    gateway/requests.db"). Without this, a rebuild() call anywhere in
+    this file would silently read whatever the REAL logs/run_units.jsonl
+    happens to contain the day a skill first writes to it -- a latent
+    flakiness class (D-0043: fixed at the class, once, here, rather than
+    threading an explicit override through every one of the ~15 existing
+    rebuild() call sites)."""
+    monkeypatch.setattr(sm, "RUN_UNITS_PATH", tmp_path / "run_units.jsonl")
+
+
 # ---------------------------------------------------------------------
 # Fixture helpers
 # ---------------------------------------------------------------------
@@ -1341,6 +1358,375 @@ def test_count_protocol_checks_unavailable_boundary(tmp_path):
 
 def test_count_protocol_checks_real_protocol_is_33():
     assert sm.count_protocol_checks() == 33
+
+
+# -----------------------------------------------------------------------
+# import_run_units (B4, docs/tasks/2026-08-13_spend-analytics.md
+# section 2/6/7 node B4) -- raw run_units.jsonl -> run_units TABLE.
+# -----------------------------------------------------------------------
+def test_import_run_units_absent_file_is_legal(tmp_path):
+    db = _run_units_db(tmp_path)
+    conn = sqlite3.connect(db)
+    report = sm.import_run_units(conn, path=tmp_path / "nope.jsonl")
+    assert report == {"legal_absent": True, "level_rows": 0, "phase_rows": 0, "candidates": []}
+    assert conn.execute("SELECT COUNT(*) FROM run_units").fetchone()[0] == 0
+
+
+def test_import_run_units_wipes_stale_rows_when_file_later_absent(tmp_path):
+    db = _run_units_db(tmp_path)
+    p = tmp_path / "ru.jsonl"
+    write_journal(p, [
+        {"ts": "2026-07-01T00:00:00", "run_id": "r1", "run_kind": "skill", "name": "kit-release",
+         "phase": None, "event": "run_start", "session_id": None, "unit_kind": None,
+         "unit_count": None, "source": "kit-release/SKILL.md"},
+    ])
+    conn = sqlite3.connect(db)
+    sm.import_run_units(conn, path=p)
+    assert conn.execute("SELECT COUNT(*) FROM run_units").fetchone()[0] == 1
+    report = sm.import_run_units(conn, path=tmp_path / "gone.jsonl")
+    assert report["legal_absent"] is True
+    assert conn.execute("SELECT COUNT(*) FROM run_units").fetchone()[0] == 0
+
+
+def test_import_run_units_basic_run_start_end(tmp_path):
+    db = _run_units_db(tmp_path)
+    p = tmp_path / "ru.jsonl"
+    write_journal(p, [
+        {"ts": "2026-08-13T15:00:00", "run_id": "r1", "run_kind": "skill", "name": "kit-release",
+         "phase": None, "event": "run_start", "session_id": "s-1", "unit_kind": None,
+         "unit_count": None, "source": "kit-release/SKILL.md"},
+        {"ts": "2026-08-13T15:40:00", "run_id": "r1", "run_kind": "skill", "name": "kit-release",
+         "phase": None, "event": "run_end", "session_id": "s-1", "unit_kind": "sync_pairs",
+         "unit_count": 86, "source": "kit-release/SKILL.md"},
+    ])
+    conn = sqlite3.connect(db)
+    report = sm.import_run_units(conn, path=p)
+    assert report["legal_absent"] is False
+    assert report["level_rows"] == 1
+    assert report["phase_rows"] == 0
+    assert report["candidates"] == []
+    row = conn.execute(
+        "SELECT ts_start, ts_end, unit_kind, unit_count, session_id FROM run_units"
+        " WHERE run_id='r1' AND phase IS NULL"
+    ).fetchone()
+    assert row == ("2026-08-13T15:00:00", "2026-08-13T15:40:00", "sync_pairs", 86, "s-1")
+
+
+def test_import_run_units_idempotent_byte_identical(tmp_path):
+    db = _run_units_db(tmp_path)
+    p = tmp_path / "ru.jsonl"
+    write_journal(p, [
+        {"ts": "2026-08-13T15:00:00", "run_id": "r1", "run_kind": "skill", "name": "boot-diet",
+         "phase": None, "event": "run_start", "session_id": None, "unit_kind": None,
+         "unit_count": None, "source": "boot-diet/SKILL.md"},
+        {"ts": "2026-08-13T15:10:00", "run_id": "r1", "run_kind": "skill", "name": "boot-diet",
+         "phase": None, "event": "run_end", "session_id": None, "unit_kind": "boot_bytes",
+         "unit_count": 61234, "source": "boot-diet/SKILL.md"},
+    ])
+    conn = sqlite3.connect(db)
+    sm.import_run_units(conn, path=p)
+    dump1 = sm._dump_derived_tables(conn)
+    sm.import_run_units(conn, path=p)
+    dump2 = sm._dump_derived_tables(conn)
+    sm.import_run_units(conn, path=p)
+    dump3 = sm._dump_derived_tables(conn)
+    assert dump1 == dump2 == dump3
+    assert "run_units" in dump1
+
+
+def test_import_run_units_unparsable_line_candidate_import_stays_alive(tmp_path):
+    db = _run_units_db(tmp_path)
+    p = tmp_path / "ru.jsonl"
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("{not json\n")
+        fh.write(json.dumps({
+            "ts": "2026-08-13T15:00:00", "run_id": "r1", "run_kind": "skill",
+            "name": "permission-audit", "phase": None, "event": "run_start",
+            "session_id": None, "unit_kind": None, "unit_count": None,
+            "source": "permission-audit/SKILL.md",
+        }, ensure_ascii=False) + "\n")
+        fh.write(json.dumps({
+            "ts": "2026-08-13T15:05:00", "run_id": "r1", "run_kind": "skill",
+            "name": "permission-audit", "phase": None, "event": "run_end",
+            "session_id": None, "unit_kind": "prompts_analyzed", "unit_count": 40,
+            "source": "permission-audit/SKILL.md",
+        }, ensure_ascii=False) + "\n")
+    conn = sqlite3.connect(db)
+    report = sm.import_run_units(conn, path=p)
+    assert report["legal_absent"] is False
+    assert report["level_rows"] == 1
+    assert len(report["candidates"]) == 1
+    assert report["candidates"][0]["line"] == 1
+
+
+def test_import_run_units_missing_run_id_is_candidate(tmp_path):
+    db = _run_units_db(tmp_path)
+    p = tmp_path / "ru.jsonl"
+    write_journal(p, [{"ts": "2026-07-01T00:00:00", "run_kind": "skill", "name": "x",
+                        "phase": None, "event": "run_start", "session_id": None,
+                        "unit_kind": None, "unit_count": None, "source": "x"}])
+    conn = sqlite3.connect(db)
+    report = sm.import_run_units(conn, path=p)
+    assert report["level_rows"] == 0
+    assert any("run_id" in c["error"] for c in report["candidates"])
+
+
+def test_import_run_units_unknown_event_is_candidate(tmp_path):
+    db = _run_units_db(tmp_path)
+    p = tmp_path / "ru.jsonl"
+    write_journal(p, [{"ts": "2026-07-01T00:00:00", "run_id": "r1", "run_kind": "skill",
+                        "name": "x", "phase": None, "event": "run_pause", "session_id": None,
+                        "unit_kind": None, "unit_count": None, "source": "x"}])
+    conn = sqlite3.connect(db)
+    report = sm.import_run_units(conn, path=p)
+    assert report["level_rows"] == 0
+    assert any("event" in c["error"] for c in report["candidates"])
+
+
+def test_import_run_units_bad_ts_is_candidate(tmp_path):
+    db = _run_units_db(tmp_path)
+    p = tmp_path / "ru.jsonl"
+    write_journal(p, [{"ts": "not-a-date", "run_id": "r1", "run_kind": "skill", "name": "x",
+                        "phase": None, "event": "run_start", "session_id": None,
+                        "unit_kind": None, "unit_count": None, "source": "x"}])
+    conn = sqlite3.connect(db)
+    report = sm.import_run_units(conn, path=p)
+    assert report["level_rows"] == 0
+    assert any("ts" in c["error"] for c in report["candidates"])
+
+
+def test_import_run_units_open_run_no_end_is_na(tmp_path):
+    # E7/M6 boundary: run_start with NO run_end -- "прогон открыт".
+    db = _run_units_db(tmp_path)
+    p = tmp_path / "ru.jsonl"
+    write_journal(p, [
+        {"ts": "2026-08-13T15:00:00", "run_id": "r1", "run_kind": "skill", "name": "kit-release",
+         "phase": None, "event": "run_start", "session_id": "s-1", "unit_kind": None,
+         "unit_count": None, "source": "kit-release/SKILL.md"},
+    ])
+    conn = sqlite3.connect(db)
+    report = sm.import_run_units(conn, path=p)
+    assert report["level_rows"] == 1
+    row = conn.execute(
+        "SELECT ts_start, ts_end FROM run_units WHERE run_id='r1' AND phase IS NULL"
+    ).fetchone()
+    assert row == ("2026-08-13T15:00:00", None)
+    cols = ["run_id", "run_kind", "name", "phase", "ts_start", "ts_end", "session_id",
+            "unit_kind", "unit_count", "source"]
+    run_row = dict(zip(cols, conn.execute(
+        "SELECT * FROM run_units WHERE run_id='r1' AND phase IS NULL").fetchone()))
+    m = sm.m6_run_cost(conn, ["projA"], run_row)
+    assert m["value"] is None
+    assert "н/д" in m["reason"]
+
+
+def test_import_run_units_closed_run_with_cc_usage_computes_m6(tmp_path):
+    # contrast case for the open-run boundary above -- a CLOSED run
+    # with matching cc_usage rows computes a real M6/M8.
+    db = _run_units_db(tmp_path)
+    p = tmp_path / "ru.jsonl"
+    write_journal(p, [
+        {"ts": "2026-07-01T00:00:00", "run_id": "r1", "run_kind": "skill", "name": "boot-diet",
+         "phase": None, "event": "run_start", "session_id": "s-1", "unit_kind": None,
+         "unit_count": None, "source": "boot-diet/SKILL.md"},
+        {"ts": "2026-07-01T00:10:00", "run_id": "r1", "run_kind": "skill", "name": "boot-diet",
+         "phase": None, "event": "run_end", "session_id": "s-1", "unit_kind": "boot_bytes",
+         "unit_count": 100, "source": "boot-diet/SKILL.md"},
+    ])
+    conn = sqlite3.connect(db)
+    sm.import_run_units(conn, path=p)
+    insert_cc_row(db, _utc_z_for_local(datetime(2026, 7, 1, 0, 5, 0)), "projA",
+                  agent_id=None, session_id="s-1", input_tokens=1000, output_tokens=500)
+    conn2 = sqlite3.connect(db)
+    out = sm._m6_m7_m8_m12(conn2, ["projA"], datetime(2026, 7, 1), datetime(2026, 7, 2))
+    assert out["M6:skill:boot-diet"]["value"] is not None
+    assert out["M8:skill:boot-diet"]["value"] == pytest.approx(
+        out["M6:skill:boot-diet"]["value"] / 100)
+
+
+def test_import_run_units_unit_count_zero_boundary_is_na(tmp_path):
+    db = _run_units_db(tmp_path)
+    p = tmp_path / "ru.jsonl"
+    write_journal(p, [
+        {"ts": "2026-07-01T00:00:00", "run_id": "r1", "run_kind": "skill", "name": "session-handoff",
+         "phase": None, "event": "run_start", "session_id": "s-1", "unit_kind": None,
+         "unit_count": None, "source": "session-handoff/SKILL.md"},
+        {"ts": "2026-07-01T00:05:00", "run_id": "r1", "run_kind": "skill", "name": "session-handoff",
+         "phase": None, "event": "run_end", "session_id": "s-1", "unit_kind": "checks_passed",
+         "unit_count": 0, "source": "session-handoff/SKILL.md"},
+    ])
+    conn = sqlite3.connect(db)
+    sm.import_run_units(conn, path=p)
+    row = conn.execute(
+        "SELECT unit_count FROM run_units WHERE run_id='r1' AND phase IS NULL"
+    ).fetchone()
+    assert row == (0,)  # explicit zero preserved (not coerced to None)
+    insert_cc_row(db, _utc_z_for_local(datetime(2026, 7, 1, 0, 2, 0)), "projA",
+                  agent_id=None, session_id="s-1", input_tokens=500, output_tokens=200)
+    conn2 = sqlite3.connect(db)
+    out = sm._m6_m7_m8_m12(conn2, ["projA"], datetime(2026, 7, 1), datetime(2026, 7, 2))
+    assert out["M8:skill:session-handoff"]["value"] is None  # deliberate: never a division by 0
+    assert "unit_count" in out["M8:skill:session-handoff"]["reason"]
+
+
+def test_import_run_units_unit_count_missing_beyond_boundary(tmp_path):
+    # one step beyond zero: unit_count entirely absent on both lines.
+    db = _run_units_db(tmp_path)
+    p = tmp_path / "ru.jsonl"
+    write_journal(p, [
+        {"ts": "2026-07-01T00:00:00", "run_id": "r1", "run_kind": "skill", "name": "next-task",
+         "phase": None, "event": "run_start", "session_id": None, "unit_kind": None,
+         "unit_count": None, "source": "next-task/SKILL.md"},
+        {"ts": "2026-07-01T00:05:00", "run_id": "r1", "run_kind": "skill", "name": "next-task",
+         "phase": None, "event": "run_end", "session_id": None, "unit_kind": None,
+         "unit_count": None, "source": "next-task/SKILL.md"},
+    ])
+    conn = sqlite3.connect(db)
+    sm.import_run_units(conn, path=p)
+    row = conn.execute(
+        "SELECT unit_count FROM run_units WHERE run_id='r1' AND phase IS NULL"
+    ).fetchone()
+    assert row == (None,)
+
+
+def test_import_run_units_two_runs_same_skill_both_imported(tmp_path):
+    db = _run_units_db(tmp_path)
+    p = tmp_path / "ru.jsonl"
+    write_journal(p, [
+        {"ts": "2026-07-01T00:00:00", "run_id": "r1", "run_kind": "skill", "name": "kit-release",
+         "phase": None, "event": "run_start", "session_id": "s-1", "unit_kind": None,
+         "unit_count": None, "source": "kit-release/SKILL.md"},
+        {"ts": "2026-07-01T00:10:00", "run_id": "r1", "run_kind": "skill", "name": "kit-release",
+         "phase": None, "event": "run_end", "session_id": "s-1", "unit_kind": "sync_pairs",
+         "unit_count": 80, "source": "kit-release/SKILL.md"},
+        {"ts": "2026-07-05T00:00:00", "run_id": "r2", "run_kind": "skill", "name": "kit-release",
+         "phase": None, "event": "run_start", "session_id": "s-2", "unit_kind": None,
+         "unit_count": None, "source": "kit-release/SKILL.md"},
+        {"ts": "2026-07-05T00:10:00", "run_id": "r2", "run_kind": "skill", "name": "kit-release",
+         "phase": None, "event": "run_end", "session_id": "s-2", "unit_kind": "sync_pairs",
+         "unit_count": 86, "source": "kit-release/SKILL.md"},
+    ])
+    conn = sqlite3.connect(db)
+    report = sm.import_run_units(conn, path=p)
+    assert report["level_rows"] == 2
+    count = conn.execute(
+        "SELECT COUNT(*) FROM run_units WHERE run_kind='skill' AND name='kit-release'"
+        " AND phase IS NULL"
+    ).fetchone()[0]
+    assert count == 2
+
+
+def test_import_run_units_phase_ts_end_chain(tmp_path):
+    db = _run_units_db(tmp_path)
+    p = tmp_path / "ru.jsonl"
+    write_journal(p, [
+        {"ts": "2026-07-01T00:00:00", "run_id": "r1", "run_kind": "skill", "name": "permission-audit",
+         "phase": None, "event": "run_start", "session_id": "s-1", "unit_kind": None,
+         "unit_count": None, "source": "permission-audit/SKILL.md"},
+        {"ts": "2026-07-01T00:01:00", "run_id": "r1", "run_kind": "skill", "name": "permission-audit",
+         "phase": "1", "event": "phase_start", "session_id": "s-1", "unit_kind": None,
+         "unit_count": None, "source": "permission-audit/SKILL.md"},
+        {"ts": "2026-07-01T00:02:00", "run_id": "r1", "run_kind": "skill", "name": "permission-audit",
+         "phase": "2", "event": "phase_start", "session_id": "s-1", "unit_kind": None,
+         "unit_count": None, "source": "permission-audit/SKILL.md"},
+        {"ts": "2026-07-01T00:05:00", "run_id": "r1", "run_kind": "skill", "name": "permission-audit",
+         "phase": None, "event": "run_end", "session_id": "s-1", "unit_kind": "prompts_analyzed",
+         "unit_count": 40, "source": "permission-audit/SKILL.md"},
+    ])
+    conn = sqlite3.connect(db)
+    report = sm.import_run_units(conn, path=p)
+    assert report["level_rows"] == 1
+    assert report["phase_rows"] == 2
+    rows = {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT phase, ts_start, ts_end FROM run_units WHERE run_id='r1' AND phase IS NOT NULL"
+    ).fetchall()}
+    assert rows["1"] == ("2026-07-01T00:01:00", "2026-07-01T00:02:00")
+    assert rows["2"] == ("2026-07-01T00:02:00", "2026-07-01T00:05:00")
+
+
+def test_import_run_units_phase_start_missing_phase_is_candidate(tmp_path):
+    db = _run_units_db(tmp_path)
+    p = tmp_path / "ru.jsonl"
+    write_journal(p, [
+        {"ts": "2026-07-01T00:00:00", "run_id": "r1", "run_kind": "skill", "name": "kit-release",
+         "phase": None, "event": "run_start", "session_id": None, "unit_kind": None,
+         "unit_count": None, "source": "kit-release/SKILL.md"},
+        {"ts": "2026-07-01T00:01:00", "run_id": "r1", "run_kind": "skill", "name": "kit-release",
+         "phase": None, "event": "phase_start", "session_id": None, "unit_kind": None,
+         "unit_count": None, "source": "kit-release/SKILL.md"},
+    ])
+    conn = sqlite3.connect(db)
+    report = sm.import_run_units(conn, path=p)
+    assert report["level_rows"] == 1
+    assert report["phase_rows"] == 0
+    assert any("phase_start без phase" in c["error"] for c in report["candidates"])
+
+
+def test_rebuild_imports_run_units_from_default_path(tmp_path):
+    # the autouse _isolate_run_units_path fixture points sm.RUN_UNITS_PATH
+    # at tmp_path/"run_units.jsonl" -- proves rebuild() wires the importer
+    # in end-to-end, not just via an explicit `path=` override.
+    db, deploys, deploy_project = _two_deploy_fixture(tmp_path)
+    write_journal(sm.RUN_UNITS_PATH, [
+        {"ts": "2026-07-01T00:00:00", "run_id": "r1", "run_kind": "skill", "name": "boot-diet",
+         "phase": None, "event": "run_start", "session_id": None, "unit_kind": None,
+         "unit_count": None, "source": "boot-diet/SKILL.md"},
+        {"ts": "2026-07-01T00:10:00", "run_id": "r1", "run_kind": "skill", "name": "boot-diet",
+         "phase": None, "event": "run_end", "session_id": None, "unit_kind": "boot_bytes",
+         "unit_count": 100, "source": "boot-diet/SKILL.md"},
+    ])
+    conn = sqlite3.connect(db)
+    stats = sm.rebuild(conn, deploys, deploy_project)
+    assert stats["run_units"]["legal_absent"] is False
+    assert stats["run_units"]["level_rows"] == 1
+    assert conn.execute("SELECT COUNT(*) FROM run_units").fetchone()[0] == 1
+
+
+# -----------------------------------------------------------------------
+# calibration_runs_missing_from_registry (B4 point 4 -- the RUNS_WITHOUT_
+# UNITS report data primitive; wiring into tools/spend_report.py itself
+# is OUT OF B4's owns, see the handoff report).
+# -----------------------------------------------------------------------
+def test_calibration_runs_missing_from_registry_reports_calibrated_events(tmp_path):
+    db = _run_units_db(tmp_path)
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [
+        ev("2026-07-01T00:00:00", "calibrated", notes="n"),
+        ev("2026-07-08T00:00:00", "calibrated", notes="n"),
+    ])
+    conn = sqlite3.connect(db)
+    out = sm.calibration_runs_missing_from_registry(conn, deploys=[("d", str(j))])
+    assert out == {"d": ["2026-07-01T00:00:00", "2026-07-08T00:00:00"]}
+
+
+def test_calibration_runs_missing_from_registry_clean_when_registry_has_calibration(tmp_path):
+    db = _run_units_db(tmp_path)
+    _insert_run_unit(db, run_id="rc", run_kind="calibration", name="calibration",
+                      unit_kind=None, unit_count=None)
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [ev("2026-07-01T00:00:00", "calibrated", notes="n")])
+    conn = sqlite3.connect(db)
+    out = sm.calibration_runs_missing_from_registry(conn, deploys=[("d", str(j))])
+    assert out == {}
+
+
+def test_calibration_runs_missing_from_registry_no_calibrated_events_is_clean(tmp_path):
+    db = _run_units_db(tmp_path)
+    j = tmp_path / "j.jsonl"
+    write_journal(j, [ev("2026-07-01T00:00:00", "delegated", agent="x", model="sonnet",
+                          task_id="t-1", category="c", worker_ref="agent:z", notes="n")])
+    conn = sqlite3.connect(db)
+    out = sm.calibration_runs_missing_from_registry(conn, deploys=[("d", str(j))])
+    assert out == {}
+
+
+def test_calibration_runs_missing_from_registry_unreadable_journal_skipped(tmp_path):
+    db = _run_units_db(tmp_path)
+    conn = sqlite3.connect(db)
+    out = sm.calibration_runs_missing_from_registry(
+        conn, deploys=[("ghost", str(tmp_path / "nope.jsonl"))]
+    )
+    assert out == {}
 
 
 # -----------------------------------------------------------------------

@@ -647,12 +647,185 @@ def stages_and_tasks_for_deploy(conn: sqlite3.Connection, deploy_key: str,
 
 
 # --------------------------------------------------------------------
+# 7a. run_units.jsonl IMPORTER (B4, docs/tasks/2026-08-13_spend-analytics
+#     .md section 2/6/7, node B4) -- raw per-EVENT JSONL log
+#     (run_start/run_end/phase_start, one line per SKILL.md write) ->
+#     aggregated run_units TABLE rows (one row per (run_id, phase), the
+#     shape section 3's schema fixes and M6/M7/M8/M12 (B2, above) already
+#     read/consume unchanged). Reuses cc_counts.load_journal wholesale
+#     (R9 -- same generic "one JSON object per line, ts field,
+#     tolerate-and-report-unparsable" file-level parser B1 already
+#     reuses for the routing journal itself; run_units.jsonl's line
+#     SHAPE differs (event values, no task_id) but the FILE shape is
+#     identical, so re-deriving a second copy of that loop would be
+#     exactly the duplication R9 forbids).
+# --------------------------------------------------------------------
+RUN_UNITS_PATH = REPO_ROOT / "logs" / "run_units.jsonl"
+
+_RUN_UNITS_EVENTS = ("run_start", "run_end", "phase_start")
+
+
+def _run_units_candidates_and_valid(lines: list) -> tuple:
+    """Splits load_journal()'s ParsedLine list into (valid_lines,
+    candidates). `candidates` covers E13 proper (JSON parse failure,
+    pl.data is None -- the spec's own named class, "непарсящаяся
+    строка") PLUS three structurally-necessary extensions that keep
+    this importer from crashing/mis-grouping on a malformed-but-valid-
+    JSON line (missing run_id, an unrecognized event value, or a ts
+    that itself fails to parse -- ts is REQUIRED for span math): never
+    a hard failure, always a candidate + skip (O3/E13's own spirit: a
+    bad line never kills the run), reported in the SAME "line N: error"
+    shape the spec's own named E13 form uses elsewhere in this codebase
+    (calibration_counts/spend_report's _unparsable_candidates)."""
+    valid, candidates = [], []
+    for pl in lines:
+        if pl.data is None:
+            candidates.append({"line": pl.line_no, "error": pl.parse_error})
+            continue
+        run_id = pl.data.get("run_id")
+        event = pl.data.get("event")
+        if not isinstance(run_id, str) or not run_id:
+            candidates.append({"line": pl.line_no, "error": "нет run_id"})
+            continue
+        if event not in _RUN_UNITS_EVENTS:
+            candidates.append({"line": pl.line_no, "error": f"неизвестный event {event!r}"})
+            continue
+        if pl.ts is None:
+            candidates.append({"line": pl.line_no, "error": "нет/невалидный ts"})
+            continue
+        valid.append(pl)
+    return valid, candidates
+
+
+_RUN_UNITS_COLUMNS = ["run_id", "run_kind", "name", "phase", "ts_start", "ts_end",
+                      "session_id", "unit_kind", "unit_count", "source"]
+_INSERT_RUN_UNITS_SQL = (
+    "INSERT INTO run_units (" + ", ".join(_RUN_UNITS_COLUMNS) + ") VALUES ("
+    + ", ".join("?" for _ in _RUN_UNITS_COLUMNS) + ")"
+)
+
+
+def _run_units_pick(field, *sources):
+    """First non-None `field` value among `sources` (ParsedLine objects,
+    None entries skipped) -- an explicit 0 (unit_count=0, section 7's
+    boundary case) is NOT None and is returned as-is, never coerced to
+    a fallback (that would silently turn a real zero into a different
+    run's value)."""
+    for pl in sources:
+        if pl is not None:
+            v = pl.data.get(field)
+            if v is not None:
+                return v
+    return None
+
+
+def _build_run_units_rows(lines: list) -> tuple:
+    """valid ParsedLine list -> (rows, candidates) where rows already
+    match the run_units TABLE shape (PK run_id+phase) -- one LEVEL row
+    (phase=NULL) per run_id from its run_start/run_end pair, plus one
+    PHASE row per phase_start event, ts_end derived from the NEXT
+    phase_start of the SAME run_id or the run's own ts_end for the last
+    phase (section 2's "границы/фазы прогона", decision (б)).
+    unit_kind/unit_count/source/session_id are read preferring the
+    run_end line (the natural place a final tally like prompts_analyzed/
+    checks_passed/sync_pairs is known), falling back to run_start's own
+    values when run_end omits them or is altogether ABSENT (section 7
+    E7's "run_start без run_end -- прогон открыт": ts_end stays None;
+    M6/m6_run_cost already returns "н/д (границы прогона неполны)" for
+    that case, unchanged by this importer -- see module's M6 section)."""
+    valid, candidates = _run_units_candidates_and_valid(lines)
+    by_run = defaultdict(list)
+    for pl in valid:
+        by_run[pl.data["run_id"]].append(pl)
+
+    rows = []
+    for run_id, pls in by_run.items():
+        pls_sorted = sorted(pls, key=lambda pl: (pl.ts, pl.line_no))
+        start_pl = next((pl for pl in pls_sorted if pl.data["event"] == "run_start"), None)
+        end_pl = next((pl for pl in pls_sorted if pl.data["event"] == "run_end"), None)
+        phase_pls = sorted(
+            (pl for pl in pls_sorted if pl.data["event"] == "phase_start"),
+            key=lambda pl: (pl.ts, pl.line_no),
+        )
+
+        run_kind = _run_units_pick("run_kind", start_pl, end_pl)
+        name = _run_units_pick("name", start_pl, end_pl)
+        source = _run_units_pick("source", end_pl, start_pl)
+        session_id = _run_units_pick("session_id", end_pl, start_pl)
+        unit_kind = _run_units_pick("unit_kind", end_pl, start_pl)
+        unit_count = _run_units_pick("unit_count", end_pl, start_pl)
+        ts_start = start_pl.ts.isoformat() if start_pl is not None else None
+        ts_end = end_pl.ts.isoformat() if end_pl is not None else None
+
+        rows.append({
+            "run_id": run_id, "run_kind": run_kind, "name": name, "phase": None,
+            "ts_start": ts_start, "ts_end": ts_end, "session_id": session_id,
+            "unit_kind": unit_kind, "unit_count": unit_count, "source": source,
+        })
+
+        for idx, ph_pl in enumerate(phase_pls):
+            phase_label = ph_pl.data.get("phase")
+            if not isinstance(phase_label, str) or not phase_label:
+                candidates.append({"line": ph_pl.line_no, "error": "phase_start без phase"})
+                continue
+            next_ts = (phase_pls[idx + 1].ts.isoformat() if idx + 1 < len(phase_pls)
+                       else ts_end)
+            rows.append({
+                "run_id": run_id, "run_kind": run_kind, "name": name, "phase": phase_label,
+                "ts_start": ph_pl.ts.isoformat(), "ts_end": next_ts,
+                "session_id": _run_units_pick("session_id", ph_pl) or session_id,
+                "unit_kind": None, "unit_count": None,
+                "source": _run_units_pick("source", ph_pl) or source,
+            })
+
+    return rows, candidates
+
+
+def import_run_units(conn: sqlite3.Connection, path=None) -> dict:
+    """B4: idempotent DELETE+INSERT of run_units, own table, its OWN
+    transaction (section 2's "своей таблицы в транзакции", kept
+    separate from rebuild()'s task_stage_costs/task_costs transaction
+    by design -- a run_units-only failure must not roll back an
+    otherwise-successful task/stage rebuild, and vice versa). E7: an
+    absent file is LEGAL (B4 not dispatched to a deploy yet, or a
+    deploy that never runs skills) -- returns 0 rows, no exception, and
+    (still) WIPES any previously-imported rows via the same DELETE, so
+    a file that existed and was later removed does not leave stale
+    rows behind (same "no silent staleness" contract every other table
+    in this module keeps)."""
+    path = RUN_UNITS_PATH if path is None else Path(path)
+    _ensure_schema(conn)
+    try:
+        lines = cc_counts.load_journal(str(path))
+    except OSError:
+        conn.execute("DELETE FROM run_units")
+        conn.commit()
+        return {"legal_absent": True, "level_rows": 0, "phase_rows": 0, "candidates": []}
+
+    rows, candidates = _build_run_units_rows(lines)
+    level_rows = [r for r in rows if r["phase"] is None]
+    phase_rows = [r for r in rows if r["phase"] is not None]
+    try:
+        conn.execute("DELETE FROM run_units")
+        conn.executemany(_INSERT_RUN_UNITS_SQL,
+                          [tuple(r[c] for c in _RUN_UNITS_COLUMNS) for r in rows])
+    except Exception:
+        conn.rollback()
+        raise
+    else:
+        conn.commit()
+    return {"legal_absent": False, "level_rows": len(level_rows),
+            "phase_rows": len(phase_rows), "candidates": candidates}
+
+
+# --------------------------------------------------------------------
 # 8. rebuild -- DELETE+INSERT one transaction, own tables only (E12).
 # --------------------------------------------------------------------
 def rebuild(conn: sqlite3.Connection, deploys=None, deploy_project=None) -> dict:
     deploys = DEPLOYS if deploys is None else deploys
     deploy_project = DEPLOY_PROJECT if deploy_project is None else deploy_project
     _ensure_schema(conn)
+    run_units_report = import_run_units(conn)
 
     all_stage_rows = []
     all_task_rows = []
@@ -679,15 +852,19 @@ def rebuild(conn: sqlite3.Connection, deploys=None, deploy_project=None) -> dict
     else:
         conn.commit()
 
-    return {"stage_rows": len(all_stage_rows), "task_rows": len(all_task_rows), "spend_only": spend_only}
+    return {"stage_rows": len(all_stage_rows), "task_rows": len(all_task_rows),
+            "spend_only": spend_only, "run_units": run_units_report}
 
 
 def _dump_derived_tables(conn: sqlite3.Connection) -> str:
-    """Canonical byte-for-byte-comparable text dump of the two tables
-    rebuild() actually populates, ORDER BY their own PK (accept key 3)."""
+    """Canonical byte-for-byte-comparable text dump of the tables
+    rebuild() actually populates, ORDER BY their own PK (accept key 3;
+    run_units added by B4 -- same idempotency contract extended to the
+    importer, not just task_stage_costs/task_costs)."""
     parts = []
     for table, order in (("task_stage_costs", "deploy, task_id, stage_index"),
-                          ("task_costs", "deploy, task_id")):
+                          ("task_costs", "deploy, task_id"),
+                          ("run_units", "run_id, phase")):
         rows = conn.execute(f"SELECT * FROM {table} ORDER BY {order}").fetchall()
         parts.append(f"-- {table} ({len(rows)} rows) --")
         parts.extend(repr(r) for r in rows)
@@ -891,6 +1068,7 @@ def run_selftest(db_file: Path, deploys=None, deploy_project=None, skip_import: 
             "stage_rows": stats2["stage_rows"], "task_rows": stats2["task_rows"],
             "spend_only": stats2["spend_only"],
         }
+        report["run_units_import"] = stats2["run_units"]  # B4 (accept key 1: candidates printed)
         report["cc_usage_invariant"] = {"before": before, "after": after, "match": before == after}
 
         windows_report = {}
@@ -960,6 +1138,18 @@ def render_selftest(report: dict) -> str:
     cci = report["cc_usage_invariant"]
     lines.append(f"  cc_usage invariant before/after match: {cci['match']} "
                  f"(before={cci['before']}, after={cci['after']})")
+
+    lines.append("")
+    lines.append("[run_units import, B4]")
+    rui = report["run_units_import"]
+    if rui["legal_absent"]:
+        lines.append("  logs/run_units.jsonl отсутствует -- легально (E7), таблица пуста")
+    else:
+        lines.append(f"  level_rows={rui['level_rows']} phase_rows={rui['phase_rows']}")
+        for c in rui["candidates"]:
+            lines.append(f"  candidate line {c['line']}: {c['error']}")
+        if not rui["candidates"]:
+            lines.append("  candidates: чисто (0 непарсящихся/неполных строк)")
 
     lines.append("")
     lines.append("[windows, accept key 5]")
@@ -1413,6 +1603,53 @@ def _m6_m7_m8_m12(conn: sqlite3.Connection, projects: list, ws, we) -> dict:
     out.setdefault("M6", _metric(reason="н/д (нет прогонов в окне)"))
     out.setdefault("M7", _metric(reason="нет фазовых меток"))
     out.setdefault("M8", _metric(reason="нет unit_count"))
+    return out
+
+
+def calibration_runs_missing_from_registry(conn: sqlite3.Connection, deploys=None) -> dict:
+    """Section 2's cheap v1 heuristic for the "прогон скилла ВИДИМ по
+    журналу/данным, но без строк реестра" detector class (the report's
+    RUNS_WITHOUT_UNITS section, tools/spend_report.py:build_r4_3 -- THIS
+    function is the DATA PRIMITIVE B4 owns and tests; wiring its output
+    into that report's dict is OUT OF B4's owns (tools/spend_report.py
+    is B3's file, not listed in this task's owns) -- flagged explicitly
+    in the B4 handoff report as an owns-boundary question, not silently
+    decided by editing a file outside owns.
+
+    Per deploy: every journal.event=="calibrated" line (a VISIBLE,
+    journal-attested calibration run) is reported as "missing" when the
+    run_units registry carries NO run_kind='calibration' row AT ALL --
+    deliberately CHEAP (v1, section 2's own word): no time-window
+    matching a specific calibrated event to a specific registry row
+    (that finer join is B5's own calibration-protocol wiring to make,
+    once it actually writes those rows -- "эта часть после B5 оживёт").
+    Returns {} when every in-scope deploy is clean (registry already has
+    >=1 calibration row) or has zero calibrated events; a deploy whose
+    journal is unreadable is silently skipped here (E14-adjacent,
+    matches this module's own established convention for an absent
+    journal -- not this function's job to raise).
+
+    LIMITATION (documented per this task's point 4, not a detector):
+    a skill run that never wrote a `calibrated`/`delegated` journal
+    line referencing it at all is invisible to this heuristic BY
+    CONSTRUCTION -- a disciplinary-layer gap, not a machine-catchable
+    one (check 18(д) class)."""
+    deploys = DEPLOYS if deploys is None else deploys
+    registry_has_calibration = conn.execute(
+        "SELECT COUNT(*) FROM run_units WHERE run_kind='calibration' AND phase IS NULL"
+    ).fetchone()[0] > 0
+    out = {}
+    for deploy_key, journal_path in deploys:
+        try:
+            lines = cc_counts.load_journal(journal_path)
+        except OSError:
+            continue
+        cal_events = [pl for pl in lines
+                      if pl.data and pl.data.get("event") == "calibrated" and pl.ts]
+        if not cal_events:
+            continue
+        if not registry_has_calibration:
+            out[deploy_key] = [pl.ts.isoformat() for pl in cal_events]
     return out
 
 

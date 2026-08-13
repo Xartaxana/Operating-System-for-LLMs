@@ -23,6 +23,9 @@ v0.1.0 (снимок+тег), v0.4.0–v0.4.2 (release-гейт critic, пари
 - Чек 14(е): большой экзамен экономии деплоя — «периодически, не
   чаще раза на релиз». Если БОЛЬШОГО прогона нет уже несколько
   релизов подряд — вопрос оператору ДО сборки, не молча.
+- Учёт (spend-мониторинг): здесь — `run_start` + `phase_start`
+  phase="0" в logs/run_units.jsonl (форма и пример — блок «Учёт
+  прогона» в конце файла).
 
 ## 1. Инвентаризация staging против порт-очереди (урок t-294)
 
@@ -34,6 +37,7 @@ Scout-диспатч (лист; приёмка по D-0094): по КАЖДОМУ
 уже стоящего в staging ломает твины. Выход: два списка — «в работу»
 (мелочи этого релиза) и «named-узлы следующего минора» (крупное, не
 блокирующее релиз, — остаётся очередью с именами).
+Учёт: `phase_start` phase="1" в logs/run_units.jsonl.
 
 ## 2. Пре-релизный батч мелочей
 
@@ -50,8 +54,12 @@ Scout-диспатч (лист; приёмка по D-0094): по КАЖДОМУ
   Lead (обе обвязки: канон штаба + toolkit/tools/), НЕ только словом
   builder'а: урок WITNESS ECHO v0.5.0 — красный трек позже витнесса
   разрешается только перегоном.
+- Учёт: `phase_start` phase="2" в logs/run_units.jsonl.
 
 ## 3. Сборка снимка
+
+Учёт: `phase_start` phase="3" в logs/run_units.jsonl (одна фаза на
+всю сборку — пункты 1-6 ниже её внутренние шаги, не отдельные фазы).
 
 1. Клон публичного репо: D:\Improving_AI\Supervised-Delegation;
    `git status` чист, ветка main на origin. Грязный клон — разобрать
@@ -90,6 +98,27 @@ Scout-диспатч (лист; приёмка по D-0094): по КАЖДОМУ
   след — коммиты обоих репо.
 - Кросс-пункты деплоям (если релиз несёт для них порт-строки) — в
   ИХ носители тем же ходом (D-0082).
+- Учёт: `phase_start` phase="4" здесь, затем `run_end` в конце
+  скилла (см. блок «Учёт прогона» ниже).
+
+## Учёт прогона (spend-мониторинг)
+
+В НАЧАЛЕ прогона (перед разделом 0) и в КОНЦЕ (после раздела 4) —
+одна JSON-строка в logs/run_units.jsonl (Edit/Write, гигиена п.4/5);
+форма дословно {"ts","run_id","run_kind","name","phase","event"
+("run_start"|"run_end"|"phase_start"),"session_id","unit_kind",
+"unit_count","source"} (docs/tasks/2026-08-13_spend-analytics.md
+раздел 2). run_id — единый для всех строк прогона, форма
+"kit-release-<ts начала>". unit_kind/unit_count — `sync_pairs`, счёт
+записей tools/parity_manifest.json, пишется на `run_end`. session_id
+— id текущей сессии, если известен; иначе `null` (M6 для прогона
+тогда «н/д», это легально, E7).
+
+Пример начала:
+`{"ts":"2026-08-13T15:00:00","run_id":"kit-release-2026-08-13T15:00:00","run_kind":"skill","name":"kit-release","phase":null,"event":"run_start","session_id":null,"unit_kind":null,"unit_count":null,"source":"kit-release/SKILL.md"}`
+
+Пример конца:
+`{"ts":"2026-08-13T16:00:00","run_id":"kit-release-2026-08-13T15:00:00","run_kind":"skill","name":"kit-release","phase":null,"event":"run_end","session_id":null,"unit_kind":"sync_pairs","unit_count":86,"source":"kit-release/SKILL.md"}`
 
 ## Детекторы (D-0049)
 

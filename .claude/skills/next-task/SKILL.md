@@ -48,6 +48,28 @@ description: Взять первую по приоритету задачу и �
    выбранной не начинай (D-0025); исключение — пункты, явно
    помеченные в очереди «на касании», если касание случилось.
 
+## Учёт прогона (spend-мониторинг)
+
+В НАЧАЛЕ прогона (перед шагом 0) и в КОНЦЕ (после шага 7) — одна
+JSON-строка в logs/run_units.jsonl (Edit/Write, гигиена п.4/5); форма
+дословно {"ts","run_id","run_kind","name","phase","event",
+"session_id","unit_kind","unit_count","source"}
+(docs/tasks/2026-08-13_spend-analytics.md раздел 2); `event` этого
+скилла — только "run_start"/"run_end" (фазовых меток этот скилл НЕ
+пишет, решение (б) спеки, `phase` всегда `null`). run_id — единый
+для всех строк прогона, форма "next-task-<ts начала>".
+unit_kind/unit_count — константа `1` (`"прогон"`), пишется на
+`run_end`. session_id — id текущей сессии, если известен; иначе
+`null` (M6 для прогона тогда «н/д», это легально, E7).
+СТОИМОСТЬ ПРОГОНА next-task ПЕРЕКРЫВАЕТСЯ МЕТРИКАМИ ЗАДАЧ M1–M5 —
+реестр здесь нужен для счёта прогонов, не денег (не двоить счёт).
+
+Пример начала:
+`{"ts":"2026-08-13T15:00:00","run_id":"next-task-2026-08-13T15:00:00","run_kind":"skill","name":"next-task","phase":null,"event":"run_start","session_id":null,"unit_kind":null,"unit_count":null,"source":"next-task/SKILL.md"}`
+
+Пример конца:
+`{"ts":"2026-08-13T16:00:00","run_id":"next-task-2026-08-13T15:00:00","run_kind":"skill","name":"next-task","phase":null,"event":"run_end","session_id":null,"unit_kind":"прогон","unit_count":1,"source":"next-task/SKILL.md"}`
+
 Детектор отказа (правило 10в): команда лишь упорядочивает
 существующие механизмы — её выход (события журнала, коммиты,
 CURRENT_CONTEXT) аудируется чеками 1/3/6/13 калибровки; выбор
