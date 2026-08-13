@@ -295,6 +295,38 @@ def test_r4_3_runs_without_units_empty_registry_literal_reason(tmp_path, monkeyp
     sm.rebuild(conn, deploys, deploy_project)
     r3 = sr.build_r4_3(conn, "shtab")
     assert r3["runs_without_units"]["status"] == "реестр пуст, метрики скиллов н/д"
+    # B6 wiring (calibration_runs_missing_from_registry, B4 handoff
+    # question): the ADDITIVE field is present alongside the literal
+    # status regardless -- the fixture has a calibrated event and a
+    # totally empty run_units registry, so this deploy's ONE calibrated
+    # window is named.
+    assert r3["runs_without_units"]["calibration_registry_gaps"]["shtab"] == ["shtab:calibrated:1"]
+
+
+def test_r4_3_runs_without_units_calibrated_present_no_calibration_rows_names_window(tmp_path, monkeypatch):
+    """DoD B6 accept key 4's own fixture wording: "calibrated есть,
+    строк calibration нет -> секция называет окно" -- this time with
+    the registry NON-empty (>=1 unrelated run_kind row present, total>0)
+    so the code path goes through the `dead`-computing branch, not the
+    total==0 early return, and the gap is still surfaced."""
+    db, deploys, deploy_project, _j = _three_task_fixture(tmp_path)
+    _patch_deploys(monkeypatch, deploys, deploy_project)
+    conn = sqlite3.connect(db)
+    sm.rebuild(conn, deploys, deploy_project)
+    sm._ensure_schema(conn)
+    conn.execute(
+        "INSERT INTO run_units (run_id, run_kind, name, phase, ts_start, ts_end,"
+        " session_id, unit_kind, unit_count, source) VALUES"
+        " ('r-1', 'boot-diet', 'boot-diet', NULL, '2026-07-01T00:00:00',"
+        " '2026-07-01T00:10:00', 's-1', 'bytes', 100, 'test')"
+    )
+    conn.commit()
+    r3 = sr.build_r4_3(conn, "shtab")
+    rwu = r3["runs_without_units"]
+    assert rwu["status"] != "реестр пуст, метрики скиллов н/д"  # total>0 branch taken
+    assert rwu["calibration_registry_gaps"]["shtab"] == ["shtab:calibrated:1"]
+    text = sr.render_text({"r4_3": r3, "window_error": "не проверяется в этом тесте"}, "shtab")
+    assert "shtab:calibrated:1" in text
 
 
 def test_r4_3_unparsable_journal_line_is_surfaced(tmp_path, monkeypatch):

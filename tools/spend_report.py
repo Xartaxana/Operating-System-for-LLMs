@@ -405,15 +405,43 @@ def _missing_calibrated_windows(conn: sqlite3.Connection, deploy_keys: list) -> 
     return missing
 
 
+def _calibration_registry_gaps(conn: sqlite3.Connection) -> dict:
+    """RUNS_WITHOUT_UNITS wiring (B6, B4 handoff question -- section 6
+    node B4's own docstring flagged spend_model.calibration_runs_missing_
+    from_registry() as ready+tested but NOT wired into this report,
+    "owns-boundary question"): reuses that function (B1/B4's already-
+    tested data primitive) IN ADDITION TO the bare "реестр пуст" stub
+    below -- names the SPECIFIC calibrated window(s) a deploy's journal
+    attests to but the run_units registry carries no run_kind='calibration'
+    row for AT ALL. Window IDs are reconstructed from the returned
+    (sorted-ascending) timestamps via the SAME calibrated_windows()
+    numbering spend_model itself uses (i-th ascending calibrated ts ->
+    window i) -- no new numbering scheme, no re-derivation of the ts-list
+    sort spend_model.calibrated_windows() already performs on its own
+    input. Searches ALL THREE deploys (sm.DEPLOYS), same cross-deploy
+    scope _runs_without_units below already uses for its `dead` list."""
+    missing = sm.calibration_runs_missing_from_registry(conn, sm.DEPLOYS)
+    out = {}
+    for deploy_key, ts_list in missing.items():
+        out[deploy_key] = [f"{deploy_key}:calibrated:{i}" for i, _ts in enumerate(sorted(ts_list), start=1)]
+    return out
+
+
 def _runs_without_units(conn: sqlite3.Connection) -> dict:
     """E7: run_units table/rows absent (B4 not dispatched yet) -> the
     LITERAL reason string the spec's own "given" section names
     ("реестр пуст, метрики скиллов н/д"). Searches ALL THREE deploys'
     projects regardless of --deploy -- see module docstring's
-    JUDGMENT CALLS for why (run_units carries no project column)."""
+    JUDGMENT CALLS for why (run_units carries no project column).
+    `calibration_registry_gaps` (B6) is always attached alongside --
+    ADDITIVE, never replaces `status`/`dead` (D-0100 minimal-risk choice:
+    an existing accepted test pins `status`'s literal wording on the
+    total==0 branch)."""
     total = conn.execute("SELECT COUNT(*) FROM run_units").fetchone()[0]
+    calibration_registry_gaps = _calibration_registry_gaps(conn)
     if total == 0:
-        return {"status": "реестр пуст, метрики скиллов н/д", "dead": []}
+        return {"status": "реестр пуст, метрики скиллов н/д", "dead": [],
+                "calibration_registry_gaps": calibration_registry_gaps}
     all_projects = [p for p in sm.DEPLOY_PROJECT.values() if p]
     level_rows = sm._query_dicts(conn, "SELECT * FROM run_units WHERE phase IS NULL")
     dead = []
@@ -422,7 +450,8 @@ def _runs_without_units(conn: sqlite3.Connection) -> dict:
         if m["value"] is None:
             dead.append({"run_id": lr.get("run_id"), "run_kind": lr.get("run_kind"),
                          "name": lr.get("name"), "reason": m["reason"]})
-    return {"status": "чисто" if not dead else "есть прогоны без денег", "dead": dead}
+    return {"status": "чисто" if not dead else "есть прогоны без денег", "dead": dead,
+            "calibration_registry_gaps": calibration_registry_gaps}
 
 
 def build_r4_3(conn: sqlite3.Connection, deploy: str) -> dict:
@@ -615,6 +644,10 @@ def render_text(report: dict, deploy: str) -> str:
     else:
         for d in rwu["dead"]:
             lines.append(f"    run_id={d['run_id']} {d['run_kind']}:{d['name']}: {d['reason']}")
+    gaps = rwu.get("calibration_registry_gaps") or {}
+    if gaps:
+        for dep, wids in gaps.items():
+            lines.append(f"    calibrated-окно(а) без строки реестра калибровки: {dep}: {', '.join(wids)}")
 
     if "series" in report:
         s = report["series"]
@@ -644,6 +677,10 @@ def _build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--db", default=None, help="override gateway/requests.db path (tests)")
     p.add_argument("--skip-import", action="store_true",
                     help="skip the lazy transcript import (tests/CI)")
+    p.add_argument("--dashboard", action="store_true",
+                    help="B6: after the text report, also (re)generate the self-contained "
+                         "HTML dashboard (logs/spend/dashboard.html) -- one entry point for "
+                         "\"постоянная прозрачность\" (spec fork (д))")
     return p
 
 
@@ -694,11 +731,24 @@ def main(argv=None) -> int:
 
         report = build_report(conn, args.deploy, args.window, bool(args.compare), args.top,
                                args.series, args.last, ws_dt, we_dt)
+
+        dashboard_path = None
+        if args.dashboard:
+            # Local import (not module-level): spend_dashboard.py itself
+            # imports THIS module (`import spend_report as sr`) for its own
+            # reuse of resolve_window/build_r4_2/build_r4_3/etc (R9) -- a
+            # top-level import here would be circular. `conn` is reused
+            # AS-IS (already rebuilt + compute_window_series'd above by
+            # this same call) -- no second rebuild.
+            import spend_dashboard
+            dashboard_path = spend_dashboard.generate_dashboard(conn, top_n=args.top)
     finally:
         conn.close()
 
     text = (json.dumps(report, ensure_ascii=False, indent=2, default=str)
             if args.json else render_text(report, args.deploy))
+    if dashboard_path is not None:
+        print(f"spend_report: dashboard written to {dashboard_path}")
 
     if args.out:
         out_path = Path(args.out)

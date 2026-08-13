@@ -18,8 +18,9 @@
 | N6=B2 | Метрики M1–M14+M4b и детекторы D1–D9 | builder | done (t-421, принят 08-13; канон 2604, живой JSON обоих окон, M4=0.632 против ручных 0.66 №6 — независимая формула) |
 | N7=B3 | Отчёт и CLI (адверсариальная батарея) + нормализация model_declared→семья для M10/D4 | builder | dispatched (t-424); owns: tools/spend_report.py, tools/test_spend_report.py + point-фикс spend_model |
 | N8=B4 | Реестр прогонов: импорт run_units.jsonl + обязанности 5 SKILL.md (фазы у 3 + калибровка) | builder | done (t-425, принят 08-13; канон 2672; вопрос owns довязки RUNS_WITHOUT_UNITS → B6) |
-| N9=B5 | Проводка в калибровку (чек 18(д)) + строка оси 2 карты | builder, doc-dispatch witness | dispatched (t-426, параллельно с B6; owns: PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md, docs/SIBLING_MAP.md) |
-| N10=B6 | HTML-дашборд «агентская ОС» + довязка RUNS_WITHOUT_UNITS в отчёт | builder | dispatched (t-427, параллельно с B5; owns: tools/spend_dashboard.py+тест, tools/spend_report.py+тест; UI-витнесс скриншотом на приёмке Lead) |
+| N9=B5 | Проводка в калибровку (чек 18(д)) + строка оси 2 карты | builder, doc-dispatch witness | done (t-426, принят 08-13; 8 ключей + негативный контроль FAIL, только добавления +42) |
+| N10=B6 | HTML-дашборд «агентская ОС» + довязка RUNS_WITHOUT_UNITS | builder | done (t-427, принят 08-13; узкий сет 226, BATCH CANON 2696, UI-витнесс 3 скриншотами Lead: плитки/тренды/таблица со сверкой «да»; найден и чинён E1-класс naive/aware на живой связке token_usage_stats×spend_model) |
+| N11 | Критик-гейт батча B1–B6 (R3: money-БД, схема) | critic (opus) | dispatched (t-428) |
 
 Узлы B1–B3, B5 секвенциальны → соло-диспатчи, канонический прогон в
 витнессе. Критик-гейт на батч перед закрытием (R3: схема данных +
