@@ -118,6 +118,20 @@ def _patch_deploys(monkeypatch, deploys, deploy_project):
 
 
 # ---------------------------------------------------------------------
+# Isolation from the live logs/run_units.jsonl registry (fix-batch
+# calibration #7, 2026-08-14): every rebuild() call in this module goes
+# through the tools/conftest.py autouse fixture, which redirects
+# spend_model.RUN_UNITS_PATH to tmp_path for the duration of each test.
+# A silent fixture is indistinguishable from a broken one (3г) -- this
+# test names the isolation explicitly instead of relying on every other
+# test in the module to prove it indirectly.
+# ---------------------------------------------------------------------
+def test_run_units_path_is_isolated_under_tmp_path(tmp_path):
+    assert sm.RUN_UNITS_PATH == tmp_path / "run_units.jsonl"
+    assert not sm.RUN_UNITS_PATH.exists()
+
+
+# ---------------------------------------------------------------------
 # resolve_window / _resolve_prev_window_id
 # ---------------------------------------------------------------------
 def test_resolve_window_last_no_calibrated_events_is_named_reason(tmp_path, monkeypatch):
