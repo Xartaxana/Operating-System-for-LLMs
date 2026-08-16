@@ -12,7 +12,7 @@ deployment of the routing MVP; the pilot deployment is D:\AO3_tests.
 
 | Function | Model here | Work | Deliverable |
 |---|---|---|---|
-| scout | Haiku | repo search, file reading, context gathering | digest + Trail, never dumps |
+| scout | Sonnet | repo search, file reading, context gathering | digest + Trail, never dumps |
 | builder | Sonnet | implementation to a written spec, tests, routine edits | diff report + witness run |
 | critic | Opus | code/architecture review, unclear bugs, acceptance gate | verdict + its own trail |
 | designer | Opus | spec DRAFTING from a Lead intent brief (forks returned, never decided) | draft spec in the R11 form + fork list |
@@ -39,10 +39,20 @@ is always scout. External-repo surveys are two-pass (D-0066): scout
 delivers the map; a mechanism enters the plan/queue only after the
 Lead's own targeted second pass, its trail recorded in RELATED_WORK.
 Digest acceptance is by trail (D-0046): scout attaches where it
-searched and what it read; the Lead checks coverage and spot-verifies
-at least one load-bearing claim (verifying a negative "X is nowhere"
-is mandatory), noting the check in `accepted`; a digest without a
-trail → `rejected`.
+searched and what it read, and the digest ITSELF carries the
+same-form positive control for every load-bearing negative — the
+worker's duty; an uncontrolled negative → `rejected`. Verification
+DEPTH follows the EXAM STATUS of the scout binding, not the model
+name (D-0102): while the bound model holds a CURRENT pass of the
+registered scout exam (built on the cheaper-wrong-answer design
+tests; current = no rebinding, no scout role-file edit, no exam-set
+rebuild and no `defect_found` on an accepted digest since that
+pass), the Lead accepts by trail-coverage check alone — mandatory
+re-verification of claims and negatives is LIFTED; spot-checks stay
+legal, optional. Any of those events voids currency and the STRICT
+form returns until a re-pass: spot-verify at least one load-bearing
+claim, verifying a negative is mandatory, the check noted in
+`accepted`. A digest without a trail → `rejected` in both modes.
 
 R2. **Implementation to a ready spec → builder.** The Lead writes the
 spec; the builder returns missing requirements as questions, never

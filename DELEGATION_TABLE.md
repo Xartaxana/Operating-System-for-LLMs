@@ -40,7 +40,7 @@ subscription contour):
 
 | Task type | Cost (Lead) | Value of Lead | Delegate to | Status |
 |---|---|---|---|---|
-| Repo search, file reading, context gathering | Medium | Low | scout (Haiku subagent) | provisionally_validated |
+| Repo search, file reading, context gathering | Medium | Low | scout (Sonnet subagent; D-0102 rebound from Haiku 2026-08-16 — exam v2 evidence: haiku 2/10 ×2 systematic fabrication, sonnet 10/10 same keys, t-455..t-457) | provisionally_validated |
 | Implementation to a written spec, tests | High | Medium | builder (Sonnet subagent) | provisionally_validated |
 | Code review, unclear-bug debugging | High | High | critic (Opus subagent) | provisionally_validated |
 | Decomposition, spec writing, acceptance | High | Very high | Lead session only | provisionally_validated |

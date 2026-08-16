@@ -46,10 +46,13 @@ roles:
     subscription:
       model: claude-sonnet-5
 
-  # Разведка (R1).
+  # Разведка (R1). D-0102 (слово оператора 2026-08-16): перепривязан с
+  # claude-haiku-4-5 по замеру экзамена v2 (haiku 2/10 дважды —
+  # систематическая подмена носителя; sonnet 10/10 тем же набором);
+  # приёмка по экзаменационному доверию — R1/D-0102.
   scout:
     subscription:
-      model: claude-haiku-4-5
+      model: claude-sonnet-5
 
   # API-контур (gateway): судья Shadow Evaluation и аналитик Ledger —
   # воркеры, не координационные роли; их привязки живут в
