@@ -1069,26 +1069,46 @@ def _agent_payload(subagent_type=None, description=None, prompt="noop", cwd=None
     return payload
 
 
+def _scout_families():
+    """(живое_семейство, заведомо_чужое_семейство) привязки scout.
+
+    Тесты role-type-warn выводят match/mismatch-лейблы из ЖИВОГО
+    роль-файла тем же резолвером, что и гейт, а не прибивают имя
+    модели: класс «имя модели как критерий» (реестр режимов отказа
+    карты) — прежние haiku-пины этих тестов сломались на перепривязке
+    scout D-0102 (2026-08-16) ровно этим классом, при полностью
+    исправном гейте. Предмет тестов — ЛОГИКА срабатывания
+    (mismatch -> WARN, match -> тишина), не конкретная привязка."""
+    known, model = dispatch_gate._find_agent_role_model("scout")
+    assert known and model, "scout.md обязан существовать и нести model: (иначе C4-тесты беспредметны)"
+    fam = dispatch_gate._model_family(model)
+    assert fam, f"model {model!r} роль-файла scout не резолвится в семейство"
+    return fam, ("haiku" if fam != "haiku" else "sonnet")
+
+
 # C4': известный тип (роль-файл есть), семейства расходятся -> WARN,
 # называющий заявленный ярус, тип и модель роль-файла.
 
 
 def test_role_type_warn_c4_known_role_family_mismatch_warns():
-    # scout.md несёт model: haiku; лейбл заявляет "sonnet:" -- расхождение.
+    # Лейбл заявляет семейство, заведомо ЧУЖОЕ живой привязке scout.md
+    # (binding-agnostic, см. _scout_families) -- расхождение.
+    live, foreign = _scout_families()
     warn = dispatch_gate.role_type_warn(
-        _agent_payload(subagent_type="scout", description="sonnet: делает разведку")
+        _agent_payload(subagent_type="scout", description=f"{foreign}: делает разведку")
     )
     assert "ROLE-TYPE WARN" in warn
-    assert "sonnet" in warn
+    assert foreign in warn
     assert "scout" in warn
-    assert "haiku" in warn
+    assert live in warn
 
 
 def test_role_type_warn_c4_known_role_family_match_silent():
     # Позитивный контроль (симметрично mismatch выше): тот же тип, лейбл
-    # совпадает с моделью роль-файла -> "".
+    # совпадает с ЖИВОЙ моделью роль-файла -> "".
+    live, _foreign = _scout_families()
     warn = dispatch_gate.role_type_warn(
-        _agent_payload(subagent_type="scout", description="haiku: делает разведку")
+        _agent_payload(subagent_type="scout", description=f"{live}: делает разведку")
     )
     assert warn == ""
 
@@ -1165,9 +1185,10 @@ def test_c11_subagent_type_case_and_whitespace_variants_silent():
 def test_c11_subagent_type_case_mismatch_still_warns_on_real_mismatch():
     # Регресс-страховка на пару с C11 выше: регистр НЕ маскирует реальное
     # расхождение семейств -- "Scout" (в другом регистре) с лейблом
-    # "sonnet:" по-прежнему WARN (scout.md несёт model: haiku).
+    # чужого семейства по-прежнему WARN (binding-agnostic).
+    _live, foreign = _scout_families()
     warn = dispatch_gate.role_type_warn(
-        _agent_payload(subagent_type="Scout", description="sonnet: делает разведку")
+        _agent_payload(subagent_type="Scout", description=f"{foreign}: делает разведку")
     )
     assert "ROLE-TYPE WARN" in warn
 
@@ -1447,7 +1468,8 @@ def test_role_type_warn_huge_description_does_not_hang():
     # tool_input["prompt"] -- проверяем, что 100КБ description и 240КБ
     # prompt тоже не вызывают зависания (LABEL_MODEL_PREFIX_RE заякорен
     # ^ -- анализирует только начало строки; AGENTS_DIR -- всего 5 файлов).
-    huge_description = "sonnet: " + ("x" * 100_000)
+    _live, _foreign = _scout_families()
+    huge_description = f"{_foreign}: " + ("x" * 100_000)
     huge_prompt = "y" * 240_000
     start = time.monotonic()
     warn = dispatch_gate.role_type_warn(
@@ -1465,7 +1487,7 @@ def test_role_type_warn_huge_description_does_not_hang():
         f"took {elapsed:.2f}s -- сторож стенных часов: проверь загрузку "
         "машины прежде, чем считать это дефектом (F-60)"
     )
-    assert "ROLE-TYPE WARN" in warn  # scout(haiku) != sonnet -- реальный mismatch
+    assert "ROLE-TYPE WARN" in warn  # чужое семейство != живой привязки scout -- реальный mismatch
 
 
 # --- Известный тип, роль-файл без model: во фронтматтере -> молчит по ней
@@ -1592,7 +1614,8 @@ def test_i1_role_type_warn_not_computed_when_gate_blocks_check1():
 def test_i2_role_type_warn_never_sets_exit_2_or_permission_decision():
     # C6: mismatch-случай (WARN точно сработает) -- exit_code остаётся 0,
     # JSON не содержит "permissionDecision".
-    payload = _agent_payload(subagent_type="scout", description="sonnet: делает разведку")
+    _live, _foreign = _scout_families()
+    payload = _agent_payload(subagent_type="scout", description=f"{_foreign}: делает разведку")
     payload["tool_input"]["prompt"] = "DoD: тест зелёный."  # subagent_type != builder, не влияет
     result = subprocess.run(
         [sys.executable, str(SCRIPT)],
@@ -1609,11 +1632,13 @@ def test_i2_role_type_warn_never_sets_exit_2_or_permission_decision():
 
 def test_i4_both_warn_layers_fire_single_json_object_given_path_first():
     # Оба слоя срабатывают одновременно: given-path (несуществующий путь
-    # в "дано") И role-type (scout несёт model: haiku, лейбл "sonnet:").
+    # в "дано") И role-type (лейбл чужого семейства против живой привязки
+    # scout, binding-agnostic).
     # Результат -- ОДИН JSON-объект, given-path сообщение ПЕРЕД role-type.
+    _live, _foreign = _scout_families()
     payload = _agent_payload(
         subagent_type="scout",
-        description="sonnet: разведка",
+        description=f"{_foreign}: разведка",
         prompt="Дано: tools/фейк_не_существует.py. Найди упоминания.",
         cwd=_REPO_ROOT,
     )
