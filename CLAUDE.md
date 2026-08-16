@@ -448,7 +448,11 @@ Three definitions that are NOT synonyms:
   Opus is the MODEL NAME of the Lead tier (binding
   delegation.config.yaml, D-0099); Fable is the reserve tier ABOVE
   the binding; "Lead" is the tier-function (decomposition, specs,
-  acceptance, mechanisms), not a role in the dialog.
+  acceptance, mechanisms), not a role in the dialog. THE TWO NAMES
+  HERE ARE DATED, NOT NORMATIVE — what `roles.lead`/`roles.reserve`
+  resolved to AS OF 2026-08-16, kept on purpose (rationale:
+  POLICY_FULL). The config is the authority; on divergence it wins
+  and this line is stale.
 - The COORDINATOR role = ROUTING, not execution. Any model leading
   the dialog with the operator carries it, from any tier, and it does
   NOT make the session a Lead. The coordinator DISTRIBUTES work
@@ -475,12 +479,17 @@ itself). Equal/higher-tier acceptance without such input = session
 self-certification (F-22; class F-6/F-14). The matrix by the
 coordinator's ACTUAL tier:
 
-| Coordinator | Accepts | Does not |
+| Coordinator's rung | Accepts | Does not |
 |---|---|---|
-| Fable (reserve, on operator's word) | everything; "critic: skipped" concession available | — |
-| Opus (the Lead binding — full Lead) | everything incl. critic/designer output (independent-context clause, D-0099); "critic: skipped" concession available | — |
-| Sonnet | scout; builder diffs ONLY with a critic input (skip concession unavailable) | critic-class and Lead-class → queue |
-| below Sonnet | no coordination is provided for | — |
+| `roles.reserve` (above the binding, on operator's word) | everything; "critic: skipped" concession available | — |
+| AT `roles.lead` (the binding — full Lead) | everything incl. critic/designer output (independent-context clause, D-0099); "critic: skipped" concession available | — |
+| at the `roles.builder` rung | scout; builder diffs ONLY with a critic input (skip concession unavailable) | critic-class and Lead-class → queue |
+| below the `roles.builder` rung | no coordination is provided for | — |
+
+Keyed by RUNG, not by model name: this table is a CRITERION, and a
+pinned name here answers the wrong question silently after the next
+rebinding (failure-mode register, docs/SIBLING_MAP.md). Ladder:
+scout < builder < critic < lead < reserve.
 
 The standing mode "operator coordinates with Sonnet, the Lead tier
 (Opus) runs in batches over the Lead queue" is the same matrix;
