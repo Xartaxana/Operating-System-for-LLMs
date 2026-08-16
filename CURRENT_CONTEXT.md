@@ -2,14 +2,13 @@
 
 ## Maintenance Rule (D-0038)
 
-LIVE state only. Budget of a queue item — a few lines: the undecided
-decision + the OWNER of its full text. Retellings of closures, of other
-documents, or of another deploy's implementation belong to their
-owners; evidence is never deleted, only relocated. A pointer to closed
-work is scaffolding for the closing session's handoff, not a resident:
-once docs/task_reports/README.md carries the entry, the pointer here is
-a duplicate and the next boot-diet removes it. Full procedure — the
-boot-diet skill (single owner, D-0068).
+LIVE state only. A queue item's budget — a few lines: the undecided
+decision + the OWNER of its full text. Retellings of closures, of
+other documents, or of another deploy's implementation belong to
+their owners; evidence is never deleted, only relocated. A pointer to
+closed work is scaffolding, not a resident: once the archive index
+carries the entry, the pointer here is a duplicate and the next diet
+removes it. Procedure — the boot-diet skill (D-0068).
 
 ## Current Milestone
 
@@ -37,27 +36,20 @@ docs/RULE_COVERAGE.md (единственная карта «правило → 
 
 ## Routing MVP — LIVE on both deployments
 
-Оба деплоя живы (pilot D:\AO3_tests, reference — этот репо); история
-запуска, приёмка Архитектора и ретро-baseline — docs/OPERATIONAL_NOTES
-§1. Лист-роутинг — дефолт ядра (R13; rationale — POLICY_FULL §R13).
-Калибровки — события `calibrated` журнала (владелец разборов они же,
-не этот файл); №7 08-14, следующая ~08-21 (staleness — Boot Report).
-
+Оба деплоя живы (pilot D:\AO3_tests, reference — этот репо). Разборы
+калибровок — notes событий `calibrated`, не этот файл; №7 08-14,
+следующая ~08-21 (staleness — Boot Report).
 **docs/OPERATIONAL_NOTES.md — справочник ПО ТРЕБОВАНИЮ, не на
-boot-пути.** Читать ПЕРЕД: подъёмом прокси и правкой gateway/ (§2 —
-окружение машины); работой с судьёй, traffic_kind, статусами
-делегирования (§1 — состояние системы); спором о метрике успеха и
-доле frontier (§3 — базлайн Claude Code).
+boot-пути.** Читать ПЕРЕД: подъёмом прокси и правкой gateway/ (§2);
+работой с судьёй, traffic_kind, статусами делегирования (§1); спором
+о метрике успеха и доле frontier (§3).
 
-## Remaining Lead-tier Queue (live only; закрытые блоки — evening-closures)
+## Remaining Lead-tier Queue (живое)
 
 - **КАЛИБРОВКА №7 ИСПОЛНЕНА 08-14, BOOT-DIET ИСПОЛНЕНА 08-16** (оба
-  хвоста слова оператора 08-10). Разборы у владельцев: №7 — notes
-  события `calibrated`; диета — её коммит + архив
-  2026-08-16_boot-diet-extractions (147151 → под порог, проходы
-  2/5/5а/5б; бэклог мелочей уехал в docs/RETRO_PATTERNS.md).
-  Следующая калибровка ~08-21. ЖИВОЕ из копилки №7: вопрос большого
-  экзамена 14(е) — три релиза без прогона.
+  хвоста слова оператора 08-10; разборы у владельцев — notes
+  `calibrated` и архив 2026-08-16_boot-diet-extractions). ЖИВОЕ из
+  копилки №7: вопрос большого экзамена 14(е) — три релиза без прогона.
 
 - **ТРИАЖ-КРИТЕРИЙ КАЧЕСТВА РЕЛИЗА — стоячая норма будущих релизов**
   (заказ 08-09 исполнен релизом v0.7.0): НАРРАТИВНАЯ ссылка (зовёт
@@ -170,6 +162,14 @@ boot-пути.** Читать ПЕРЕД: подъёмом прокси и пр�
   класса. Класс «чекер диктует форму артефакта» — счёт 1, в реестр
   карты при рецидиве. Заодно проверить наш штабной твин тем же
   вопросом (какой формы наши хуки в settings.json).
+
+- **ПОРТ NOTES LEN В КИТ — ОСОЗНАННОЕ ОТСТУПЛЕНИЕ ОТ ОСИ 10** (08-16,
+  механизм t-447). Ось требует «кит-сиблинг тем же диффом»; здесь не
+  так, причина: пороги выведены из НАШЕГО распределения, а перенос
+  числа через границу деплоя — та самая ошибка, что вскрыла развилка
+  символы/байты. Твин вдобавок поколением старше (combine_context на
+  4 сегмента против наших 6). Порт минором: либо с порогами хоста,
+  либо с пометкой «числа — образец, не мера».
 
 - **NAMED-УЗЛЫ СЛЕДУЮЩЕГО МИНОРА КИТА** (мораторий D-0074; сюда же
   живой остаток ревью Codex — (в) дизайн режимов телеметрии):
@@ -309,10 +309,6 @@ t-446, F2в — до неё остаток жил только в сообщен
 завышена (считалась по Fable вдвое дороже истины), №6 верна —
 перепривязка попала внутрь её окна.
 
-## Archive (D-0038 pointer)
+## Archive (D-0038)
 
-Closed work lives in docs/task_reports/ — the annotated index is its
-README.md (single owner since 2026-07-10; per-file descriptions were
-duplicated here and are trimmed from the boot path).
-
-This file is intended to be updated frequently.
+docs/task_reports/README.md — единственный владелец описаний архива.

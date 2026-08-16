@@ -1,12 +1,33 @@
-# STAGED COPY (D-0069, тот же приём, что tools/test_witness_echo.py уже
-# документировал для узла N2): tools/journal_echo.py -- ЖИВОЙ hook-путь,
-# НЕ ТРОНУТ этой правкой. Этот файл = живой journal_echo.py (байт в байт,
-# на момент копирования) + аддитивный TS DRIFT-слой ниже (константы
-# TS_FUTURE_TOLERANCE_SECONDS/TS_STALE_TOLERANCE_SECONDS, функции
-# _detect_ts_drift/_collect_ts_drift_events/_format_ts_drift_line/
-# build_ts_drift_segment, точки вставки в combine_context() и main()).
-# Lead ретаргетит вызывающий hook на этот путь при постановке и удаляет
-# staged-копию (см. tools/test_journal_echo_tsdrift.py за парный тест-файл).
+# ЖИВОЙ ХУК (правка t-447, найдено builder'ом как протухшая шапка): этот
+# файл, tools/journal_echo.py, -- ЖИВОЙ hook-путь САМ ПО СЕБЕ, не staged-
+# копия. .claude/settings.json:33 регистрирует ровно
+# `python tools/journal_echo.py` на PostToolUse -- это И ЕСТЬ файл,
+# который исполняется. Более ранняя версия этой шапки утверждала
+# обратное ("STAGED COPY ... tools/journal_echo.py -- ЖИВОЙ hook-путь,
+# НЕ ТРОНУТ этой правкой") -- верно было на МОМЕНТ той более ранней
+# постановки (D-0069, приём tools/test_witness_echo.py: staged-копия
+# рядом, Lead ретаргетит хук и сливает копию в живой файл при приёмке),
+# но с тех пор ретаргет уже случился и живой файл -- ЭТОТ, шапка не
+# обновлялась и лгала о себе задним числом (найдено при постановке t-447,
+# исправлено здесь, а не молча). Сиблинги tools/test_journal_echo_tsdrift.py
+# / tools/test_journal_echo_escalation.py по-прежнему используют
+# staged-конвенцию ДЛЯ СВОИХ СОБСТВЕННЫХ будущих добавлений (её описание
+# в их докстрингах не тронуто этой правкой, вне owns этой задачи) -- она
+# относится к процессу постановки НОВОГО слоя, не к текущему состоянию
+# этого файла.
+#
+# Слои, накопленные в этом файле по сей день (аддитивно, один и тот же
+# живой путь): TS DRIFT ECHO (константы TS_FUTURE_TOLERANCE_SECONDS/
+# TS_STALE_TOLERANCE_SECONDS, функции _detect_ts_drift/
+# _collect_ts_drift_events/_format_ts_drift_line/build_ts_drift_segment),
+# TIER ECHO, WITNESS ECHO (+ WITNESS ECHO STALENESS), ESCALATION ECHO
+# (batch B6), PAYLOAD-SCOPED ECHO BASE (t-277/t-279) и, этой задачей
+# (t-447, замер 2026-08-16), NOTES LEN ECHO -- WARN при записи строки,
+# чьё поле notes длиннее порога, назначенного типу события (константы
+# NOTES_LEN_THRESHOLDS_CHARS/MAX_NOTES_LEN_LINES, функции
+# _collect_notes_len_events/_format_notes_len_line/build_notes_len_segment,
+# точки вставки в combine_context()/main() -- см. секцию "NOTES LEN ECHO"
+# ниже за полный разбор).
 """journal_echo.py -- PostToolUse-хук Claude Code, эхом валидирующий
 СВЕЖЕЕ (только что записанное на диск) состояние logs/routing-log.jsonl
 СРАЗУ после любого tool-вызова, чей tool_input несёт путь на этот файл --
@@ -732,31 +753,39 @@ def build_context(violations: list, ascii_only: bool = False) -> str:
 
 def combine_context(violations: list, tier_events: list, witness_events: list = None,
                      ts_drift_events: list = None, escalation_events: list = None,
-                     fallback_marker: str = "", ascii_only: bool = False) -> str:
+                     fallback_marker: str = "", *, notes_len_events: list = None,
+                     ascii_only: bool = False) -> str:
     """Спека п.3: "один JSON additionalContext может нести и дефекты
-    формы, и TIER ECHO-строки (раздели '; ')". ШЕСТЬ НЕЗАВИСИМЫХ
+    формы, и TIER ECHO-строки (раздели '; ')". СЕМЬ НЕЗАВИСИМЫХ
     сегментов -- build_context(violations) (ЦЕЛИКОМ, свой заголовок
     "JOURNAL ECHO: N дефект(ов)..." не меняется -- существующие тесты
     завязаны на этот формат буквально), build_tier_segment(tier_events),
     (расширение N2, узел «валидационный импорт»)
     build_witness_segment(witness_events), (расширение TS-DRIFT-задачи)
     build_ts_drift_segment(ts_drift_events), (batch B6, задача 1)
-    build_escalation_segment(escalation_events) и (t-277/t-279)
+    build_escalation_segment(escalation_events), (t-447, эта задача)
+    build_notes_len_segment(notes_len_events) и (t-277/t-279)
     fallback_marker -- склеиваются через "; ", только если непусты. Любое
     подмножество сегментов пусто -> итог = склейка ОСТАВШИХСЯ непустых,
     JSON всё равно печатается, пока хоть один сегмент непуст. Все пусты
     -> "" -- вызывающий код (main()) трактует пустую строку как полную
     тишину (та же проверка истинности, что раньше была
-    `if not violations`).
+    `if not violations`). ПОРЯДОК фиксирован (R-6 спеки t-447):
+    violations первым (литерал заголовка "JOURNAL ECHO: N дефект(ов) в
+    новых строках: " не меняется ни на символ), затем tier/witness/
+    ts-drift/escalation/notes-len в этом порядке, fallback_marker
+    ПОСЛЕДНИМ всегда -- ни один сегмент не является условием видимости
+    другого, каждый делает вызов видимым самостоятельно.
 
     fallback_marker -- ЛИТЕРАЛ (FALLBACK_MARKER_TEXT, см. секцию
     "PAYLOAD-SCOPED ECHO BASE" выше), НЕ проходит ни через один
     санитайзер (статическая ASCII-строка, никогда не несёт стороннего
     текста -- тот же принцип, что статический префикс build_context).
     Вызывающий код (main()) передаёт его пустой строкой, если TIER/
-    WITNESS/TS-DRIFT/ESCALATION в ЭТОМ вызове хука не деградировали до
-    HEAD-дифф-фолбэка (см. _resolve_echo_base) -- поэтому его отсутствие
-    в старых 2-/3-/4-позиционных вызовах ничего не меняет.
+    WITNESS/TS-DRIFT/ESCALATION/NOTES-LEN в ЭТОМ вызове хука не
+    деградировали до HEAD-дифф-фолбэка (см. _resolve_echo_base) --
+    поэтому его отсутствие в старых 2-/3-/4-позиционных вызовах ничего
+    не меняет.
 
     witness_events=None / ts_drift_events=None / escalation_events=None
     (значения по умолчанию, НЕ [] -- сохраняет старые 2-, 3- и
@@ -766,16 +795,31 @@ def combine_context(violations: list, tier_events: list, witness_events: list = 
     сигнатуре -- существующие вызовы/тесты, завязанные на короткую
     форму, продолжают работать буквально как раньше, см.
     tools/test_journal_echo.py/tools/test_journal_echo_tsdrift.py).
-    escalation_events добавлен КАК НОВЫЙ 5-Й позиционный параметр (ПЕРЕД
-    fallback_marker, который сдвигается на 6-е место) -- ни один
-    существующий вызов в репо не передаёт fallback_marker позиционно
-    (только 2-4 позиционных аргумента или именованно, эмпирически
-    проверено grep'ом по всем test_journal_echo*.py/test_witness_echo.py
-    перед этой правкой) -- сдвиг НЕ ломает ни один существующий call
-    site, кроме main() ниже в этом же файле, который эта же задача
-    обновляет. fallback_marker="" -- та же логика: default никогда не
-    добавляет сегмент, старые вызовы без этого аргумента не меняют
-    поведение ни на байт."""
+    escalation_events добавлен КАК 5-Й позиционный параметр (ПЕРЕД
+    fallback_marker, 6-м позиционным) прежней (t-263/B6) правкой этого
+    файла.
+
+    НАЙДЕНО ловушкой этой задачи (t-447), ИСПРАВЛЕНО здесь: прежняя
+    версия этого докстринга утверждала "ни один существующий вызов в
+    репо не передаёт fallback_marker позиционно ... эмпирически
+    проверено grep'ом" -- это было НЕВЕРНО уже на момент написания:
+    tools/test_journal_echo_escalation.py:431 (живой пин-тест,
+    test_combine_context_escalation_joined_with_fallback_marker) вызывает
+    ровно `je.combine_context([], [], None, None, [ev], "MARKER")` --
+    ШЕСТОЙ ПОЗИЦИОННЫЙ аргумент, буквально fallback_marker позиционно.
+    Отсюда ЖЁСТКОЕ требование для ЛЮБОГО следующего параметра этой
+    функции: notes_len_events добавлен СТРОГО KEYWORD-ONLY (после `*`,
+    вместе с ascii_only, который был positional-or-keyword, но на
+    практике ВСЕГДА вызывался по имени во всех call site репо -- перевод
+    его тоже за `*` не меняет поведение ни одного существующего вызова).
+    Вставка нового параметра ещё одним, седьмым, ПОЗИЦИОННЫМ слотом молча
+    превратила бы литерал "MARKER" теста t-431 в notes_len_events -- тест
+    либо упал бы, либо (хуже) прошёл по случайному совпадению типов.
+    Keyword-only исключает этот класс регрессии структурно: строка t-431
+    и остальные существующие 2-/3-/4-/5-/6-позиционные вызовы этого
+    репо остаются побайтово прежними (см. тест-пин
+    test_combine_context_six_positional_arg_form_unchanged в
+    tools/test_journal_echo_noteslen.py)."""
     parts = []
     if violations:
         parts.append(build_context(violations, ascii_only))
@@ -791,6 +835,9 @@ def combine_context(violations: list, tier_events: list, witness_events: list = 
     escalation_segment = build_escalation_segment(escalation_events or [], ascii_only)
     if escalation_segment:
         parts.append(escalation_segment)
+    notes_len_segment = build_notes_len_segment(notes_len_events or [], ascii_only)
+    if notes_len_segment:
+        parts.append(notes_len_segment)
     if fallback_marker:
         parts.append(fallback_marker)
     return "; ".join(parts)
@@ -1474,6 +1521,179 @@ def build_escalation_segment(escalation_events: list, ascii_only: bool = False) 
     return body
 
 
+# --- NOTES LEN ECHO при записи (t-447, замер 2026-08-16) ---------------
+# ПОВОД: замер по logs/routing-log.jsonl (1239 событий на момент замера)
+# -- медиана длины notes 550 символов, p75 768, p90 1047, p99 2040, max
+# 13352; 43% событий длиннее 600; последние 30 событий -- 22 из 30
+# длиннее 600, класс усиливается. WARN при записи журнальной строки, чьё
+# notes длиннее порога, назначенного ТИПУ события -- НИКОГДА не блок (та
+# же гарантия, что весь остальной файл: этот хук всегда возвращает 0, ни
+# один слой не печатает permissionDecision).
+#
+# ПОРОГИ (Lead-решение, закрытая развилка Ф1 спеки t-447): 800 символов
+# для диспетчерского цикла (delegated/accepted/rejected/dispatch_skipped/
+# escalated/defect_found/decomposable) -- p75 замера 768, медиана 550;
+# порог 800 ловит примерно верхнюю четверть (меньшинство, которое учит),
+# а не 43% (что превратило бы предупреждение в обои, к игнорированию
+# которых приучают). calibrated -- отдельный, много больший порог 15000
+# (Ф2): выше текущего живого максимума 13352 -- СЕГОДНЯ он не сработает
+# ни разу, это осознанная и честная цена решения, не выданная за
+# достоинство; ценность потолка -- в его тестируемости и в границе на
+# будущее, реальный контроль над прозой calibrated-события -- отдельное
+# решение Lead (увод разбора в отдельный файл-носитель), не эта задача.
+#
+# СОБЫТИЕ ВНЕ ТАБЛИЦЫ / БЕЗ ПОЛЯ event: МОЛЧИМ (Ф1b) -- тот же принцип,
+# что уже трижды применён в этом файле (_extract_declared_word,
+# _detect_ts_drift, _find_agent_transcript): нет назначенного порога --
+# нет вердикта, а не домысел порога "по умолчанию".
+#
+# ЕДИНИЦА -- СИМВОЛЫ (Ф4), не байты: len() по строке Python, буквально
+# то же измерение, что Ф4 требует в имени константы
+# (NOTES_LEN_THRESHOLDS_CHARS) и в тексте предупреждения (слово "chars")
+# -- норма целится в объём прозы, которую читает человек, не в размер
+# файла на диске; байтовая метрика делала бы наказание зависимым от
+# языка записи (кириллица шире в UTF-8, чем ASCII).
+#
+# БАЗА (Ф5, наследование класса F-57): используется ТА ЖЕ payload-scoped
+# база (echo_new_lines/echo_base_lines из _resolve_echo_base), что уже
+# несут TIER/WITNESS/TS-DRIFT/ESCALATION выше в этом файле, -- НО, в
+# отличие от них, этот слой ПОЛНОСТЬЮ ОТКЛЮЧАЕТСЯ целиком, когда
+# used_fallback == True (см. main()): в фолбэк-режиме (payload
+# нечитаем/не-хвостовая правка) слой не даёт ни одного notes-len события,
+# а не просто "меньше уверен" -- иначе он переоценивал бы ВЕСЬ
+# незакоммиченный хвост журнала при каждой записи (тот же класс, что
+# F-57 уже поймал: детектор с растущими ложными срабатываниями на
+# накопленном фолбэк-диффе). FALLBACK_MARKER_TEXT печатается КАК И
+# РАНЬШЕ независимо от этого отключения -- "слой промолчал" остаётся
+# видимым читателю через существующую пометку, не тихая смерть.
+#
+# ТЕКСТ ПРЕДУПРЕЖДЕНИЯ (Ф6): статический ASCII-шаблон, БЕЗ фрагмента
+# notes -- см. _format_notes_len_line. Все динамические значения,
+# вставляемые в сообщение (line_no, length, threshold -- целые числа;
+# event -- ОДНО из фиксированных ASCII-ключей NOTES_LEN_THRESHOLDS_CHARS,
+# закрытое множество, никогда произвольный текст стороннего JSON-поля),
+# не несут риска инъекции -- в отличие от cmd/ts у WITNESS ECHO или
+# measured у TIER ECHO, санитайз здесь не требуется (тот же класс
+# "чистая динамика", что _format_ts_drift_line/_format_ts_drift_line
+# уже устанавливают в этом файле для событий, несущих только числа).
+#
+# КРАЯ (fail-open, тот же построчный try/except-паттерн, что все
+# остальные _collect_* этого файла): notes отсутствует/не строка/пустая/
+# из пробелов -- МОЛЧИМ (дефект формы уже ловит journal_validator,
+# правило 2 -- два предупреждения об одном дефекте были бы шумом, не
+# новым сигналом); строка не парсится как JSON / не объект -- построчный
+# `continue`, битая строка не мешает разобрать остальные строки того же
+# вызова.
+NOTES_LEN_THRESHOLDS_CHARS = {
+    "delegated": 800,
+    "accepted": 800,
+    "rejected": 800,
+    "dispatch_skipped": 800,
+    "escalated": 800,
+    "defect_found": 800,
+    "decomposable": 800,
+    "calibrated": 15000,
+}
+# Внешний файл конфигурации порогов НЕ заводится (R-1 спеки t-447): он
+# породил бы временной край "до/после появления файла" и второй носитель
+# истины помимо кода -- пороги живут ИСКЛЮЧИТЕЛЬНО здесь, в модульной
+# константе.
+MAX_NOTES_LEN_LINES = 5  # тот же класс потолка, что MAX_TIER_LINES/
+# MAX_WITNESS_LINES/MAX_TS_DRIFT_LINES/MAX_ESCALATION_LINES выше в этом
+# файле -- тот же мотив (payload-scoped база БЕЗ потолка на редком, но
+# реальном большом батче -> неограниченный additionalContext на один
+# вызов хука). Граничные тесты на 5/6 -- правило 6а, см.
+# tools/test_journal_echo_noteslen.py.
+
+
+def _collect_notes_len_events(new_lines: list, base_lines: list) -> list:
+    """Для КАЖДОЙ новой строки (та же new_lines/base_lines пара, что
+    TIER/WITNESS/TS-DRIFT/ESCALATION ECHO уже используют в main(), см.
+    _resolve_echo_base) с event, ЕСТЬ В NOTES_LEN_THRESHOLDS_CHARS, и
+    непустым (после strip()) строковым notes длиннее назначенного
+    порога СТРОГО (>, не >=) -- добавляет (line_no, event, length,
+    threshold) в результат. line_no -- ТА ЖЕ формула, что
+    journal_validator.validate_new_lines и все остальные _collect_*
+    этого файла (len(base_lines)+idx+1).
+
+    Молчит (не добавляет ничего) на: event отсутствует/не входит в
+    таблицу порогов (Ф1b -- нет назначенного порога, нет вердикта);
+    notes отсутствует/не строка (E6 -- в т.ч. int/list/None/dict, len()
+    по не-строке не вызывается вовсе); notes пустая/из одних пробелов
+    (E4/E5 -- дефект формы уже ловит journal_validator, правило 2);
+    length <= threshold (E1, граница САМА тиха).
+
+    Длина измеряется по СЫРОМУ notes (len(notes), включая ведущие/
+    хвостовые пробелы, если они есть при непустом содержимом) -- проверка
+    пустоты (notes.strip()) используется ТОЛЬКО как фильтр "нечего
+    оценивать", не как предобработка перед измерением (единица -- Ф4:
+    символы Python-строки как есть).
+
+    Fail-open построчно (E7, тот же паттерн, что _collect_tier_events/
+    _collect_ts_drift_events/_collect_escalation_events выше): битый
+    JSON одной строки / не-dict строка -- try/except с `continue`, не
+    роняет разбор остальных строк того же вызова и не роняет хук."""
+    events = []
+    for idx, line in enumerate(new_lines):
+        line_no = len(base_lines) + idx + 1
+        try:
+            obj = json.loads(line)
+            if not isinstance(obj, dict):
+                continue
+            event = obj.get("event")
+            threshold = NOTES_LEN_THRESHOLDS_CHARS.get(event)
+            if threshold is None:
+                continue
+            notes = obj.get("notes")
+            if not isinstance(notes, str):
+                continue
+            if not notes.strip():
+                continue
+            length = len(notes)
+            if length > threshold:
+                events.append((line_no, event, length, threshold))
+        except Exception:
+            continue
+    return events
+
+
+def _format_notes_len_line(event: tuple) -> str:
+    """Ф6, буквально: "NOTES LEN: line <N> event=<e> notes <L> chars >
+    threshold <T> (move load-bearing facts to typed fields / task
+    carrier)" -- статический ASCII-литерал, БЕЗ фрагмента notes (Ф6:
+    вставка текста notes включила бы санитайз и второй лимит со своими
+    граничными тестами -- сознательно не заводится). Никакая часть
+    сообщения не требует sanitize (см. секцию "NOTES LEN ECHO" выше за
+    разбор -- все четыре подставляемых значения либо целые числа, либо
+    один из фиксированных ASCII-ключей NOTES_LEN_THRESHOLDS_CHARS) --
+    нет параметра ascii_only, тот же выбор сигнатуры, что
+    _format_ts_drift_line уже сделал в этом файле по той же причине."""
+    line_no, event_name, length, threshold = event
+    return (f"NOTES LEN: line {line_no} event={event_name} notes {length} chars "
+            f"> threshold {threshold} (move load-bearing facts to typed fields / task carrier)")
+
+
+def build_notes_len_segment(events: list, ascii_only: bool = False) -> str:
+    """Собирает NOTES LEN-часть additionalContext -- ТОТ ЖЕ паттерн, что
+    build_tier_segment/build_ts_drift_segment/build_escalation_segment
+    (потолок MAX_NOTES_LEN_LINES=5 строк на вызов хука, хвост "; +K more"
+    сверху). ascii_only принят для единообразия сигнатуры со всеми
+    остальными build_*/combine_context этого файла, но фактически no-op
+    (тот же выбор, что build_ts_drift_segment уже документирует для той
+    же причины -- _format_notes_len_line не вставляет ничего, что могло
+    бы требовать санитайза ни в одном режиме). Пустой список -> "" --
+    вызывающий код трактует пустую строку как отсутствие сегмента, тот
+    же принцип, что остальные build_*."""
+    if not events:
+        return ""
+    head = events[:MAX_NOTES_LEN_LINES]
+    rest = len(events) - len(head)
+    body = "; ".join(_format_notes_len_line(ev) for ev in head)
+    if rest > 0:
+        body += f"; +{rest} more"
+    return body
+
+
 # --- PAYLOAD-SCOPED ECHO BASE (critic diagnosis t-277, this task) ------
 # ROOT CAUSE: TIER ECHO/WITNESS ECHO/TS DRIFT ECHO above all shared ONE
 # base -- new_lines = staged_lines[len(head_lines):], head_lines from
@@ -1638,8 +1858,9 @@ def main() -> int:
        регрессией валидации, не багом (в отличие от TIER/WITNESS/
        TS-DRIFT ниже, у которых "видел раньше -- не показывай снова"
        ИМЕННО желаемое поведение).
-     - ЭХО-СЛОИ (TIER ECHO/WITNESS ECHO/TS DRIFT ECHO/ESCALATION ECHO) --
-       ПО-СОБЫТИЙНАЯ payload-scoped база (_resolve_echo_base, см. секцию
+     - ЭХО-СЛОИ (TIER ECHO/WITNESS ECHO/TS DRIFT ECHO/ESCALATION ECHO/
+       NOTES LEN ECHO, последний -- t-447, эта задача) -- ПО-СОБЫТИЙНАЯ
+       payload-scoped база (_resolve_echo_base, см. секцию
        "PAYLOAD-SCOPED ECHO BASE" выше): каждый вызов хука оценивает
        ТОЛЬКО строки, добавленные ИМЕННО ЭТИМ tool-вызовом -- никогда
        те, что уже были на диске (закоммичены или нет) до него.
@@ -1647,7 +1868,12 @@ def main() -> int:
        TIER/WITNESS/TS-DRIFT: он ЧИТАЕТ base_lines как историю ДЛЯ
        КОНТЕКСТА (см. докстринг секции "ESCALATION ECHO" выше), но
        триггерит проверку ТОЛЬКО на строках echo_new_lines -- та же
-       payload-scoped база, тот же вызов, отдельный смысл использования."""
+       payload-scoped база, тот же вызов, отдельный смысл использования.
+       NOTES LEN ECHO -- ЕЩЁ ОДНО отличие (Ф5 спеки t-447, наследование
+       класса F-57): при used_fallback == True этот слой ПОЛНОСТЬЮ
+       отключён (ноль событий), в отличие от TIER/WITNESS/TS-DRIFT/
+       ESCALATION, которые продолжают работать (с фолбэковой базой) и
+       в фолбэк-режиме -- см. секцию "NOTES LEN ECHO" выше за мотив."""
     _reconfigure_streams_utf8()
     try:
         raw_bytes = sys.stdin.buffer.read()
@@ -1732,8 +1958,35 @@ def main() -> int:
         except Exception:
             escalation_events = []
 
+        # NOTES LEN ECHO (t-447, замер 2026-08-16 -- см. секцию "NOTES LEN
+        # ECHO" выше за полный разбор): ТА ЖЕ payload-scoped база, что
+        # TIER/WITNESS/TS-DRIFT/ESCALATION выше (main() не пересчитывает
+        # HEAD-дифф сам -- R-5 спеки t-447), питается ГОТОВЫМИ
+        # echo_new_lines/echo_base_lines. Ф5 (закрытая развилка спеки,
+        # наследование класса F-57): при used_fallback == True слой
+        # ПОЛНОСТЬЮ отключён -- ноль notes-len событий, коллектор даже не
+        # вызывается -- иначе он переоценивал бы весь незакоммиченный
+        # хвост журнала на каждой записи (тот же класс, что F-57 уже
+        # поймал). FALLBACK_MARKER_TEXT (fallback_marker ниже) печатается
+        # КАК И РАНЬШЕ независимо от этого отключения -- "слой промолчал"
+        # остаётся видимым читателю. Fail-open вторым слоем поверх
+        # построчного try/except внутри самой _collect_notes_len_events --
+        # тот же паттерн, что WITNESS ECHO/TS DRIFT ECHO/ESCALATION ECHO
+        # выше.
+        if used_fallback:
+            notes_len_events = []
+        else:
+            try:
+                notes_len_events = _collect_notes_len_events(echo_new_lines, echo_base_lines)
+            except Exception:
+                notes_len_events = []
+
+        # R-7 (спека t-447): "полная тишина на чистой записи" сохраняется
+        # -- notes_len_events добавлен В ТУ ЖЕ проверку истинности, что
+        # решает "печатать ли вообще что-то в этом вызове", наравне с
+        # остальными пятью источниками.
         if (not violations and not tier_events and not witness_visible
-                and not ts_drift_events and not escalation_events):
+                and not ts_drift_events and not escalation_events and not notes_len_events):
             return 0
 
         # Фолбэк-пометка (эта задача): видна ТОЛЬКО когда мы всё равно
@@ -1746,11 +1999,16 @@ def main() -> int:
         # два разных варианта санитайза (см. докстринг build_context).
         # combine_context склеивает дефекты формы, TIER ECHO-строки,
         # WITNESS ECHO-строки, TS DRIFT-строки, ESCALATION-строки (batch
-        # B6) и фолбэк-пометку (спека п.3) -- см. докстринг combine_context.
+        # B6), NOTES LEN-строки (t-447) и фолбэк-пометку (спека п.3) --
+        # см. докстринг combine_context. notes_len_events -- ТОЛЬКО
+        # keyword (combine_context требует его строго keyword-only, см.
+        # её докстринг за разбор ловушки t-447).
         context_for_stdout = combine_context(violations, tier_events, witness_events, ts_drift_events,
-                                              escalation_events, fallback_marker, ascii_only=False)
+                                              escalation_events, fallback_marker,
+                                              notes_len_events=notes_len_events, ascii_only=False)
         context_for_stderr = combine_context(violations, tier_events, witness_events, ts_drift_events,
-                                              escalation_events, fallback_marker, ascii_only=True)
+                                              escalation_events, fallback_marker,
+                                              notes_len_events=notes_len_events, ascii_only=True)
 
         sys.stderr.write(context_for_stderr + "\n")
         output = {

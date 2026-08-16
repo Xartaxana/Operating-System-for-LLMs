@@ -375,7 +375,14 @@ Base fields of EVERY event: ts (ISO, local time, no timezone — read
 from the system clock immediately before writing, never from the
 session's narrative, F-29), event, agent, category, notes
 (non-empty; there is NO separate `reason` field — reasons go inside
-notes). Event SHAPES — mandatory typed fields on top of the base
+notes). NOTES HAS A LENGTH BUDGET: 800 chars for the dispatch cycle, 15000
+for `calibrated` (its notes are the declared OWNER of a run's
+analysis). Over budget = the note carries what belongs elsewhere —
+a load-bearing fact goes to a typed field, an analysis to its own
+carrier (task DAG, commit message, report), the note keeps the
+pointer. Machine layer: the NOTES LEN warn of journal_echo at write
+time (never a block; silent in the hook's fallback base, which
+prints its own marker). Event SHAPES — mandatory typed fields on top of the base
 (D-0053; load-bearing facts as fields, notes is surplus):
 
 | event | adds on top of base |
