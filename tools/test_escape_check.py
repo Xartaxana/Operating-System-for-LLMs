@@ -74,6 +74,7 @@ from pathlib import Path
 import pytest
 
 import escape_check as ec
+from wallclock_guard import WALLCLOCK_HARNESS_TIMEOUT
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CHECKER_PATH = REPO_ROOT / "tools" / "escape_check.py"
@@ -228,14 +229,24 @@ def _write_allowlist(tmp_path, entries, name="allowlist.json",
 
 
 def _run_cli(args, input_bytes=None, env=None):
-    return subprocess.run(
-        [sys.executable, str(CHECKER_PATH)] + args,
-        cwd=str(REPO_ROOT),
-        input=input_bytes,
-        capture_output=True,
-        timeout=15,
-        env=env,
-    )
+    # F-60 (класс A): timeout -- сетка против зависшего процесса, не
+    # утверждение о предмете; WALLCLOCK_HARNESS_TIMEOUT -- общий источник
+    # значения для всех сайтов этого файла.
+    try:
+        return subprocess.run(
+            [sys.executable, str(CHECKER_PATH)] + args,
+            cwd=str(REPO_ROOT),
+            input=input_bytes,
+            capture_output=True,
+            timeout=WALLCLOCK_HARNESS_TIMEOUT,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"escape_check CLI exceeded WALLCLOCK_HARNESS_TIMEOUT="
+            f"{WALLCLOCK_HARNESS_TIMEOUT}s -- сторож стенных часов: "
+            "проверь загрузку машины прежде, чем считать это дефектом (F-60)"
+        )
 
 
 # ---------------------------------------------------------------------------

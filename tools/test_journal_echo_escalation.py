@@ -42,11 +42,32 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import journal_echo as je  # noqa: E402
+from wallclock_guard import WALLCLOCK_HARNESS_TIMEOUT  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parent / "journal_echo.py"
+
+
+def _run_subprocess_guarded(args, **kwargs):
+    # F-60 (класс A), общий "хелпер" для subprocess-вызовов этого файла --
+    # и _run_hook, и inline-сайты, которым не подходит форма json.dumps()
+    # (напр. сырой input=""), проходят ЧЕРЕЗ эту функцию, так что все они
+    # ловят TimeoutExpired одинаково (Ф8: обёртка на хелперах, не на
+    # каждом сайте) вместо того, чтобы тест сам молча падал по стенным
+    # часам с неинформативным traceback'ом.
+    kwargs.setdefault("timeout", WALLCLOCK_HARNESS_TIMEOUT)
+    try:
+        return subprocess.run(args, **kwargs)
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"journal_echo hook exceeded WALLCLOCK_HARNESS_TIMEOUT="
+            f"{kwargs['timeout']}s -- сторож стенных часов: проверь "
+            "загрузку машины прежде, чем считать это дефектом (F-60)"
+        )
 
 
 def _fresh_ts() -> str:
@@ -128,8 +149,8 @@ def _post_tool_use_payload(file_path, tool_name="Edit", original_file=_NO_ORIGIN
     }
 
 
-def _run_hook(payload, timeout=10, env=None) -> subprocess.CompletedProcess:
-    return subprocess.run(
+def _run_hook(payload, timeout=WALLCLOCK_HARNESS_TIMEOUT, env=None) -> subprocess.CompletedProcess:
+    return _run_subprocess_guarded(
         [sys.executable, str(SCRIPT)],
         input=json.dumps(payload),
         capture_output=True,
@@ -658,13 +679,13 @@ def test_echo_escalation_malformed_line_among_new_does_not_crash(tmp_path):
 def test_echo_escalation_empty_payload_silent(tmp_path):
     # Адверсариальная 10: пустой payload -> тихий exit 0 (существующий
     # fail-open путь main(), payload не dict).
-    result = subprocess.run(
+    result = _run_subprocess_guarded(
         [sys.executable, str(SCRIPT)],
         input="",
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=10,
+        timeout=WALLCLOCK_HARNESS_TIMEOUT,
     )
     assert result.returncode == 0
     assert result.stdout == ""

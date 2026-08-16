@@ -21,6 +21,7 @@ import pytest
 import spend_model as sm
 import token_usage_stats as tus
 import usage_report
+from wallclock_guard import WALLCLOCK_HARNESS_TIMEOUT
 
 
 @pytest.fixture(autouse=True)
@@ -1461,8 +1462,18 @@ def test_m10_d4_collapse_drifted_fable_declarations_into_one_row():
 # M11 -- git numstat (real tmp git repos; subprocess allowed, section 9)
 # -----------------------------------------------------------------------
 def _git(*args, cwd, env=None):
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
-                           env=env, timeout=30)
+    # F-60 (класс A): timeout -- сетка против зависшего git-процесса, не
+    # утверждение о предмете; WALLCLOCK_HARNESS_TIMEOUT -- общий источник
+    # значения.
+    try:
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
+                               env=env, timeout=WALLCLOCK_HARNESS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"git {' '.join(args)} exceeded WALLCLOCK_HARNESS_TIMEOUT="
+            f"{WALLCLOCK_HARNESS_TIMEOUT}s -- сторож стенных часов: "
+            "проверь загрузку машины прежде, чем считать это дефектом (F-60)"
+        )
 
 
 def _init_repo_with_commit(repo_dir, commit_dt):

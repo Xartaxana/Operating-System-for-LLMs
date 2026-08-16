@@ -4,7 +4,8 @@
 граничные -- контроль ровно на 3-й строке (окно срабатывает) и на 4-й
 (не срабатывает), регистр/середина слова; (3) адверсариальная батарея
 -- битый JSON, пустой stdin, payload без tool_response, результат-
-объект с вложенным content, текст 1 МБ (<2с), не-UTF8 байты,
+объект с вложенным content, текст 1 МБ (сторож катастрофы, не SLO
+задержки -- F-60, t-453), не-UTF8 байты,
 эмодзи/юникод -- всё fail-open; (4) ложноположительный контроль --
 форма "ЗАКРЫТО: ..." (t-297) не должна давать WARN."""
 
@@ -17,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import negative_lint  # noqa: E402
+from wallclock_guard import WALLCLOCK_CATASTROPHE_CEILING  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parent / "negative_lint.py"
 
@@ -272,7 +274,7 @@ def test_cli_nested_content_object_result_detected():
     assert "NEGATIVE LINT" in out["hookSpecificOutput"]["additionalContext"]
 
 
-def test_cli_1mb_text_under_2_seconds():
+def test_cli_1mb_text_no_catastrophic_blowup():
     line = "просто обычная строка отчёта без маркеров нужной длины для объёма. " * 3
     big_text = (line + "\n") * 15000  # существенно больше 1 МБ
     assert len(big_text.encode("utf-8")) > 1_000_000
@@ -281,7 +283,17 @@ def test_cli_1mb_text_under_2_seconds():
     result = _run_hook(json.dumps(payload).encode("utf-8"))
     elapsed = time.perf_counter() - started
     assert result.returncode == 0
-    assert elapsed < 2.0
+    # F-60 (класс B): сторож катастрофы, не SLO задержки -- ловит
+    # реальный complexity-регресс на 1МБ входе, не отслеживает бытовую
+    # задержку. Здоровое время ~0.34с (замер этого прогона, --durations,
+    # t-453). Величина катастрофы не замерена; потолок задан классом, а
+    # не измерением. СУЖЕНИЕ ПОКРЫТИЯ (было -> стало): раньше тест
+    # утверждал "укладывается в 2 секунды"; теперь -- "предмет не
+    # деградировал на порядок".
+    assert elapsed < WALLCLOCK_CATASTROPHE_CEILING, (
+        f"took {elapsed:.2f}s -- сторож стенных часов: проверь загрузку "
+        "машины прежде, чем считать это дефектом (F-60)"
+    )
 
 
 def test_cli_non_utf8_bytes_exit0_no_traceback():

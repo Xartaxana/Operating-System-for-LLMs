@@ -64,6 +64,10 @@ import dod_track  # noqa: E402 -- КАНОН формулы пути трека 
 import main_gate  # noqa: E402 -- канон-сверка формулы пути трека (read-only, не owns)
 
 import journal_echo as we  # noqa: E402
+from wallclock_guard import (  # noqa: E402
+    WALLCLOCK_CATASTROPHE_CEILING,
+    WALLCLOCK_HARNESS_TIMEOUT,
+)
 
 SCRIPT = Path(__file__).resolve().parent / "journal_echo.py"
 
@@ -198,15 +202,24 @@ def _post_tool_use_payload(file_path, cwd, session_id="sess-1", tool_name="Edit"
     }
 
 
-def _run_hook(payload, timeout=10) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(SCRIPT)],
-        input=json.dumps(payload),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=timeout,
-    )
+def _run_hook(payload, timeout=WALLCLOCK_HARNESS_TIMEOUT) -> subprocess.CompletedProcess:
+    # F-60 (класс A): сетка против зависшего хука, не утверждение о
+    # предмете; WALLCLOCK_HARNESS_TIMEOUT -- общий источник значения.
+    try:
+        return subprocess.run(
+            [sys.executable, str(SCRIPT)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"journal_echo hook exceeded WALLCLOCK_HARNESS_TIMEOUT={timeout}s -- "
+            "сторож стенных часов: проверь загрузку машины прежде, чем "
+            "считать это дефектом (F-60)"
+        )
 
 
 def _parse_stdout_json(stdout: str):
@@ -1193,7 +1206,17 @@ def test_collect_witness_events_large_witness_and_track_performs(tmp_path):
     start = time.perf_counter()
     events = we._collect_witness_events(_new_lines(line), [], payload)
     elapsed = time.perf_counter() - start
-    assert elapsed < 2.0
+    # F-60 (класс B): сторож катастрофы, не SLO задержки -- ловит
+    # квадратичный разбор witness/track, не отслеживает бытовую задержку.
+    # Здоровое время ~0.01с (замер этого прогона, `pytest ... -k ... --durations`,
+    # t-453). Величина катастрофы не замерена; потолок задан классом, а не
+    # измерением.
+    # СУЖЕНИЕ ПОКРЫТИЯ (было -> стало): раньше тест утверждал "укладывается
+    # в 2 секунды"; теперь -- "предмет не деградировал на порядок".
+    assert elapsed < WALLCLOCK_CATASTROPHE_CEILING, (
+        f"took {elapsed:.2f}s -- сторож стенных часов: проверь загрузку "
+        "машины прежде, чем считать это дефектом (F-60)"
+    )
     assert len(events) == 1
     assert events[0][0] == "warn_soft"  # ни одна из 300 команд не встречается в witness
 
@@ -1212,7 +1235,17 @@ def test_collect_witness_events_large_witness_finds_embedded_command(tmp_path):
     start = time.perf_counter()
     events = we._collect_witness_events(_new_lines(line), [], payload)
     elapsed = time.perf_counter() - start
-    assert elapsed < 2.0
+    # F-60 (класс B): сторож катастрофы, не SLO задержки -- ловит
+    # квадратичный разбор witness/track, не отслеживает бытовую задержку.
+    # Здоровое время ~0.01с (замер этого прогона, `pytest ... -k ... --durations`,
+    # t-453). Величина катастрофы не замерена; потолок задан классом, а не
+    # измерением.
+    # СУЖЕНИЕ ПОКРЫТИЯ (было -> стало): раньше тест утверждал "укладывается
+    # в 2 секунды"; теперь -- "предмет не деградировал на порядок".
+    assert elapsed < WALLCLOCK_CATASTROPHE_CEILING, (
+        f"took {elapsed:.2f}s -- сторож стенных часов: проверь загрузку "
+        "машины прежде, чем считать это дефектом (F-60)"
+    )
     assert events == []  # matched, green -> silence
 
 
@@ -1713,7 +1746,17 @@ def test_collect_witness_events_witness_100kb_no_quadratic_blowup(tmp_path):
     start = time.perf_counter()
     events = we._collect_witness_events(_new_lines(line), [], payload)
     elapsed = time.perf_counter() - start
-    assert elapsed < 2.0
+    # F-60 (класс B): сторож катастрофы, не SLO задержки -- ловит
+    # квадратичный разбор witness/track, не отслеживает бытовую задержку.
+    # Здоровое время ~0.01с (замер этого прогона, `pytest ... -k ... --durations`,
+    # t-453). Величина катастрофы не замерена; потолок задан классом, а не
+    # измерением.
+    # СУЖЕНИЕ ПОКРЫТИЯ (было -> стало): раньше тест утверждал "укладывается
+    # в 2 секунды"; теперь -- "предмет не деградировал на порядок".
+    assert elapsed < WALLCLOCK_CATASTROPHE_CEILING, (
+        f"took {elapsed:.2f}s -- сторож стенных часов: проверь загрузку "
+        "машины прежде, чем считать это дефектом (F-60)"
+    )
     kinds = {e[0] for e in events}
     assert "warn_soft" in kinds  # ни одна из 200 команд не встречается
 

@@ -29,15 +29,35 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import judge_calib_sanitize as jcs
+from wallclock_guard import WALLCLOCK_HARNESS_TIMEOUT
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATH = REPO_ROOT / "tools" / "judge_calib_sanitize.py"
 REAL_CALIBRATION_PATH = REPO_ROOT / "gateway" / "judge_calibration.json"
 
 
-def _run_cli(args, timeout=15, env=None):
-    return subprocess.run(
+def _run_subprocess_guarded(args, **kwargs):
+    # F-60 (класс A), общий "хелпер" -- и _run_cli, и inline-сайты этого
+    # файла, которым нужна форма stdout=<file> (несовместимая с
+    # capture_output=True в _run_cli), проходят через эту функцию, так
+    # что все они ловят TimeoutExpired одинаково (Ф8: обёртка на
+    # хелперах, не на каждом сайте).
+    kwargs.setdefault("timeout", WALLCLOCK_HARNESS_TIMEOUT)
+    try:
+        return subprocess.run(args, **kwargs)
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"judge_calib_sanitize CLI exceeded WALLCLOCK_HARNESS_TIMEOUT="
+            f"{kwargs['timeout']}s -- сторож стенных часов: проверь "
+            "загрузку машины прежде, чем считать это дефектом (F-60)"
+        )
+
+
+def _run_cli(args, timeout=WALLCLOCK_HARNESS_TIMEOUT, env=None):
+    return _run_subprocess_guarded(
         [sys.executable, str(SCRIPT_PATH)] + args,
         cwd=str(REPO_ROOT),
         capture_output=True,
@@ -344,12 +364,12 @@ def test_cli_stdout_redirected_to_file_is_byte_identical_utf8(tmp_path):
     # subprocess pipe buffering involved on the read side.
     out_path = tmp_path / "sanitized_out.json"
     with open(out_path, "wb") as out_fh:
-        result = subprocess.run(
+        result = _run_subprocess_guarded(
             [sys.executable, str(SCRIPT_PATH)],
             cwd=str(REPO_ROOT),
             stdout=out_fh,
             stderr=subprocess.PIPE,
-            timeout=15,
+            timeout=WALLCLOCK_HARNESS_TIMEOUT,
         )
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
     file_bytes = out_path.read_bytes()
@@ -372,9 +392,10 @@ def test_cli_pipe_file_and_narrow_console_all_agree_byte_for_byte(tmp_path):
 
     out_path = tmp_path / "out.json"
     with open(out_path, "wb") as out_fh:
-        file_result = subprocess.run(
+        file_result = _run_subprocess_guarded(
             [sys.executable, str(SCRIPT_PATH)],
-            cwd=str(REPO_ROOT), stdout=out_fh, stderr=subprocess.PIPE, timeout=15,
+            cwd=str(REPO_ROOT), stdout=out_fh, stderr=subprocess.PIPE,
+            timeout=WALLCLOCK_HARNESS_TIMEOUT,
         )
     assert file_result.returncode == 0
 

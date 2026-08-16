@@ -16,14 +16,26 @@ from pathlib import Path
 import pytest
 
 import session_context as sc
+from wallclock_guard import WALLCLOCK_HARNESS_TIMEOUT
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _git(args, cwd):
-    return subprocess.run(
-        ["git"] + args, cwd=str(cwd), capture_output=True, text=True, timeout=10
-    )
+    # F-60 (класс A): timeout -- сетка против зависшего git-процесса, не
+    # утверждение о предмете; WALLCLOCK_HARNESS_TIMEOUT -- общий источник
+    # значения для всех сайтов этого файла.
+    try:
+        return subprocess.run(
+            ["git"] + args, cwd=str(cwd), capture_output=True, text=True,
+            timeout=WALLCLOCK_HARNESS_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"git {' '.join(args)} exceeded WALLCLOCK_HARNESS_TIMEOUT="
+            f"{WALLCLOCK_HARNESS_TIMEOUT}s -- сторож стенных часов: "
+            "проверь загрузку машины прежде, чем считать это дефектом (F-60)"
+        )
 
 
 def _init_repo_with_hooks(tmp_path, hookspath="own"):
@@ -210,10 +222,35 @@ def test_git_channel_hookspath_unset_autofix_degrades_to_warn_when_git_write_fai
     def _failing_write(cmd, *args, **kwargs):
         if len(cmd) >= 3 and cmd[0] == "git" and cmd[1] == "config" and "--local" in cmd:
             raise OSError("simulated: git config write failed")
+        if cmd == ["git", "config", "core.hooksPath"]:
+            # F-60 (класс C, R9/D-0100 -- покрыть ОБА read-вызова, не
+            # только этот): под нагрузкой машины настоящий git может
+            # превысить встроенный timeout=5 сессии (session_context.py)
+            # и уйти в TimeoutExpired вместо ожидаемой ветки "unset",
+            # ломая ассерт этого теста по стенным часам, а не по логике
+            # (наблюдалось живьём -- F-60). Мок делает READ детерминированным
+            # (canned "unset": returncode!=0, пустой stdout) вместо того,
+            # чтобы пускать настоящий git на этот вызов.
+            return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr="")
+        if cmd == ["git", "-c", "core.quotepath=false", "ls-files", "-s", "--", ".githooks"]:
+            # Тот же мотив -- сиблинг READ-вызова в том же артефакте
+            # (git_hooks_channel's exec-bit check). Канон -- оба
+            # required-хука отслежены с mode 100755 (см.
+            # _init_repo_with_hooks: git update-index --chmod=+x).
+            stdout = (
+                "100755 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0\t.githooks/pre-commit\n"
+                "100755 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0\t.githooks/commit-msg\n"
+            )
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout=stdout, stderr="")
         return real_run(cmd, *args, **kwargs)
 
     monkeypatch.setattr(sc.subprocess, "run", _failing_write)
     warnings = sc.git_hooks_channel(tmp_path)
+    # Restore the REAL subprocess.run before the independent verification
+    # below -- that check must query the ACTUAL repo state, not the canned
+    # READ stub above (which would otherwise always report "unset"
+    # regardless of ground truth, silently defeating this negative check).
+    monkeypatch.setattr(sc.subprocess, "run", real_run)
     assert any(
         "core.hooksPath not set" in w and "autofix failed" in w for w in warnings
     ), warnings

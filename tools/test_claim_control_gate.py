@@ -33,6 +33,8 @@ try:
 except ImportError:
     import claim_control_gate as m
 
+from wallclock_guard import WALLCLOCK_CATASTROPHE_CEILING
+
 _SCRIPT_NEXT = Path(__file__).resolve().parent / "claim_control_gate.py"
 _SCRIPT_LIVE = Path(__file__).resolve().parent / "claim_control_gate.py"
 SCRIPT = _SCRIPT_NEXT if _SCRIPT_NEXT.exists() else _SCRIPT_LIVE
@@ -314,9 +316,17 @@ def test_adversarial_very_large_write_payload_no_crash(tmp_path):
     result = _run_hook(payload, ledger_dir=ledger_dir)
     elapsed = time.monotonic() - started
     assert result.returncode == 0
-    # Generous ceiling (subprocess overhead included) -- catches a real
-    # complexity regression without being flaky on a loaded CI box.
-    assert elapsed < 5.0
+    # F-60 (класс B): сторож катастрофы, не SLO задержки -- ловит
+    # реальный complexity-регресс, не отслеживает бытовую задержку.
+    # Здоровое время ~0.27с (замер этого прогона, --durations, t-453).
+    # Величина катастрофы не замерена; потолок задан классом, а не
+    # измерением. СУЖЕНИЕ ПОКРЫТИЯ (было -> стало): раньше тест
+    # утверждал "укладывается в 5 секунд"; теперь -- "предмет не
+    # деградировал на порядок".
+    assert elapsed < WALLCLOCK_CATASTROPHE_CEILING, (
+        f"took {elapsed:.2f}s -- сторож стенных часов: проверь загрузку "
+        "машины прежде, чем считать это дефектом (F-60)"
+    )
 
 
 def test_read_stdin_bytes_tty_guard_no_block(monkeypatch):

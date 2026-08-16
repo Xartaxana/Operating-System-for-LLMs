@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import dispatch_gate  # noqa: E402
 import owns_gate  # noqa: E402 -- t-384: эталон истинности для теста равенства
+from wallclock_guard import WALLCLOCK_CATASTROPHE_CEILING  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parent / "dispatch_gate.py"
 
@@ -904,15 +905,24 @@ def test_extract_given_candidates_body_301_chars_not_extracted():
     assert candidates == []
 
 
-def test_extract_given_candidates_pathological_input_under_5s():
+def test_extract_given_candidates_pathological_input_no_catastrophic_blowup():
     # Форма критика: "C:/"*20000 + "a"*20000 -- без точки-расширения
-    # вовсе (обрыв замера критика: 89.5с на 240КБ ДО фикса). Порог 5с
-    # -- запас на медленный CI; реально ожидается <1с.
+    # вовсе (обрыв замера критика: 89.5с на 240КБ ДО фикса -- катастрофа,
+    # которую ловит этот сторож).
+    #
+    # F-60 (класс B): сторож катастрофы, не SLO задержки. Здоровое время
+    # ~0.07с (замер этого прогона, --durations, t-453); катастрофа --
+    # 89.5с на 240 КБ до фикса (см. выше). СУЖЕНИЕ ПОКРЫТИЯ (было ->
+    # стало): раньше тест утверждал "укладывается в 5 секунд"; теперь --
+    # "предмет не деградировал на порядок".
     pathological = "C:/" * 20000 + "a" * 20000
     start = time.monotonic()
     candidates = dispatch_gate.extract_given_candidates(pathological)
     elapsed = time.monotonic() - start
-    assert elapsed < 5.0, f"took {elapsed:.2f}s -- quadratic regression?"
+    assert elapsed < WALLCLOCK_CATASTROPHE_CEILING, (
+        f"took {elapsed:.2f}s -- сторож стенных часов: проверь загрузку "
+        "машины прежде, чем считать это дефектом (F-60)"
+    )
     assert candidates == []
 
 
@@ -922,7 +932,17 @@ def test_extract_given_candidates_1000_real_paths_previous_behavior():
     start = time.monotonic()
     candidates = dispatch_gate.extract_given_candidates(prompt)
     elapsed = time.monotonic() - start
-    assert elapsed < 5.0, f"took {elapsed:.2f}s"
+    # F-60 (класс B): сторож катастрофы, не SLO задержки. Здоровое время
+    # <0.005с (замер этого прогона, --durations, t-453); катастрофа --
+    # 89.5с на 240 КБ до фикса (см. test_extract_given_candidates_
+    # pathological_input_no_catastrophic_blowup выше -- тот же регресс,
+    # другой вход). СУЖЕНИЕ ПОКРЫТИЯ (было -> стало): раньше тест
+    # утверждал "укладывается в 5 секунд"; теперь -- "предмет не
+    # деградировал на порядок".
+    assert elapsed < WALLCLOCK_CATASTROPHE_CEILING, (
+        f"took {elapsed:.2f}s -- сторож стенных часов: проверь загрузку "
+        "машины прежде, чем считать это дефектом (F-60)"
+    )
     toks = [c[0] for c in candidates]
     assert toks == names
 
@@ -1434,7 +1454,17 @@ def test_role_type_warn_huge_description_does_not_hang():
         _agent_payload(subagent_type="scout", description=huge_description, prompt=huge_prompt)
     )
     elapsed = time.monotonic() - start
-    assert elapsed < 5.0, f"took {elapsed:.2f}s"
+    # F-60 (класс B): сторож катастрофы, не SLO задержки. Здоровое время
+    # <0.005с (замер этого прогона, --durations, t-453); катастрофа --
+    # 89.5с на 240 КБ до фикса (тот же регресс F2, см. test_extract_
+    # given_candidates_pathological_input_no_catastrophic_blowup выше).
+    # СУЖЕНИЕ ПОКРЫТИЯ (было -> стало): раньше тест утверждал
+    # "укладывается в 5 секунд"; теперь -- "предмет не деградировал на
+    # порядок".
+    assert elapsed < WALLCLOCK_CATASTROPHE_CEILING, (
+        f"took {elapsed:.2f}s -- сторож стенных часов: проверь загрузку "
+        "машины прежде, чем считать это дефектом (F-60)"
+    )
     assert "ROLE-TYPE WARN" in warn  # scout(haiku) != sonnet -- реальный mismatch
 
 

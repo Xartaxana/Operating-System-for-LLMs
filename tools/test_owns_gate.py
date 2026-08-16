@@ -24,8 +24,9 @@ ATTEMPT 3 (блокер контрольного входа критика): и�
 read-only корзины "дано"); тест ФОЛЛБЕК-ветки (word-boundary совпадений
 нет вовсе -> подстрочный перебор прежнего вида работает); пин N2
 (ведущая звезда глоба съедается стриппером -- known limitation) и
-граничный тест величины N3 (мусорный префикс ~50КБ скобочных групп
-разбирается < 5с)."""
+граничный тест величины N3 (мусорный префикс ~50КБ скобочных групп не
+деградирует на порядок -- сторож катастрофы, не SLO задержки, F-60,
+t-453: было "< 5с", потолок поднят до WALLCLOCK_CATASTROPHE_CEILING)."""
 
 import json
 import subprocess
@@ -36,6 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import owns_gate  # noqa: E402
+from wallclock_guard import WALLCLOCK_CATASTROPHE_CEILING  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parent / "owns_gate.py"
 
@@ -747,20 +749,32 @@ def test_p3_is_continuation_path_token_rejects_bare_star_without_slash():
     assert owns_gate._is_continuation_path_token("D:/repo/a.py") is True
 
 
-def test_strip_owns_marker_junk_50kb_paren_groups_completes_under_5s():
+def test_strip_owns_marker_junk_50kb_paren_groups_no_catastrophic_blowup():
     # N3, ГРАНИЧНЫЙ ТЕСТ ВЕЛИЧИНЫ на РЕАЛИСТИЧНОМ потолке: срез мусора
     # квадратичен по числу скобочных групп (замер критика: 240К групп
-    # ~3с). ~50КБ префикса из групп должны разбираться заведомо быстро.
+    # ~3с до фикса -- катастрофа, которую ловит этот сторож). ~50КБ
+    # префикса из групп должны разбираться заведомо быстро.
+    #
+    # F-60 (класс B): сторож катастрофы, не SLO задержки. Здоровое время
+    # ~0.03с (замер этого прогона, --durations, t-453); катастрофа --
+    # 240К групп ~3с до фикса (см. выше). СУЖЕНИЕ ПОКРЫТИЯ (было -> стало):
+    # раньше тест утверждал "укладывается в 5 секунд"; теперь --
+    # "предмет не деградировал на порядок". time.monotonic() вместо
+    # time.time() (Ф10) -- немонотонные часы дают отрицательный elapsed
+    # при переводе системного времени назад, и сторож молча зеленеет.
     import time
 
     junk = "(x)" * 16667  # 50 001 символ
     assert len(junk) >= 50000
     prompt = "owns " + junk + ": D:/repo/tools/a.py"
-    started = time.time()
+    started = time.monotonic()
     paths = owns_gate.extract_owns_paths(prompt)
-    elapsed = time.time() - started
+    elapsed = time.monotonic() - started
     assert paths == ["D:/repo/tools/a.py"]
-    assert elapsed < 5.0
+    assert elapsed < WALLCLOCK_CATASTROPHE_CEILING, (
+        f"took {elapsed:.2f}s -- сторож стенных часов: проверь загрузку "
+        "машины прежде, чем считать это дефектом (F-60)"
+    )
 
 
 # ---------------------------------------------------------------------
@@ -1080,11 +1094,22 @@ def test_echo_json_huge_owns_string_completes_quickly(tmp_path):
 
     huge_owns = "D:\\repo\\tools\\huge_" + ("x" * (1024 * 1024)) + ".py"
     payload = _writing_payload(huge_owns, session_id="s-huge", cwd=str(tmp_path))
-    started = time.time()
+    started = time.monotonic()
     result = _run_hook(json.dumps(payload).encode("utf-8"), cwd=tmp_path)
-    elapsed = time.time() - started
+    elapsed = time.monotonic() - started
     assert result.returncode == 0
-    assert elapsed < 5.0
+    # F-60 (класс B): сторож катастрофы, не SLO задержки -- ЭТО тот самый
+    # тест, на котором F-60 была замечена (0.25с здоровых в изоляции,
+    # 11.8с под сторонней CPU-нагрузкой). Здоровое время этого прогона --
+    # 0.15с (--durations, t-453). СУЖЕНИЕ ПОКРЫТИЯ (было -> стало): раньше
+    # тест утверждал "укладывается в 5 секунд"; теперь -- "предмет не
+    # деградировал на порядок". time.monotonic() вместо time.time() (Ф10)
+    # -- немонотонные часы дают отрицательный elapsed при переводе
+    # системного времени назад, и сторож молча зеленеет.
+    assert elapsed < WALLCLOCK_CATASTROPHE_CEILING, (
+        f"took {elapsed:.2f}s -- сторож стенных часов: проверь загрузку "
+        "машины прежде, чем считать это дефектом (F-60)"
+    )
 
 
 def test_echo_json_valid_writing_dispatch_no_prior_records_is_silent(tmp_path):

@@ -67,6 +67,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import journal_echo as je  # noqa: E402 -- живой файл, прямой импорт (Ф8)
+from wallclock_guard import WALLCLOCK_HARNESS_TIMEOUT  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parent / "journal_echo.py"
 
@@ -149,16 +150,25 @@ def _post_tool_use_payload(file_path, tool_name="Edit", original_file=_NO_ORIGIN
     }
 
 
-def _run_hook(payload, timeout=15, env=None) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(SCRIPT)],
-        input=json.dumps(payload),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=timeout,
-        env=env,
-    )
+def _run_hook(payload, timeout=WALLCLOCK_HARNESS_TIMEOUT, env=None) -> subprocess.CompletedProcess:
+    # F-60 (класс A): сетка против зависшего хука, не утверждение о
+    # предмете; WALLCLOCK_HARNESS_TIMEOUT -- общий источник значения.
+    try:
+        return subprocess.run(
+            [sys.executable, str(SCRIPT)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"journal_echo hook exceeded WALLCLOCK_HARNESS_TIMEOUT={timeout}s -- "
+            "сторож стенных часов: проверь загрузку машины прежде, чем "
+            "считать это дефектом (F-60)"
+        )
 
 
 def _parse_stdout_json(stdout: str) -> dict:

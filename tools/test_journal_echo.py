@@ -32,9 +32,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import journal_echo  # noqa: E402
+from wallclock_guard import WALLCLOCK_HARNESS_TIMEOUT  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parent / "journal_echo.py"
 
@@ -142,7 +145,7 @@ def _post_tool_use_payload(file_path, tool_name="Edit", original_file=_NO_ORIGIN
     }
 
 
-def _run_hook(payload, timeout=10, env=None) -> subprocess.CompletedProcess:
+def _run_hook(payload, timeout=WALLCLOCK_HARNESS_TIMEOUT, env=None) -> subprocess.CompletedProcess:
     # env=None -> subprocess.run inherits the current process environment
     # unchanged (identical to the original behaviour before this parameter
     # existed). TIER ECHO subprocess-level tests pass a MODIFIED env (see
@@ -152,15 +155,26 @@ def _run_hook(payload, timeout=10, env=None) -> subprocess.CompletedProcess:
     # runs in a separate Python interpreter (empirically confirmed before
     # writing these tests: `Path.home()` in a subprocess DOES follow an
     # overridden USERPROFILE/HOME env var on this machine).
-    return subprocess.run(
-        [sys.executable, str(SCRIPT)],
-        input=json.dumps(payload),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=timeout,
-        env=env,
-    )
+    #
+    # F-60 (класс A): timeout -- сетка против зависшего хука, не
+    # утверждение о предмете; WALLCLOCK_HARNESS_TIMEOUT (60s) -- общий
+    # источник значения для всех сайтов этого файла (t-453).
+    try:
+        return subprocess.run(
+            [sys.executable, str(SCRIPT)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"journal_echo hook exceeded WALLCLOCK_HARNESS_TIMEOUT={timeout}s -- "
+            "сторож стенных часов: проверь загрузку машины прежде, чем "
+            "считать это дефектом (F-60)"
+        )
 
 
 # ---------------------------------------------------------------------
@@ -646,7 +660,7 @@ def test_echo_giant_line_does_not_hang(tmp_path):
     giant_line = _line(event="delegated", ts=_fresh_ts(), task_id="t-002",
                         model="sonnet", notes=giant_notes)
     journal_path.write_text(HEAD_TEXT + giant_line + "\n", encoding="utf-8")
-    result = _run_hook(_post_tool_use_payload(journal_path), timeout=20)
+    result = _run_hook(_post_tool_use_payload(journal_path), timeout=WALLCLOCK_HARNESS_TIMEOUT)
     assert result.returncode == 0
     # Строка валидна (все обязательные поля есть) -> тишина, несмотря на размер.
     assert result.stdout == ""
@@ -1217,7 +1231,7 @@ def test_echo_giant_invalid_line_does_not_hang_and_reports(tmp_path):
         "_padding": giant_task_id_holder,
     }, ensure_ascii=False)
     journal_path.write_text(HEAD_TEXT + bad_line + "\n", encoding="utf-8")
-    result = _run_hook(_post_tool_use_payload(journal_path), timeout=20)
+    result = _run_hook(_post_tool_use_payload(journal_path), timeout=WALLCLOCK_HARNESS_TIMEOUT)
     assert result.returncode == 0
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]

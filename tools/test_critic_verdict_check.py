@@ -18,11 +18,30 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import critic_verdict_check as cvc
+from wallclock_guard import WALLCLOCK_HARNESS_TIMEOUT
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = REPO_ROOT / "tools" / "critic_verdict.schema.json"
 CHECKER_PATH = REPO_ROOT / "tools" / "critic_verdict_check.py"
+
+
+def _run_subprocess_guarded(args, **kwargs):
+    # F-60 (класс A), общий "хелпер" -- и _run_cli, и inline-сайты этого
+    # файла (напр. вызов с явным env=), проходят через эту функцию, так
+    # что все они ловят TimeoutExpired одинаково (Ф8: обёртка на
+    # хелперах, не на каждом сайте).
+    kwargs.setdefault("timeout", WALLCLOCK_HARNESS_TIMEOUT)
+    try:
+        return subprocess.run(args, **kwargs)
+    except subprocess.TimeoutExpired:
+        pytest.fail(
+            f"critic_verdict_check CLI exceeded WALLCLOCK_HARNESS_TIMEOUT="
+            f"{kwargs['timeout']}s -- сторож стенных часов: проверь "
+            "загрузку машины прежде, чем считать это дефектом (F-60)"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -66,13 +85,13 @@ def _base_blocker():
 
 
 def _run_cli(args, input_text=None):
-    return subprocess.run(
+    return _run_subprocess_guarded(
         [sys.executable, str(CHECKER_PATH)] + args,
         cwd=str(REPO_ROOT),
         input=input_text,
         capture_output=True,
         text=True,
-        timeout=15,
+        timeout=WALLCLOCK_HARNESS_TIMEOUT,
     )
 
 
@@ -334,12 +353,12 @@ def test_cli_stdin_invalid_bytes_fails_clean_no_traceback():
     # stdin to strict utf-8 so the case is deterministic across locales
     # (default Windows locale may decode 0xFF permissively as cp1251).
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
-    result = subprocess.run(
+    result = _run_subprocess_guarded(
         [sys.executable, str(CHECKER_PATH), "-"],
         cwd=str(REPO_ROOT),
         input=bytes([0xFF, 0xFE, 0x80, 0x81] * 20),
         capture_output=True,
-        timeout=15,
+        timeout=WALLCLOCK_HARNESS_TIMEOUT,
         env=env,
     )
     assert result.returncode == 1
