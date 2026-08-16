@@ -63,9 +63,10 @@ DRAFTING → designer BY DEFAULT: a WRITING dispatch whose spec carries
 from a Lead intent brief; the Lead self-drafting it anyway is legal
 ONLY with a `dispatch_skipped` event (agent = designer, reason
 mandatory) — the same form R1 gives scout. The obligation holds even
-when designer and Lead sit on the SAME tier: the routing motive is
-CONTEXT ISOLATION and an independent drafting context, not model
-price, and R8's obligation follows the MOTIVE, not the price gap.
+when designer is NOT a cheaper tier than the Lead — same tier OR
+above: the routing motive is CONTEXT ISOLATION and an independent
+drafting context, not model price, and R8's obligation follows the
+MOTIVE, not the price gap.
 Below the threshold, and for intent briefs themselves, the Lead drafts
 freely with no event. The threshold counts the task's PRIMARY draft. A
 RESUBMISSION after a `rejected` — a retry under the SAME task_id — is
@@ -480,24 +481,24 @@ degradation (below) is an unplanned entry into it.
 
 ## Lead degradation (D-0039, D-0042, D-0056)
 
-Triggers: refusal of the Lead-binding model (Opus: safety/dual-use,
+Triggers: refusal of the Lead-binding model (safety/dual-use,
 subscription limit, unavailability) OR the operator explicitly
 switching to a lower tier.
 
 ```mermaid
 stateDiagram-v2
-    Lead(Opus) --> Degraded: trigger → lead_degraded (cause, scope)\nBEFORE the first Lead action
+    Lead(binding) --> Degraded: trigger → lead_degraded (cause, scope)\nBEFORE the first Lead action
     Degraded --> Degraded: coordination and authorized tasks — yes;\ntable statuses, gates — no; new DECISIONS → queue;\nacceptance per the Role≠tier matrix
-    Degraded --> Lead(Opus): default at task/session boundary → lead_restored\n+ acceptance of the window (journal + diffs of ALL repos\ntouched by the session, D-0044) in the event's notes;\nan empty window is noted explicitly
+    Degraded --> Lead(binding): default at task/session boundary → lead_restored\n+ acceptance of the window (journal + diffs of ALL repos\ntouched by the session, D-0044) in the event's notes;\nan empty window is noted explicitly
 ```
 
 The tier is verified at BOTH ends (D-0056, F-21) — either alone is
 insufficient: (а) ENTRY — before the FIRST Lead action of a session
 (dispatch, acceptance, mechanism commit, status change): check your
 actual model by the last visible signal against the Lead binding
-(Opus, delegation.config.yaml); lower, with no window opened in the
-journal → `lead_degraded` BEFORE the action; a session ABOVE the
-binding (Fable reserve) is a full Lead with margin — no window
+(`roles.lead`, delegation.config.yaml); lower, with no window opened
+in the journal → `lead_degraded` BEFORE the action; a session ABOVE
+the binding (`roles.reserve`) is a full Lead with margin — no window
 needed, its use is the operator's word (D-0099). (б) EXIT — a visible ascent is by
 itself PROOF of a window, regardless of the journal: in the same
 move, a retroactive `lead_degraded` (mark + actual bounds), window
