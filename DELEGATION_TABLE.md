@@ -44,7 +44,7 @@ subscription contour):
 | Implementation to a written spec, tests | High | Medium | builder (Sonnet subagent) | provisionally_validated |
 | Code review, unclear-bug debugging | High | High | critic (Opus subagent) | provisionally_validated |
 | Decomposition, spec writing, acceptance | High | Very high | Lead session only | provisionally_validated |
-| Spec DRAFTING from a Lead intent brief (forks returned, not decided) | High | High (drafting), acceptance stays Lead | designer (Opus subagent, .claude/agents/designer.md) | provisionally_validated (calibration #5, 2026-07-29 — evidence: SHADOW_EVALUATION_LOG closing entry; pilot docs/tasks/2026-07-14_opus-designer-pilot.md). EVIDENCE CORRECTED 2026-08-05 (calibration #6, operator's question): the 4 PILOT dispatches (t-096/t-101/t-109 07-14, t-179 07-18) ran BEFORE .claude/agents/designer.md existed (the file was created 2026-07-29 18:21 by the promoting commit 2fa220d) — cc_usage shows all four as `general-purpose` on claude-opus-4-8, timestamps matching the journal to the minute. So the pilot validated the FUNCTION (an Opus subagent drafting from a brief, 5/5 accepted, 0 rejects), NOT the ARTIFACT: the role file has exactly ONE exercised run — t-345 (2026-07-29 21:51, the only cc_usage sidechain with agent_type='designer': 34 turns, $6.98, forks F1–F10 returned). Status LEFT provisionally_validated (D-0035: "small sample" is exactly what this is); a move up needs runs of the ROLE, not of the function |
+| Spec DRAFTING from a Lead intent brief (forks returned, not decided) | High | High (drafting), acceptance stays Lead | designer (Opus subagent, .claude/agents/designer.md) | provisionally_validated (calibration #5, 2026-07-29). Evidence and its 2026-08-05 CORRECTION — docs/SHADOW_EVALUATION_LOG.md (D-0067), two entries: the pilot closing, and the correction showing the pilot validated the FUNCTION, not the ARTIFACT (the role file has exactly one exercised run, t-345). Status stays provisionally_validated: a move up needs runs of the ROLE, not of the function |
 
 Evidence for the 2026-07-11 status moves: relocated VERBATIM to
 docs/SHADOW_EVALUATION_LOG.md (boot diet 2026-07-16, same D-0067
@@ -79,18 +79,14 @@ evidence — never by default.
 ## External Evidence (priors, not measurements)
 
 Figures from outside sources that our own telemetry should confirm or
-refute. Sources and details: docs/RELATED_WORK.md.
-
-| Claim | Figure | Source |
-|---|---|---|
-| Re-sent conversation history share of token spend | 50–62% | Unblocked, 2026 |
-| Input tokens share of agentic session cost | ~85% (input:output ≈ 25:1) | Vantage, 2026 |
-| Tokens wasted on redundant context / re-reading | 30–40% | arXiv:2604.22750 |
-| Savings from summarization + budget-aware planning | 25–35% | arXiv:2604.22750 |
-| Cascade routing cost reduction at equal quality | up to 98% (benchmarks) | FrugalGPT |
-| GPT-4-class quality with 26% of frontier calls | 95% quality | RouteLLM |
-| Prompt-cache discount on cached prefix | ~90% | provider pricing |
-| Frontier vs cheap model retry loops on same task | 1 vs 10 loops | Klyshevich, 2026 |
+refute live in their OWNER, docs/RELATED_WORK.md — claim, figure,
+source and the take on each (re-sent history share, input-token share
+of agentic sessions, wasted-context share, summarization savings,
+cascade routing, RouteLLM quality-per-frontier-call, prompt-cache
+discount, retry-loop asymmetry). The table used to be duplicated here;
+the duplicate was removed by the 2026-08-16 boot diet — a prior is not
+a delegation status, and boot context pays for this file on every
+session.
 
 ## Shadow Evaluation Log (relocated, D-0067)
 

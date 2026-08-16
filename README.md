@@ -31,29 +31,18 @@ routing plan merged on 2026-07-07.
 
 ## Findings
 
-See docs/FINDINGS.md — the registry of empirical findings from
-dogfooding the architecture on both contours (distinct from
-docs/RELATED_WORK.md, which holds external priors); entries summarize
-and point to the canonical evidence, which stays in place.
-docs/SIBLING_MAP.md is the symmetry-axis map that makes the D-0043
-"fix the class" sweep a targeted lookup instead of a repo rescan.
-docs/RULE_COVERAGE.md is the living rule-to-enforcer coverage map
-(policy rule -> watching gate -> trigger mode, since 2026-07-28).
-Routing policy for
-this repository lives in CLAUDE.md (auto-loaded) with tiered subagents
-in .claude/agents/ and the delegation journal in logs/routing-log.jsonl.
-docs/OPERATIONAL_NOTES.md holds the on-demand operational reference —
-system state (judge, traffic_kind, canonical test form), this machine's
-environment (proxy convention, litellm pin, deploy lessons) and the
-Claude Code cost baseline with the Architect's correction on the success
-metric. It is deliberately OFF the boot path (2026-08-05): every session
-paid for it, few needed it; read it before touching the proxy/gateway,
-the judge, or an argument about frontier share.
-delegation.config.yaml at the repo root is the single carrier of this
-deployment's function→model binding (D-0099): policy rules name only
-functions, the models live there, and the code gates
-(tools/mechanism_gate.py, tools/journal_validator.py,
-tools/session_context.py) resolve the binding from it.
+- docs/FINDINGS.md — empirical findings from dogfooding (external
+  priors live separately in docs/RELATED_WORK.md).
+- docs/SIBLING_MAP.md — symmetry-axis map + failure-mode register; makes
+  the D-0043 "fix the class" sweep a lookup, not a repo rescan.
+- docs/RULE_COVERAGE.md — rule -> watching gate -> trigger mode.
+- docs/OPERATIONAL_NOTES.md — on-demand operational reference,
+  deliberately OFF the boot path: read before touching the
+  proxy/gateway, the judge, or an argument about frontier share.
+- CLAUDE.md — routing policy (auto-loaded); tiered subagents in
+  .claude/agents/; delegation journal logs/routing-log.jsonl.
+- delegation.config.yaml — the single carrier of this deployment's
+  function→model binding (D-0099); the code gates resolve it from there.
 
 ## Gateway
 

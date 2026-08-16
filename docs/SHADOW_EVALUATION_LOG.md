@@ -534,3 +534,22 @@ $8.22; суммарно обе серии ~ $14.5.
 ### DESIGNER PILOT CLOSING (2026-07-29, калибровка №5, Update Rule 1)
 
 - 2026-07-29  designer-pilot VERDICT=POSITIVE -> provisionally_validated. Точки: 3 дизайнер (t-096, t-101, t-109) + 3 Fable-контроль (t-095, t-100, t-117) + внеплановая t-223 (эскалационный корпус: 3/5 рассогласованных пар task-коммит пойманы В БРИФЕ до прогонов, развилки возвращены). Метрика 1 (spec-rate): 2 spec-реджекта прогона 2 — ловушка двусторонняя (a1 спека дизайнера, a2 поправка САМОГО Fable; обе группы прошли одинаково, поймал critic-вход) — точка не дискриминирует; прогоны 4/5: 0 spec-реджектов на 5 builder-диспатчей. Метрика 4 (interpretation drift): 11 развилок возвращены вопросами / 27 закрыто сам / 0 перевёрнуто Lead. Метрика 5: 0 rejected-спек на приёмке Fable (все «да, без правок»). Метрика 2 (цена): 71–166K opus-side токенов/спека (~$0.11/turn side) против Fable-письма (~$0.46/turn main) — направление в пользу дизайнера, точный контрфакт не считался (оговорка метода). Метрика 3: 0 поздних defect_found по обеим группам. Оговорки: n мал (3+1 точки), чередование прогона 5 нарушено словом заказчика (контроль недобрал точку); production_validated — по накоплению реальных недель. Пакет промоции: мост D-0062 (ARCHITECTURE Two Vocabularies + таблица ярусов CLAUDE.md), role-файл .claude/agents/designer.md, строка таблицы — этим же коммитом.
+
+### DESIGNER ROW — EVIDENCE CORRECTION (2026-08-05, калибровка №6, вопрос оператора)
+
+- 2026-08-05  designer-evidence CORRECTION. Перенесено VERBATIM из
+  DELEGATION_TABLE.md диетой 2026-08-16 (D-0067: эвиденс живёт здесь,
+  таблица несёт статус и ссылку). Текст поправки:
+  «EVIDENCE CORRECTED 2026-08-05 (calibration #6, operator's question):
+  the 4 PILOT dispatches (t-096/t-101/t-109 07-14, t-179 07-18) ran
+  BEFORE .claude/agents/designer.md existed (the file was created
+  2026-07-29 18:21 by the promoting commit 2fa220d) — cc_usage shows
+  all four as `general-purpose` on claude-opus-4-8, timestamps matching
+  the journal to the minute. So the pilot validated the FUNCTION (an
+  Opus subagent drafting from a brief, 5/5 accepted, 0 rejects), NOT
+  the ARTIFACT: the role file has exactly ONE exercised run — t-345
+  (2026-07-29 21:51, the only cc_usage sidechain with
+  agent_type='designer': 34 turns, $6.98, forks F1–F10 returned).
+  Status LEFT provisionally_validated (D-0035: "small sample" is
+  exactly what this is); a move up needs runs of the ROLE, not of the
+  function.»
