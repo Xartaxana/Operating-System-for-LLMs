@@ -1,14 +1,31 @@
 # Supervised Delegation: an Operating System Approach to LLM Cost
 
-**White Paper — living draft v0.2.2 (2026-07-22)**
+**White Paper — living draft v0.2.3 (2026-08-16)**
 
-Status: draft. Every claim in section 7 is backed by repository
-evidence (commits, DELEGATION_TABLE.md + docs/SHADOW_EVALUATION_LOG.md,
-requests.db, logs/routing-log.jsonl, docs/FINDINGS.md); numbers
-will be revised as telemetry volume grows. Deliverable #1 of
-PROJECT_CHARTER.md.
+Status: draft, refreshed for review. Every claim in section 7 is
+backed by repository evidence (commits, DELEGATION_TABLE.md +
+docs/SHADOW_EVALUATION_LOG.md, requests.db, logs/routing-log.jsonl,
+docs/FINDINGS.md); numbers will be revised as telemetry volume grows.
+Deliverable #1 of PROJECT_CHARTER.md.
 
-Changelog: v0.2.2 (2026-07-22) — §4.3 extended with the delivery
+Changelog: v0.2.3 (2026-08-16) — freshness pass for review. Phase 2
+CLOSED 07-23 (router workstream closed on the clean check-30 audit;
+leaf routing promoted to the kernel default, D-0094) and Phase 4
+(Hardening for Delivery, D-0098) CLOSED 07-30 — §10 rewritten, and
+the fact that NO phase is now open is stated as a result, not a gap:
+the project stopped producing phases and started producing classes.
+Kit releases through v0.8.1 recorded, including the D-0101 change of
+the delivery FILTER itself (mirror-minus-kitchen instead of
+road-tested-only). Lead binding moved Fable→Opus 5 (D-0099); the
+binding now lives in delegation.config.yaml and the code gates
+resolve it. §5 check count 33→34. §11 gained three method-level
+limitations, each found by measurement and none by design review:
+a non-deterministic witness (F-60), a model name outliving its
+binding (found by the PEER deployment, not by us), and declared
+totality exceeding implemented totality in three hooks (F-61).
+Canonical-source list refreshed to D-0101 / F-61 and extended with
+the symmetry map, the rule→gate map and the binding config.
+v0.2.2 (2026-07-22) — §4.3 extended with the delivery
 upgrade layer (D-0091: versioned ledgers, revision-delta
 re-inventory, role files as diffable delivery content — the F-52
 lesson; D-0092: an adopt row is a wiring commitment); §5 calibration
@@ -421,7 +438,7 @@ cost — the only status that may justify routing real traffic), or to
 subscription contour status moves happen only at the weekly
 calibration (D-0047), never mid-stream. The first such calibration
 ran 2026-07-11 (18 checks at the time — the checklist has since
-grown to 33 as new mechanisms registered their detectors; a
+grown to 34 as new mechanisms registered their detectors; a
 journaled `calibrated` event) and moved
 the four Claude-contour rows — recon, implementation-to-spec,
 review, coordination — to provisionally_validated on 3.4 days of
@@ -1174,26 +1191,42 @@ docs/RELATED_WORK.md to stop re-litigating).
   Architect decision. The ROUTER gate — red at the 07-13 decision —
   OPENED 2026-07-21 on the re-registered coordination framing
   (§6.5): the pre-registered leaf-routing experiment took its keys,
-  the adopt decision landed as D-0087/D-0088, and the workstream's
-  remaining path to closure (and with it Phase 2's) is the first
-  live window of judge-based acceptances audited at calibration #4;
-  the window itself is already collected (07-22: four judge-basis
-  acceptances and five reject verdicts in the journal).
+  the adopt decision landed as D-0087/D-0088, and the workstream
+  CLOSED 2026-07-23 after the clean check-30 audit at calibration #4
+  (8/8 judge-basis acceptances leaf-class, no judge hallucinations),
+  which promoted leaf routing from MAY to the kernel default
+  (D-0094). All four workstreams are therefore decided with
+  evidence; all six LLM-router candidates remain rejected.
 - **Phase 3 (toolkit, D-0070) — CLOSED 2026-07-12:** the system
-  packaged as a public installable template (Supervised-Delegation
-  v0.1.0), validated by two installs (§4.1); template changes ship
-  only as verified batches from the dogfooding deployments (D-0074).
-  Batches since: releases v0.4.0–v0.4.2 (2026-07-20) brought the kit
-  to parity with the dogfooding deployment — policy kernel, gate
-  suite, judge onboarding — with a port queue accumulating between
-  operator-opened syncs. The v0.5.0 snapshot is assembled and gated
-  behind calibration #4 (operator's word, 2026-07-22).
+  packaged as a public installable template (Supervised-Delegation),
+  validated by two installs (§4.1); template changes ship only as
+  verified batches from the dogfooding deployments (D-0074).
+  Releases since: v0.5.0 (07-23), v0.6.0 (07-30), v0.7.0 and v0.8.0
+  (08-10), v0.8.1 (08-10, "hardening patch"). The delivery FILTER
+  itself changed at v0.8.0: D-0101 retired the road-tested-only rule
+  — the kit is now a MIRROR of the staff branch minus development
+  traces, one staff calibration of a mechanism suffices to ship it,
+  and road-testing moves to volunteer hosts.
+- **Phase 4 (Hardening for Delivery, D-0098) — CLOSED 2026-07-30:**
+  for the DELIVERED product the default flipped from
+  evidence-driven promotion to PROACTIVE hole-closure — enforcement
+  gaps are hunted before any future user can hit one, while D-0063's
+  leak-evidence default stays for staff-internal mechanisms. All
+  four gate criteria passed; the closing artifact was kit minor
+  v0.6.0, shipped through the kit-release skill (D-0097).
+- **No phase is currently open.** What runs instead is standing
+  operation: the weekly calibration (seven runs — 07-11, 07-18,
+  07-19, 07-23, 07-29, 08-05, 08-14), the port queue behind the
+  D-0074 moratorium, and the finding→remediation loop. One
+  observation is worth stating plainly, because it is a result and
+  not a scheduling note: after four phases the project stopped
+  producing PHASES and started producing CLASSES. The artifacts that
+  grow now are the failure-mode register, the findings ledger and
+  the calibration checklist — not new components.
 - **Continuous:** the delegation table and this paper's §7 are living
   documents; Shadow Evaluation runs append to
   docs/SHADOW_EVALUATION_LOG.md; the weekly calibration aggregates
-  the journal and owns every status movement (runs #1–#3 done, #2
-  moved coding→Middle to rejected; #4 due ~2026-07-25 carries the
-  first leaf-routing window audit).
+  the journal and owns every status movement (Update Rule 1).
 
 ## 11. Limitations
 
@@ -1215,22 +1248,61 @@ threshold); single machine (6 GB VRAM constrains local tiers to 4B);
 the judge calibration set is young (13 pairs) and grows only as
 fast as chief-judge reviews happen; retry-loop cost is designed into
 the method (the `attempt` field exists) but the trend is not yet
-measured. The mechanism discipline of §6.2 is ten days old at this
-update (2026-07-22); its detectors have fired in production beyond
-their motivating incidents (F-34, F-37, F-38) — evidence both that
-the net catches and that leaks keep arriving — and the validation
-layer above the gates (§6.6) has since been added. The task-pipeline
-pilot (the QA conveyor) is live and cycling; its incidents feed the
-method back as findings (e.g. the AT-BUG-022 deliverable-drift
-incident → F-50 and calibration check 31).
+measured. The mechanism discipline of §6.2 is a month old at this
+update (2026-08-16); its detectors keep firing beyond their
+motivating incidents — evidence both that the net catches and that
+leaks keep arriving — and the validation layer above the gates
+(§6.6) has since been added. The task-pipeline pilot (the QA
+conveyor) is live and cycling; its incidents feed the method back as
+findings.
+
+Three limitations were added by the 2026-08-16 update, and each is a
+limitation OF THE METHOD, not of a component:
+
+**The witness is only as deterministic as the machine.** Acceptance
+rests on the verbatim output of a verification run (D-0052). On
+2026-08-16 three consecutive canonical runs over an unchanged tree
+produced three different pairs of failures — every one a wall-clock
+assertion, under load from unrelated processes (F-60). A
+non-deterministic canon does not merely annoy: it supplies a
+permanent excuse ("the machine was busy") for any red result, which
+is corrosive precisely where the witness is the only proof we have.
+Remediated by re-scoping those guards from latency budgets to
+catastrophe ceilings — an honest narrowing of what they can refute,
+recorded as such.
+
+**A model name written into a rule outlives the binding.** The
+function→model binding moved to a config file (D-0099) so that
+rules could speak functions only. Three artifacts kept the old name
+anyway — a calibration check, the savings counterfactual, and the
+kernel's own acceptance matrix — and the check misreported for
+twelve days. It was found by the OTHER deployment hitting false
+positives, not by us. The class is now in the failure-mode register
+with an applicability question; the honest lesson is that a
+single-carrier rule (D-0038) is not self-enforcing when prose can
+quietly become a second carrier.
+
+**Declared totality is not implemented totality.** Three hooks
+promise a total guarantee ("exit 0 always", "never drops the
+dispatch", "any error collapses to one line") and guard a proper
+subset of the path (F-61): a locked artifact makes one exit 1 with a
+traceback; a mid-write failure erases a neighbour's state; an
+output-channel failure burns a safety-valve fact that was promised to
+be re-offered. All three were found by measurement after a peer
+deployment named the class — and the existing tests could not have
+found them, because they mock the failure before the moment where
+the damage happens.
 
 ---
 
 *Canonical sources: ARCHITECTURE.md (specification; boot core
 ARCHITECTURE_BOOT.md), DECISIONS.md index + docs/DECISIONS_FULL.md
-(D-0001…D-0089), DELEGATION_TABLE.md + docs/SHADOW_EVALUATION_LOG.md
+(D-0001…D-0101), DELEGATION_TABLE.md + docs/SHADOW_EVALUATION_LOG.md
 (evidence), logs/routing-log.jsonl (routing journal),
-docs/FINDINGS.md (F-1…F-50), PROCESS/JUDGE_CALIBRATION_PROTOCOL.md,
+docs/FINDINGS.md (F-1…F-61), docs/SIBLING_MAP.md (symmetry axes +
+failure-mode register), docs/RULE_COVERAGE.md (rule → gate),
+delegation.config.yaml (this deployment's function→model binding),
+PROCESS/JUDGE_CALIBRATION_PROTOCOL.md,
 PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md, PROCESS/CRITIC_EXAM.md,
 docs/RELATED_WORK.md, docs/TASK_CARRIER_EVAL_2026-07-13.md +
 docs/tasks/ (task-pipeline workstream), toolkit/ +

@@ -56,10 +56,12 @@ existing tool, never a build (D-0030).
 All six stages closed with evidence (intake t-044, packaging
 decisions В1–В6, core spec v0, skeleton, both validation installs,
 public wrap); the toolkit is public and released:
-github.com/Xartaxana/Supervised-Delegation, tag v0.1.0 (latest
-release: v0.5.0, 2026-07-23). Operator direction in session;
-residuals live in CURRENT_CONTEXT's queue on their own evidence
-triggers. Full narrative:
+github.com/Xartaxana/Supervised-Delegation. Releases after closure:
+v0.5.0 (07-23), v0.6.0 (07-30), v0.7.0 and v0.8.0 (08-10), v0.8.1
+(08-10) — current. The delivery FILTER changed at v0.8.0 (D-0101):
+the kit is a mirror of the staff branch minus development traces,
+not a road-tested-only subset. Residuals live in CURRENT_CONTEXT's
+queue on their own evidence triggers. Full narrative:
 docs/task_reports/2026-07-15_roadmap-closed-phases.md.
 
 ## Phase 4 — Hardening for Delivery (D-0098) — CLOSED 2026-07-30
@@ -71,3 +73,19 @@ snapshot aa725e6, cycle t-344..t-346). Closure signature —
 Architect, in session 2026-07-30: «подтверждаю закрытие фазы 4».
 Full narrative and gate report:
 docs/task_reports/2026-07-15_roadmap-closed-phases.md.
+
+## After Phase 4 — no phase open (status as of 2026-08-16)
+
+No new phase has been opened and none is proposed here: opening one
+is the Architect's decision (see the transition procedure above), and
+this file records phases, not intentions. What runs instead is
+standing operation — the weekly calibration (seven runs: 07-11,
+07-18, 07-19, 07-23, 07-29, 08-05, 08-14), the kit port queue behind
+the D-0074 moratorium, and the finding→remediation loop.
+
+Worth recording as a fact about the project rather than a gap: the
+work that arrives now is CLASSES, not components. The artifacts that
+grow are docs/FINDINGS.md, the failure-mode register in
+docs/SIBLING_MAP.md and the calibration checklist. A future phase, if
+opened, would most plausibly be about that shift — but naming it is
+the Architect's move, not this file's.
