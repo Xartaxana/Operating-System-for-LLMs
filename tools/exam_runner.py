@@ -748,21 +748,63 @@ def stall_estimate(turns):
     return total
 
 
+LIKE_ESCAPE_CHAR = "\\"
+
+
+def _escape_like(value):
+    """Escapes SQL LIKE metacharacters in `value` so it can be safely
+    embedded in a LIKE pattern together with `ESCAPE '\\'` (t-449,
+    critic finding F2, Phase-4 tail of t-126): unescaped, a slug
+    containing '_' (LIKE's "any single char" wildcard) or '%' ("any
+    run of chars") lets an UNRELATED project's slug false-match as a
+    sub-slug of ours -- silently, no crash, a plausible-looking wrong
+    number rather than an error. Escapes the escape char itself FIRST
+    (so a literal backslash in `value` is not later mistaken for one
+    of the escapes just inserted), then '%', then '_'. '-' is
+    deliberately NOT escaped here: SQL LIKE already treats it as an
+    ordinary literal character, not a metacharacter (see
+    sandbox_metrics/window_load docstrings below) -- the SEPARATE
+    arm/task hyphen-free invariant enforced by validate_manifest
+    exists for a different reason (composed-slug boundary semantics
+    of the sub-slug match, not LIKE metacharacter escaping) and is
+    unaffected by this helper."""
+    return (
+        value.replace(LIKE_ESCAPE_CHAR, LIKE_ESCAPE_CHAR * 2)
+        .replace("%", LIKE_ESCAPE_CHAR + "%")
+        .replace("_", LIKE_ESCAPE_CHAR + "_")
+    )
+
+
+def _sub_slug_like_pattern(slug):
+    """Returns the (pattern, escape_char) pair for the '<slug> or a
+    LIKE sub-slug of <slug>' match shared by sandbox_metrics() and
+    window_load() -- LIKE metacharacters in `slug` are escaped via
+    _escape_like() so an unrelated project cannot false-match through
+    a '_' or '%' inside the slug itself. The single place both
+    callers build this pattern from (R-1: one escaping site, not one
+    per call)."""
+    return _escape_like(slug) + "-%", LIKE_ESCAPE_CHAR
+
+
 def sandbox_metrics(conn, project):
     """turns/cost/side_cost/side_share/wall(min,max ts)/stall_est for
     one project's cc_usage rows, read from an open sqlite3 connection
     (schema per usage_report.SCHEMA).
 
-    Matches project = slug OR project LIKE '<slug>-%' -- when a
-    session (or a subagent it spawns) starts with cwd inside a
-    sandbox subdirectory, Claude Code logs it under a distinct
-    sub-slug project (e.g. '...-C-t2' plus '...-C-t2-click'), which a
-    plain equality match would miss entirely. Precedent: run #3's C/t2
-    rerun partly landed under such a sub-slug and undercounted."""
+    Matches project = slug OR project LIKE '<escaped slug>-%' ESCAPE
+    '\\' (t-449: LIKE metacharacters '%'/'_' inside slug are escaped
+    via _sub_slug_like_pattern()/_escape_like() so they cannot widen
+    the match -- see that helper's docstring) -- when a session (or a
+    subagent it spawns) starts with cwd inside a sandbox subdirectory,
+    Claude Code logs it under a distinct sub-slug project (e.g.
+    '...-C-t2' plus '...-C-t2-click'), which a plain equality match
+    would miss entirely. Precedent: run #3's C/t2 rerun partly landed
+    under such a sub-slug and undercounted."""
+    pattern, esc = _sub_slug_like_pattern(project)
     rows = conn.execute(
         "SELECT ts, output_tokens, accounted_cost_usd, is_sidechain "
-        "FROM cc_usage WHERE project = ? OR project LIKE ? ORDER BY ts",
-        (project, project + "-%"),
+        "FROM cc_usage WHERE project = ? OR project LIKE ? ESCAPE ? ORDER BY ts",
+        (project, pattern, esc),
     ).fetchall()
     turns = len(rows)
     total_cost = sum(r[2] or 0.0 for r in rows)
@@ -802,10 +844,12 @@ def window_load(conn, exclude_projects, window_start, window_end):
     already full of hyphens from path separators, which is harmless
     here since SQL LIKE treats '-' as a literal character, not a
     wildcard) therefore additionally excludes project LIKE
-    '<entry>-%'. An unrelated project sharing only a prefix without
-    that trailing '-' boundary (e.g. '<entry>X...') is NOT excluded --
-    LIKE requires the literal '-' as the next character after the
-    entry."""
+    '<escaped entry>-%' ESCAPE '\\' (t-449: '%'/'_' inside an entry are
+    escaped via _sub_slug_like_pattern(), same helper sandbox_metrics
+    uses, so they cannot widen the match into an unrelated project).
+    An unrelated project sharing only a prefix without that trailing
+    '-' boundary (e.g. '<entry>X...') is NOT excluded -- LIKE requires
+    the literal '-' as the next character after the entry."""
     exclude_projects = list(exclude_projects)
     query = (
         "SELECT project, COUNT(*), SUM(output_tokens) "
@@ -816,9 +860,13 @@ def window_load(conn, exclude_projects, window_start, window_end):
         placeholders = ",".join("?" for _ in exclude_projects)
         query += f" AND project NOT IN ({placeholders})"
         params.extend(exclude_projects)
-        not_like_clauses = " AND ".join("project NOT LIKE ?" for _ in exclude_projects)
+        not_like_clauses = " AND ".join(
+            "project NOT LIKE ? ESCAPE ?" for _ in exclude_projects
+        )
         query += f" AND {not_like_clauses}"
-        params.extend(p + "-%" for p in exclude_projects)
+        for p in exclude_projects:
+            pattern, esc = _sub_slug_like_pattern(p)
+            params.extend([pattern, esc])
     query += " GROUP BY project ORDER BY 2 DESC"
     rows = conn.execute(query, params).fetchall()
     return [{"project": r[0], "turns": r[1], "out_tokens": r[2] or 0} for r in rows]

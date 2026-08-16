@@ -32,6 +32,9 @@ from exam_runner import (
     stall_estimate,
     validate_manifest,
     window_load,
+    LIKE_ESCAPE_CHAR,
+    _escape_like,
+    _sub_slug_like_pattern,
 )
 from usage_report import SCHEMA
 
@@ -1217,6 +1220,177 @@ def test_sandbox_metrics_like_does_not_match_unrelated_project(cc_db):
 
     assert metrics["turns"] == 1
     assert metrics["cost_usd"] == pytest.approx(0.10)
+
+
+# ---------------------------------------------------------------------------
+# 8a. LIKE metacharacter escaping (t-449, critic finding F2, Phase-4
+#     tail of t-126): the sub-slug pattern '<slug>-%' was interpolated
+#     into SQL LIKE with NO escaping of LIKE's own metacharacters
+#     ('%' = any run of chars, '_' = any single char) -- a slug
+#     containing either could silently fold an UNRELATED project's
+#     metrics into ours (no crash, a plausible wrong number). Edges
+#     E1-E6 per spec; the two existing tests directly above already
+#     pin the ordinary hyphen-only-slug behavior (E4's own scenario),
+#     duplicated once more here explicitly under the E4 label.
+# ---------------------------------------------------------------------------
+
+
+def test_escape_like_escapes_percent_underscore_and_backslash():
+    e = LIKE_ESCAPE_CHAR
+    assert _escape_like("plain") == "plain"
+    assert _escape_like("a_b") == f"a{e}_b"
+    assert _escape_like("a%b") == f"a{e}%b"
+    assert _escape_like("a" + e + "b") == f"a{e}{e}b"
+    # escape-char-first ordering: a slug that already contains a raw
+    # escape char plus '%'/'_' must not have its just-inserted escape
+    # markers re-escaped by the later replace() passes.
+    assert _escape_like("a" + e + "_b%c") == f"a{e}{e}{e}_b{e}%c"
+
+
+def test_sub_slug_like_pattern_appends_dash_percent_with_escape_char():
+    pattern, esc = _sub_slug_like_pattern("my_project")
+    assert esc == LIKE_ESCAPE_CHAR
+    assert pattern == f"my{LIKE_ESCAPE_CHAR}_project-%"
+
+
+def test_sandbox_metrics_underscore_in_slug_does_not_wildcard_match(cc_db):
+    # E1 (core case): LIKE '_' is "any single char" -- unescaped, the
+    # sub-slug pattern 'my_project-%' would ALSO match
+    # 'myXproject-arm1' (an unrelated project whose slug merely has
+    # some other character where the '_' sits).
+    conn = cc_db
+    proj = "my_project"
+    genuine_sub_slug = "my_project-arm1"
+    unrelated = "myXproject-arm1"
+
+    _insert_row(conn, proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 10, 0.01)
+    _insert_row(conn, genuine_sub_slug, "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 20, 0.02)
+    _insert_row(conn, unrelated, "s3", "s3:r1", "2026-07-07T12:02:00.000Z", 999, 9.99)
+
+    metrics = sandbox_metrics(conn, proj)
+
+    assert metrics["turns"] == 2
+    assert metrics["cost_usd"] == pytest.approx(0.03)
+
+
+def test_sandbox_metrics_percent_in_slug_does_not_wildcard_match(cc_db):
+    # E2: LIKE '%' is "any run of chars" -- unescaped, 'my%project-%'
+    # would ALSO match e.g. 'myAAAproject-arm1'.
+    conn = cc_db
+    proj = "my%project"
+    genuine_sub_slug = "my%project-arm1"
+    unrelated = "myAAAproject-arm1"
+
+    _insert_row(conn, proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 10, 0.01)
+    _insert_row(conn, genuine_sub_slug, "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 20, 0.02)
+    _insert_row(conn, unrelated, "s3", "s3:r1", "2026-07-07T12:02:00.000Z", 999, 9.99)
+
+    metrics = sandbox_metrics(conn, proj)
+
+    assert metrics["turns"] == 2
+    assert metrics["cost_usd"] == pytest.approx(0.03)
+
+
+def test_sandbox_metrics_escape_char_itself_in_slug_matches_as_literal(cc_db):
+    # E3: a slug containing a literal instance of the ESCAPE character
+    # itself must still match its own genuine sub-slug byte-exactly
+    # (proves _escape_like's doubling of the escape char works, not
+    # just '%'/'_').
+    conn = cc_db
+    e = LIKE_ESCAPE_CHAR
+    proj = f"my{e}project"
+    genuine_sub_slug = proj + "-arm1"
+
+    _insert_row(conn, proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 10, 0.01)
+    _insert_row(conn, genuine_sub_slug, "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 20, 0.02)
+
+    metrics = sandbox_metrics(conn, proj)
+
+    assert metrics["turns"] == 2
+    assert metrics["cost_usd"] == pytest.approx(0.03)
+
+
+def test_sandbox_metrics_no_metacharacters_regression_pin(cc_db):
+    # E4: a slug with no LIKE metacharacters (the ordinary case --
+    # composed project slugs from project_slug() are always this
+    # shape) behaves exactly as before this fix: genuine sub-slug
+    # folded in, a same-length-prefix-without-'-'-boundary project
+    # excluded. Same scenario as the two existing LIKE tests directly
+    # above, pinned again explicitly under the E4 label.
+    conn = cc_db
+    proj = "D--fake-polygon-E4-t9"
+    sub_slug = proj + "-click"
+    unrelated = proj + "0-noise"  # no '-' right after proj -> must NOT match
+
+    _insert_row(conn, proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 10, 0.01)
+    _insert_row(conn, sub_slug, "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 20, 0.02)
+    _insert_row(conn, unrelated, "s3", "s3:r1", "2026-07-07T12:02:00.000Z", 999, 9.99)
+
+    metrics = sandbox_metrics(conn, proj)
+
+    assert metrics["turns"] == 2
+    assert metrics["cost_usd"] == pytest.approx(0.03)
+
+
+def test_sandbox_metrics_none_project_still_raises(cc_db):
+    # E5 (None): sandbox_metrics(None) crashed before this fix
+    # ("project + '-%'" -- TypeError: unsupported operand types for
+    # NoneType + str) and still crashes after it (_escape_like(None)
+    # -- AttributeError: NoneType has no .replace). Naming this
+    # behavior per DoD E5, not silently "improving" it into a
+    # no-op/empty result under this task.
+    with pytest.raises((TypeError, AttributeError)):
+        sandbox_metrics(cc_db, None)
+
+
+def test_sandbox_metrics_empty_string_project_no_crash(cc_db):
+    # E5 (empty string): "" has no metacharacters to escape and never
+    # crashed either before or after this fix -- the pattern becomes
+    # '-%' (matches any project starting with '-'); an empty table
+    # simply returns zero turns.
+    metrics = sandbox_metrics(cc_db, "")
+    assert metrics["turns"] == 0
+
+
+def test_sandbox_metrics_slug_entirely_metacharacters(cc_db):
+    # E6: a slug made ENTIRELY of LIKE metacharacters is the sharpest
+    # adversarial case -- unescaped, 'project LIKE "%_%-%"' degenerates
+    # into "contains a '-' anywhere", matching almost every project;
+    # escaped, it requires the literal '%_%-' prefix.
+    conn = cc_db
+    proj = "%_%"
+    genuine_sub_slug = proj + "-arm1"
+    unrelated = "ANYTHING-arm1"  # would false-match if metachars were live
+
+    _insert_row(conn, proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 10, 0.01)
+    _insert_row(conn, genuine_sub_slug, "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 20, 0.02)
+    _insert_row(conn, unrelated, "s3", "s3:r1", "2026-07-07T12:02:00.000Z", 999, 9.99)
+
+    metrics = sandbox_metrics(conn, proj)
+
+    assert metrics["turns"] == 2
+    assert metrics["cost_usd"] == pytest.approx(0.03)
+
+
+def test_window_load_underscore_in_exclude_project_does_not_wildcard_exclude(cc_db):
+    # Sibling of the E1 case, on window_load()'s NOT LIKE exclusion
+    # path (same _sub_slug_like_pattern() call site): an exclude entry
+    # containing '_' must not wildcard-exclude an unrelated project.
+    conn = cc_db
+    exclude_proj = "my_project"
+    unrelated = "myXproject-noise"  # '_' replaced by a literal 'X'
+
+    _insert_row(conn, exclude_proj, "s1", "s1:r1", "2026-07-07T12:00:00.000Z", 50, 0.01)
+    _insert_row(conn, unrelated, "s2", "s2:r1", "2026-07-07T12:01:00.000Z", 999, 9.99)
+
+    load = window_load(
+        conn, exclude_projects=[exclude_proj],
+        window_start="2026-07-07T12:00:00.000Z", window_end="2026-07-07T12:05:00.000Z",
+    )
+
+    projects_seen = {row["project"] for row in load}
+    assert unrelated in projects_seen
+    assert exclude_proj not in projects_seen
 
 
 # ---------------------------------------------------------------------------
