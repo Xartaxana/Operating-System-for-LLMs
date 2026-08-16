@@ -22,10 +22,9 @@ Policy rules speak ONLY these function names; the function→model
 binding is a deployment property; it LIVES in delegation.config.yaml
 (roles.lead) at the repo root — code gates (mechanism_gate,
 journal_validator, session_context) resolve it from there, defaulting
-to fable when the file is absent. D-0099 (2026-08-04, operator's
-word, cost motive): Lead rebound Fable→Opus 5; Fable is the RESERVE
-tier ABOVE the Lead binding, summoned only by the operator's word for
-the hardest cases. Grades intern/junior/middle/senior
+to fable when the file is absent. A RESERVE tier sits ABOVE the Lead
+binding (`roles.reserve`) and is summoned only by the operator's word
+for the hardest cases (D-0099). Grades intern/junior/middle/senior
 (API contour) are model price/capability vocabulary for accounting and
 DELEGATION_TABLE.md, never used in rules (bridge: ARCHITECTURE.md
 "Two Vocabularies").
@@ -56,33 +55,27 @@ screenshot/recording; a text-only witness is insufficient. A
 self-activating enforcement file (hook on the active hooksPath etc.)
 is never placed on the path by its builder: it is delivered as
 content or under a sibling name, and the Lead places it at acceptance
-(D-0069). The designer is a STANDING function since calibration #5
-(2026-07-29, provisionally_validated): spec DRAFTING from a Lead
-intent brief, forks returned and never decided silently; the draft
-passes the Lead's acceptance before any dispatch uses it (D-0037).
-DRAFTING → designer BY DEFAULT (2026-08-05, operator's word after
-the calibration-#6 measurement: 5 designer dispatches all-time
-against 480 builder and 340 scout — the function existed but was
-never routed to): a WRITING dispatch whose spec carries ≥3 numbered
-items, or touches ≥3 files, is DRAFTED by the designer from a Lead
-intent brief; the Lead self-drafting it anyway is legal ONLY with a
-`dispatch_skipped` event (agent = designer, reason mandatory) — the
-same form R1 gives scout. This skip obligation holds even though
-designer is NOT a cheaper tier than the Lead (both Opus under the
-D-0099 binding): the routing motive here is CONTEXT ISOLATION and an
-independent drafting context, not model price, and R8's obligation
-follows the MOTIVE, not the price gap. Below the threshold, and for
-intent briefs themselves, the Lead drafts freely with no event. The
-threshold counts the task's PRIMARY draft. A RESUBMISSION after a
-`rejected` — a retry under the SAME task_id — is a CONTINUATION of the
-existing spec: the Lead edits that spec ITSELF, with no designer
-dispatch and no `dispatch_skipped` event, regardless of the ≥3-items /
-≥3-files threshold (operator's word, 2026-08-09). Work re-badged under
-a NEW task_id is a NEW task and the threshold applies to it as usual;
-parts produced after a `decomposable` take new task_ids and each is
-judged against the threshold on its own.
-Pilot protocol and evidence:
-docs/tasks/2026-07-14_opus-designer-pilot.md.
+(D-0069). The designer is a STANDING function: spec DRAFTING from a Lead intent
+brief, forks returned and never decided silently; the draft passes the
+Lead's acceptance before any dispatch uses it (D-0037).
+DRAFTING → designer BY DEFAULT: a WRITING dispatch whose spec carries
+≥3 numbered items, or touches ≥3 files, is DRAFTED by the designer
+from a Lead intent brief; the Lead self-drafting it anyway is legal
+ONLY with a `dispatch_skipped` event (agent = designer, reason
+mandatory) — the same form R1 gives scout. The obligation holds even
+when designer and Lead sit on the SAME tier: the routing motive is
+CONTEXT ISOLATION and an independent drafting context, not model
+price, and R8's obligation follows the MOTIVE, not the price gap.
+Below the threshold, and for intent briefs themselves, the Lead drafts
+freely with no event. The threshold counts the task's PRIMARY draft. A
+RESUBMISSION after a `rejected` — a retry under the SAME task_id — is
+a CONTINUATION of the existing spec: the Lead edits that spec ITSELF,
+with no designer dispatch and no `dispatch_skipped` event, regardless
+of the threshold. Work re-badged under a NEW task_id is a NEW task and
+the threshold applies to it as usual; parts produced after a
+`decomposable` take new task_ids and each is judged against the
+threshold on its own. Rationale, pilot and the measurement that made
+drafting a default — POLICY_FULL.
 
 R3. **critic is the MANDATORY acceptance gate** for builder diffs
 >~100 lines or touching the data schema / core / money accounting,
@@ -112,16 +105,14 @@ path ownership but the SCOPE OF THE WITNESS RUN: each parallel
 worker's verification run is narrowed by OWNS — it must cover the
 test sets of all owned paths in that worker's `owns`, not merely the
 files the worker judges to be its own (a named narrow target); another
-worker's uncommitted state breaks a shared full run; the FULL
+worker's uncommitted state breaks a shared full run. The FULL
 canonical run (`python -m pytest tools/ gateway/ -q`) is the
 COORDINATOR's duty after the branches converge; its output is
 APPENDED to the `witness` field of the batch's LAST `accepted` event —
 that field carries BOTH parts, clearly delimited: first the node's OWN
 narrowed run (D-0052, proving ITS work), then the canon output labeled
-BATCH CANON; the canon addition never replaces the node's own proof
-(the journal schema is unchanged, this reuses the existing
-accepted/witness slot). A SOLO writing dispatch keeps the canonical
-run. Acceptance of a parallel node stands on its narrowed witness; a
+BATCH CANON; the canon addition never replaces the node's own proof.
+A SOLO writing dispatch keeps the canonical run. Acceptance of a parallel node stands on its narrowed witness; a
 canon failure discovered after convergence is handled as
 `defect_found` against the responsible node (reopen is forbidden,
 D-0060). Parallel SESSIONS in one repo are the same class: never touch
@@ -132,9 +123,8 @@ reads at boot (OS: CURRENT_CONTEXT.md; AO3: docs/HANDOFF.md); own
 journal notes / FINDINGS are not a carrier — an item living only
 there is NOT handed over (D-0082, F-48). A task of ≥5 journal events
 OR ≥2 sessions is carried as a markdown DAG in docs/tasks/ (D-0080:
-nodes/statuses/tiers; a WRITING node also declares its owns paths —
-rationale in POLICY_FULL, 2026-07-28); a node's status moves in the
-same move as its journal event.
+nodes/statuses/tiers; a WRITING node also declares its owns paths);
+a node's status moves in the same move as its journal event.
 
 R5. **Flat delegation (D-0037)**: workers never spawn workers. A task
 found decomposable returns to the Lead via a `decomposable` event.
@@ -163,40 +153,39 @@ as that tier's word (relaunch / honest record with basis / escalate).
 R8. **Universal skip rule (F-9)**: a task mapping to a cheaper tier,
 executed by the Lead itself, is legal ONLY with `dispatch_skipped`
 (agent = the skipped tier, reason mandatory) — at any tier. The rule
-follows the ROUTING MOTIVE, not the price gap (2026-08-05): where a
-function is routed to for CONTEXT ISOLATION or an independent
-context rather than for a cheaper model, the skip event is owed just
-the same — a same-tier function absorbed by the coordinator is still
-an absorbed function. Standing case: designer drafting (R2). BATCHING
-(D-0081): a small builder-class edit NOT blocking the next step is
-never self-executed piecemeal by the coordinator — it accumulates in
-the session's list and goes to builder as ONE batched dispatch at a
-stage boundary (marker «батч мелочей» in notes); self-execution with
-a skip event is legal only for an edit BLOCKING the current move —
-the reason must name the blockage. A skip reason of the class "the
-operator is waiting / an interactive request blocks the move" is
-legal for SELF-EXECUTION ONLY on the FIRST such move in a session;
-from the SECOND same-class occurrence self-execution is a violation
-regardless of whether the edit itself is blocking — the operator's
-waiting is not an exemption, it is the very shape the loophole took
-(calibration #6, check 22, count 3). This overrides only the earlier
-blocking-edit SELF-EXECUTION concession, not dispatch itself: a
-NON-blocking edit of this class, from the second occurrence, joins the
-batch (D-0081) as usual; a BLOCKING edit of this class cannot wait for
-the batch boundary by definition — its legal exit is an IMMEDIATE SOLO
-builder dispatch, never self-execution and never a batch entry; the
-coordinator self-executing it is illegal even when it blocks the
-current move. Lead-tier work per the table
-(decomposition, specs, acceptance, architecture, policy) needs no
-skip events. DETERMINISTIC SCRIPT RUNS (D-0095): launching /
-collecting a deterministic script (exam runner, D-construction
-orchestrator, validator, health check — code with no AI judgment in
-the coordinator's loop) is an ENVIRONMENT operation, not a task
-mapping to a tier: no `dispatch_skipped` event is required. The
-trace duty stays — the run's result lives in its own carrier (Runs
-log, the construction's journal events, a report); a run with no
-carrier trace is still a violation. In doubt (the run embeds
-judgment) — the old skip-event form is the safe default.
+follows the ROUTING MOTIVE, not the price gap: where a function is
+routed to for CONTEXT ISOLATION or an independent context rather than
+for a cheaper model, the skip event is owed just the same — a
+same-tier function absorbed by the coordinator is still an absorbed
+function. Standing case: designer drafting (R2). BATCHING (D-0081): a
+small builder-class edit NOT blocking the next step is never
+self-executed piecemeal by the coordinator — it accumulates in the
+session's list and goes to builder as ONE batched dispatch at a stage
+boundary (marker «батч мелочей» in notes); self-execution with a skip
+event is legal only for an edit BLOCKING the current move — the reason
+must name the blockage. A skip reason of the class "the operator is
+waiting / an interactive request blocks the move" is legal for
+SELF-EXECUTION ONLY on the FIRST such move in a session; from the
+SECOND same-class occurrence self-execution is a violation regardless
+of whether the edit itself is blocking — the operator's waiting is not
+an exemption, it is the very shape the loophole took. This overrides
+only the earlier blocking-edit SELF-EXECUTION concession, not dispatch
+itself: a NON-blocking edit of this class, from the second occurrence,
+joins the batch (D-0081) as usual; a BLOCKING edit of this class
+cannot wait for the batch boundary by definition — its legal exit is
+an IMMEDIATE SOLO builder dispatch, never self-execution and never a
+batch entry; the coordinator self-executing it is illegal even when it
+blocks the current move. Lead-tier work per the table (decomposition,
+specs, acceptance, architecture, policy) needs no skip events.
+DETERMINISTIC SCRIPT RUNS (D-0095): launching / collecting a
+deterministic script (exam runner, D-construction orchestrator,
+validator, health check — code with no AI judgment in the
+coordinator's loop) is an ENVIRONMENT operation, not a task mapping to
+a tier: no `dispatch_skipped` event is required. The trace duty stays
+— the run's result lives in its own carrier (Runs log, the
+construction's journal events, a report); a run with no carrier trace
+is still a violation. In doubt (the run embeds judgment) — the old
+skip-event form is the safe default.
 
 R9. **Fix the class, not the instance (D-0043)**: name the class;
 walk the siblings VIA docs/SIBLING_MAP.md (point lookup, NOT a repo
@@ -246,15 +235,13 @@ D-0055/D-0063/D-0064/D-0065/D-0072 (DECISIONS_FULL).
 R11. **DoD in every dispatch (D-0054)** — what "done" means and how
 acceptance verifies it, in the tier's form: builder — acceptance
 criteria + the verification run whose output becomes the witness,
-AND the spec names its EDGE BEHAVIOR (2026-07-29, check-23 class
-(б) codification): for every limit/truncation it sets, every
-empty/absent/None input its data can carry, and every pair of its
-own requirements that can conflict, the expected behavior is STATED
-— or the fork is explicitly handed down as a question; a spec
-silent on an edge its own requirements create is a dispatcher
-defect (check-23 attribution), not the performer's guess to make.
-Two sub-classes of that edge, both dispatcher defects when silent
-(2026-08-05, calibration #6, cases t-350 B1/B2): (i) TEMPORAL — an
+AND the spec names its EDGE BEHAVIOR: for every limit/truncation it
+sets, every empty/absent/None input its data can carry, and every
+pair of its own requirements that can conflict, the expected
+behavior is STATED — or the fork is explicitly handed down as a
+question; a spec silent on an edge its own requirements create is a
+dispatcher defect, not the performer's guess to make. Two sub-classes
+of that edge, both dispatcher defects when silent: (i) TEMPORAL — an
 artifact the change itself brings into existence (a config, file or
 flag absent at spec time, present after): the behavior is stated for
 BOTH worlds, before and after it exists, and the spec says which
@@ -283,33 +270,30 @@ FIVE-POINT CHECKLIST (D-0096) run against every dispatch before it
 goes: (1) explicit question / completeness criterion or acceptance
 keys; (2) DoD inline with the exact verification run AND the edge
 behaviors NAMED — limits/truncations, empty/absent inputs,
-conflicting requirement pairs: stated, or explicitly forked down
-(2026-07-29, check-23 class (б) — cases t-324/t-325/t-332/t-343);
-(3) "given"
-enumerated AND sufficient — data, fixtures, paths NAMED, not
-implied; (4) writing dispatch: owns/non-goals/handoff present; a
+conflicting requirement pairs: stated, or explicitly forked down;
+(3) "given" enumerated AND sufficient — data, fixtures, paths NAMED,
+not implied; (4) writing dispatch: owns/non-goals/handoff present; a
 PARALLEL writing dispatch also names the NARROWED witness scope (R4);
 (5) freshness — the spec's load-bearing facts checked against their
 carrier, not memory (a stale note in the spec is a dispatcher
-defect; machine layer since t-343 — the dispatch_gate given-path
-warn). A checklist miss exposed by a reject or finding = a
-spec-defect of the dispatcher (check-23 case); promotion to a
-machine layer follows the next recurrence (D-0063). The DoD is
-written INLINE in the dispatch prompt itself — named acceptance
-criteria plus the exact verification run; a bare pointer to a spec
-file or an earlier event is NOT a DoD. DOC-DISPATCH WITNESS
-(2026-08-10, критик t-407 по прецеденту витнесса B6 батча v0.8.0):
-when the owns are markdown/config with no test set of their own, a
-deterministic key-presence run IS a legal mechanical layer, but ONLY
-with three properties: (i) the keys are quoted VERBATIM from the DoD
-as written BEFORE the run — keys chosen after the fact are the
-performer checking itself; (ii) the script is committed as a test OR
-attached in FULL source with the witness — an unrerunnable witness
-forfeits the cheap-rerun right; (iii) the run includes a NEGATIVE
-control (one key deliberately absent → the script reports failure) —
-an evergreen script that cannot fail is indistinguishable from a
-broken one. Missing any of the three → the witness is a retelling,
-not a run (D-0052 class); detector — check 13(л). A worker returning
+defect; machine layer — the dispatch_gate given-path warn). A
+checklist miss exposed by a reject or finding = a spec-defect of the
+dispatcher; promotion to a machine layer follows the next recurrence
+(D-0063). The DoD is written INLINE in the dispatch prompt itself —
+named acceptance criteria plus the exact verification run; a bare
+pointer to a spec file or an earlier event is NOT a DoD.
+DOC-DISPATCH WITNESS: when the owns are markdown/config with no test
+set of their own, a deterministic key-presence run IS a legal
+mechanical layer, but ONLY with three properties: (i) the keys are
+quoted VERBATIM from the DoD as written BEFORE the run — keys chosen
+after the fact are the performer checking itself; (ii) the script is
+committed as a test OR attached in FULL source with the witness — an
+unrerunnable witness forfeits the cheap-rerun right; (iii) the run
+includes a NEGATIVE control (one key deliberately absent → the script
+reports failure) — an evergreen script that cannot fail is
+indistinguishable from a broken one. Missing any of the three → the
+witness is a retelling, not a run (D-0052 class); detector — check
+13(л). A worker returning
 a DoD-less dispatch (or a writing/parallel one without a manifest)
 with questions is the emergency net, not the normal cycle: frequent
 returns = a spec-discipline defect of the coordinator, a calibration
@@ -340,24 +324,22 @@ per task — a measured goal (exams / calibration check), not a gate.
 R13. **Leaf routing (D-0087).** Intake classifies every task: a LEAF
 closes under one performer of one allocate-category with no
 dependencies; doubt = graph. A leaf runs through the D-construction
-BY DEFAULT (D-0094 — MAY promoted to default on the clean check-30
-audit of calibration #4, 2026-07-23): category→tier by the ladder,
-worker executes, acceptance by a CALIBRATED JUDGE (verdict recorded;
-`basis: "judge"`), deterministic R6 mirror on reject (one retry same
-tier → one-step escalation → failed back to the coordinator); the
+BY DEFAULT (D-0094): category→tier by the ladder, worker executes,
+acceptance by a CALIBRATED JUDGE (verdict recorded; `basis:
+"judge"`), deterministic R6 mirror on reject (one retry same tier →
+one-step escalation → failed back to the coordinator); the
 coordinator stays out of the leaf loop. A deviation — the
 coordinator taking a leaf through the standard acceptance path — is
-legal ONLY with a recorded reason in the journal (t-286 form; the
-window detector is check 30). Recon-leaf intent keys / DoD carry the
+legal ONLY with a recorded reason in the journal; the window detector
+is check 30. Recon-leaf intent keys / DoD carry the
 NEGATIVE-FORM-CONTROL criterion (command hygiene p.6): a negative
 claim in the material without its positive same-form control →
-reject (check-20 cases t-268/t-272 — the miss passed two judges). TWO legal judge forms: the
-gateway alias (judge-sonnet, needs a live proxy; the only form for
-script-driven constructions) and a SUBSCRIPTION judge-subagent
-carrying the pinned JUDGE_SYSTEM_PROMPT (gateway/shadow_eval.py)
-VERBATIM — equivalence point 13/13 on the D-0031 set (t-254,
-2026-07-21); a drifted subagent-judge prompt is a finding, not a
-judge. Judge
+reject. TWO legal judge forms: the gateway alias (judge-sonnet, needs
+a live proxy; the only form for script-driven constructions) and a
+SUBSCRIPTION judge-subagent carrying the pinned JUDGE_SYSTEM_PROMPT
+(gateway/shadow_eval.py) VERBATIM — a drifted subagent-judge prompt
+is a finding, not a judge (the equivalence measurement that legalized
+the subscription form — POLICY_FULL §R13). Judge
 acceptance is legal ONLY for leaf-class dispatches (recon /
 implementation to a written spec); it never accepts mechanisms,
 policy edits or integration wholes — those keep the D-0058 matrix.
@@ -564,20 +546,14 @@ all sessions and subagents of this repo:
    a truncated window systematically shows the problem without its
    resolution (F-55).
 7. **Temporary corruption is rolled back by a BYTE COPY, never by
-   `git checkout`** (2026-08-05; AO3 cross-point of 08-02 confirmed on
-   our side by a live case: our own critic corrupted the MONEY table
-   `logs/token_usage.xlsx` to prove a guard hole — the probe itself was
-   right and valuable — and rolled it back with `git checkout -- <file>`,
-   the idiom that wipes ANOTHER session's uncommitted changes to that
-   file along with the corruption). For any mutation/red probe, at
-   every tier: (а) take a byte copy BEFORE corrupting and restore FROM
-   IT; (б) `git checkout`/`git restore` is legal only when
-   `git status --porcelain -- <file>` was EMPTY before the corruption
-   — check it, never assume; (в) the rollback's witness is the
-   VERBATIM output of the comparison (hash or diff), not the word
-   "restored"; (г) do NOT corrupt a live artifact at all when a
+   `git checkout`** — that idiom wipes ANOTHER session's uncommitted
+   changes to the file along with the corruption. For any
+   mutation/red probe, at every tier: (а) take a byte copy BEFORE
+   corrupting and restore FROM IT; (б) `git checkout`/`git restore` is
+   legal only when `git status --porcelain -- <file>` was EMPTY before
+   the corruption — check it, never assume; (в) the rollback's witness
+   is the VERBATIM output of the comparison (hash or diff), not the
+   word "restored"; (г) do NOT corrupt a live artifact at all when a
    function's verdict proves the same thing — corrupt a COPY of the
-   tree instead (precedent the same day: the judge-pin liveness probe
-   ran on corrupted COPIES, the live role file untouched). Detector:
-   calibration check 25 — its transcript scan covers this command
-   class.
+   tree instead. Detector: calibration check 25 — its transcript scan
+   covers this command class.

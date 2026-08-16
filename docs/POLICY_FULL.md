@@ -840,3 +840,121 @@ pytest-мишени может не существовать), но конкре
 дисциплина приёмки; детектор — чек 13(л) (витнессы доковых
 диспатчей окна против трёх свойств; скрипт-витнесс без негативного
 контроля = находка). Кит-зеркало — тем же коммитом (D-0101).
+
+## Диета ядра 2026-08-16 (слово оператора; кросс-диагноз AO3): история, снятая с boot-пути
+
+Слово оператора 2026-08-16: «обе, но главное не потерять правила
+(длинные комментарии истории можно уменьшить)». Ниже — ДОСЛОВНО всё,
+что снято с ядра CLAUDE.md этим ходом. Нормы не тронуты: снимались
+только даты, номера задач/чеков/калибровок, замеры, происхождение
+(«слово оператора такого-то числа») и прецедентные нарративы. Каждый
+кусок подписан правилом, из которого снят.
+
+### R2 (designer)
+
+- «The designer is a STANDING function **since calibration #5
+  (2026-07-29, provisionally_validated)**».
+- «DRAFTING → designer BY DEFAULT **(2026-08-05, operator's word after
+  the calibration-#6 measurement: 5 designer dispatches all-time
+  against 480 builder and 340 scout — the function existed but was
+  never routed to)**».
+- «This skip obligation holds even though designer is NOT a cheaper
+  tier than the Lead **(both Opus under the D-0099 binding)**» —
+  снято ещё и потому, что это прибитая в норме привязка: класс «имя
+  модели как критерий», заведённый в реестр режимов отказа карты
+  2026-08-16. В ядре осталась формулировка через ЯРУС («even when
+  designer and Lead sit on the SAME tier»), не через имя модели.
+- «…regardless of the ≥3-items / ≥3-files threshold **(operator's
+  word, 2026-08-09)**».
+- «**Pilot protocol and evidence:
+  docs/tasks/2026-07-14_opus-designer-pilot.md.**» — носитель жив,
+  ссылка теперь отсюда.
+
+### R4 (параллель, витнесс-область)
+
+- «the canon addition never replaces the node's own proof **(the
+  journal schema is unchanged, this reuses the existing
+  accepted/witness slot)**» — пояснение о реализации, не норма.
+- «a WRITING node also declares its owns paths **— rationale in
+  POLICY_FULL, 2026-07-28**» — дата снята, сам указатель на этот файл
+  избыточен внутри этого файла.
+
+### R8 (универсальное правило пропуска)
+
+- «The rule follows the ROUTING MOTIVE, not the price gap
+  **(2026-08-05)**».
+- «…it is the very shape the loophole took **(calibration #6,
+  check 22, count 3)**».
+
+### R11 (DoD, края, чеклист диспетчера)
+
+- «AND the spec names its EDGE BEHAVIOR **(2026-07-29, check-23 class
+  (б) codification)**».
+- «a spec silent on an edge its own requirements create is a
+  dispatcher defect **(check-23 attribution)**».
+- «Two sub-classes of that edge, both dispatcher defects when silent
+  **(2026-08-05, calibration #6, cases t-350 B1/B2)**».
+- «stated, or explicitly forked down **(2026-07-29, check-23 class
+  (б) — cases t-324/t-325/t-332/t-343)**».
+- «machine layer **since t-343** — the dispatch_gate given-path warn».
+- «A checklist miss exposed by a reject or finding = a spec-defect of
+  the dispatcher **(check-23 case)**».
+- «DOC-DISPATCH WITNESS **(2026-08-10, критик t-407 по прецеденту
+  витнесса B6 батча v0.8.0)**».
+
+### R13 (лист-роутинг)
+
+- «A leaf runs through the D-construction BY DEFAULT **(D-0094 — MAY
+  promoted to default on the clean check-30 audit of calibration #4,
+  2026-07-23)**».
+- «legal ONLY with a recorded reason in the journal **(t-286 form;**
+  the window detector is check 30**)**».
+- «a negative claim in the material without its positive same-form
+  control → reject **(check-20 cases t-268/t-272 — the miss passed
+  two judges)**».
+- «a SUBSCRIPTION judge-subagent carrying the pinned
+  JUDGE_SYSTEM_PROMPT (gateway/shadow_eval.py) VERBATIM — **equivalence
+  point 13/13 on the D-0031 set (t-254, 2026-07-21)**; a drifted
+  subagent-judge prompt is a finding, not a judge». Это ЕДИНСТВЕННОЕ
+  основание, по которому подписочная форма судьи вообще легальна:
+  13 из 13 совпадений вердиктов с гейтвейной формой на калибровочном
+  наборе D-0031. Ядро теперь ссылается сюда.
+
+### Таблица ярусов
+
+- «**D-0099 (2026-08-04, operator's word, cost motive): Lead rebound
+  Fable→Opus 5; Fable is the RESERVE tier ABOVE the Lead binding**,
+  summoned only by the operator's word for the hardest cases.» — в
+  ядре осталась норма без имён моделей: резерв живёт ключом
+  `roles.reserve` и входит только по слову оператора.
+
+### Командная гигиена п.7 (откат порчи байтовой копией)
+
+- «**(2026-08-05; AO3 cross-point of 08-02 confirmed on our side by a
+  live case: our own critic corrupted the MONEY table
+  logs/token_usage.xlsx to prove a guard hole — the probe itself was
+  right and valuable — and rolled it back with `git checkout --
+  <file>`, the idiom that wipes ANOTHER session's uncommitted changes
+  to that file along with the corruption)**». В ядре осталась причина
+  без нарратива: «that idiom wipes ANOTHER session's uncommitted
+  changes to the file along with the corruption».
+- «corrupt a COPY of the tree instead **(precedent the same day: the
+  judge-pin liveness probe ran on corrupted COPIES, the live role file
+  untouched)**».
+
+### Что ОСОЗНАННО НЕ тронуто
+
+- Секция «Role ≠ tier» несёт собственную защиту F-31 («the three
+  definitions below are load-bearing, do not compress») — не
+  компрессировал. НО в ней трижды прибиты имена моделей (Opus как имя
+  яруса Lead, Fable как резерв, строки матрицы) — тот самый класс, что
+  заведён в реестр режимов отказа карты 2026-08-16. Привести её к
+  привязке — отдельное решение, потому что F-31 прямо охраняет секцию
+  от правок этого рода; молча не трогаю.
+- Ссылки вида F-NN / D-NNNN внутри норм оставлены: это указатели на
+  носитель обоснования, а не история; стоят один токен и отвечают на
+  вопрос «почему это правило существует».
+- Колонка «Model here» таблицы ярусов — второй носитель факта
+  привязки рядом с delegation.config.yaml. Кандидат на снятие по тому
+  же классу, но это ПЕРЕСТРОЙКА таблицы, а не сжатие истории;
+  за пределами слова оператора этого хода.
