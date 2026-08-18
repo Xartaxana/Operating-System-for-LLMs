@@ -147,8 +147,7 @@ tier" signal → one tier up + an `escalated` event; a silent retry on
 the same tier is forbidden. A failed attempt = a result REJECTED at
 acceptance; every rejection is a `rejected` event (agent = worker).
 Two `rejected` with one task_id on one tier → escalation is
-MANDATORY. The attempt counter is an operational proxy of the cost
-crossover; the crossover itself is measured by the weekly calibration.
+MANDATORY.
 
 R7. **Background dispatch by default (D-0040)**: `run_in_background`;
 synchronous only when the next step depends on the result AND there
