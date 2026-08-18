@@ -99,7 +99,10 @@ rule, or an explicit refusal line; (W2) registry form instead of
 prose — norms as keyed rows grouped by problem/data source, full-text
 rationale with its owner, the calibration checklist dispatched by
 window-applicability instead of read linearly; (W3) a growth detector
-for the class itself. Node statuses, baseline numbers, gate criteria
+for the class itself plus a standing calibration check (Architect's
+word 2026-08-18): thematic layout holds, diets execute AND pay for
+themselves, files have not grown against their own header rules and
+our expectations. Node statuses, baseline numbers, gate criteria
 (reading cost down at equal norm coverage; no norm lost — every
 retired full text leaves an index line) and the Architect's forks:
 docs/tasks/2026-08-18_phase5-norm-corpus.md. Standing operation
