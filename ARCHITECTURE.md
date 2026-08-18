@@ -404,5 +404,5 @@ workstream: docs/UNIFIED_PLAN_2026-07-07.md.
 - WHITE_PAPER.md — the project's primary written deliverable.
 - docs/UNIFIED_PLAN_2026-07-07.md — plan of record (D-0034..D-0036).
 - docs/RELATED_WORK.md — external projects and cost data this design is checked against.
-- PROJECT_CHARTER.md, PROJECT_PHILOSOPHY.md, ANTI_GOALS.md, SYSTEM_PROMPT.md — constitution.
+- PROJECT_CHARTER.md, PROJECT_PHILOSOPHY.md, ANTI_GOALS.md — constitution. (SYSTEM_PROMPT.md retired 2026-08-18, D-0011 superseded — permanent rules now in CLAUDE.md.)
 - DECISIONS.md — decision log.

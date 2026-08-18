@@ -22,20 +22,22 @@ No important project knowledge should exist only inside a conversation.
 
 ### Layer 1 — Constitution
 
-Always loaded.
+Always loaded. (BOOT.md's Layer A = this Constitution, minus the
+auto-loaded CLAUDE.md, plus README.md's mission line and
+ARCHITECTURE_BOOT.md — the stable orientation set.)
 
 Includes:
 - PROJECT_CHARTER.md
 - PROJECT_PHILOSOPHY.md
 - ANTI_GOALS.md
-- SYSTEM_PROMPT.md
 - CLAUDE.md (auto-loaded by the Claude Code harness itself at session
   start — routing policy; D-0041: delegation is opt-in, the policy
   must precede any task, so it cannot wait for an on-request boot)
 
 ### Layer 2 — Decisions and Process
 
-Architectural knowledge and engineering protocols.
+Architectural knowledge and engineering protocols. REFERENCE, point-read
+on demand — NOT loaded at boot (2026-08-18 boot restructure).
 
 Includes:
 - DECISIONS.md
@@ -44,13 +46,17 @@ Includes:
 
 ### Layer 3 — Operational State
 
-Current status of the project. Loaded at boot; kept small by the
-D-0038 archiving rule (closed work moves to docs/task_reports/).
+Current status of the project. Kept small by the D-0038 archiving rule
+(closed work moves to docs/task_reports/).
+
+Only CURRENT_CONTEXT.md loads at boot (Layer B of BOOT.md — the Boot
+Report's source). ROADMAP.md and DELEGATION_TABLE.md are REFERENCE,
+point-read on demand (2026-08-18 boot restructure).
 
 Includes:
-- ROADMAP.md
-- CURRENT_CONTEXT.md
-- DELEGATION_TABLE.md
+- CURRENT_CONTEXT.md (boot-loaded)
+- ROADMAP.md (on demand)
+- DELEGATION_TABLE.md (on demand)
 
 ### Layer 4 — Repository History and Archive
 

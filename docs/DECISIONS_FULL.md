@@ -40,6 +40,16 @@ BOOT.md defines the canonical repository loading sequence.
 ## D-0011
 SYSTEM_PROMPT.md defines permanent behavioural rules.
 
+СУПЕРСИД 2026-08-18 (реструктура бута): SYSTEM_PROMPT.md удалён — его
+содержимое было почти целиком дублем PROJECT_PHILOSOPHY.md /
+PROJECT_CHARTER.md / CLAUDE.md (абзац D-0043 = R9 авто-грузимого
+CLAUDE.md). Постоянные правила поведения теперь держат: CLAUDE.md
+(авто-грузится КАЖДУЮ сессию — настоящий систем-промпт; преамбула несёт
+уникальный остаток «не выдумывай состояние проекта — доставай из репо,
+репозиторий важнее чата») + PROJECT_PHILOSOPHY.md (ценности, Слой A
+бута). Файл-«конституция», грузившийся только на ручном буте, для
+ПОСТОЯННЫХ правил был ловушкой (правила не были постоянно в контексте).
+
 ## D-0012
 Every commit must improve the repository as a complete knowledge system.
 
@@ -183,8 +193,9 @@ Division of duty follows D-0037: workers REPORT sibling defects they
 notice (they do not expand scope themselves), reviewers check
 class-completeness of every fix as a standard finding category, the
 coordinator owns the sweep and the rule placement. Recorded in
-SYSTEM_PROMPT.md (constitution, always loaded) because it must bind
-any LLM in any session — routed or not.
+CLAUDE.md R9 (auto-loaded every session) because it must bind
+any LLM in any session — routed or not. (Was SYSTEM_PROMPT.md until
+2026-08-18; that file retired, D-0011 superseded — R9 is the live home.)
 
 ## D-0044
 Restoration from Lead degradation includes acceptance of the degraded

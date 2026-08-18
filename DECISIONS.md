@@ -16,7 +16,7 @@ line and the full text in the same commit; entry counts must match
 - D-0008 — Every Patch leaves the repository consistent and navigable.
 - D-0009 — Repository content overrides chat history.
 - D-0010 — BOOT.md defines the canonical loading sequence.
-- D-0011 — SYSTEM_PROMPT.md defines permanent behavioural rules.
+- D-0011 — SYSTEM_PROMPT.md defines permanent behavioural rules. [СУПЕРСИД 2026-08-18: файл удалён как дубль; постоянные правила — в CLAUDE.md (авто-грузится: R9/D-0043 + преамбула «не выдумывай состояние — доставай из репо») и PROJECT_PHILOSOPHY.md (ценности).]
 - D-0012 — Every commit improves the repository as a knowledge system.
 - D-0013 — Recurring practices are documented as repository protocols.
 - D-0014 — No important knowledge remains only in chat history.

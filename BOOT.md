@@ -1,28 +1,50 @@
 # Boot Sequence
 
-The repository is the only source of truth.
+The repository is the only source of truth. If repository contents
+conflict with chat history, the repository always wins.
 
-Note: in Claude Code sessions the harness auto-loads CLAUDE.md
-(routing policy; D-0041 — delegation is opt-in, so the policy must be
-in context before any task). That auto-load is NOT a boot: full state
-recovery is still this sequence, executed on the operator's request.
+Note: the Claude Code harness auto-loads CLAUDE.md (routing policy;
+D-0041 — delegation is opt-in, so the policy must precede any task).
+That auto-load is NOT a boot.
 
-When starting a new conversation:
+Memory is layered (MEMORY_ARCHITECTURE.md). Only two layers load at
+boot, because boot context is paid (D-0038):
+
+- **Layer A — ORIENTATION** (stable: the project's idea, architecture
+  and goals — what every session must not forget). Small, always loaded.
+- **Layer B — STATE** (the current in-flight picture — where we are and
+  what is queued; the source of the Boot Report).
+
+Everything else — the decision log, the delegation table, the
+closed-phase roadmap, and the deep documents — is REFERENCE, point-read
+ON DEMAND by pointer, never loaded at boot.
+
+When starting a new conversation, read Layer A then Layer B:
+
+## Layer A — Orientation (always)
 
 1. Read README.md.
 2. Read PROJECT_CHARTER.md.
-3. Read PROJECT_PHILOSOPHY.md.
-4. Read ANTI_GOALS.md.
-5. Read SYSTEM_PROMPT.md.
-6. Read DECISIONS.md.
-7. Read MEMORY_ARCHITECTURE.md.
-8. Read ARCHITECTURE_BOOT.md (condensed operative core, D-0067;
-   the full specification ARCHITECTURE.md is point-read on demand).
-9. Read DELEGATION_TABLE.md.
-10. Read ROADMAP.md.
-11. Read CURRENT_CONTEXT.md.
+3. Read ANTI_GOALS.md.
+4. Read PROJECT_PHILOSOPHY.md.
+5. Read ARCHITECTURE_BOOT.md.
 
-After loading these documents, produce a Boot Report per
+(ARCHITECTURE_BOOT.md is the condensed operative core, D-0067; the full
+specification ARCHITECTURE.md is point-read on demand.)
+
+## Layer B — State (for the Boot Report)
+
+6. Read CURRENT_CONTEXT.md.
+
+## Reference — NOT loaded at boot; point-read on demand
+
+- DECISIONS.md — decision index (full texts in docs/DECISIONS_FULL.md).
+- DELEGATION_TABLE.md — tier cost/value table and statuses.
+- ROADMAP.md — phases and gates (all closed; the standing phase-
+  transition procedure lives here).
+- WHITE_PAPER.md, docs/, PROCESS/, docs/task_reports/ — deep documents.
+
+After loading Layer A and Layer B, produce a Boot Report per
 PROCESS/BOOT_REPORT_PROTOCOL.md:
 
 - summarize the current state;
@@ -32,7 +54,4 @@ PROCESS/BOOT_REPORT_PROTOCOL.md:
 
 Boot recovery is not work authorization: do not start the next task
 (reading additional files for implementation, writing code) until the
-operator confirms. Deep documents (WHITE_PAPER.md, docs/, PROCESS/,
-docs/task_reports/) are loaded on demand, not at boot.
-
-If repository contents conflict with chat history, the repository always wins.
+operator confirms.

@@ -5,7 +5,9 @@ the operator's request only (boot context is paid, D-0038). This file
 holds only what must ALWAYS be in context: routing policy and command
 hygiene (D-0041). Norms live HERE; rationale, precedents and history
 live in docs/POLICY_FULL.md (axis-4 pair, same-commit discipline) and
-docs/DECISIONS_FULL.md. This repo is the reference (dogfooding)
+docs/DECISIONS_FULL.md. Permanent behaviour (D-0011, absorbed from the
+retired SYSTEM_PROMPT.md): never invent project state — retrieve it from
+the repository; the repository overrides chat. This repo is the reference (dogfooding)
 deployment of the routing MVP; the pilot deployment is D:\AO3_tests.
 
 ## Tiers — functions, not models (D-0062)
