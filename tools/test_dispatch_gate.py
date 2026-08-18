@@ -1691,6 +1691,54 @@ def test_t384_is_path_like_token_direct():
     assert dispatch_gate.is_path_like_token(None) is False
 
 
+def test_root_only_absolute_token_is_not_a_path():
+    # Дефект (найден и исправлен этой правкой): корень БЕЗ сегмента
+    # пути ("/", "D:\\") ложно засчитывался путём -- normalize_path("/")
+    # самопересекается с любым другим "/", normalize_path("D:\\")=="d:"
+    # пересекает весь диск D. AK1/edge-batter: голый/вырожденный корень
+    # -- False.
+    for tok in ["/", "//", "///", "/ ", "D:\\", "D:/", "\\", "", "   ", "."]:
+        assert dispatch_gate.is_path_like_token(tok) is False, tok
+    # relative / bare-star -- контроль регресса (AK3), должны остаться
+    # False и после этой правки (не тронуты фиксом).
+    assert dispatch_gate.is_path_like_token("src/foo.py") is False
+    assert dispatch_gate.is_path_like_token("*.py") is False
+
+
+def test_root_with_segment_absolute_token_is_a_path():
+    # AK2: реальный путь с >=1 символом сегмента СРАЗУ после корневого
+    # слэша остаётся True -- позиционный инвариант (регексы всё ещё
+    # проверяются первыми, до глоб-ветки) сохранён.
+    for tok in [
+        "/etc/x",
+        "/a",
+        "D:\\x",
+        "D:/x",
+        "D:\\AI CRM\\x\\AGENTS.md",
+        "logs/*.jsonl",
+        "/*.py",
+    ]:
+        assert dispatch_gate.is_path_like_token(tok) is True, tok
+    # Один длинный сегмент (5000 символов) после корня -- граница
+    # длины, тоже True (правило 6а: тест на длинной границе).
+    assert dispatch_gate.is_path_like_token("/" + ("a" * 5000)) is True
+
+
+def test_doubled_root_with_segment_is_a_path():
+    # Уточнение критика t-476: класс -- "корень БЕЗ сегмента", а не
+    # "ровно один слэш". Удвоенный корень С сегментом -- это путь
+    # (сегмент есть); `/+`/`[\\/]+` их принимает. Прежняя форма
+    # `^/[^/\\s]` ошибочно роняла "//foo".
+    for tok in ["//foo", "//server/share", "D://x", "///a"]:
+        assert dispatch_gate.is_path_like_token(tok) is True, tok
+    # Но голый удвоенный/утроенный корень БЕЗ сегмента остаётся False
+    # (граница класса не сдвинута) -- дублирует контроль в
+    # test_root_only_absolute_token_is_not_a_path, держится здесь рядом
+    # с позитивами как парная граница.
+    for tok in ["//", "///", "D://"]:
+        assert dispatch_gate.is_path_like_token(tok) is False, tok
+
+
 def test_t384_owns_declaration_has_path_token_canonical_forms():
     assert dispatch_gate.owns_declaration_has_path_token(
         "owns (ABSOLUTE write paths): D:/repo/tools/x.py"

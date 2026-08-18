@@ -167,7 +167,8 @@ def test_extract_owns_paths_prose_tail_cut_preserves_path_with_space():
 def test_f59_backtick_wrapped_path_single_line_recognized():
     # Однострочная форма: путь в одинарных гравис-кавычках (markdown
     # "код-шрифт") -- ДО фикса backtick не входил в _EDGE_TRIM_CHARS,
-    # `_WINDOWS_ABS_RE` не матчил токен, начинающийся с "`".
+    # is_path_like_token() (dispatch_gate, делегируемый предикат) не
+    # матчил токен, начинающийся с "`".
     prompt = "owns: `D:/repo/tools/a.py`, `D:/repo/tools/b.py`"
     assert owns_gate.extract_owns_paths(prompt) == [
         "D:/repo/tools/a.py",
@@ -299,6 +300,53 @@ def test_f59_pin_v_two_bold_marker_manifests_with_overlap_detected(tmp_path):
     assert exit_code2 == 0
     assert output2 is not None
     assert "OWNS OVERLAP" in output2["hookSpecificOutput"]["additionalContext"]
+
+
+def test_ak4_bare_slash_owns_token_does_not_register_as_path():
+    # AK4 (фикс root-only guard): голая "/" -- фантомный корень без
+    # сегмента -- больше НЕ засчитывается путём в owns-декларации.
+    assert owns_gate.extract_owns_paths("owns: /") == []
+    assert owns_gate.extract_owns_paths("owns (ABSOLUTE write paths): /") == []
+    # Контроль: тот же маркер с РЕАЛЬНЫМ путём рядом с голым "/" всё
+    # ещё даёт настоящий путь -- фильтруется только фантомный токен.
+    assert owns_gate.extract_owns_paths("owns: /, D:/repo/tools/real.py") == [
+        "D:/repo/tools/real.py",
+    ]
+
+
+def test_ak4_two_declarations_with_only_stray_slash_do_not_overlap(tmp_path):
+    # AK4 (дефект спеки): ДО фикса normalize_path("/")=="/" -- два
+    # диспатча, каждый несущий только случайную "/" в owns-строке,
+    # ложно пересекались друг с другом ("OWNS OVERLAP" на пустом
+    # месте). После фикса "/" вовсе не регистрируется как owns-путь --
+    # sidecar не растёт, пересечения нет.
+    registry = tmp_path / "owns_registry.jsonl"
+    now = datetime(2026, 8, 18, 12, 0, 0)
+    # Без write-индикатора (WRITE_INDICATORS_RE) -- чистая проверка
+    # ветки "путей нет вовсе", не диагностики B2 слепоты.
+    prompt = "DoD: witness приложен. Дано: репо целиком.\nowns: /\n"
+
+    payload1 = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "builder", "prompt": prompt, "description": "sonnet: A"},
+        "session_id": "s-A",
+        "cwd": "D:\\repo",
+    }
+    exit_code1, output1 = owns_gate.decide(payload1, registry_path=registry, now=now)
+    assert exit_code1 == 0
+    assert output1 is None
+
+    payload2 = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "builder", "prompt": prompt, "description": "sonnet: B"},
+        "session_id": "s-B",
+        "cwd": "D:\\repo",
+    }
+    exit_code2, output2 = owns_gate.decide(payload2, registry_path=registry, now=now)
+    assert exit_code2 == 0
+    assert output2 is None
+    # Sidecar не растёт вовсе -- ни одной записи (owns_paths всегда []).
+    assert not registry.exists() or registry.read_text(encoding="utf-8").strip() == ""
 
 
 def test_f59_owns_bare_marker_without_any_paths_stays_empty():

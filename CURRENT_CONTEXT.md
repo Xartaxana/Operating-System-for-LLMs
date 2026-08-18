@@ -193,6 +193,16 @@ boot-пути.** Читать ПЕРЕД: подъёмом прокси и пр�
   docs/tasks/2026-08-18_lead-exam-v2.md, посадка v2 —
   PROCESS/LEAD_RANKING_EXAM.md §v2.
 
+- **ПОРТ ФИКСА «фантомный root-only path-token» → toolkit + Dog (батч
+  D-0074, НЕ on-touch — мораторий):** is_path_like_token в
+  toolkit/tools/dispatch_gate.py (~257-258) + мёртвая пара
+  _POSIX/_WINDOWS_ABS_RE в toolkit/tools/owns_gate.py (~324-325) несут
+  тот же дефект (голый «/» и «X:\» засчитываются путём → ложное OWNS
+  OVERLAP / перекрытие диска). Фикс штаба — t-476 (regex `^/+[^/\s]`,
+  `^[A-Za-z]:[\\/]+[^\\/\s]` + удаление мёртвой пары owns_gate). Ось
+  SIBLING_MAP ~285; детектор дрейфа parity_check --check (hq-drift).
+  Dog — та же правка (ось 11 D-0082).
+
 - **ПОРТ ПРАВИЛА 9 journal_validator — ЗАКРЫТ 08-10, обе ветки.**
   ЖИВОЕ из него одно: allowlist их reopen-формы в КРОСС-ЧТУЩЕМ
   скрипте калибровки (наш валидатор их семантику не принимает,
