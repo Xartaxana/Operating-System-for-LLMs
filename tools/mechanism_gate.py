@@ -135,6 +135,16 @@ MECHANISM_PREFIXES = (
     "tools/journal_validator.py",    # .githooks/pre-commit
     "tools/escape_check.py",         # .githooks/pre-commit
     "tools/enforcement_probe.py",    # .githooks/pre-commit
+    # Phase 5 W1 (2026-08-18, класс F-56 «защищена декларация, не
+    # связанное»): docs/FINDINGS.md с посадкой правила ретирования
+    # несёт ОБЯЗАННОСТИ будущих сессий (шапочные правила реестра +
+    # D-0100 поля + долг ретирования) — правка его текста без осевого
+    # блока проходила commit-msg молча. Найдено дизайнером t-487/
+    # критиком t-488. Тем же ходом — docs/RULE_COVERAGE.md: несёт
+    # обязанность поддержания «строка тем же коммитом» (его шапка) и
+    # меняет картину сторожей; протухшая строка там = F-41.
+    "docs/FINDINGS.md",
+    "docs/RULE_COVERAGE.md",
     # tools/wiring_check.py -- НЕ названо явно в спеке T2, найдено этим
     # аудитом (T1): subprocess-вызывается tools/enforcement_probe.py
     # (строка выше, уже в неводе) на пути pre-commit, ПЛЮС импортируется
