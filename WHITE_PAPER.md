@@ -1,6 +1,6 @@
 # Supervised Delegation: an Operating System Approach to LLM Cost
 
-**White Paper — living draft v0.2.3 (2026-08-16)**
+**White Paper — living draft v0.2.4 (2026-08-18)**
 
 Status: draft, refreshed for review. Every claim in section 7 is
 backed by repository evidence (commits, DELEGATION_TABLE.md +
@@ -8,7 +8,13 @@ docs/SHADOW_EVALUATION_LOG.md, requests.db, logs/routing-log.jsonl,
 docs/FINDINGS.md); numbers will be revised as telemetry volume grows.
 Deliverable #1 of PROJECT_CHARTER.md.
 
-Changelog: v0.2.3 (2026-08-16) — freshness pass for review. Phase 2
+Changelog: v0.2.4 (2026-08-18) — §6.3.1 added: what the blind,
+in-flow tier exams reveal about the MODELS themselves (per-tier
+character — fabrication, silent over-deciding and un-audited inputs,
+second-order blindness with bistability, and the top tier's
+judge-beats-doer gap), with the Rule-#1 consequence that price should
+track the ambiguity/second-order boundary, not apparent difficulty.
+v0.2.3 (2026-08-16) — freshness pass for review. Phase 2
 CLOSED 07-23 (router workstream closed on the clean check-30 audit;
 leaf routing promoted to the kernel default, D-0094) and Phase 4
 (Hardening for Delivery, D-0098) CLOSED 07-30 — §10 rewritten, and
@@ -777,6 +783,75 @@ change to the deployment, none of them decided by intuition:
   durability; its designed advantage is the regime where quality
   debt compounds — which is exactly what the accruing median
   exists to test.
+
+## 6.3.1 What the Blind Tier Exams Reveal About the Models
+
+The deployment exam above tests the POLICY. A parallel series of
+blind, in-flow competence exams — one per role, each handing a model
+real work without announcing that it is being measured — tests the
+MODELS themselves. Across roles a consistent character emerged for
+each tier, and the useful distinction was never "can it do the
+surface task" (reflex-level checks are passed by almost any tier) but
+how each behaves under ambiguity and at depth. These are
+small-sample tendencies, not laws.
+
+- **The cheapest tier** is fast and adequate on narrow, well-bounded
+  lookups, but under open-ended gathering it FABRICATES —
+  confidently supplying plausible-but-false material instead of
+  reporting absence. The danger is coherence: the invention does not
+  betray itself. Where a wrong-but-plausible answer is worse than
+  none, it cannot be trusted.
+
+- **The mid tier** is a reliable, honest workhorse at grounded
+  retrieval (it reports absence as absence) and is technically
+  capable of genuinely good work. Its two failure modes are both
+  about judgment, not capability: it quietly DECIDES what should have
+  been escalated — hardcoding one reading of an ambiguous intent
+  rather than surfacing the fork — and it does not independently
+  RE-VERIFY a plausible input before building on it. Told "this is
+  done" or handed a confident diagnosis, it takes the word rather
+  than reproducing the fact from source. It is only as sound as the
+  inputs it is fed; it does not audit them.
+
+- **The near-frontier tier** is a strong verifier at the REFLEX
+  level — it re-checks plausible claims, rejects ill-founded
+  diagnoses, and returns genuine forks upward. Its weaknesses are
+  two: it is BISTABLE on the very subtlest traps (catching a class on
+  one run, missing it the next), and it is blind to SECOND-ORDER
+  error — the defect that sits one or two steps away from where you
+  look, most dangerously when a change has silently disabled the very
+  check that would have caught it (a seatbelt that still clicks while
+  the strap no longer holds: the "buckled?" test is green, the defect
+  only surfaces in the crash). It verifies the surface honestly but
+  can accept something superficially clean while deeply defective.
+
+- **The reserve (top) tier** reasons at second order natively: it
+  asks what a locally-correct change quietly defeats downstream,
+  reconstructs the whole chain, cross-checks independent signals
+  before trusting, and escalates real ambiguity — catching defects
+  the tier below rationalizes away, and without a proportional time
+  penalty. But it is not an infallible ceiling, and the exams were
+  honest about this. Its depth is a JUDGING strength, not an
+  execution guarantee: when the top tier is itself DOING the work
+  under load rather than reviewing another's, it commits the same
+  first-order reflex errors it catches in others — acting on a
+  plausible memory without the cheap check it would demand of a
+  subordinate, over-trusting its own recollection instead of
+  re-checking the source, producing an exhaustive-looking list that
+  is quietly incomplete, and accumulating small procedural slips over
+  a long task. The top tier is a better checker than doer; the same
+  discipline it imposes on others (cheap-check-first,
+  enumerate-to-the-end, verify-don't-remember) has to be imposed on
+  it too.
+
+The operational consequence reinforces Rule #1 from a new angle:
+price should track this boundary, not apparent task difficulty. A
+cheap tier is safe up to the point where a plausible-but-wrong answer
+costs more than a dear-but-right one; a deep tier earns its cost
+exactly where the error has a second order the surface check cannot
+reach; and even the deep tier, when executing rather than judging,
+needs external discipline, because it audits its own in-flow work
+less well than it audits someone else's.
 
 ## 6.4 Driving the Price Down: What We Tried, What Held
 
