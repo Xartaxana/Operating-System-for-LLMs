@@ -182,7 +182,7 @@ DECISIONS/DELEGATION_TABLE/ROADMAP (целы на пути), MEMORY_ARCHITECTURE
 | P2a | BOOT.md переписать: Слой A (всегда) + Слой B (отчёт/резюм); MEMORY_ARCH влить | Lead | TODO |
 | P2b | CURRENT_CONTEXT диета: пункт очереди = строка-указатель + владелец; подробность в per-item файл (docs/tasks/ или queue-detail), подтягивается ТОЛЬКО для выбранного пункта. Сохраняет разделы очереди Boot Report | Lead | TODO |
 | P2c | BOOT_REPORT_PROTOCOL обновить под дието-состояние (читает короткие пункты; per-item подробность по выбору) | Lead | TODO |
-| P3a | Посадить сиблинг авто-бута t-477: авто-грузить Слой A + строить ПОЛНЫЙ Boot Report из B на свежем старте; source-гейт (не на compact/resume) | Lead | TODO (сиблинг собран, придержан) |
+| P3a/b/c | **DONE — C5.** Авто-бут t-477 посажен на session_context.py (D-0069); D-0103 в DECISIONS+DECISIONS_FULL+CLAUDE.md; F8 boot_path_files пин-тест; RULE_COVERAGE строка + чек 14(ж). Канон 2857 passed. NB: пре-существующий разрыв паритета D-0102 (индекс есть, DECISIONS_FULL нет — 102 vs 101) замечен, НЕ мой, в очередь калибровки чек 12 | Lead | DONE |
 | P3b | Решения: D-0103 (авто-бут, поправка D-0038 «по запросу») + решение о двухслойном буте + переподтвердить бюджет CURRENT_CONTEXT; детектор 14(ж) уже есть | Lead | TODO |
 | P3c | Бюджет-учёт в session_context.py: BOOT_BUDGET считает A+B+CLAUDE (референс/per-item ВНЕ бюджета); пороги D-0068 под новую базу | Lead+builder | TODO |
 | P5 | Skill бут-диеты: при пробое СУММАРНОГО бюджета запускать ВСЕ ТРИ диеты (Слой A / Слой B / CLAUDE.md), каждая со своим режимом разрастания | Lead | TODO |

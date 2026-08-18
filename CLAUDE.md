@@ -1,7 +1,10 @@
 # CLAUDE.md — Operating System for LLMs
 
-Auto-loaded every session. Full state recovery is BOOT.md, executed on
-the operator's request only (boot context is paid, D-0038). This file
+Auto-loaded every session. Full state recovery is BOOT.md — on a fresh
+session start the SessionStart hook auto-injects the boot directive
+(D-0103, amends D-0038's request-only default; fires on startup/clear,
+not on compact/resume). Boot context is paid, so it stays scoped to the
+two boot layers A+B (D-0038). This file
 holds only what must ALWAYS be in context: routing policy and command
 hygiene (D-0041). Norms live HERE; rationale, precedents and history
 live in docs/POLICY_FULL.md (axis-4 pair, same-commit discipline) and

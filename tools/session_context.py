@@ -606,6 +606,63 @@ def extract_model_id(payload):
     return None
 
 
+# ---------------------------------------------------------------------------
+# AUTO-BOOT (D-0103, sibling copy per D-0069 -- Lead places this on the live
+# tools/session_context.py path at acceptance): the operator opted into
+# automatic full boot so a fresh session no longer has to type "стартуй с
+# бут" by hand. FIRES on a genuinely fresh SessionStart ("startup"/"clear")
+# OR when the source is missing/unrecognized -- fail TOWARD booting: a
+# source value this hook does not know about (a harness field rename, a new
+# source string added upstream) must not silently turn the feature off.
+# DOES NOT fire on "resume"/"compact" -- those already carry state via the
+# compact/resume summary, and re-injecting the boot directive there is pure
+# waste (D-0103 rationale: ~100KB every time).
+# ---------------------------------------------------------------------------
+
+
+def extract_source(payload) -> str | None:
+    """Looks for the SessionStart "source" field -- mirrors
+    extract_model_id's defensive style. Returns payload.get("source")
+    only when payload is a dict AND that value is a non-empty string;
+    every other shape (non-dict payload, missing key, empty string,
+    non-string value) returns None rather than raising."""
+    if not isinstance(payload, dict):
+        return None
+    source = payload.get("source")
+    if isinstance(source, str) and source:
+        return source
+    return None
+
+
+# Sources that mean "state already carries over" -- auto-boot must NOT
+# fire for these (spec: re-injecting the directive after resume/compact
+# wastes ~100KB every time the compact summary already covers).
+_AUTOBOOT_NO_FIRE_SOURCES = {"resume", "compact"}
+
+# EXACT text (ASCII only, this file's hard invariant -- do not translate to
+# Cyrillic): the AUTO-BOOT directive block, printed verbatim, one list
+# entry per line.
+_AUTOBOOT_DIRECTIVE_LINES = [
+    "AUTO-BOOT (D-0103, operator opted in): fresh session start -- run the full boot now.",
+    "  Read the files listed in BOOT.md in order, then produce a Boot Report per",
+    "  PROCESS/BOOT_REPORT_PROTOCOL.md and STOP for work authorization.",
+    "  (Boot recovery is not work authorization -- BOOT_REPORT_PROTOCOL rule 4.",
+    "  This directive fires on a fresh start only, not after resume/compact.)",
+]
+
+
+def autoboot_lines(source) -> list:
+    """Returns the AUTO-BOOT directive block (_AUTOBOOT_DIRECTIVE_LINES,
+    verbatim) when auto-boot SHOULD fire for this SessionStart `source`,
+    else []. Fires when source is "startup" or "clear", OR when source is
+    None / any other unrecognized string (fail-toward-booting -- see the
+    module comment above this section). Does NOT fire when source is
+    "resume" or "compact"."""
+    if source in _AUTOBOOT_NO_FIRE_SOURCES:
+        return []
+    return list(_AUTOBOOT_DIRECTIVE_LINES)
+
+
 # D-0099 (2026-08-04): sentinel "config_text не передан явно" -- model_tier()
 # reads the REAL delegation.config.yaml (via mechanism_gate.CONFIG_PATH)
 # only when the caller does not override config_text at all; an explicit
@@ -1693,6 +1750,16 @@ def main(root: Path = None) -> int:
     try:
         stdin_payload = read_stdin_payload()
         for line in build_context_lines(root, stdin_payload=stdin_payload):
+            print(line)
+        # AUTO-BOOT (D-0103): printed as a SEPARATE step, deliberately
+        # OUTSIDE build_context_lines()'s own MAX_LINES (25) truncation --
+        # the directive must always survive regardless of how full the
+        # boot-lite context already is. Still inside this one try/except:
+        # a failure building the autoboot block collapses into the same
+        # fail-open warning path as everything else in this function,
+        # never breaks session start (the boot-lite lines above have
+        # already been printed by this point and are not lost).
+        for line in autoboot_lines(extract_source(stdin_payload)):
             print(line)
     except Exception as e:  # fail-open: this hook must never break session start
         print(f"session-context warning: {e}")

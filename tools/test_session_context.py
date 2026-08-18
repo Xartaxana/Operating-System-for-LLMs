@@ -881,6 +881,26 @@ def test_boot_path_files_missing_boot_md_still_yields_claude_md(tmp_path):
     assert sc.boot_path_files(tmp_path) == ["CLAUDE.md"]
 
 
+def test_boot_path_files_pins_post_restructure_set():
+    # F8 (boot restructure 2026-08-18, critic-on-plan t-479): pin the REAL
+    # boot-load set so a silent budget miscount fails LOUDLY. boot_path_files
+    # derives the budget from BOOT.md's literal `Read <FILE>.md` lines, so a
+    # Read line added/removed (or BOOT.md rewritten into prose that drops the
+    # literal form) would silently change the budget with no error. This test
+    # is the tripwire. Layer A (orientation) + Layer B (state) + the auto-
+    # appended CLAUDE.md.
+    root = sc.repo_root()
+    assert sc.boot_path_files(root) == [
+        "README.md",
+        "PROJECT_CHARTER.md",
+        "ANTI_GOALS.md",
+        "PROJECT_PHILOSOPHY.md",
+        "ARCHITECTURE_BOOT.md",
+        "CURRENT_CONTEXT.md",
+        "CLAUDE.md",
+    ]
+
+
 def test_boot_budget_normal_under_warn_threshold(tmp_path):
     root = tmp_path
     _seed_boot_files(root, {"README.md": 100, "CLAUDE.md": 200})

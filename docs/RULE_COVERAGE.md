@@ -73,7 +73,7 @@ SIBLING_MAP); свежесть утверждений — чек 24 калибр
 | Завершение main-хода с правками без СВЕЖЕГО зелёного прогона запрещено | БЛОК-ХУК | tools/main_gate.py (Stop): main-правки в dod_track без зелёного прогона ПОСЛЕ последней → exit 2, ход не завершится; предохранитель 2 блока подряд, третий — пропуск с unsafe-фактом (см. выше) |
 | Субагент не сдаёт работу без прогона | БЛОК-ХУК | tools/dod_gate.py (SubagentStop) — та же логика по agent_id-срезу трека tools/dod_track.py (PostToolUse пишет edits/runs с разделением main/subagent) |
 | Handoff: всё закоммичено/запушено, журнал закрыт (D-0050) | СКИЛЛ + ВСПЛЫТИЕ + ЧЕК 31 | skills/session-handoff вечером; Boot Report правило 6: DIRTY/UNPUSHED при старте = находка о пропущенном handoff; чек 31 — durable-персистентность принятых диффов за неделю |
-| Boot по слову, отчёт до работы, STOP до подтверждения | ДИСЦИПЛИНА+ДЕТЕКТОР | BOOT_REPORT_PROTOCOL правила 1–4 (прецедент 2026-07-15 записан); детектор — следующая сессия видит расхождение Current Task ↔ коммиты (D-0025) |
+| Boot: авто-впрыск директивы на свежем старте (D-0103), отчёт до работы, STOP до подтверждения | ВСПЛЫТИЕ + ДИСЦИПЛИНА + ДЕТЕКТОР | session_context.autoboot_lines впрыскивает AUTO-BOOT-директиву при source=startup/clear (не compact/resume; unknown→fire, fail-toward-boot); BOOT_REPORT_PROTOCOL правила 1–4 (STOP до авторизации, прецедент 2026-07-15); детекторы — autoboot-юниттесты (test_session_context_autoboot.py) + boot_path_files пин-тест + чек 14(ж) (директива на fresh-транскрипте); расхождение Current Task ↔ коммиты (D-0025) |
 | Boot-бюджет ≤100КБ | ВСПЛЫТИЕ + СКИЛЛ | session_context меряет и печатает BOOT BUDGET (WARN на пробое); реакция — скилл boot-diet по слову оператора; чеки 10/11 |
 
 ## 4. Командная гигиена
