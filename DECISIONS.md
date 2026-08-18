@@ -6,6 +6,12 @@ point-read on demand (D-0051). A new decision adds both the index
 line and the full text in the same commit; entry counts must match
 (calibration check 12).
 
+Строка ретированного решения несёт инлайн-суффикс `[РЕТИРОВАНО
+<YYYY-MM-DD>: <причина>; полный текст — docs/DECISIONS_ARCHIVE.md]`
+(образец формы уже стоит на D-0011). Число строк и МНОЖЕСТВО ID
+индекса равны множеству заголовков `## D-NNNN` в
+docs/DECISIONS_FULL.md — держит tools/test_norm_retire.py.
+
 - D-0001 — Git is the single source of truth.
 - D-0002 — English is canonical; Russian is a synchronized translation.
 - D-0003 — Engineering over Perfection.
@@ -16,7 +22,7 @@ line and the full text in the same commit; entry counts must match
 - D-0008 — Every Patch leaves the repository consistent and navigable.
 - D-0009 — Repository content overrides chat history.
 - D-0010 — BOOT.md defines the canonical loading sequence.
-- D-0011 — SYSTEM_PROMPT.md defines permanent behavioural rules. [СУПЕРСИД 2026-08-18: файл удалён как дубль; постоянные правила — в CLAUDE.md (авто-грузится: R9/D-0043 + преамбула «не выдумывай состояние — доставай из репо») и PROJECT_PHILOSOPHY.md (ценности).]
+- D-0011 — SYSTEM_PROMPT.md defines permanent behavioural rules. [РЕТИРОВАНО 2026-08-18: поглощён CLAUDE.md (преамбула + R9) и PROJECT_PHILOSOPHY.md, файл SYSTEM_PROMPT.md удалён как дубль; полный текст — docs/DECISIONS_ARCHIVE.md]
 - D-0012 — Every commit improves the repository as a knowledge system.
 - D-0013 — Recurring practices are documented as repository protocols.
 - D-0014 — No important knowledge remains only in chat history.

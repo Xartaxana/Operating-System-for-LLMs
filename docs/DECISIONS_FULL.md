@@ -6,6 +6,19 @@ this file is point-read on demand. New decisions add BOTH the index
 line and the full text here in the same commit; the entry counts of
 the two files must match (calibration check 12).
 
+**Ретирование (Phase 5, W1).** Решение, чей текст СУПЕРСИЖЕН другим
+решением или ПОГЛОЩЁН нормой CLAUDE.md, оставляет здесь СТАБ (форма
+ниже), а полный текст переезжает VERBATIM в
+docs/DECISIONS_ARCHIVE.md. Действующее решение не ретируется.
+Решение, чей decision_id стоит в tools/escape_allowlist.json, не
+ретируется вовсе, пока пин жив (ретирование меняет секцию →
+section_sha256 расходится → python tools/escape_check.py падает;
+перепин — акт Lead, не диеты). Долг наступает В ТОТ ЖЕ ХОД, которым
+решение объявлено суперсиженным/поглощённым: коммит, вносящий
+суперсид, несёт и стаб, и переезд. Форма стаба и инварианты —
+tools/test_norm_retire.py; счётчики индекс↔полнотекст держит он же
+(чек 12 калибровки).
+
 ## D-0001
 Git is the single source of truth.
 
@@ -38,17 +51,8 @@ Repository content overrides chat history.
 BOOT.md defines the canonical repository loading sequence.
 
 ## D-0011
-SYSTEM_PROMPT.md defines permanent behavioural rules.
-
-СУПЕРСИД 2026-08-18 (реструктура бута): SYSTEM_PROMPT.md удалён — его
-содержимое было почти целиком дублем PROJECT_PHILOSOPHY.md /
-PROJECT_CHARTER.md / CLAUDE.md (абзац D-0043 = R9 авто-грузимого
-CLAUDE.md). Постоянные правила поведения теперь держат: CLAUDE.md
-(авто-грузится КАЖДУЮ сессию — настоящий систем-промпт; преамбула несёт
-уникальный остаток «не выдумывай состояние проекта — доставай из репо,
-репозиторий важнее чата») + PROJECT_PHILOSOPHY.md (ценности, Слой A
-бута). Файл-«конституция», грузившийся только на ручном буте, для
-ПОСТОЯННЫХ правил был ловушкой (правила не были постоянно в контексте).
+**РЕТИРОВАНО 2026-08-18.** Поглощён: CLAUDE.md (преамбула + R9) и PROJECT_PHILOSOPHY.md — файл SYSTEM_PROMPT.md удалён как дубль (реструктура бута, коммит 8f8ff0e).
+Полный текст VERBATIM — docs/DECISIONS_ARCHIVE.md, секция `## D-0011`.
 
 ## D-0012
 Every commit must improve the repository as a complete knowledge system.
