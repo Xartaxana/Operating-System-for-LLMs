@@ -74,18 +74,35 @@ Architect, in session 2026-07-30: «подтверждаю закрытие фа
 Full narrative and gate report:
 docs/task_reports/2026-07-15_roadmap-closed-phases.md.
 
-## After Phase 4 — no phase open (status as of 2026-08-16)
+## Phase 5 — Norm Corpus (Нормативный корпус) — OPEN 2026-08-18
 
-No new phase has been opened and none is proposed here: opening one
-is the Architect's decision (see the transition procedure above), and
-this file records phases, not intentions. What runs instead is
-standing operation — the weekly calibration (seven runs: 07-11,
-07-18, 07-19, 07-23, 07-29, 08-05, 08-14), the kit port queue behind
-the D-0074 moratorium, and the finding→remediation loop.
+Opened by the Architect's word in session 2026-08-18. The predecessor
+section here («After Phase 4», 2026-08-16) recorded the basis as a
+fact before the phase existed: the work that arrives now is CLASSES,
+not components — the artifacts that grow are docs/FINDINGS.md, the
+failure-mode register in docs/SIBLING_MAP.md and the calibration
+checklist. The opening measurement (2026-08-18, deterministic git
+run) confirmed and widened it: the normative corpus without an owner
+or a retirement rule grew ~320 KB → ~904 KB in 38 days (×2.8), the
+growth is INTO existing entries rather than by new ones (checks 33→34
+while checklist bytes ×1.9 over the same window), and the costliest
+byte is CLAUDE.md — auto-loaded by every session, +42% in 20 days.
+Contrast held by the controlled artifacts: CURRENT_CONTEXT under the
+D-0038 diet (38.9→19.7 KB), DELEGATION_TABLE flat, the boot path
+under its 100 KB threshold — diet works where it exists.
 
-Worth recording as a fact about the project rather than a gap: the
-work that arrives now is CLASSES, not components. The artifacts that
-grow are docs/FINDINGS.md, the failure-mode register in
-docs/SIBLING_MAP.md and the calibration checklist. A future phase, if
-opened, would most plausibly be about that shift — but naming it is
-the Architect's move, not this file's.
+Scope — make the norm corpus scale the way the boot path already
+does: (W0) measure the supervision loop itself first (D-0030: the
+first task is an evaluation with existing instruments, never a
+build); (W1) every normative artifact gets an owner and a retirement
+rule, or an explicit refusal line; (W2) registry form instead of
+prose — norms as keyed rows grouped by problem/data source, full-text
+rationale with its owner, the calibration checklist dispatched by
+window-applicability instead of read linearly; (W3) a growth detector
+for the class itself. Node statuses, baseline numbers, gate criteria
+(reading cost down at equal norm coverage; no norm lost — every
+retired full text leaves an index line) and the Architect's forks:
+docs/tasks/2026-08-18_phase5-norm-corpus.md. Standing operation
+(weekly calibration — seven runs: 07-11, 07-18, 07-19, 07-23, 07-29,
+08-05, 08-14 — the kit port queue behind the D-0074 moratorium, the
+finding→remediation loop) continues alongside, unchanged.
