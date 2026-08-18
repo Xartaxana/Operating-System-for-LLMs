@@ -12,6 +12,22 @@ f/g/h по амендменту). Карты R9 и лёгкого батча —
 по указанному адресу; исполнитель карту не дописывает — утверждение
 без адреса возвращается вопросом.
 
+**ПРАВИЛО КЛЮЧ-ПРОГОНА (кодифицировано 08-19 по находке t-496):**
+ключ-прогон ОБЯЗАН фолдить пробелы (контракт _fold_whitespace
+escape_check: {пробел, таб, CR, LF}+ → один пробел; `|` НЕ фолдится и
+рвёт ключ) — наивная нефолдящая проверка ложно валит ключи,
+пересекающие перенос строки, и провоцирует «починку» рабочего текста
+под сломанный чекер. Карта проверяется этим же методом ПРИ ПРИЁМКЕ
+КАРТЫ (до диспатча), не после записи в файл — класс «карта расходится
+сама с собой» (ключ #3 R11, три строки R13) ловится на этапе карты.
+ИСПРАВЛЕНИЯ КАРТЫ R13 (Lead 08-19, по возврату t-496): строка c —
+хвост отдельным предложением («…not a judge. With no judge available
+in either form…», заглавная W выживает); строка d — duty несёт
+дословное «it is legal ONLY for leaf-class dispatches: recon /
+implementation to a written spec»; строка f — триггер «the
+classification was wrong», duty открывается дословным
+«Misclassification is recoverable by construction: …».
+
 **РАМКА АРХИТЕКТОРА (слово 08-18, ПОВЕРХ карт):** правило обязано
 ДЕРЖАТЬСЯ — голая норма без объяснения/примера плохо исполняется.
 Строка карты, уводящая МОТИВ в POLICY_FULL, применяется только если
@@ -174,10 +190,10 @@ Graph tasks keep the standard Lead loop.
 |---|---|---|---|
 | a | the coordinator takes a leaf through the standard acceptance path | a deviation: legal ONLY with a recorded reason in the journal; the window detector is check 30 | D-0094 |
 | b | recon-leaf intent keys / DoD | carry the NEGATIVE-FORM-CONTROL criterion (command hygiene p.6): a negative claim in the material without its positive same-form control → reject | D-0087 |
-| c | which judge is legal | TWO forms: the gateway alias (judge-sonnet, needs a live proxy — the only form for script-driven constructions) and a SUBSCRIPTION judge-subagent carrying the pinned JUDGE_SYSTEM_PROMPT (gateway/shadow_eval.py) VERBATIM; a drifted subagent-judge prompt is a finding, not a judge; with no judge available in either form the standard acceptance path applies | D-0087 |
-| d | the dispatch is NOT leaf-class — a mechanism, a policy edit, an integration whole | judge acceptance is illegal: those keep the D-0058 matrix; it is legal ONLY for recon / implementation to a written spec | D-0087 |
+| c | which judge is legal | TWO forms: the gateway alias (judge-sonnet, needs a live proxy — the only form for script-driven constructions) and a SUBSCRIPTION judge-subagent carrying the pinned JUDGE_SYSTEM_PROMPT (gateway/shadow_eval.py) VERBATIM; a drifted subagent-judge prompt is a finding, not a judge. With no judge available in either form the standard acceptance path applies | D-0087 |
+| d | the dispatch is NOT leaf-class — a mechanism, a policy edit, an integration whole | judge acceptance is illegal: those keep the D-0058 matrix — it is legal ONLY for leaf-class dispatches: recon / implementation to a written spec | D-0087 |
 | e | a quality-critical task, on the operator's word | H-mode: a Lead-authored DAG + per-node intent keys incl. adversarial probes + D-machinery on leaves | D-0087 |
-| f | misclassification | recoverable by construction: a leaf that was really a graph comes back via judge reject / `decomposable` (R5); a graph-classified simple task only pays the Lead-layer tax | D-0087 |
+| f | the classification was wrong | Misclassification is recoverable by construction: a leaf that was really a graph comes back via judge reject / `decomposable` (R5); a graph-classified simple task only pays the Lead-layer tax | D-0087 |
 ```
 
 Карта переноса R13:

@@ -37,61 +37,38 @@ DELEGATION_TABLE.md, never used in rules (bridge: ARCHITECTURE.md
 ## Routing rules
 
 R1. **Recon → scout BY DEFAULT**: any repo search, or more than 1–2
-files known in advance. The Lead may point-read a known file; up to ~4
-known targets itself ONLY with a `dispatch_skipped` event (reason
-mandatory) — a silent skip is a violation (F-9). Unknown-volume recon
-is always scout. External-repo surveys are two-pass (D-0066): scout
-delivers the map; a mechanism enters the plan/queue only after the
-Lead's own targeted second pass, its trail recorded in RELATED_WORK.
-Digest acceptance is by trail (D-0046): scout attaches where it
-searched and what it read, and the digest ITSELF carries the
-same-form positive control for every load-bearing negative — the
-worker's duty; an uncontrolled negative → `rejected`. Verification
-DEPTH follows the EXAM STATUS of the scout binding, not the model
-name (D-0102): while the bound model holds a CURRENT pass of the
-registered scout exam (built on the cheaper-wrong-answer design
-tests; current = no rebinding, no scout role-file edit, no exam-set
-rebuild and no `defect_found` on an accepted digest since that
-pass), the Lead accepts by trail-coverage check alone — mandatory
-re-verification of claims and negatives is LIFTED; spot-checks stay
-legal, optional. Any of those events voids currency and the STRICT
-form returns until a re-pass: spot-verify at least one load-bearing
-claim, verifying a negative is mandatory, the check noted in
-`accepted`. A digest without a trail → `rejected` in both modes.
+files known in advance; unknown-volume recon is always scout. The Lead
+may point-read a known file; up to ~4 known targets itself ONLY with a
+`dispatch_skipped` event (reason mandatory) — a silent skip is a
+violation (F-9). A digest is accepted BY TRAIL (where it searched, what
+it read) and carries a same-form positive control for every
+load-bearing negative — the worker's duty; no trail, or an uncontrolled
+negative → `rejected`, in both modes below.
 
-R2. **Implementation to a ready spec → builder.** The Lead writes the
+| R1 | when | duty | src |
+|---|---|---|---|
+| a | survey of an EXTERNAL repo | two-pass: scout delivers the map; a mechanism enters the plan/queue only after the Lead's own targeted second pass, its trail recorded in RELATED_WORK | D-0066 |
+| b | verification DEPTH follows the EXAM STATUS of the scout binding, not the model name: the scout binding holds a CURRENT pass of the registered scout exam — current = no rebinding, no scout role-file edit, no exam-set rebuild and no `defect_found` on an accepted digest since that pass | acceptance = trail-coverage check alone; mandatory re-verification of claims and negatives is LIFTED; spot-checks stay legal, optional | D-0102 |
+| c | currency voided by any event listed in b | the STRICT form returns until a re-pass: spot-verify at least one load-bearing claim, verifying a negative is mandatory, the check noted in `accepted` | D-0102 |
+
+R2. **Implementation to a ready spec → builder**: the Lead writes the
 spec; the builder returns missing requirements as questions, never
-invents. Acceptance is by witness (D-0052/D-0053): the `accepted`
-event's `witness` field carries the VERBATIM output of the
-verification run (test command + result), not a retelling; a report
-without a witness → `rejected`. A task with a UI result: the run
-includes DRIVING the UI — witness is a before/after
-screenshot/recording; a text-only witness is insufficient. A
-self-activating enforcement file (hook on the active hooksPath etc.)
-is never placed on the path by its builder: it is delivered as
-content or under a sibling name, and the Lead places it at acceptance
-(D-0069). The designer is a STANDING function: spec DRAFTING from a Lead intent
+invents. Acceptance is by witness — the `accepted` event's `witness`
+field carries the VERBATIM output of the verification run (command +
+result), not a retelling; a report without a witness → `rejected`. The
+designer is a STANDING function: spec DRAFTING from a Lead intent
 brief, forks returned and never decided silently; the draft passes the
-Lead's acceptance before any dispatch uses it (D-0037).
-DRAFTING → designer BY DEFAULT: a WRITING dispatch whose spec carries
-≥3 numbered items, or touches ≥3 files, is DRAFTED by the designer
-from a Lead intent brief; the Lead self-drafting it anyway is legal
-ONLY with a `dispatch_skipped` event (agent = designer, reason
-mandatory) — the same form R1 gives scout. The obligation holds even
-when designer is NOT a cheaper tier than the Lead — same tier OR
-above: the routing motive is CONTEXT ISOLATION and an independent
-drafting context, not model price, and R8's obligation follows the
-MOTIVE, not the price gap.
-Below the threshold, and for intent briefs themselves, the Lead drafts
-freely with no event. The threshold counts the task's PRIMARY draft. A
-RESUBMISSION after a `rejected` — a retry under the SAME task_id — is
-a CONTINUATION of the existing spec: the Lead edits that spec ITSELF,
-with no designer dispatch and no `dispatch_skipped` event, regardless
-of the threshold. Work re-badged under a NEW task_id is a NEW task and
-the threshold applies to it as usual; parts produced after a
-`decomposable` take new task_ids and each is judged against the
-threshold on its own. Rationale, pilot and the measurement that made
-drafting a default — POLICY_FULL.
+Lead's acceptance before any dispatch uses it.
+
+| R2 | when | duty | src |
+|---|---|---|---|
+| a | the task's result is a UI | the run includes DRIVING the UI — the witness is a before/after screenshot/recording; a text-only witness is insufficient | D-0052 |
+| b | a self-activating enforcement file (hook on the active hooksPath etc.) | is never placed on the path by its builder: it is delivered as content or under a sibling name, and the Lead places it at acceptance | D-0069 |
+| c | a WRITING dispatch whose spec carries ≥3 numbered items, or touches ≥3 files | DRAFTING → designer BY DEFAULT, from a Lead intent brief; the Lead self-drafting it anyway is legal ONLY with a `dispatch_skipped` event (agent = designer, reason mandatory) — the same form R1 gives scout | D-0037 |
+| d | designer is NOT a cheaper tier than the Lead — same tier OR above | the obligation in c holds anyway: the routing motive is CONTEXT ISOLATION and an independent drafting context, not model price (R8: motive, not price gap) | D-0037 |
+| e | below c's threshold, and for intent briefs themselves | the Lead drafts freely with no event; the threshold counts the task's PRIMARY draft | D-0037 |
+| f | a RESUBMISSION after a `rejected` — a retry under the SAME task_id | a CONTINUATION of the existing spec: the Lead edits that spec ITSELF, with no designer dispatch and no `dispatch_skipped` event, regardless of the threshold | D-0037 |
+| g | work re-badged under a NEW task_id; parts produced after a `decomposable` | a NEW task each, judged against c's threshold on its own | D-0037 |
 
 R3. **critic is the MANDATORY acceptance gate** for builder diffs
 >~100 lines or touching the data schema / core / money accounting,
@@ -114,33 +91,23 @@ inside the `accepted` event — a concession ONLY of an acceptor above
 the performer (D-0058). Acceptance itself stays with the Lead
 (D-0037).
 
-R4. **Independent parts → several parallel workers**, each with its
-own spec (context isolation). Parallel specs declare path ownership;
-the Lead checks overlap before launch. Parallel specs declare not only
-path ownership but the SCOPE OF THE WITNESS RUN: each parallel
-worker's verification run is narrowed by OWNS — it must cover the
-test sets of all owned paths in that worker's `owns`, not merely the
-files the worker judges to be its own (a named narrow target); another
-worker's uncommitted state breaks a shared full run. The FULL
-canonical run (`python -m pytest tools/ gateway/ -q`) is the
-COORDINATOR's duty after the branches converge; its output is
-APPENDED to the `witness` field of the batch's LAST `accepted` event —
-that field carries BOTH parts, clearly delimited: first the node's OWN
-narrowed run (D-0052, proving ITS work), then the canon output labeled
-BATCH CANON; the canon addition never replaces the node's own proof.
-A SOLO writing dispatch keeps the canonical run. Acceptance of a parallel node stands on its narrowed witness; a
-canon failure discovered after convergence is handled as
-`defect_found` against the responsible node (reopen is forbidden,
-D-0060). Parallel SESSIONS in one repo are the same class: never touch
-or commit another session's uncommitted paths (D-0060, F-23). A
-cross-deploy queue item exists
-only if written IN THE SAME MOVE into the carrier the TARGET deploy
-reads at boot (OS: CURRENT_CONTEXT.md; AO3: docs/HANDOFF.md); own
-journal notes / FINDINGS are not a carrier — an item living only
-there is NOT handed over (D-0082, F-48). A task of ≥5 journal events
-OR ≥2 sessions is carried as a markdown DAG in docs/tasks/ (D-0080:
-nodes/statuses/tiers; a WRITING node also declares its owns paths);
-a node's status moves in the same move as its journal event.
+R4. **Independent parts → several parallel workers**, each with its own
+spec (context isolation). Parallel specs declare path ownership AND the
+SCOPE OF THE WITNESS RUN; the Lead checks overlap before launch. Each
+worker's verification run is narrowed by OWNS — it must cover the test
+sets of all owned paths in that worker's `owns`, not merely the files
+the worker judges to be its own (a named narrow target); another
+worker's uncommitted state breaks a shared full run. A SOLO writing
+dispatch keeps the canonical run.
+
+| R4 | when | duty | src |
+|---|---|---|---|
+| a | the branches of a parallel batch have converged | the FULL canonical run (`python -m pytest tools/ gateway/ -q`) is the COORDINATOR's duty; its output is APPENDED to the `witness` field of the batch's LAST `accepted` event, which then carries BOTH parts, clearly delimited: first the node's OWN narrowed run, then the canon output labeled BATCH CANON — the canon addition never replaces the node's own proof | D-0052 |
+| b | acceptance of a parallel node | stands on its narrowed witness | D-0052 |
+| c | a canon failure discovered after convergence | handled as `defect_found` against the responsible node; reopen is forbidden | D-0060 |
+| d | parallel SESSIONS in one repo | the same class: never touch or commit another session's uncommitted paths | D-0060 |
+| e | a queue item for ANOTHER deploy | exists only if written IN THE SAME MOVE into the carrier the TARGET deploy reads at boot (OS: CURRENT_CONTEXT.md; AO3: docs/HANDOFF.md); own journal notes / FINDINGS are not a carrier — an item living only there is NOT handed over | D-0082 |
+| f | a task of ≥5 journal events OR ≥2 sessions | is carried as a markdown DAG in docs/tasks/ (nodes/statuses/tiers; a WRITING node also declares its owns paths); a node's status moves in the same move as its journal event | D-0080 |
 
 R5. **Flat delegation (D-0037)**: workers never spawn workers. A task
 found decomposable returns to the Lead via a `decomposable` event.
