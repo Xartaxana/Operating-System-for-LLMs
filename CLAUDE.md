@@ -247,72 +247,44 @@ non-mechanism edit of the same paths is legal only with the line
 «оси: не-механизм (<reason>)» in the commit MESSAGE. Full procedure:
 D-0055/D-0063/D-0064/D-0065/D-0072 (DECISIONS_FULL).
 
-R11. **DoD in every dispatch (D-0054)** — what "done" means and how
-acceptance verifies it, in the tier's form: builder — acceptance
-criteria + the verification run whose output becomes the witness,
-AND the spec names its EDGE BEHAVIOR: for every limit/truncation it
-sets, every empty/absent/None input its data can carry, and every
-pair of its own requirements that can conflict, the expected
-behavior is STATED — or the fork is explicitly handed down as a
-question; a spec silent on an edge its own requirements create is a
-dispatcher defect, not the performer's guess to make. Two sub-classes
-of that edge, both dispatcher defects when silent: (i) TEMPORAL — an
-artifact the change itself brings into existence (a config, file or
-flag absent at spec time, present after): the behavior is stated for
-BOTH worlds, before and after it exists, and the spec says which
-move creates it; (ii) POSITIONAL — when the spec prescribes WHERE in
-existing logic a branch goes (order, precedence, before/after which
-check), it states the INVARIANT that position must preserve (what
-stays unreachable, what must still be refused), not the location
-alone: a position without its invariant is the dispatcher's guess
-handed to the performer as fact.
-A task with an INTERACTIVE surface (CLI/UI taking user input) adds an
-adversarial mini-battery to the DoD — size, nesting, encoding,
-empty/broken input; every limit/boundary the code introduces gets a
-test AT and BEYOND it; SCOPE CEILING: test volume = acceptance keys +
-battery + boundaries, full regress beyond is not required. scout —
-explicit question(s) + a completeness criterion ("X is nowhere" is a
-valid result requiring a trail). critic — the spec/DoD of the
-reviewed work attached. Next to the DoD — the CONTEXT MANIFEST
-(D-0073): "given" = enumeration of injected files/data; a writing
-dispatch adds owns (ABSOLUTE write paths) / non-goals / handoff; a
-parallel fan-out — ownership per R4 + optional maxConcurrent. The
-manifest is DECLARATIVE on reads (reading past the basket is a report
-line, not a violation), NORMATIVE on writes; a point read-only
-dispatch just enumerates its basket inline. Completeness of DoD and
-manifest is the DISPATCHER's duty BEFORE sending — executed as a
+R11. **DoD in every dispatch (D-0054)**: what "done" means and how
+acceptance verifies it, in the tier's form, INLINE in the dispatch
+prompt — a bare pointer to a spec file or an earlier event is NOT a
+DoD. Next to it — the CONTEXT MANIFEST (D-0073): "given" = enumeration
+of injected files/data; a writing dispatch adds owns (ABSOLUTE write
+paths) / non-goals / handoff. Completeness of both is the DISPATCHER's
+duty BEFORE sending (checklist below); silence on an edge its own
+requirements create is a dispatcher defect, not the performer's guess.
+
+| R11 | when | duty | src |
+|---|---|---|---|
+| a | builder | acceptance criteria + the verification run whose output becomes the witness | D-0054 |
+| b | the spec sets a limit/truncation, admits an empty/absent/None input its data can carry, or carries pairs of its own requirements that can conflict | for every limit, every such input and every pair of its own requirements that can conflict, the expected behavior is STATED — or the fork is explicitly handed down as a question | D-0054 |
+| c | edge sub-class (i) TEMPORAL — an artifact the change itself brings into existence (a config, file or flag absent at spec time, present after) | the behavior is stated for BOTH worlds, before and after it exists, and the spec says which move creates it | D-0054 |
+| d | edge sub-class (ii) POSITIONAL — the spec prescribes WHERE in existing logic a branch goes (order, precedence, before/after which check) | it states the INVARIANT that position must preserve (what stays unreachable, what must still be refused), not the location alone: a position without its invariant is the dispatcher's guess handed to the performer as fact | D-0054 |
+| e | the task has an INTERACTIVE surface (CLI/UI taking user input) | the DoD adds an adversarial mini-battery — size, nesting, encoding, empty/broken input; every limit/boundary the code introduces gets a test AT and BEYOND it | D-0054 |
+| f | test volume under e | SCOPE CEILING: acceptance keys + battery + boundaries; full regress beyond is not required | D-0054 |
+| g | scout | explicit question(s) + a completeness criterion ("X is nowhere" is a valid result requiring a trail) | D-0054 |
+| h | critic | the spec/DoD of the reviewed work attached | D-0054 |
+| i | a parallel fan-out | ownership per R4 + optional maxConcurrent | D-0073 |
+| j | the manifest on READS | DECLARATIVE: reading past the basket is a report line, not a violation; a point read-only dispatch just enumerates its basket inline | D-0073 |
+| k | the manifest on WRITES | NORMATIVE | D-0073 |
+| l | the owns are markdown/config with no test set of their own (DOC-DISPATCH WITNESS) | a deterministic key-presence run IS a legal mechanical layer, but ONLY with three properties: (i) the keys are quoted VERBATIM from the DoD as written BEFORE the run; (ii) the script is committed as a test OR attached in FULL source with the witness; (iii) the run includes a NEGATIVE control (one key deliberately absent → the script reports failure) | D-0052 |
+| m | any of l's three properties is missing | the witness is a retelling, not a run (D-0052 class); detector — check 13(л) | D-0052 |
+| n | a checklist miss exposed by a reject or finding | a spec-defect of the dispatcher; promotion to a machine layer follows the next recurrence | D-0063 |
+| o | a worker returns a DoD-less dispatch (or a writing/parallel one without a manifest) with questions | the emergency net, not the normal cycle: frequent returns = a spec-discipline defect of the coordinator, a calibration case | D-0054 |
+
 FIVE-POINT CHECKLIST (D-0096) run against every dispatch before it
 goes: (1) explicit question / completeness criterion or acceptance
 keys; (2) DoD inline with the exact verification run AND the edge
-behaviors NAMED — limits/truncations, empty/absent inputs,
-conflicting requirement pairs: stated, or explicitly forked down;
-(3) "given" enumerated AND sufficient — data, fixtures, paths NAMED,
-not implied; (4) writing dispatch: owns/non-goals/handoff present; a
-PARALLEL writing dispatch also names the NARROWED witness scope (R4);
+behaviors NAMED — limits/truncations, empty/absent inputs, conflicting
+requirement pairs: stated, or explicitly forked down; (3) "given"
+enumerated AND sufficient — data, fixtures, paths NAMED, not implied;
+(4) writing dispatch: owns/non-goals/handoff present; a PARALLEL
+writing dispatch also names the NARROWED witness scope (R4);
 (5) freshness — the spec's load-bearing facts checked against their
-carrier, not memory (a stale note in the spec is a dispatcher
-defect; machine layer — the dispatch_gate given-path warn). A
-checklist miss exposed by a reject or finding = a spec-defect of the
-dispatcher; promotion to a machine layer follows the next recurrence
-(D-0063). The DoD is written INLINE in the dispatch prompt itself —
-named acceptance criteria plus the exact verification run; a bare
-pointer to a spec file or an earlier event is NOT a DoD.
-DOC-DISPATCH WITNESS: when the owns are markdown/config with no test
-set of their own, a deterministic key-presence run IS a legal
-mechanical layer, but ONLY with three properties: (i) the keys are
-quoted VERBATIM from the DoD as written BEFORE the run — keys chosen
-after the fact are the performer checking itself; (ii) the script is
-committed as a test OR attached in FULL source with the witness — an
-unrerunnable witness forfeits the cheap-rerun right; (iii) the run
-includes a NEGATIVE control (one key deliberately absent → the script
-reports failure) — an evergreen script that cannot fail is
-indistinguishable from a broken one. Missing any of the three → the
-witness is a retelling, not a run (D-0052 class); detector — check
-13(л). A worker returning
-a DoD-less dispatch (or a writing/parallel one without a manifest)
-with questions is the emergency net, not the normal cycle: frequent
-returns = a spec-discipline defect of the coordinator, a calibration
-case.
+carrier, not memory (a stale note in the spec is a dispatcher defect;
+machine layer — the dispatch_gate given-path warn).
 
 R11a. **Questions route UP, work routes DOWN (D-0077); the USER is
 the apex of the hierarchy** (above the Lead). Underspecified

@@ -1095,19 +1095,75 @@ def test_registry_write_and_read(tmp_path):
     assert entries[0]["alive_count"] == report["alive_count"]
 
 
+def _make_hermetic_git_repo(tmp_path: Path) -> Path:
+    """Изолированный git-репозиторий БЕЗ единой правки шапок в истории --
+    для тестов determine_mode/last_header_touching_commit, которым НЕ
+    нужен live REPO_ROOT (класс «неинъектируемый дефолт/боевой артефакт
+    тянется в тестовый контекст», фикс-батч калибровки №7, 2026-08-14;
+    находка t-493: живой REPO_ROOT в determine_mode ловил РЕАЛЬНЫЙ
+    коммит правки шапок M1 (3280086) и молча переключал ветку триггера
+    с периодической на событийную -- тест ломался НАВСЕГДА после любого
+    коммита, трогающего <!--CHK. Герметичный git-репозиций без такого
+    коммита -- честная проверка ИМЕННО периодической/explicit-веток, не
+    мок функции: последующая правка шапок в живом репо больше не может
+    задеть этот тест, потому что git log здесь смотрит СВОЁ дерево."""
+    repo = tmp_path / "hermetic-git-repo"
+    repo.mkdir()
+    run = lambda *args: subprocess.run(  # noqa: E731
+        args, cwd=str(repo), check=True, capture_output=True,
+        encoding="utf-8", errors="replace",
+    )
+    run("git", "init", "-q")
+    run("git", "config", "user.email", "hermetic@test.local")
+    run("git", "config", "user.name", "hermetic-test")
+    (repo / "dummy.txt").write_text("никаких <!--CHK-- здесь нет", encoding="utf-8")
+    run("git", "add", "dummy.txt")
+    run("git", "commit", "-q", "-m", "init, без правок шапок")
+    return repo
+
+
 def test_control_mode_periodic_trigger(tmp_path):
+    hermetic_repo = _make_hermetic_git_repo(tmp_path)
     reg = tmp_path / "registry.jsonl"
     for i in range(3):
         with open(reg, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({"mode": "обычный (x)"}) + "\n")
-    mode, reason = prep.determine_mode(prep.read_registry(reg), str(REPO_ROOT),
+    mode, reason = prep.determine_mode(prep.read_registry(reg), str(hermetic_repo),
                                         "PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md", False)
     assert mode == "КОНТРОЛЬНЫЙ"
     assert "N=4" in reason
 
 
+def test_control_mode_event_trigger_after_header_commit(tmp_path):
+    """Обратная сторона того же герметичного репо -- живой A3.8(б)-
+    сценарий БЕЗ живого REPO_ROOT: коммит, тронувший <!--CHK, обязан
+    включить событийный триггер (сильнее периодического), даже когда
+    периодический порог N=4 ещё не выбит (всего 1 запись реестра)."""
+    hermetic_repo = _make_hermetic_git_repo(tmp_path)
+    protocol_rel = "protocol.md"
+    (hermetic_repo / protocol_rel).write_text(
+        "0. **Чек.**\n<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой-->\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", protocol_rel], cwd=str(hermetic_repo), check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "добавлена шапка"],
+                    cwd=str(hermetic_repo), check=True)
+    reg = tmp_path / "registry2.jsonl"
+    with open(reg, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"mode": "обычный (x)"}) + "\n")
+    mode, reason = prep.determine_mode(prep.read_registry(reg), str(hermetic_repo),
+                                        protocol_rel, False)
+    assert mode == "КОНТРОЛЬНЫЙ"
+    assert "правк" in reason and "шапок" in reason
+
+
 def test_control_mode_explicit_flag(tmp_path):
-    mode, reason = prep.determine_mode([], str(REPO_ROOT),
+    # explicit_control=True возвращает результат ДО обращения к git log
+    # (короткое замыкание в самом начале determine_mode) -- repo_root
+    # здесь намеренно НЕ живой REPO_ROOT и даже не существующий путь:
+    # значение доказуемо не используется в этой ветке (см. R9-перечень
+    # в отчёте), заведомо синтетическая строка документирует это.
+    mode, reason = prep.determine_mode([], "/nonexistent/repo/for/this/branch",
                                         "PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md", True)
     assert mode == "КОНТРОЛЬНЫЙ"
     assert "--control" in reason
