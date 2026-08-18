@@ -253,3 +253,262 @@ dispatch keeps the canonical run.
 (D-0082/D-0080) к параллельности отношения не имеют — осели в R4 за
 неимением места; перенос сломал бы внешние ссылки (RULE_COVERAGE:53),
 оставлены строками реестра.
+
+---
+---
+
+# ДОСЫЛКА t-494 (принята Lead 08-18; ключи R8/R1, банк карт лёгких, решения Р12/Р13)
+
+## РЕШЕНИЯ LEAD ПО ДОСЫЛКЕ (08-18)
+
+- **Р12 → B** (ОТМЕНЯЕТ Р9(A) на замеренных данных — Rule #1 на сам
+  ход): R3/R7/R9/R10/R11a НЕ конвертируются — замер досылки: батч
+  дал бы +1 160 Б (R3 +26%, R10 +25%, R7 +23%, R11a +18%, R9 +12%) и
+  сделал храповик BREACH=36 115 невыполнимым по построению; у этих
+  пяти правил НЕТ накопленных амендментов (болезни, которую лечим).
+  Анти-ростовое свойство держит СТРОКА-ПРАВИЛО в шапку CLAUDE.md
+  (узел W2b-8): «a rule with a registry block carries its amendments
+  as rows; a rule without one has none yet — the first amendment
+  creates the block». Карты пяти правил (ниже) БАНКУЮТСЯ: применяются
+  в день первого амендмента. Ассерт полноты W2b-8 меняется: реестр
+  покрывает R11/R8/R2/R13/R4/R1; R3/R5/R6/R7/R9/R10/R12/R11a — явно
+  освобождены до первого амендмента. R13/R4 (+4/+5%) остаются в
+  скоупе — у них реальные структуры исключений и стабильные ID нужны.
+- **Р13 — утверждена** редакция §0.2 п.3 для R8.e: «…never a batch
+  entry; self-executing it is illegal even when it blocks the current
+  move — the override hits the SELF-EXECUTION concession only, not
+  dispatch itself» (иллюстративная формулировка Lead убивала ключ
+  «not dispatch itself» — дословность восстановлена).
+- Все микроправки §0.2 (7 правок текстов R8/R1, 4 перепина ключей)
+  — ПРИНЯТЫ.
+- Новая проекция файла после всех узлов: ≈35 900 Б — храповик
+  BREACH=36 115 держится с малым запасом; байтовый рычаг остаётся у
+  W2c.
+
+## §0.2 Обязательные микроправки текстов (иначе ключ не выживает) — VERBATIM
+
+| # | Текст | Правка |
+|---|---|---|
+| 1 | R8 ядро | `needs no skip event.` → `needs no skip events.` (ключ оригинала, стр. 194) |
+| 2 | R8.f триггер | вернуть `code with no AI judgment in the coordinator's loop` |
+| 3 | R8.e duty | финал: `…never a batch entry; self-executing it is illegal even when it blocks the current move — the override hits the SELF-EXECUTION concession only, not dispatch itself` (Р13) |
+| 4 | R1 ядро | `in BOTH modes below` → `in both modes below` (фолд не снимает регистр) |
+| 5 | R1.b триггер | открывается дословно: `verification DEPTH follows the EXAM STATUS of the scout binding, not the model name: …` |
+| 6 | R1.b триггер | `no exam-set rebuild and no \`defect_found\`` (не «, no») |
+| 7 | R1.c duty | открывается `the STRICT form returns until a re-pass: …` |
+
+Перепины ключей (ДО прогона, не-исполнителем): R9 `a class wider
+than the map`; R9 два ключа `over ~150 lines or over 5 neighbors` +
+`to ONE scout dispatch with the applicability` (фраза пересекала
+границу ячейки — первый живой случай края §3.1 п.6); R9 `sweep never
+replaces the map walk`; R11a `an explicit environment clause with
+proxy escalation`.
+
+## Ключи R8 (15 утверждений; для узла W2b-2) — VERBATIM
+
+| # | Ключ (verbatim) | Место |
+|---|---|---|
+| 1 | `agent = the skipped` | ядро |
+| 2 | `follows the ROUTING MOTIVE, not the price gap` | ядро |
+| 3 | `is still an absorbed` | ядро |
+| 4 | `case: designer drafting` | ядро |
+| 5 | `ONE batched dispatch at a stage` + `«батч мелочей» in notes` | R8.a |
+| 6 | `self-execution with a skip event is legal only for an edit BLOCKING the current move` (carrier_anchor) + `the reason must name the blockage` | R8.b |
+| 7 | `FIRST such move in a session` | R8.c |
+| 8 | `is a violation regardless` | R8.d + R8.e (шапка) |
+| 9 | `the very shape the loophole took` | R8.d сжатой клаузой (рамка Архитектора) |
+| 10 | `not dispatch itself` | R8.e (редакция Р13) |
+| 11 | `joins the batch` | R8.d |
+| 12 | `an IMMEDIATE SOLO builder dispatch` + `illegal even when it blocks` | R8.e |
+| 13 | `needs no skip events` | ядро |
+| 14 | `code with no AI judgment in the` + `an ENVIRONMENT operation, not a task mapping to` | R8.f |
+| 15 | `a run with no carrier trace` + `skip-event form is the safe default` | R8.g / R8.h |
+
+Оговорка ⚠ ключа 1: в новом тексте «cheaper tier»→«another function»
+и т.п. — обобщение формулировки судит critic узла, машинный слой не
+ловит по построению.
+
+## Ключи R1 (14 утверждений; для узла W2b-6) — VERBATIM
+
+| # | Ключ (verbatim) | Место |
+|---|---|---|
+| 1 | `any repo search, or more than` | ядро |
+| 2 | `may point-read a known file` | ядро |
+| 3 | `known targets itself ONLY with a` | ядро |
+| 4 | `a silent skip is a violation` | ядро |
+| 5 | `-volume recon is always scout` | ядро |
+| 6 | `scout delivers the map` | R1.a |
+| 7 | `Lead's own targeted second pass` | R1.a |
+| 8 | `its trail recorded in RELATED_WORK` | R1.a |
+| 9 | `where it searched` | ядро ⚠ (актор перефразирован — судит critic) |
+| 10 | `same-form positive control for every` | ядро |
+| 11 | `an uncontrolled negative` | ядро |
+| 12 | `follows the EXAM STATUS of the scout binding` | R1.b (правка §0.2 п.5) |
+| 13 | `no exam-set rebuild and no` + `mandatory re-verification of claims and negatives is LIFTED` | R1.b |
+| 14 | `the STRICT form returns until a re-pass` + `verifying a negative is mandatory` + `in both modes` | R1.c / ядро |
+
+## БАНК: карты и новые тексты R3/R9/R10/R11a/R7 (НЕ конвертируются — Р12(B); применяются при ПЕРВОМ амендменте соответствующего правила)
+
+Сводная проверка выживания досылки: 77 ключей, все уникальны в живом
+файле; 70 выживают без правок, 7 — после §0.2, 3 перепина; все 4
+якоря escape_allowlist живы во всех новых текстах. R3 несёт
+carrier_anchor `critic: skipped, <reason>` — ЕДИНСТВЕННОЕ вхождение
+полной формы (строка 112); матрица Role≠tier несёт короткую форму
+без `, <reason>`, якорю НЕ удовлетворяющую — ложная подстраховка,
+наблюдение для карты симметрий.
+
+### Банк 2.1 — R3 (новый текст)
+
+```
+R3. **critic is the MANDATORY acceptance gate** for builder diffs
+>~100 lines or touching the data schema / core / money accounting, and
+for unclear bugs BEFORE the Lead starts debugging itself. The first
+filter of EVERY diff is the performer's own DoD self-run (R11) — the
+critic does not replace it. Acceptance itself stays with the Lead.
+
+| R3 | when | duty | src |
+|---|---|---|---|
+| a | the input to a critic dispatch | TWO-LAYER input: the MECHANICAL layer (test reruns, control values, smoke matrices) is executed by the submitting builder or a script and attached VERBATIM before the verdict; the critic's zone is the VERDICT layer (architecture, semantics, class completeness) | D-0058 |
+| b | the mechanical layer is attached | a cheap control re-run of the attached is legal; investigating mechanics by critic-reading is not | D-0058 |
+| c | the layer is missing | the critic returns the dispatch with a request, it does not execute the layer itself | D-0058 |
+| d | a money/numeric diff | the critic starts with EMPIRICS — control-value runs; code reading on divergence or where no deterministic check exists | D-0058 |
+| e | a recon deliverable serves as the SPEC of work >~30 min | CRITIC ON PLAN: a critic pass BEFORE code starts — facts verified by trail (D-0046), feasibility as architectural judgment | D-0046 |
+| f | a small diff | "critic: skipped, <reason>" inside the `accepted` event — a concession ONLY of an acceptor above the performer | D-0058 |
+```
+
+Карта R3 (ключи): 1 `MANDATORY acceptance gate`→ядро; 2 `touching the
+data schema`→ядро; 3 `BEFORE the Lead starts debugging itself`→ядро;
+4 `the performer's own DoD self-run`→ядро; 5 `the critic does not
+replace it`→ядро; 6 `TWO-LAYER input` + `attached VERBATIM before
+the`→R3.a; 7 `the VERDICT layer`→R3.a; 8 `investigating mechanics by
+critic-reading is not`→R3.b; 9 `returns the dispatch with a
+request`→R3.c; 10 `starts with EMPIRICS`→R3.d; 11 `CRITIC ON
+PLAN`→R3.e; 12 `feasibility as architectural judgment`→R3.e; 13
+`critic: skipped, <reason>` (carrier_anchor)→R3.f; 14 `ONLY of an
+acceptor above`→R3.f; 15 `Acceptance itself stays with the Lead`→ядро.
+Якорь: целиком в ячейке duty R3.f, `|` внутри нет — ЖИВ.
+
+### Банк 2.2 — R7 (новый текст)
+
+```
+R7. **Background dispatch by default (D-0040)**: `run_in_background`;
+synchronous only when the next step depends on the result AND there is
+no other work or operator question. Acceptance of the result on
+completion is mandatory. The visible dispatch label (`description`)
+starts with the worker's model: "haiku: …" / "sonnet: …" / "opus: …"
+(non-standard agent — its actual model); this is the same
+self-declaration as the journal's `model` field.
+
+| R7 | when | duty | src |
+|---|---|---|---|
+| a | a journal line with `worker_ref agent:<id>` is written | a tier REQUIREMENT closes by MEASUREMENT: the journal_echo hook measures the worker's actual transcript models and warns on a MISMATCH with the declared model | D-0083 |
+| b | a MISMATCH is reported | it is resolved BEFORE the result is used as that tier's word (relaunch / honest record with basis / escalate) | D-0083 |
+```
+
+Карта R7 (ключи): 1 `run_in_background`→ядро; 2 `synchronous only
+when the next step depends`→ядро; 3 `no other work or operator
+question`→ядро; 4 `Acceptance of the result on`→ядро; 5 `starts with
+the worker's model`→ядро; 6 `non-standard agent — its actual
+model`→ядро; 7 `the same self-declaration as the journal's`→ядро; 8
+`closes by MEASUREMENT`→R7.a; 9 `measures the worker's actual
+transcript models` + `warns on a MISMATCH`→R7.a; 10 `BEFORE the
+result is used` + `relaunch / honest record with basis /
+escalate`→R7.b.
+
+### Банк 2.3 — R9 (новый текст)
+
+```
+R9. **Fix the class, not the instance (D-0043)**: name the class; walk
+the siblings VIA docs/SIBLING_MAP.md (point lookup, NOT a repo scan);
+fix now or EXPLICITLY queue the remainder; place the anti-recurrence
+rule at the highest binding level; a new symmetry = a new axis in the
+map in the same commit. A silently left known sibling is a violation.
+
+| R9 | when | duty | src |
+|---|---|---|---|
+| a | roles on the walk | Workers REPORT noticed analogs (without widening scope), the critic checks the fix's class completeness against the map, the Lead owns the walk and rule placement | D-0043 |
+| b | a class wider than the map | scout with a concrete question | D-0043 |
+| c | a class has just been NAMED | FIRST apply it to every neighbor inside the SAME artifact — sibling subsections of the check, clauses of the rule, entries of the list, branches of the parser — before the map walk and before the queue | D-0100 |
+| d | the sweep's base unit | the enclosing structural block, widening to the WHOLE file when this move has already read it; opening a file specially for the sweep is forbidden — queue it instead | D-0100 |
+| e | the sweep is executed | an ENUMERATION with a verdict per neighbor (applied / not applicable — why / queued with a pointer); prose "neighbors checked" is NOT execution | D-0100 |
+| f | there are no neighbors | the explicit line "no neighbors: <why>" | D-0100 |
+| g | a unit over ~150 lines or over 5 neighbors | it routes to ONE scout dispatch with the applicability question as its intent key, or carries a `dispatch_skipped` event (F-9 class) | D-0100 |
+| h | a class lives both in the artifact and on an axis | it gets BOTH: the sweep never replaces the map walk | D-0100 |
+```
+
+Карта R9 (ключи): 1 `name the class; walk`→ядро; 2 `point lookup, NOT
+a repo`→ядро; 3 `a class wider than the map` (перепин)→R9.b; 4
+`EXPLICITLY queue the remainder`→ядро; 5 `at the highest binding
+level`→ядро; 6 `a new symmetry = a new axis`→ядро; 7 `A silently left
+known sibling`→ядро; 8 `Workers REPORT noticed analogs` + `the Lead
+owns the walk and rule placement`→R9.a; 9 `FIRST apply it to every
+neighbor` + `branches of the parser`→R9.c; 10 `the enclosing
+structural block`→R9.d; 11 `opening a file specially for the
+sweep`→R9.d; 12 `an ENUMERATION with a verdict per neighbor` + `is
+NOT execution`→R9.e; 13 `no neighbors: <why>`→R9.f; 14 `over ~150
+lines or over 5 neighbors` + `to ONE scout dispatch with the
+applicability` (перепины)→R9.g; 15 `sweep never replaces the map
+walk` (перепин)→R9.h.
+
+### Банк 2.4 — R10 (новый текст; четыре вопроса — уже-список, дословно)
+
+```
+R10. **Mechanism discipline.** Recognition (D-0065): a mechanism is ANY
+edit adding or changing a duty of future sessions/workers or a machine
+check — regardless of file; doubt counts as a mechanism: four questions
+or an explicit refusal. The four questions are answered in writing, in
+the mechanism text or commit message. Full procedure:
+D-0055/D-0063/D-0064/D-0065/D-0072 (DECISIONS_FULL).
+
+FOUR QUESTIONS (F-11, D-0049, D-0063/D-0064): (а) what compliance costs
+and who pays (Rule #1 applied to the rule itself); (б) SIBLING_MAP axes
+BY ENUMERATION (D-0055): a line «ось N: покрыта / в очередь / н-п
+<why>» per axis of the CURRENT map per mechanism; (в) where its failure
+DETECTOR is registered — a calibration check or a named external one; a
+mechanism without a detector is a wish, and finding one is a finding;
+(г) what stands on the execution path (D-0063: code guarantees the
+encounter, an AI tier above judges the meaning).
+
+| R10 | when | duty | src |
+|---|---|---|---|
+| a | the answer to (г) is «held by discipline» | «held by discipline» is legal only as an explicit line naming the (в) detector | D-0064 |
+| b | a mechanism commit | the commit-msg gate (.githooks/ + tools/mechanism_gate.py) rejects a mechanism commit without the axis block and a `tier: <model>` line | D-0072 |
+| c | a NON-mechanism edit of the same paths | legal only with the line «оси: не-механизм (<reason>)» in the commit MESSAGE | D-0072 |
+```
+
+Карта R10 (ключи): 1 `a mechanism is ANY`→ядро; 2 `doubt counts as a
+mechanism`→ядро; 3 `in the mechanism text or commit message`→ядро; 4
+`what compliance costs and who pays`→блок вопросов; 5 `SIBLING_MAP
+axes BY ENUMERATION` + `«ось N: покрыта`→блок; 6 `where its failure
+DETECTOR is registered` + `a mechanism without a detector is a
+wish`→блок; 7 `what stands on the execution path`→блок; 8 `«held by
+discipline» is legal only as an`→R10.a; 9 `rejects a mechanism commit
+without the axis block`→R10.b; 10 `«оси: не-механизм`→R10.c; 11
+`Full procedure:`→ядро.
+
+### Банк 2.5 — R11a (новый текст)
+
+```
+R11a. **Questions route UP, work routes DOWN (D-0077); the USER is the
+apex of the hierarchy** (above the Lead). Underspecified REQUIREMENTS
+(intent interpretation, choice of result form) are user-level
+questions; the affected work stands until answered; deciding for the
+user is forbidden at every tier including the Lead. The skip concession
+points only DOWN: you may skip a dispatch BELOW your tier (with the
+event); a question ABOVE your level cannot be absorbed — only escalated
+(R6; tiers exhausted → the Lead queue via `escalated`).
+
+| R11a | when | duty | src |
+|---|---|---|---|
+| a | coordinator work self-executed after `dispatch_skipped` | passes the same acceptance as a builder diff (D-0058 matrix); handing unaccepted work to the user is a violation | D-0077 |
+| b | a headless environment with no user | legal only via an explicit environment clause with proxy escalation (exam protocol) | D-0077 |
+```
+
+Карта R11a (ключи): 1 `Questions route UP, work routes DOWN` + `apex
+of the hierarchy`→ядро; 2 `Underspecified`→ядро; 3 `the affected work
+stands until answered`→ядро; 4 `deciding for the user is forbidden at
+every tier`→ядро; 5 `The skip concession points only DOWN`→ядро; 6
+`cannot be absorbed — only escalated`→ядро; 7 `passes the same
+acceptance as a builder diff`→R11a.a; 8 `handing unaccepted work to
+the user`→R11a.a; 9 `an explicit environment clause with proxy
+escalation` (перепин)→R11a.b.
