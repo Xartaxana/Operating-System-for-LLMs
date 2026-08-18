@@ -164,6 +164,20 @@ BOOT_BUDGET_LIMIT = 100000
 
 _ALWAYS_INCLUDE_BOOT_FILE = "CLAUDE.md"
 
+# W2b-8 (D-0054/D-0065): CLAUDE.md's own personal ratchet, layered on
+# top of the whole-boot-path thresholds above. CLAUDE_BREACH is the
+# file's measured size at the START of the W2b form-refactor phase (a
+# ratchet floor: the phase must not grow the file past its own
+# starting point). CLAUDE_WARN = ceil(measured * 1.015 / 100) * 100,
+# clamped to min(WARN, CLAUDE_BREACH - 300); the raw formula on the
+# phase's final measured size (~36084 B) lands above that clamp floor,
+# so the clamp fired -- a form-refactor that ends up near byte-neutral
+# leaves no real growth margin. That is a recorded FINDING ("ratchet
+# exhausted, W2c"), not a silent renumbering; see docs/tasks/
+# 2026-08-18_w2b-transfer-maps.md for the measured inputs.
+CLAUDE_BREACH = 36115
+CLAUDE_WARN = 35815
+
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 # D-0056a tier mapping: substring of the model id (lowercased) -> tier
@@ -869,7 +883,24 @@ def boot_budget_lines(root: Path) -> list:
     else:
         status_suffix = ""
 
-    lines = [base + missing_suffix + status_suffix]
+    # W2b-8: CLAUDE.md's own personal ratchet suffix -- printed ALWAYS
+    # (unlike the WARN/BREACH pieces above, which only appear once the
+    # whole boot path is over threshold). Breach of THIS threshold is
+    # its own, narrower signal: only the CLAUDE layer of boot-diet is
+    # due, not a full three-layer diet (.claude/skills/boot-diet/
+    # SKILL.md). Comparison is strictly ">", matching BOOT_WARN/BREACH
+    # above; a missing CLAUDE.md prints "missing", never "under budget".
+    claude_size = next(
+        (size for name, size in sizes if name == _ALWAYS_INCLUDE_BOOT_FILE), 0
+    )
+    if _ALWAYS_INCLUDE_BOOT_FILE in missing:
+        claude_suffix = f" | {_ALWAYS_INCLUDE_BOOT_FILE}: missing"
+    else:
+        claude_suffix = f" | {_ALWAYS_INCLUDE_BOOT_FILE}: {claude_size}/{CLAUDE_WARN}"
+        if claude_size > CLAUDE_WARN:
+            claude_suffix += " OVER -> boot-diet (CLAUDE layer)"
+
+    lines = [base + missing_suffix + status_suffix + claude_suffix]
 
     if status_suffix:
         top3 = sorted(sizes, key=lambda t: t[1], reverse=True)[:3]

@@ -1,17 +1,21 @@
 # CLAUDE.md — Operating System for LLMs
 
-Auto-loaded every session. Full state recovery is BOOT.md — on a fresh
-session start the SessionStart hook auto-injects the boot directive
-(D-0103, amends D-0038's request-only default; fires on startup/clear,
-not on compact/resume). Boot context is paid, so it stays scoped to the
-two boot layers A+B (D-0038). This file
-holds only what must ALWAYS be in context: routing policy and command
-hygiene (D-0041). Norms live HERE; rationale, precedents and history
-live in docs/POLICY_FULL.md (axis-4 pair, same-commit discipline) and
-docs/DECISIONS_FULL.md. Permanent behaviour (D-0011, absorbed from the
-retired SYSTEM_PROMPT.md): never invent project state — retrieve it from
-the repository; the repository overrides chat. This repo is the reference (dogfooding)
-deployment of the routing MVP; the pilot deployment is D:\AO3_tests.
+Auto-loaded every session. Full state recovery is BOOT.md
+(SessionStart auto-injects it, D-0103; boot context is paid, layers
+A+B, D-0038). This file holds only what must ALWAYS be in context:
+routing policy and command hygiene (D-0041). Norms live HERE;
+rationale and history live in docs/POLICY_FULL.md and
+docs/DECISIONS_FULL.md. Permanent behaviour (D-0011): never invent
+project state — retrieve it from the repository; the repository
+overrides chat. This repo is the reference (dogfooding) deployment;
+the pilot is D:\AO3_tests.
+
+Size budget: this file is capped at 35815 bytes (breach 36115); an
+amendment to a rule with a registry block is a ROW in that registry,
+never a paragraph in its core; a rule without a block has no
+amendments yet — the first amendment creates the block; rationale
+goes to docs/POLICY_FULL.md (axis-4 pair, same commit). Breach →
+boot-diet, CLAUDE layer.
 
 ## Tiers — functions, not models (D-0062)
 
@@ -139,8 +143,7 @@ mandatory) — at ANY tier, except as listed below. The rule follows
 the ROUTING MOTIVE, not the price gap: a same-tier function absorbed
 by the coordinator is still an absorbed function (standing case:
 designer drafting, R2). Lead-tier work per the Tiers table
-(decomposition, specs, acceptance, architecture, policy) needs no
-skip events.
+(decomposition, specs, acceptance, architecture, policy) needs no skip events.
 
 | R8 | when | duty | src |
 |---|---|---|---|

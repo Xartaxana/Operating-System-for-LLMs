@@ -905,7 +905,7 @@ def test_boot_budget_normal_under_warn_threshold(tmp_path):
     root = tmp_path
     _seed_boot_files(root, {"README.md": 100, "CLAUDE.md": 200})
     lines = sc.boot_budget_lines(root)
-    assert lines == ["BOOT BUDGET: 300 bytes / 100000 (2 files)"]
+    assert lines == ["BOOT BUDGET: 300 bytes / 100000 (2 files) | CLAUDE.md: 200/35815"]
 
 
 def test_boot_budget_warn_includes_top3(tmp_path):
@@ -923,7 +923,9 @@ def test_boot_budget_warn_includes_top3(tmp_path):
     total = 40000 + 30000 + 25000 + 100
     assert total > sc.BOOT_WARN_THRESHOLD
     assert total <= sc.BOOT_BREACH_THRESHOLD
-    assert lines[0] == f"BOOT BUDGET: {total} bytes / 100000 (4 files) WARN"
+    assert lines[0] == (
+        f"BOOT BUDGET: {total} bytes / 100000 (4 files) WARN | CLAUDE.md: 100/35815"
+    )
     assert lines[1] == "  40000  README.md"
     assert lines[2] == "  30000  PROJECT_CHARTER.md"
     assert lines[3] == "  25000  ANTI_GOALS.md"
@@ -946,7 +948,7 @@ def test_boot_budget_breach_includes_hint_and_top3(tmp_path):
     assert total > sc.BOOT_BREACH_THRESHOLD
     assert lines[0] == (
         f"BOOT BUDGET: {total} bytes / 100000 (4 files) BREACH -> boot-diet due "
-        "(D-0068; report first, operator word starts it)"
+        "(D-0068; report first, operator word starts it) | CLAUDE.md: 100/35815"
     )
     assert lines[1] == "  60000  README.md"
     assert lines[2] == "  30000  PROJECT_CHARTER.md"
@@ -959,7 +961,54 @@ def test_boot_budget_missing_file_counts_zero_and_is_flagged(tmp_path):
     (root / "BOOT.md").write_text("1. Read GHOST_FILE.md.\n", encoding="utf-8")
     (root / "CLAUDE.md").write_bytes(b"x" * 50)
     lines = sc.boot_budget_lines(root)
-    assert lines[0] == "BOOT BUDGET: 50 bytes / 100000 (2 files) [missing: GHOST_FILE.md]"
+    assert lines[0] == (
+        "BOOT BUDGET: 50 bytes / 100000 (2 files) [missing: GHOST_FILE.md]"
+        " | CLAUDE.md: 50/35815"
+    )
+
+
+# ---- W2b-8: CLAUDE.md's own personal ratchet suffix -- four worlds ----
+
+
+def test_claude_budget_suffix_under_warn(tmp_path):
+    root = tmp_path
+    _seed_boot_files(root, {"README.md": 100, "CLAUDE.md": sc.CLAUDE_WARN - 1})
+    lines = sc.boot_budget_lines(root)
+    assert lines[0].endswith(f"| CLAUDE.md: {sc.CLAUDE_WARN - 1}/{sc.CLAUDE_WARN}")
+    assert "OVER" not in lines[0]
+
+
+def test_claude_budget_suffix_exactly_at_warn_no_flag(tmp_path):
+    # Boundary: strictly ">" -- a file sitting exactly ON CLAUDE_WARN is
+    # NOT flagged (mirrors the BOOT_WARN/BREACH boundary convention).
+    root = tmp_path
+    _seed_boot_files(root, {"README.md": 100, "CLAUDE.md": sc.CLAUDE_WARN})
+    lines = sc.boot_budget_lines(root)
+    assert lines[0].endswith(f"| CLAUDE.md: {sc.CLAUDE_WARN}/{sc.CLAUDE_WARN}")
+    assert "OVER" not in lines[0]
+
+
+def test_claude_budget_suffix_over_warn_flags_over(tmp_path):
+    # Boundary + 1: crosses strictly over CLAUDE_WARN -> OVER flag fires.
+    root = tmp_path
+    _seed_boot_files(root, {"README.md": 100, "CLAUDE.md": sc.CLAUDE_WARN + 1})
+    lines = sc.boot_budget_lines(root)
+    assert lines[0].endswith(
+        f"| CLAUDE.md: {sc.CLAUDE_WARN + 1}/{sc.CLAUDE_WARN}"
+        " OVER -> boot-diet (CLAUDE layer)"
+    )
+
+
+def test_claude_budget_suffix_missing_claude_md(tmp_path):
+    root = tmp_path
+    # No BOOT.md, no CLAUDE.md -- boot_path_files() still always appends
+    # CLAUDE.md (D-0041); its stat() fails, and the suffix reports the
+    # gap explicitly rather than reading as "under budget".
+    lines = sc.boot_budget_lines(root)
+    assert lines[0] == (
+        "BOOT BUDGET: 0 bytes / 100000 (1 files) [missing: CLAUDE.md]"
+        " | CLAUDE.md: missing"
+    )
 
 
 def test_boot_budget_lines_within_output_budget(tmp_path):
