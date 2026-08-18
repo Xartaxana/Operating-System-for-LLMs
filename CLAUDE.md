@@ -259,36 +259,23 @@ strictly to the TAIL — the anchor is the file's actual tail, not
 memory; boot-budget squeeze batched at handoff. Target ≤15 main moves
 per task — a measured goal (exams / calibration check), not a gate.
 
-R13. **Leaf routing (D-0087).** Intake classifies every task: a LEAF
+R13. **Leaf routing (D-0087)**: intake classifies every task — a LEAF
 closes under one performer of one allocate-category with no
-dependencies; doubt = graph. A leaf runs through the D-construction
-BY DEFAULT (D-0094): category→tier by the ladder, worker executes,
-acceptance by a CALIBRATED JUDGE (verdict recorded; `basis:
-"judge"`), deterministic R6 mirror on reject (one retry same tier →
-one-step escalation → failed back to the coordinator); the
-coordinator stays out of the leaf loop. A deviation — the
-coordinator taking a leaf through the standard acceptance path — is
-legal ONLY with a recorded reason in the journal; the window detector
-is check 30. Recon-leaf intent keys / DoD carry the
-NEGATIVE-FORM-CONTROL criterion (command hygiene p.6): a negative
-claim in the material without its positive same-form control →
-reject. TWO legal judge forms: the gateway alias (judge-sonnet, needs
-a live proxy; the only form for script-driven constructions) and a
-SUBSCRIPTION judge-subagent carrying the pinned JUDGE_SYSTEM_PROMPT
-(gateway/shadow_eval.py) VERBATIM — a drifted subagent-judge prompt
-is a finding, not a judge (the equivalence measurement that legalized
-the subscription form — POLICY_FULL §R13). Judge
-acceptance is legal ONLY for leaf-class dispatches (recon /
-implementation to a written spec); it never accepts mechanisms,
-policy edits or integration wholes — those keep the D-0058 matrix.
-Graph tasks keep the standard Lead loop; the H-mode (Lead-authored
-DAG + per-node intent keys incl. adversarial probes + D-machinery on
-leaves) is available on the operator's word for quality-critical
-tasks. With no judge available in either form the standard
-acceptance path applies. Misclassification is recoverable
-by construction: a leaf that was really a graph comes back via judge
-reject / `decomposable` (R5); a graph-classified simple task only
-pays the Lead-layer tax.
+dependencies; doubt = graph. A leaf runs through the D-construction BY
+DEFAULT: category→tier by the ladder, worker executes, acceptance by a
+CALIBRATED JUDGE (verdict recorded; `basis: "judge"`), deterministic R6
+mirror on reject (one retry same tier → one-step escalation → failed
+back to the coordinator); the coordinator stays out of the leaf loop.
+Graph tasks keep the standard Lead loop.
+
+| R13 | when | duty | src |
+|---|---|---|---|
+| a | the coordinator takes a leaf through the standard acceptance path | a deviation: legal ONLY with a recorded reason in the journal; the window detector is check 30 | D-0094 |
+| b | recon-leaf intent keys / DoD | carry the NEGATIVE-FORM-CONTROL criterion (command hygiene p.6): a negative claim in the material without its positive same-form control → reject | D-0087 |
+| c | which judge is legal | TWO forms: the gateway alias (judge-sonnet, needs a live proxy — the only form for script-driven constructions) and a SUBSCRIPTION judge-subagent carrying the pinned JUDGE_SYSTEM_PROMPT (gateway/shadow_eval.py) VERBATIM; a drifted subagent-judge prompt is a finding, not a judge. With no judge available in either form the standard acceptance path applies | D-0087 |
+| d | the dispatch is NOT leaf-class — a mechanism, a policy edit, an integration whole | judge acceptance is illegal: those keep the D-0058 matrix — it is legal ONLY for leaf-class dispatches: recon / implementation to a written spec | D-0087 |
+| e | a quality-critical task, on the operator's word | H-mode: a Lead-authored DAG + per-node intent keys incl. adversarial probes + D-machinery on leaves | D-0087 |
+| f | the classification was wrong | Misclassification is recoverable by construction: a leaf that was really a graph comes back via judge reject / `decomposable` (R5); a graph-classified simple task only pays the Lead-layer tax | D-0087 |
 
 ## Journal — logs/routing-log.jsonl
 
