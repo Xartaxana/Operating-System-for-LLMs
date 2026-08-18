@@ -165,42 +165,26 @@ the worker's actual transcript models and warns on a MISMATCH with
 the declared model; a mismatch is resolved BEFORE the result is used
 as that tier's word (relaunch / honest record with basis / escalate).
 
-R8. **Universal skip rule (F-9)**: a task mapping to a cheaper tier,
-executed by the Lead itself, is legal ONLY with `dispatch_skipped`
-(agent = the skipped tier, reason mandatory) — at any tier. The rule
-follows the ROUTING MOTIVE, not the price gap: where a function is
-routed to for CONTEXT ISOLATION or an independent context rather than
-for a cheaper model, the skip event is owed just the same — a
-same-tier function absorbed by the coordinator is still an absorbed
-function. Standing case: designer drafting (R2). BATCHING (D-0081): a
-small builder-class edit NOT blocking the next step is never
-self-executed piecemeal by the coordinator — it accumulates in the
-session's list and goes to builder as ONE batched dispatch at a stage
-boundary (marker «батч мелочей» in notes); self-execution with a skip
-event is legal only for an edit BLOCKING the current move — the reason
-must name the blockage. A skip reason of the class "the operator is
-waiting / an interactive request blocks the move" is legal for
-SELF-EXECUTION ONLY on the FIRST such move in a session; from the
-SECOND same-class occurrence self-execution is a violation regardless
-of whether the edit itself is blocking — the operator's waiting is not
-an exemption, it is the very shape the loophole took. This overrides
-only the earlier blocking-edit SELF-EXECUTION concession, not dispatch
-itself: a NON-blocking edit of this class, from the second occurrence,
-joins the batch (D-0081) as usual; a BLOCKING edit of this class
-cannot wait for the batch boundary by definition — its legal exit is
-an IMMEDIATE SOLO builder dispatch, never self-execution and never a
-batch entry; the coordinator self-executing it is illegal even when it
-blocks the current move. Lead-tier work per the table (decomposition,
-specs, acceptance, architecture, policy) needs no skip events.
-DETERMINISTIC SCRIPT RUNS (D-0095): launching / collecting a
-deterministic script (exam runner, D-construction orchestrator,
-validator, health check — code with no AI judgment in the
-coordinator's loop) is an ENVIRONMENT operation, not a task mapping to
-a tier: no `dispatch_skipped` event is required. The trace duty stays
-— the run's result lives in its own carrier (Runs log, the
-construction's journal events, a report); a run with no carrier trace
-is still a violation. In doubt (the run embeds judgment) — the old
-skip-event form is the safe default.
+R8. **Universal skip rule (F-9)**: work mapping to another function,
+executed by the coordinator itself, is legal ONLY with a
+`dispatch_skipped` event (agent = the skipped function, reason
+mandatory) — at ANY tier, except as listed below. The rule follows
+the ROUTING MOTIVE, not the price gap: a same-tier function absorbed
+by the coordinator is still an absorbed function (standing case:
+designer drafting, R2). Lead-tier work per the Tiers table
+(decomposition, specs, acceptance, architecture, policy) needs no
+skip events.
+
+| R8 | when | duty | src |
+|---|---|---|---|
+| a | a small builder-class edit NOT blocking the next step | never self-executed piecemeal: it accumulates in the session's list and goes to builder as ONE batched dispatch at a stage boundary (marker «батч мелочей» in notes) | D-0081 |
+| b | the edit blocks the current move | self-execution with a skip event is legal only for an edit BLOCKING the current move — the reason must name the blockage | D-0081 |
+| c | skip reason of the class "the operator is waiting / an interactive request blocks the move", FIRST such move in a session | as in b | D-0081 |
+| d | the same class, SECOND and later occurrence in a session, edit NOT blocking | self-execution is a violation regardless of blocking; the edit joins the batch (a) — the operator's waiting is not an exemption, it is the very shape the loophole took | D-0081 |
+| e | the same class, SECOND and later occurrence, edit BLOCKING | legal exit is an IMMEDIATE SOLO builder dispatch — never self-execution, never a batch entry; self-executing it is illegal even when it blocks the current move — the override hits the SELF-EXECUTION concession only, not dispatch itself | D-0081 |
+| f | launching / collecting a DETERMINISTIC script (exam runner, D-construction orchestrator, validator, health check — code with no AI judgment in the coordinator's loop) | an ENVIRONMENT operation, not a task mapping to a tier: no `dispatch_skipped` event is required | D-0095 |
+| g | the same script run | the trace duty stays — the result lives in its own carrier (Runs log, the construction's journal events, a report); a run with no carrier trace is still a violation | D-0095 |
+| h | doubt: the run embeds judgment | the skip-event form is the safe default | D-0095 |
 
 R9. **Fix the class, not the instance (D-0043)**: name the class;
 walk the siblings VIA docs/SIBLING_MAP.md (point lookup, NOT a repo
