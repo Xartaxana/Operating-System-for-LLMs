@@ -16,6 +16,13 @@
 
 contour: both   # subscription — координация; api-keys — gateway-воркеры
 
+# Карта внешних деплоев (Phase 5 W2a, Р11(A), 2026-08-18): символьные
+# имена для предиката deploy.exists пре-пасса калибровки
+# (tools/calibration_prepass.py, резолюция CLI --deploy > этот ключ >
+# env OSLLM_DEPLOY_*). Правка — акт Lead (носитель топологии).
+deploys:
+  ao3: D:\AO3_tests
+
 roles:
   # Координация: декомпозиция, спеки, приёмка, механизмы (D-0099:
   # перепривязан с claude-fable-5 по мотиву стоимости).
