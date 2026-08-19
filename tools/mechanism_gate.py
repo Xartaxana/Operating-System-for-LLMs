@@ -288,6 +288,11 @@ MECHANISM_PREFIXES = (
     # tools/session_context.py импортирует preflight_quota -- падение
     # импорта валит session_context на старте КАЖДОЙ сессии.
     "tools/preflight_quota.py",
+    # Р12(A) спеки W4 (2026-08-19): после W4 пре-пасс -- носитель
+    # ОБЯЗАННОСТИ ЧТЕНИЯ чек-листа калибровки (вердикты живости решают,
+    # что читается; skip-каунтер и сторож -- машинные duty). Критерий
+    # F-56: его отказ/порча меняет, что обязано случиться на прогоне.
+    "tools/calibration_prepass.py",  # пре-пасс калибровки (W4, Р12)
 )
 
 AXIS_HEADING_RE = re.compile(r"^##\s+Ось\s+(\d+)", re.MULTILINE)

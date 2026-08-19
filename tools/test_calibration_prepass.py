@@ -11,8 +11,12 @@ AM-2, --check-form AM-7), адверсариальная батарея A10+AM-7
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -2376,3 +2380,1135 @@ def test_lead_8a_itog_always_prints_both_addends_symmetrically(tmp_path):
         [str(j)], proto,
     )
     assert "из них тела 0 Б · принудительно 0 Б" in rendered
+
+
+# ---------------------------------------------------------------------------
+# 25. W4-1b -- kind (Р7(A)/§4.4)
+# ---------------------------------------------------------------------------
+
+def _journal_ctx_all(tmp_path, events, name="j.jsonl"):
+    j = write_journal(tmp_path, events, name)
+    return prep.build_journal_context([str(j)], None, None)
+
+
+def test_determine_kind_explicit_flag_overrides(tmp_path):
+    ctx = _journal_ctx_all(tmp_path, [])
+    kind, reason = prep.determine_kind(datetime(2026, 8, 14), ctx, True)
+    assert kind == "калибровка"
+    assert "--calibration" in reason
+
+
+def test_determine_kind_journal_unavailable_is_calibration(tmp_path):
+    ctx = prep.build_journal_context([str(tmp_path / "no-such.jsonl")], None, None)
+    kind, reason = prep.determine_kind(datetime(2026, 8, 14), ctx, False)
+    assert kind == "калибровка"
+    assert "недоступен" in reason
+
+
+def test_determine_kind_window_start_matches_last_calibrated_is_calibration(tmp_path):
+    ctx = _journal_ctx_all(tmp_path, [
+        {"ts": "2026-08-14T12:12:34", "event": "calibrated", "category": "x",
+         "notes": "x", "model": "opus", "by": "opus"},
+    ])
+    ws = prep.cc.parse_ts("2026-08-14T12:12:34")
+    kind, reason = prep.determine_kind(ws, ctx, False)
+    assert kind == "калибровка"
+    assert "совпадает" in reason
+
+
+def test_determine_kind_window_start_mismatch_is_adhoc(tmp_path):
+    ctx = _journal_ctx_all(tmp_path, [
+        {"ts": "2026-08-14T12:12:34", "event": "calibrated", "category": "x",
+         "notes": "x", "model": "opus", "by": "opus"},
+    ])
+    ws = prep.cc.parse_ts("2026-08-15T00:00:00")
+    kind, reason = prep.determine_kind(ws, ctx, False)
+    assert kind == "ad-hoc"
+
+
+def test_determine_kind_no_calibrated_event_is_adhoc(tmp_path):
+    ctx = _journal_ctx_all(tmp_path, [
+        {"ts": "2026-08-14T12:12:34", "event": "delegated", "category": "x", "notes": "x",
+         "model": "sonnet", "task_id": "t-1", "worker_ref": "cli:1"},
+    ])
+    ws = prep.cc.parse_ts("2026-08-14T12:12:34")
+    kind, reason = prep.determine_kind(ws, ctx, False)
+    assert kind == "ad-hoc"
+
+
+def test_find_last_calibrated_ts_picks_max(tmp_path):
+    ctx = _journal_ctx_all(tmp_path, [
+        {"ts": "2026-08-10T00:00:00", "event": "calibrated", "category": "x",
+         "notes": "x", "model": "opus", "by": "opus"},
+        {"ts": "2026-08-14T12:12:34", "event": "calibrated", "category": "x",
+         "notes": "x", "model": "opus", "by": "opus"},
+    ])
+    ts = prep.find_last_calibrated_ts(ctx)
+    assert ts == prep.cc.parse_ts("2026-08-14T12:12:34")
+
+
+def test_find_last_calibrated_ts_none_when_absent(tmp_path):
+    ctx = _journal_ctx_all(tmp_path, [
+        {"ts": "2026-08-10T00:00:00", "event": "delegated", "category": "x", "notes": "x",
+         "model": "sonnet", "task_id": "t-1", "worker_ref": "cli:1"},
+    ])
+    assert prep.find_last_calibrated_ts(ctx) is None
+
+
+# ---------------------------------------------------------------------------
+# 26. W4-1b -- compute_skip_streak (§4.4/A3), границы 2/3/4 (rule 6a)
+# ---------------------------------------------------------------------------
+
+def _calib_entry(window_start, bodies):
+    return {"kind": "калибровка", "window_start": window_start, "bodies": bodies}
+
+
+def _adhoc_entry(window_start, bodies):
+    return {"kind": "ad-hoc", "window_start": window_start, "bodies": bodies}
+
+
+def test_skip_streak_zero_no_history():
+    assert prep.compute_skip_streak([], "26") == 0
+
+
+def test_skip_streak_two_below_threshold():
+    entries = [
+        _calib_entry("2026-08-01T00:00:00", {"26": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"26": "ПРОПУЩЕНО"}),
+    ]
+    assert prep.compute_skip_streak(entries, "26") == 2
+
+
+def test_skip_streak_three_at_threshold():
+    entries = [
+        _calib_entry("2026-08-01T00:00:00", {"26": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"26": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-15T00:00:00", {"26": "ПРОПУЩЕНО"}),
+    ]
+    assert prep.compute_skip_streak(entries, "26") == 3
+
+
+def test_skip_streak_four_over_threshold():
+    entries = [_calib_entry(f"2026-08-0{i}T00:00:00", {"26": "ПРОПУЩЕНО"})
+               for i in range(1, 5)]
+    assert prep.compute_skip_streak(entries, "26") == 4
+
+
+def test_skip_streak_stops_at_prochitano():
+    entries = [
+        _calib_entry("2026-08-01T00:00:00", {"26": "ПРОЧИТАНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"26": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-15T00:00:00", {"26": "ПРОПУЩЕНО"}),
+    ]
+    assert prep.compute_skip_streak(entries, "26") == 2
+
+
+def test_skip_streak_stops_at_prinuditelno():
+    entries = [
+        _calib_entry("2026-08-01T00:00:00", {"26": "ПРИНУДИТЕЛЬНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"26": "ПРОПУЩЕНО"}),
+    ]
+    assert prep.compute_skip_streak(entries, "26") == 1
+
+
+def test_skip_streak_ignores_adhoc_entries():
+    entries = [
+        _calib_entry("2026-08-01T00:00:00", {"26": "ПРОПУЩЕНО"}),
+        _adhoc_entry("2026-08-05T00:00:00", {"26": "ПРОЧИТАНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"26": "ПРОПУЩЕНО"}),
+    ]
+    assert prep.compute_skip_streak(entries, "26") == 2, (
+        "ad-hoc не двигает и не рвёт калибровочный streak (К8)"
+    )
+
+
+def test_skip_streak_ignores_entries_without_bodies():
+    entries = [
+        {"kind": "калибровка", "window_start": "2026-08-01T00:00:00"},  # без bodies вовсе
+        _calib_entry("2026-08-08T00:00:00", {"26": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-15T00:00:00", {"26": "ПРОПУЩЕНО"}),
+    ]
+    assert prep.compute_skip_streak(entries, "26") == 2
+
+
+def test_skip_streak_ignores_entries_without_this_id_in_bodies():
+    entries = [
+        _calib_entry("2026-08-01T00:00:00", {"18": "ПРОЧИТАНО"}),  # другое тело
+        _calib_entry("2026-08-08T00:00:00", {"26": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-15T00:00:00", {"26": "ПРОПУЩЕНО"}),
+    ]
+    assert prep.compute_skip_streak(entries, "26") == 2
+
+# (монотонная свёртка группы window_start -- A14(б), блокер 2 -- см.
+# секцию "33. A14(б), блокер 2" ниже: тесты не дублируются здесь.)
+
+
+# ---------------------------------------------------------------------------
+# 27. W4-1b -- apply_skip_counter: forcing, bodies-статус, К2-нейтральность
+# ---------------------------------------------------------------------------
+
+def _write_registry_lines(path: Path, lines: list) -> None:
+    with open(path, "w", encoding="utf-8") as fh:
+        for ln in lines:
+            fh.write(json.dumps(ln, ensure_ascii=False) + "\n")
+
+
+def test_apply_skip_counter_no_bodies_is_k2_neutral(tmp_path):
+    j = write_journal(tmp_path, [])
+    proto = write_protocol(tmp_path, _pilot_body())
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    before_to_read = report["to_read_bytes"]
+    before_total = report["total_bytes"]
+    reg = tmp_path / "reg.jsonl"
+    report2 = prep.apply_skip_counter(report, [], reg, "калибровка", "test")
+    assert report2["to_read_bytes"] == before_to_read
+    assert report2["total_bytes"] == before_total
+    assert report2["bodies_status"] == {}
+    assert report2["forced_lines"] == []
+
+
+def test_apply_skip_counter_below_threshold_no_forcing(tmp_path):
+    write_body_file(tmp_path, 0)
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="journal.any"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    assert report["body_verdicts"][0].alive is False
+
+    reg = tmp_path / "reg.jsonl"
+    _write_registry_lines(reg, [
+        _calib_entry("2026-08-01T00:00:00", {"0": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"0": "ПРОПУЩЕНО"}),
+    ])
+    entries, _bad = prep.read_registry(reg)
+    report2 = prep.apply_skip_counter(report, entries, reg, "калибровка", "test")
+    bv = report2["body_verdicts"][0]
+    assert bv.alive is False
+    assert report2["bodies_status"]["0"] == "ПРОПУЩЕНО"
+    assert report2["forced_lines"] == []
+    assert report2["bodies_forced_bytes"] == 0
+
+
+def test_apply_skip_counter_forces_at_streak_3_with_print_and_reset(tmp_path):
+    write_body_file(tmp_path, 0)
+    body_size = (tmp_path / "PROCESS" / "checks" / "CHK-0.md").stat().st_size
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="journal.any"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    assert report["body_verdicts"][0].alive is False
+
+    reg = tmp_path / "reg.jsonl"
+    _write_registry_lines(reg, [
+        _calib_entry("2026-08-01T00:00:00", {"0": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"0": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-15T00:00:00", {"0": "ПРОПУЩЕНО"}),
+    ])
+    entries, _bad = prep.read_registry(reg)
+    report2 = prep.apply_skip_counter(report, entries, reg, "калибровка", "test")
+    bv = report2["body_verdicts"][0]
+    assert bv.alive is True
+    expected_msg = ("ПРИНУДИТЕЛЬНО ЖИВ: 0 — тело пропущено 3 калибровки подряд "
+                     "(skip-каунтер), предикат journal.any ложен")
+    assert bv.reason == expected_msg
+    assert expected_msg in report2["forced_lines"]
+    assert report2["bodies_status"]["0"] == "ПРИНУДИТЕЛЬНО"
+    assert report2["bodies_forced_bytes"] == body_size
+    assert report2["to_read_bytes"] == report2["protocol_to_read_bytes"] + body_size
+
+    # "Обнуление streak": запись, которую этот прогон допишет в сайдкар,
+    # несёт bodies["0"]=="ПРИНУДИТЕЛЬНО" -- следующий скан стопится СРАЗУ,
+    # streak==0 для будущего прогона.
+    prep.write_registry_entry(reg, "2026-08-22T00:00:00", "2026-08-24T00:00:00",
+                               "обычный", "test", report2, None)
+    entries_after, _bad2 = prep.read_registry(reg)
+    assert prep.compute_skip_streak(entries_after, "0") == 0
+
+
+def test_apply_skip_counter_streak_4_prints_overflow_line(tmp_path):
+    write_body_file(tmp_path, 0)
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="journal.any"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+
+    reg = tmp_path / "reg.jsonl"
+    _write_registry_lines(reg, [
+        _calib_entry(f"2026-08-0{i}T00:00:00", {"0": "ПРОПУЩЕНО"}) for i in range(1, 5)
+    ])
+    entries, _bad = prep.read_registry(reg)
+    report2 = prep.apply_skip_counter(report, entries, reg, "калибровка", "test")
+    assert report2["body_verdicts"][0].alive is True
+    assert any("счётчик перешагнул порог — разобрать" in ln and "streak=4" in ln
+               for ln in report2["forced_lines"]), report2["forced_lines"]
+
+
+def test_apply_skip_counter_bodies_status_prochitano_when_naturally_alive(tmp_path):
+    write_body_file(tmp_path, 0)
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="always"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    reg = tmp_path / "reg.jsonl"
+    report2 = prep.apply_skip_counter(report, [], reg, "калибровка", "test")
+    assert report2["bodies_status"]["0"] == "ПРОЧИТАНО"
+    assert report2["forced_lines"] == []
+
+
+def test_apply_skip_counter_forced_lines_rendered(tmp_path):
+    write_body_file(tmp_path, 0)
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="journal.any"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    reg = tmp_path / "reg.jsonl"
+    _write_registry_lines(reg, [
+        _calib_entry("2026-08-01T00:00:00", {"0": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"0": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-15T00:00:00", {"0": "ПРОПУЩЕНО"}),
+    ])
+    entries, _bad = prep.read_registry(reg)
+    report2 = prep.apply_skip_counter(report, entries, reg, "калибровка", "test")
+    rendered = prep.render_window_report(
+        report2, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "=== ПРИНУДИТЕЛЬНО ЖИВЫЕ ТЕЛА" in rendered
+    assert "ПРИНУДИТЕЛЬНО ЖИВ: 0 — тело пропущено 3 калибровки подряд" in rendered
+    assert "СКИП-КАУНТЕР: kind=калибровка (test) · сайдкар:" in rendered
+
+
+# ---------------------------------------------------------------------------
+# 28. W4-1b -- А10: сайдкар-дефект форсирует ВСЕ тела (окно ПОСЛЕ
+#     последней валидной калибровки, не вечно)
+# ---------------------------------------------------------------------------
+
+def test_sidecar_bad_after_last_valid_calibration_no_valid_entry_any_bad_forces(tmp_path):
+    reg = tmp_path / "reg.jsonl"
+    reg.write_text("не-json-мусор\n", encoding="utf-8")
+    forces, bad = prep.sidecar_bad_after_last_valid_calibration(reg)
+    assert forces is True and bad == 1
+
+
+def test_sidecar_bad_after_last_valid_calibration_bad_after_valid_forces(tmp_path):
+    reg = tmp_path / "reg.jsonl"
+    reg.write_text(
+        json.dumps(_calib_entry("x", {})) + "\n" + "мусор-после\n",
+        encoding="utf-8",
+    )
+    forces, bad = prep.sidecar_bad_after_last_valid_calibration(reg)
+    assert forces is True and bad == 1
+
+
+def test_sidecar_bad_after_last_valid_calibration_bad_before_valid_does_not_force(tmp_path):
+    """A10: не форсирует ВЕЧНО -- битая строка ДО последней валидной
+    калибровочной записи не форсирует текущий прогон."""
+    reg = tmp_path / "reg.jsonl"
+    reg.write_text(
+        "мусор-до\n" + json.dumps(_calib_entry("x", {})) + "\n",
+        encoding="utf-8",
+    )
+    forces, bad = prep.sidecar_bad_after_last_valid_calibration(reg)
+    assert forces is False and bad == 1
+
+
+def test_sidecar_bad_after_last_valid_calibration_no_bad_lines(tmp_path):
+    reg = tmp_path / "reg.jsonl"
+    reg.write_text(json.dumps(_calib_entry("x", {})) + "\n", encoding="utf-8")
+    forces, bad = prep.sidecar_bad_after_last_valid_calibration(reg)
+    assert forces is False and bad == 0
+
+
+def test_sidecar_bad_after_last_valid_calibration_missing_file(tmp_path):
+    forces, bad = prep.sidecar_bad_after_last_valid_calibration(tmp_path / "no-such.jsonl")
+    assert forces is False and bad == 0
+
+
+def test_apply_skip_counter_sidecar_defect_forces_remaining_skipped_bodies(tmp_path):
+    write_body_file(tmp_path, 0)
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="journal.any"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+
+    reg = tmp_path / "reg.jsonl"
+    reg.write_text("мусор\n", encoding="utf-8")  # ни одной валидной записи -> форсирует
+    entries, _bad = prep.read_registry(reg)
+    report2 = prep.apply_skip_counter(report, entries, reg, "калибровка", "test")
+    bv = report2["body_verdicts"][0]
+    assert bv.alive is True
+    assert "САЙДКАР ДЕФЕКТЕН (1 битых строк)" in bv.reason
+    assert report2["bodies_status"]["0"] == "ПРИНУДИТЕЛЬНО"
+    assert report2["sidecar_forces_all"] is True
+    rendered = prep.render_window_report(
+        report2, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "САЙДКАР ДЕФЕКТЕН (1 битых строк)" in rendered
+
+
+def test_apply_skip_counter_sidecar_clean_after_valid_calibration_no_forcing(tmp_path):
+    """A10 позитив-контроль: битая строка ДО последней валидной
+    калибровки -- НЕ форсирует, тело остаётся честно ПРОПУЩЕНО."""
+    write_body_file(tmp_path, 0)
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="journal.any"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+
+    reg = tmp_path / "reg.jsonl"
+    reg.write_text(
+        "мусор-давно-исправленный\n" + json.dumps(_calib_entry("2026-08-01T00:00:00", {})) + "\n",
+        encoding="utf-8",
+    )
+    entries, _bad = prep.read_registry(reg)
+    report2 = prep.apply_skip_counter(report, entries, reg, "калибровка", "test")
+    bv = report2["body_verdicts"][0]
+    assert bv.alive is False
+    assert report2["bodies_status"]["0"] == "ПРОПУЩЕНО"
+    assert report2["sidecar_forces_all"] is False
+
+
+# ---------------------------------------------------------------------------
+# 29. W4-1b -- §4.5 сторож живости git.paths/git.pathset (класс
+#     «молчаливый ноль»): X из Y с настоящим контролем, красные половины.
+# ---------------------------------------------------------------------------
+
+def _git(repo: Path, *args, env=None):
+    return subprocess.run(
+        ["git"] + list(args), cwd=str(repo), check=True, capture_output=True,
+        encoding="utf-8", errors="replace", env=env,
+    )
+
+
+def _make_git_repo_with_commits(tmp_path: Path, commits, name: str = "git-repo") -> Path:
+    """commits: [(relpath, content, iso_ts), ...] -- один герметичный
+    git-репозиторий, коммиты с ЯВНЫМИ датами (GIT_AUTHOR_DATE/
+    GIT_COMMITTER_DATE) для детерминированной фильтрации окном."""
+    repo = tmp_path / name
+    repo.mkdir(exist_ok=True)
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@test.local")
+    _git(repo, "config", "user.name", "test")
+    for relpath, content, iso_ts in commits:
+        p = repo / relpath
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        _git(repo, "add", relpath)
+        env = dict(os.environ)
+        env["GIT_AUTHOR_DATE"] = iso_ts
+        env["GIT_COMMITTER_DATE"] = iso_ts
+        _git(repo, "commit", "-q", "-m", f"commit {relpath}", env=env)
+    return repo
+
+
+def test_git_paths_alive_when_pathspec_matches_in_window(tmp_path):
+    repo = _make_git_repo_with_commits(tmp_path, [
+        ("tools/x.py", "x", "2026-08-15T10:00:00"),
+    ])
+    run_ctx = _run_ctx_for(repo, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.paths:tools/**", run_ctx)
+    assert ev.alive is True
+    assert ev.observed == 1
+
+
+def test_git_paths_empty_with_real_positive_control_denominator(tmp_path):
+    """§4.5: ПУСТ по pathspec, но окно НЕ пусто по коммитам вообще --
+    Y обязан быть настоящим числом коммитов без pathspec, не 0."""
+    repo = _make_git_repo_with_commits(tmp_path, [
+        ("other.txt", "x", "2026-08-15T10:00:00"),
+    ])
+    run_ctx = _run_ctx_for(repo, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.paths:nomatch/**", run_ctx)
+    assert ev.alive is False
+    assert ev.observed == 0
+    assert ev.denom == 1, "контроль обязан отразить РЕАЛЬНОЕ число коммитов окна (1), не 0"
+
+
+def test_git_paths_window_with_zero_commits_second_stage_alive_form(tmp_path):
+    """Настоящий (не мок) репозиторий БЕЗ единого коммита В ОКНЕ (но с
+    историей вне окна, значит `git log` успешен -- HEAD существует) --
+    вторая ступень git rev-parse --git-dir подтверждает живость git,
+    verdict остаётся ПУСТ с явным "форма жива", не молчаливым нулём."""
+    repo = _make_git_repo_with_commits(tmp_path, [
+        ("outside-window.txt", "x", "2020-01-01T00:00:00"),
+    ])
+    run_ctx = _run_ctx_for(repo, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.paths:tools/**", run_ctx)
+    assert ev.alive is False
+    assert ev.observed == 0 and ev.denom == 0
+    assert "форма жива" in ev.reason
+    assert "-> 0 из 0" in ev.reason
+
+
+def test_git_paths_not_git_repo_is_alive_fail_closed(tmp_path):
+    run_ctx = _run_ctx_for(tmp_path, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.paths:tools/**", run_ctx)
+    assert ev.alive is True
+
+
+def test_git_paths_guard_red_half_run_git_none_is_alive(tmp_path, monkeypatch):
+    monkeypatch.setattr(prep, "_run_git", lambda *a, **k: None)
+    run_ctx = _run_ctx_for(tmp_path, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.paths:tools/**", run_ctx)
+    assert ev.alive is True, ev.reason
+
+
+def test_git_paths_guard_red_half_run_git_empty_string_is_alive(tmp_path, monkeypatch):
+    """«0 из 0» без настоящего контроля структурно недостижим: даже
+    когда ВСЕ вызовы _run_git (включая git rev-parse --git-dir) отдают
+    пустую строку -- не None -- сторож не принимает это за живой git."""
+    monkeypatch.setattr(prep, "_run_git", lambda *a, **k: "")
+    run_ctx = _run_ctx_for(tmp_path, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.paths:tools/**", run_ctx)
+    assert ev.alive is True, ev.reason
+    assert "rev-parse" in ev.reason
+
+
+# ---------------------------------------------------------------------------
+# 30. W4-1b -- git.pathset:hooks (A6/Р4/DoD-3), переиспользует
+#     enforcement_probe._chain_paths
+# ---------------------------------------------------------------------------
+
+def test_bodypred_git_pathset_hooks_valid_grammar():
+    assert prep.validate_predicate_value("git.pathset:hooks") is None
+
+
+def test_git_pathset_hooks_alive_when_settings_touched_in_window(tmp_path, monkeypatch):
+    # A14(е): settings.json ОБЯЗАН парситься как JSON И дать хотя бы один
+    # член СВЕРХ двух безусловно посеянных (settings.json+wiring_check) --
+    # валидный JSON, несущий строку с "python tools/....py" где-то внутри
+    # (тот же regex-разбор, что и в реальном hook-command).
+    settings_json = json.dumps({"note": "python tools/hook_liveness_probe.py"})
+    repo = _make_git_repo_with_commits(tmp_path, [
+        (".claude/settings.json", settings_json, "2026-08-15T10:00:00"),
+    ])
+    monkeypatch.setattr(prep.ep, "SETTINGS_PATH", str(repo / ".claude" / "settings.json"))
+    monkeypatch.setattr(prep.ep, "GITHOOKS_DIR", str(repo / ".githooks"))
+    run_ctx = _run_ctx_for(repo, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.pathset:hooks", run_ctx)
+    assert ev.alive is True, ev.reason
+    assert ev.observed == 1
+
+
+def test_git_pathset_hooks_positive_control_size_and_sample_on_live_repo():
+    """Позитивный контроль DoD-3 на РЕАЛЬНОМ settings.json этого репо
+    (given: tools/enforcement_probe.py read-only) -- множество непусто и
+    несёт .claude/settings.json."""
+    run_ctx = _run_ctx_for(REPO_ROOT, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.pathset:hooks", run_ctx)
+    assert "нечитаем" not in ev.reason
+    assert "вырожден" not in ev.reason
+
+
+def test_git_pathset_hooks_settings_unreadable_is_alive_fail_closed(tmp_path, monkeypatch):
+    monkeypatch.setattr(prep.ep, "SETTINGS_PATH", str(tmp_path / "no-such-settings.json"))
+    run_ctx = _run_ctx_for(tmp_path, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.pathset:hooks", run_ctx)
+    assert ev.alive is True
+    assert "нечитаем" in ev.reason
+
+
+def test_git_pathset_hooks_degenerate_chain_is_alive_fail_closed(monkeypatch):
+    """DoD-3: контроль размера/образца -- множество вырождено (пусто)
+    -> ЖИВ fail-closed, а не тихий пропуск."""
+    monkeypatch.setattr(prep.ep, "_chain_paths", lambda: set())
+    run_ctx = _run_ctx_for(REPO_ROOT, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.pathset:hooks", run_ctx)
+    assert ev.alive is True
+    assert "вырожден" in ev.reason
+
+
+def test_git_pathset_unknown_name_is_alive_fail_closed(tmp_path):
+    run_ctx = _run_ctx_for(tmp_path, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.pathset:frobnicate", run_ctx)
+    assert ev.alive is True
+    assert "неизвестное имя pathset" in ev.reason
+
+
+def test_git_pathset_not_git_repo_is_alive_fail_closed(tmp_path):
+    run_ctx = _run_ctx_for(tmp_path, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.pathset:hooks", run_ctx)
+    assert ev.alive is True
+
+
+def test_git_pathset_guard_red_half_run_git_empty_string_is_alive(tmp_path, monkeypatch):
+    monkeypatch.setattr(prep, "_run_git", lambda *a, **k: "")
+    run_ctx = _run_ctx_for(REPO_ROOT, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.pathset:hooks", run_ctx)
+    assert ev.alive is True, ev.reason
+
+
+# ---------------------------------------------------------------------------
+# 31. W4-1b -- CLI: --calibration, kind в JSON/witness
+# ---------------------------------------------------------------------------
+
+def test_cli_calibration_flag_prints_kind_calibration(tmp_path):
+    proto = write_protocol(tmp_path, CHK0_VALID)
+    j = write_journal(tmp_path, [])
+    reg = tmp_path / "reg.jsonl"
+    proc = run_cli([
+        "--window-start", "2026-08-14T00:00:00", "--protocol", str(proto),
+        "--journal", str(j), "--registry", str(reg), "--calibration",
+        "--rule-coverage", str(default_rc(tmp_path)),
+    ])
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "kind=калибровка" in proc.stdout
+    assert "явный флаг --calibration" in proc.stdout
+    entries, _bad = prep.read_registry(reg)
+    assert entries[-1]["kind"] == "калибровка"
+    assert entries[-1]["bodies"] == {}
+
+
+def test_cli_without_calibration_flag_default_kind_present(tmp_path):
+    proto = write_protocol(tmp_path, CHK0_VALID)
+    j = write_journal(tmp_path, [])
+    reg = tmp_path / "reg.jsonl"
+    proc = run_cli([
+        "--window-start", "2026-08-14T00:00:00", "--protocol", str(proto),
+        "--journal", str(j), "--registry", str(reg),
+        "--rule-coverage", str(default_rc(tmp_path)),
+    ])
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "СКИП-КАУНТЕР: kind=" in proc.stdout
+    assert "сайдкар:" in proc.stdout
+
+
+def test_cli_json_output_includes_kind_and_bodies(tmp_path):
+    proto = write_protocol(tmp_path, CHK0_VALID)
+    j = write_journal(tmp_path, [])
+    reg = tmp_path / "reg.jsonl"
+    proc = run_cli([
+        "--window-start", "2026-08-14T00:00:00", "--protocol", str(proto),
+        "--journal", str(j), "--registry", str(reg), "--calibration", "--json",
+        "--rule-coverage", str(default_rc(tmp_path)),
+    ])
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["kind"] == "калибровка"
+    assert payload["bodies"] == {}
+
+
+# =============================================================================
+# КРИТИК t-536 (blocker, A14) -- 2 блокера + 6 фиксов
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 32. A14(а), блокер 1: вердикт гейта (а) считается от N-F, не от N
+# ---------------------------------------------------------------------------
+
+def test_gate_verdict_base_is_n_minus_f_not_n(tmp_path, monkeypatch):
+    """A14(a) блокер 1: гейт (а) и ±d считаются от N-F ("к чтению" МИНУС
+    "принудительно"), не от N. Порог выставлен РОВНО в N-F -> ВЗЯТ (+0),
+    хотя порог < N (что раньше давало НЕ ВЗЯТ (+F Б) -- witness
+    критика: «порог==к-чтению-без-принудительных давал НЕ ВЗЯТ
+    (+181 Б)»)."""
+    write_body_file(tmp_path, 0)
+    body_size = (tmp_path / "PROCESS" / "checks" / "CHK-0.md").stat().st_size
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="journal.any"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+
+    reg = tmp_path / "reg.jsonl"
+    _write_registry_lines(reg, [
+        _calib_entry("2026-08-01T00:00:00", {"0": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"0": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-15T00:00:00", {"0": "ПРОПУЩЕНО"}),
+    ])
+    entries, _bad = prep.read_registry(reg)
+    report2 = prep.apply_skip_counter(report, entries, reg, "калибровка", "test")
+    assert report2["bodies_forced_bytes"] == body_size  # F > 0 -- тело форсировано
+
+    n = report2["to_read_bytes"]
+    f = report2["bodies_forced_bytes"]
+    threshold = n - f  # порог РОВНО в N-F
+    monkeypatch.setattr(prep, "GATE_A_THRESHOLD_BYTES", threshold)
+    rendered = prep.render_window_report(
+        report2, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert f"гейт (а) ≤{threshold} Б: ВЗЯТ (+0 Б)" in rendered, rendered
+    # N печатается КАК ЕСТЬ (не N-F) -- строка ИТОГ не меняется формой (§4.3).
+    assert f"к чтению {n} Б из" in rendered
+
+
+def test_gate_verdict_base_old_bug_would_reject_at_same_threshold(tmp_path, monkeypatch):
+    """Регресс-пин ошибки ДО фикса: если бы база вердикта считалась от N
+    (не N-F), порог==N-F дал бы «НЕ ВЗЯТ (+F Б)» -- явно демонстрируем,
+    что F>0 и что порог строго МЕНЬШЕ N (иначе тест не различал бы
+    старую/новую формулу)."""
+    write_body_file(tmp_path, 0)
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="journal.any"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    reg = tmp_path / "reg.jsonl"
+    _write_registry_lines(reg, [
+        _calib_entry("2026-08-01T00:00:00", {"0": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"0": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-15T00:00:00", {"0": "ПРОПУЩЕНО"}),
+    ])
+    entries, _bad = prep.read_registry(reg)
+    report2 = prep.apply_skip_counter(report, entries, reg, "калибровка", "test")
+    n = report2["to_read_bytes"]
+    f = report2["bodies_forced_bytes"]
+    assert f > 0 and (n - f) < n, "F>0 -- иначе N-F==N и блокер1 не различим этим тестом"
+
+
+# ---------------------------------------------------------------------------
+# 33. A14(б), блокер 2: монотонная свёртка группы window_start
+# ---------------------------------------------------------------------------
+
+def test_skip_streak_group_monotonic_fold_read_then_skip_stays_read(tmp_path):
+    """A14(б): МОНОТОННАЯ свёртка -- ПРОЧИТАНО где-то в группе делает
+    группу "читалась" НАВСЕГДА; более поздняя запись той же группы с
+    ПРОПУЩЕНО НЕ откатывает это назад (это и была дыра A3 -- 'последняя
+    запись группы' допускала недолговечное обнуление)."""
+    entries = [
+        _calib_entry("2026-08-08T00:00:00", {"26": "ПРОЧИТАНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"26": "ПРОПУЩЕНО"}),
+    ]
+    assert prep.compute_skip_streak(entries, "26") == 0
+
+
+def test_skip_streak_group_monotonic_fold_skip_then_read_becomes_read(tmp_path):
+    entries = [
+        _calib_entry("2026-08-08T00:00:00", {"26": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"26": "ПРОЧИТАНО"}),
+    ]
+    assert prep.compute_skip_streak(entries, "26") == 0
+
+
+def test_skip_streak_group_all_skipped_counts_group_once(tmp_path):
+    """Группа БЕЗ единой записи ПРОЧИТАНО/ПРИНУДИТЕЛЬНО -- ПРОПУЩЕНО
+    (даже при нескольких записях ПРОПУЩЕНО внутри -- РОВНО ОДИН вклад в
+    streak на группу, не по числу записей)."""
+    entries = [
+        _calib_entry("2026-08-08T00:00:00", {"26": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"26": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-15T00:00:00", {"26": "ПРОПУЩЕНО"}),
+    ]
+    assert prep.compute_skip_streak(entries, "26") == 2  # 2 ГРУППЫ, не 3 записи
+
+
+def test_skip_streak_blocker2_four_reruns_of_one_window_stable_after_forcing(tmp_path):
+    """A14(б) дословно по witness критика: история трёх ПРОПУЩЕНО (три
+    разных window_start) -> streak=3 -> 1-й прогон окна W4 форсирует
+    (ПРИНУДИТЕЛЬНО); 2-й/3-й/4-й прогоны ТОГО ЖЕ window_start W4 (при
+    предикате, всё ещё ложном) обязаны быть СТАБИЛЬНЫ: streak==0 у
+    каждого (не растёт до 4), никакого "перешагнул порог"."""
+    write_body_file(tmp_path, 0)
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="journal.any"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+
+    reg = tmp_path / "reg.jsonl"
+    _write_registry_lines(reg, [
+        _calib_entry("2026-08-01T00:00:00", {"0": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"0": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-15T00:00:00", {"0": "ПРОПУЩЕНО"}),
+    ])
+
+    w4 = "2026-08-22T00:00:00"
+    report1 = prep.build_window_report(proto, run_ctx)
+    entries, _bad = prep.read_registry(reg)
+    report1 = prep.apply_skip_counter(report1, entries, reg, "калибровка", "test")
+    assert report1["body_verdicts"][0].alive is True
+    assert report1["bodies_status"]["0"] == "ПРИНУДИТЕЛЬНО"
+    assert not any("перешагнул порог" in ln for ln in report1["forced_lines"])
+    prep.write_registry_entry(reg, w4, "2026-08-24T00:00:00", "обычный", "test", report1, None)
+
+    for _ in range(3):
+        report_n = prep.build_window_report(proto, run_ctx)
+        entries, _bad = prep.read_registry(reg)
+        report_n = prep.apply_skip_counter(report_n, entries, reg, "калибровка", "test")
+        assert report_n["body_verdicts"][0].alive is False, (
+            "предикат по-прежнему ложен -- НЕ форсируется повторно"
+        )
+        assert report_n["bodies_status"]["0"] == "ПРОПУЩЕНО"
+        assert report_n["skip_streaks"]["0"] == 0, (
+            "streak после форсированного окна обязан быть стабильно 0 (A14б)"
+        )
+        assert report_n["forced_lines"] == [], "никакого 'перешагнул порог' на повторах"
+        prep.write_registry_entry(reg, w4, "2026-08-24T00:00:00", "обычный", "test",
+                                   report_n, None)
+
+    entries_final, _bad = prep.read_registry(reg)
+    assert prep.compute_skip_streak(entries_final, "0") == 0
+
+
+# ---------------------------------------------------------------------------
+# 34. A14(в), фикс 3: форма §4.3 дословно -- skip-streak видим ДО
+#     срабатывания; "X из Y" на ОБЕИХ ветках (ЖИВОЙ/ПУСТ)
+# ---------------------------------------------------------------------------
+
+def test_body_pust_line_matches_para_4_3_form_literally(tmp_path):
+    write_body_file(tmp_path, 0)
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="journal.any"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    reg = tmp_path / "reg.jsonl"
+    _write_registry_lines(reg, [
+        _calib_entry("2026-08-01T00:00:00", {"0": "ПРОПУЩЕНО"}),
+    ])
+    entries, _bad = prep.read_registry(reg)
+    report2 = prep.apply_skip_counter(report, entries, reg, "калибровка", "test")
+    assert report2["skip_streaks"]["0"] == 1, "счётчик виден ДО срабатывания (1/3)"
+    rendered = prep.render_window_report(
+        report2, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert ("  PROCESS/checks/CHK-0.md (journal.any -> 0 из 0 строк окна; "
+            "skip-streak 1/3)") in rendered, rendered
+
+
+def test_body_pust_line_streak_visible_at_zero_and_two(tmp_path):
+    write_body_file(tmp_path, 0)
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="journal.any"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    reg = tmp_path / "reg.jsonl"
+
+    entries, _bad = prep.read_registry(reg)  # сайдкар пуст -- streak 0
+    report0 = prep.apply_skip_counter(report, entries, reg, "калибровка", "test")
+    rendered0 = prep.render_window_report(
+        report0, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "skip-streak 0/3" in rendered0
+
+    _write_registry_lines(reg, [
+        _calib_entry("2026-08-01T00:00:00", {"0": "ПРОПУЩЕНО"}),
+        _calib_entry("2026-08-08T00:00:00", {"0": "ПРОПУЩЕНО"}),
+    ])
+    entries2, _bad = prep.read_registry(reg)
+    report2 = prep.apply_skip_counter(prep.build_window_report(proto, run_ctx), entries2,
+                                       reg, "калибровка", "test")
+    rendered2 = prep.render_window_report(
+        report2, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "skip-streak 2/3" in rendered2
+
+
+def test_body_alive_line_shows_observed_out_of_control_for_git_bodypred(tmp_path):
+    repo = _make_git_repo_with_commits(tmp_path, [
+        ("tools/x.py", "x", "2026-08-15T10:00:00"),
+    ])
+    write_body_file(repo, 0)
+    body_size = (repo / "PROCESS" / "checks" / "CHK-0.md").stat().st_size
+    proto = write_protocol(repo, body_header_check(0, bodypred="git.paths:tools/**"))
+    j = write_journal(repo, [])
+    run_ctx = _run_ctx_for(repo, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    bv = report["body_verdicts"][0]
+    assert bv.alive is True
+    assert bv.reason.endswith("-> 1 из 1 коммитов окна"), bv.reason
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert (f"  PROCESS/checks/CHK-0.md ({body_size} Б, предикат git.paths:tools/** "
+            f"-> 1 из 1 коммитов окна)") in rendered, rendered
+
+
+# ---------------------------------------------------------------------------
+# 35. A14(г), фикс 5: денoминатор git-предикатов -- "коммитов окна"
+# ---------------------------------------------------------------------------
+
+def test_git_paths_pust_denominator_labeled_commits_not_rows(tmp_path):
+    repo = _make_git_repo_with_commits(tmp_path, [
+        ("other.txt", "x", "2026-08-15T10:00:00"),
+    ])
+    run_ctx = _run_ctx_for(repo, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.paths:nomatch/**", run_ctx)
+    assert ev.denom_unit == "коммитов окна"
+    assert ev.alive is False and ev.denom == 1
+
+
+def test_check_level_git_paths_pust_rendered_says_commits_not_rows(tmp_path):
+    """Денoминатор газеты «коммитов окна», а не «строк окна» -- на
+    БОЕВОМ пути (build_window_report + render_window_report), не
+    только в EvalResult (A14з, класс «публичный шов»)."""
+    repo = _make_git_repo_with_commits(tmp_path, [
+        ("other.txt", "x", "2026-08-15T10:00:00"),
+    ])
+    proto = write_protocol(repo, (
+        "0. **Чек git.paths.**\n"
+        "<!--CHK 0|src:git|pred:git.paths:nomatch/**|rules:RC§1/R6|status:живой-->\n"
+        "    тело чека.\n\n"
+    ))
+    j = write_journal(repo, [])
+    run_ctx = _run_ctx_for(repo, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "-> 0 из 1 коммитов окна" in rendered
+    assert "строк окна" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# 36. A14(д), фикс 6: git.any/git.diff_lines -- та же вторая ступень
+# ---------------------------------------------------------------------------
+
+def test_git_any_zero_commits_window_second_stage_form_alive(tmp_path):
+    repo = _make_git_repo_with_commits(tmp_path, [
+        ("outside.txt", "x", "2020-01-01T00:00:00"),
+    ])
+    run_ctx = _run_ctx_for(repo, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.any", run_ctx)
+    assert ev.alive is False
+    assert "форма жива" in ev.reason
+    assert "коммитов окна" in ev.reason
+
+
+def test_git_any_red_half_run_git_empty_string_is_alive(tmp_path, monkeypatch):
+    monkeypatch.setattr(prep, "_run_git", lambda *a, **k: "")
+    run_ctx = _run_ctx_for(tmp_path, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.any", run_ctx)
+    assert ev.alive is True, ev.reason
+
+
+def test_git_any_red_half_run_git_none_is_alive(tmp_path, monkeypatch):
+    monkeypatch.setattr(prep, "_run_git", lambda *a, **k: None)
+    run_ctx = _run_ctx_for(tmp_path, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.any", run_ctx)
+    assert ev.alive is True, ev.reason
+
+
+def test_git_diff_lines_zero_second_stage_form_alive(tmp_path):
+    repo = _make_git_repo_with_commits(tmp_path, [
+        ("outside.txt", "x", "2020-01-01T00:00:00"),
+    ])
+    run_ctx = _run_ctx_for(repo, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.diff_lines:>100", run_ctx)
+    assert ev.alive is False
+    assert "форма жива" in ev.reason
+
+
+def test_git_diff_lines_red_half_run_git_empty_string_is_alive(tmp_path, monkeypatch):
+    monkeypatch.setattr(prep, "_run_git", lambda *a, **k: "")
+    run_ctx = _run_ctx_for(tmp_path, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.diff_lines:>100", run_ctx)
+    assert ev.alive is True, ev.reason
+
+
+def test_git_diff_lines_small_nonzero_not_guarded(tmp_path):
+    """Малое, но НАСТОЯЩЕЕ число (n>0, <=threshold) -- НЕ проходит через
+    гвард (не искажаем честный малый диф второй ступенью)."""
+    repo = _make_git_repo_with_commits(tmp_path, [
+        ("x.txt", "abc\ndef\n", "2026-08-15T10:00:00"),
+    ])
+    run_ctx = _run_ctx_for(repo, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.diff_lines:>100", run_ctx)
+    assert ev.alive is False
+    assert "форма жива" not in ev.reason
+
+
+# ---------------------------------------------------------------------------
+# 37. A14(е), фикс 7: позитивный контроль pathset ОБЯЗАН МОЧЬ УПАСТЬ
+# ---------------------------------------------------------------------------
+
+def test_git_pathset_hooks_settings_invalid_json_is_alive_fail_closed(tmp_path, monkeypatch):
+    bad_settings = tmp_path / "bad-settings.json"
+    bad_settings.write_text("{не валидный json", encoding="utf-8")
+    monkeypatch.setattr(prep.ep, "SETTINGS_PATH", str(bad_settings))
+    run_ctx = _run_ctx_for(tmp_path, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.pathset:hooks", run_ctx)
+    assert ev.alive is True
+    assert "не парсится как JSON" in ev.reason
+
+
+def test_git_pathset_hooks_exactly_two_seeded_members_is_alive_fail_closed(tmp_path, monkeypatch):
+    """A14(е): позитивный контроль ОБЯЗАН МОЧЬ УПАСТЬ -- валидный JSON,
+    но множество несёт РОВНО два безусловно посеянных члена (ни одного
+    сверх) -> ЖИВ fail-closed, не тихий пропуск (ДО фикса контроль,
+    построенный только на присутствии двух посеянных членов, никогда не
+    мог упасть -- это и есть 'молчаливый ноль' не по букве)."""
+    settings = tmp_path / "settings.json"
+    settings.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(prep.ep, "SETTINGS_PATH", str(settings))
+    monkeypatch.setattr(prep.ep, "_chain_paths",
+                         lambda: {".claude/settings.json", "tools/wiring_check.py"})
+    run_ctx = _run_ctx_for(tmp_path, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.pathset:hooks", run_ctx)
+    assert ev.alive is True
+    assert "вырождено" in ev.reason
+    assert "членов сверх двух безусловно посеянных -- 0" in ev.reason
+
+
+def test_git_pathset_hooks_one_extra_member_control_passes(tmp_path, monkeypatch):
+    """Позитив-контроль симметрии: РОВНО ОДИН член сверх посеянных --
+    контроль ПРОХОДИТ (не вырождено)."""
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"hint": "python tools/x.py"}', encoding="utf-8")
+    monkeypatch.setattr(prep.ep, "SETTINGS_PATH", str(settings))
+    monkeypatch.setattr(prep.ep, "_chain_paths",
+                         lambda: {".claude/settings.json", "tools/wiring_check.py",
+                                   "tools/x.py"})
+    chain, reason = prep._resolve_pathset("hooks")
+    assert chain is not None, reason
+    assert "1 членов сверх посеянных" in reason
+
+
+# ---------------------------------------------------------------------------
+# 38. A14(ж), фикс 8: import enforcement_probe под try/except
+# ---------------------------------------------------------------------------
+
+def test_git_pathset_ep_none_is_alive_fail_closed_with_reason(monkeypatch):
+    """Быстрый юнит-пин нижестоящей ветки (ep is None) -- без файлового
+    ввода-вывода."""
+    monkeypatch.setattr(prep, "ep", None)
+    monkeypatch.setattr(prep, "_EP_IMPORT_ERROR", "ImportError: имитация сбоя импорта")
+    run_ctx = _run_ctx_for(REPO_ROOT, [], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    ev = prep.evaluate_predicate("git.pathset:hooks", run_ctx)
+    assert ev.alive is True
+    assert "enforcement_probe недоступен" in ev.reason
+    assert "имитация сбоя импорта" in ev.reason
+
+
+def test_broken_enforcement_probe_import_does_not_crash_module(tmp_path):
+    """A14(ж) полный контур: import enforcement_probe падает НАСТОЯЩИМ
+    импортом (не моком) -- window-прогон и --check-form живут (rc по
+    контракту §4.7, не traceback). Порча КОПИИ дерева (command hygiene
+    п.7г) -- живой tools/enforcement_probe.py НЕ трогается (см. отчёт:
+    хеш-witness ДО и ПОСЛЕ этого теста идентичен, копия делает даже сам
+    откат ненужным -- ничего не портится)."""
+    scratch_tools = tmp_path / "tools"
+    scratch_tools.mkdir()
+    shutil.copy(REPO_ROOT / "tools" / "calibration_prepass.py", scratch_tools)
+    shutil.copy(REPO_ROOT / "tools" / "calibration_counts.py", scratch_tools)
+    (scratch_tools / "enforcement_probe.py").write_text(
+        "raise ImportError('deliberately broken for A14ж test')\n", encoding="utf-8",
+    )
+    proto = write_protocol(tmp_path, CHK0_VALID)
+    rc = default_rc(tmp_path)
+    j = write_journal(tmp_path, [])
+    reg = tmp_path / "reg.jsonl"
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+
+    proc_window = subprocess.run(
+        [sys.executable, str(scratch_tools / "calibration_prepass.py"),
+         "--window-start", "2026-08-14T00:00:00", "--protocol", str(proto),
+         "--journal", str(j), "--registry", str(reg), "--rule-coverage", str(rc)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
+    )
+    assert proc_window.returncode == 0, proc_window.stdout + proc_window.stderr
+    assert "Traceback" not in proc_window.stderr
+    assert "ПРЕ-ПАСС НЕ ОТРАБОТАЛ" not in proc_window.stderr
+
+    proc_form = subprocess.run(
+        [sys.executable, str(scratch_tools / "calibration_prepass.py"), "--check-form",
+         "--protocol", str(proto), "--rule-coverage", str(rc)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
+    )
+    assert proc_form.returncode == 0, proc_form.stdout + proc_form.stderr
+    assert "Traceback" not in proc_form.stderr
+
+
+# ---------------------------------------------------------------------------
+# 39. A14(з), фикс 4: красные/зелёные половины §4.5 пинят БОЕВОЙ вывод
+#     (render_window_report/CLI), не только evaluate_predicate
+# ---------------------------------------------------------------------------
+
+def test_battery_z_full_pipeline_git_paths_future_window_form_alive_render(tmp_path):
+    """Зелёная половина на БОЕВОМ пути: build_window_report +
+    render_window_report на РЕАЛЬНОМ (не моканом) окне без коммитов --
+    строка чека в РЕНДЕРЕ несёт "форма жива", не только EvalResult."""
+    proto = write_protocol(REPO_ROOT, (
+        "0. **Чек git.paths будущее окно.**\n"
+        "<!--CHK 0|src:git|pred:git.paths:no-such-path-xyz-abc/**|rules:RC§1/R6|"
+        "status:живой-->\n"
+        "    тело чека.\n\n"
+    ), name="future_window_proto.md")
+    try:
+        j = write_journal(tmp_path, [])
+        run_ctx = _run_ctx_for(REPO_ROOT, [str(j)], "2099-01-01T00:00:00",
+                                "2099-01-02T00:00:00")
+        report = prep.build_window_report(proto, run_ctx)
+        rendered = prep.render_window_report(
+            report, "2099-01-01T00:00:00", "2099-01-02T00:00:00", "обычный", "test",
+            [str(j)], proto,
+        )
+        assert "0: ПУСТ" in rendered
+        assert "форма жива" in rendered
+        assert "коммитов окна" in rendered
+    finally:
+        proto.unlink(missing_ok=True)
+
+
+def test_battery_z_red_half_full_pipeline_run_git_empty_string_render(tmp_path, monkeypatch):
+    """Красная половина на БОЕВОМ пути: monkeypatch _run_git -> "" ->
+    рендер чека остаётся ЖИВ (fail-closed), а НЕ "форма жива" -- сторож
+    не даёт красной половине притвориться зелёной на публичном пути."""
+    proto = write_protocol(tmp_path, (
+        "0. **Чек git.paths.**\n"
+        "<!--CHK 0|src:git|pred:git.paths:tools/**|rules:RC§1/R6|status:живой-->\n"
+        "    тело чека.\n\n"
+    ))
+    j = write_journal(tmp_path, [])
+    monkeypatch.setattr(prep, "_run_git", lambda *a, **k: "")
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "0: ЖИВ" in rendered
+    assert "fail-closed" in rendered
+    assert "форма жива" not in rendered
+
+
+def test_battery_z_cli_git_paths_future_window_form_alive_end_to_end(tmp_path):
+    """То же зелёное поведение через CLI end-to-end (subprocess) --
+    реальный REPO_ROOT, окно в будущем без коммитов."""
+    proto = write_protocol(tmp_path, (
+        "0. **Чек git.paths будущее окно.**\n"
+        "<!--CHK 0|src:git|pred:git.paths:no-such-path-xyz-abc/**|rules:RC§1/R6|"
+        "status:живой-->\n"
+        "    тело чека.\n\n"
+    ))
+    j = write_journal(tmp_path, [])
+    reg = tmp_path / "reg.jsonl"
+    proc = run_cli([
+        "--window-start", "2099-01-01T00:00:00", "--window-end", "2099-01-02T00:00:00",
+        "--protocol", str(proto), "--journal", str(j), "--registry", str(reg),
+        "--rule-coverage", str(default_rc(tmp_path)),
+    ])
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "0: ПУСТ" in proc.stdout
+    assert "форма жива" in proc.stdout
+    assert "коммитов окна" in proc.stdout
+
+
+# ---------------------------------------------------------------------------
+# 40. К2-контроль после фикс-раунда A14 -- см. отчёт (числа N/M/живых
+#     идентичны; гейт-строка на реальном окне без принудительных тел не
+#     меняется, т.к. F==0 там).
+# ---------------------------------------------------------------------------
+
+def test_k2_window_gate_line_unchanged_when_no_forced_bytes(tmp_path):
+    """A14(a): на окне БЕЗ форсированных тел (F==0) гейт-строка (база,
+    вердикт, ±d) идентична и ДО, и ПОСЛЕ блокера 1 -- дельта базы
+    N-F==N-0==N. Регресс-пин K2-нейтральности блокера 1 на синтетике
+    (реальный прогон -- в witness отчёта)."""
+    j = write_journal(tmp_path, [])
+    proto = write_protocol(tmp_path, _pilot_body())
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    assert report["bodies_forced_bytes"] == 0
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    to_read = report["to_read_bytes"]
+    gate_diff = to_read - prep.GATE_A_THRESHOLD_BYTES
+    sign = "+" if gate_diff >= 0 else ""
+    verdict = "ВЗЯТ" if to_read <= prep.GATE_A_THRESHOLD_BYTES else "НЕ ВЗЯТ"
+    assert f"гейт (а) ≤{prep.GATE_A_THRESHOLD_BYTES} Б: {verdict} ({sign}{gate_diff} Б)" in rendered

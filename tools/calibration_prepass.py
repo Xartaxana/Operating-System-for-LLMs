@@ -45,7 +45,7 @@ import os
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -66,6 +66,17 @@ except ImportError:  # pragma: no cover -- pyyaml всегда в окружен
 # _in_window, parse_ts.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calibration_counts as cc  # noqa: E402
+# W4-1b (A6/DoD-3): git.pathset:hooks ПЕРЕИСПОЛЬЗУЕТ _chain_paths -- не
+# второй вывод того же факта (given манифеста диспатча: enforcement_probe.py
+# read-only, только импорт). A14(ж): импорт-провал НЕ роняет весь модуль
+# (window-прогон и --check-form обязаны жить без него) -- под try/except;
+# отказ читается через ep is None в _resolve_pathset, ЖИВ fail-closed.
+try:
+    import enforcement_probe as ep  # noqa: E402
+    _EP_IMPORT_ERROR: Optional[str] = None
+except Exception as _ep_import_exc:  # noqa: BLE001 -- A14ж: любой отказ импорта
+    ep = None  # type: ignore[assignment]
+    _EP_IMPORT_ERROR = f"{type(_ep_import_exc).__name__}: {_ep_import_exc}"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PROTOCOL = REPO_ROOT / "PROCESS" / "WEEKLY_CALIBRATION_PROTOCOL.md"
@@ -398,6 +409,10 @@ PREDICATE_PATTERNS = {
     "journal.parallel_groups": re.compile(r"^journal\.parallel_groups$"),
     "git.any": re.compile(r"^git\.any$"),
     "git.paths": re.compile(r"^git\.paths:[^,@]+(,[^,@]+)*(@(OS|AO3))?$"),
+    # W4-1b (A6, DoD-3): git.pathset:<имя> -- множество путей выводится
+    # ДИНАМИЧЕСКИ (не glob в самой шапке, как git.paths); закрытый список
+    # имён -- см. _KNOWN_PATHSETS (сегодня только "hooks").
+    "git.pathset": re.compile(r"^git\.pathset:[A-Za-z_]+$"),
     "git.diff_lines": re.compile(r"^git\.diff_lines:>\d+$"),
     "path.exists": re.compile(r"^path\.exists:\S+$"),
     "deploy.exists": re.compile(r"^deploy\.exists:[A-Za-z0-9_-]+$"),
@@ -1223,6 +1238,10 @@ class EvalResult:
     denom: Optional[int] = None
     reason: str = ""
     empty_reasons_needed: bool = True  # False для always/manual/script/deploy-ЖИВ и т.п.
+    # A14(г): единица измерения знаменателя в печати -- "строк окна"
+    # (журнальные предикаты) по умолчанию, "коммитов окна" у git.*
+    # (git.any/git.paths/git.pathset/git.diff_lines переопределяют).
+    denom_unit: str = "строк окна"
 
 
 def _count_journal_event(ctx: JournalContext, event: str,
@@ -1302,6 +1321,126 @@ class RunContext:
         return self.deploy_cache[name]
 
 
+# ---------------------------------------------------------------------------
+# W4-1b §4.5 -- сторож живости предикатов git.paths/git.pathset (класс
+# «молчаливый ноль»): ПУСТ-вердикт обязан нести X из Y, где Y -- РЕАЛЬНЫЙ
+# позитивный контроль ТОЙ ЖЕ формы (число коммитов окна БЕЗ pathspec),
+# не голый 0.
+# ---------------------------------------------------------------------------
+
+GIT_DENOM_UNIT = "коммитов окна"  # A14(г): все git-предикаты, не "строк окна"
+
+
+def _second_stage_git_alive_check(repo_root: str) -> Tuple[bool, str]:
+    """A14(д): вторая ступень сторожа, ОБЩАЯ для всех git-предикатов --
+    git rev-parse --git-dir ОБЯЗАН вернуть НЕПУСТОЙ ответ (не None, не
+    "" -- красная половина: monkeypatch _run_git -> None И -> "" обе
+    фейлятся сюда же, «0 из 0» без настоящего контроля структурно
+    недостижимо). Возвращает (git_alive, dead_reason_or_empty)."""
+    alive_probe = _run_git(["rev-parse", "--git-dir"], repo_root)
+    if not alive_probe:  # None ИЛИ "" -- ни то ни другое не доказывает живость git
+        return False, ("git недоступен (git rev-parse --git-dir пуст/недоступен), "
+                        "ЖИВ (fail-closed, сторож §4.5)")
+    return True, ""
+
+
+def _zero_form_alive_verdict(value_with_suffix: str, denom_unit: str) -> EvalResult:
+    """Зелёная ветка второй ступени: git функционирует, наблюдённое
+    число ПОДТВЕРЖДЁННО 0 (не молчаливый ноль) -- ПУСТ с явным «форма
+    жива»."""
+    return EvalResult(
+        alive=False, observed=0, denom=0, denom_unit=denom_unit,
+        reason=(f"{value_with_suffix} -> 0 из 0 {denom_unit} (окно без коммитов, "
+                f"форма жива: git rev-parse --git-dir OK)"),
+        empty_reasons_needed=False,
+    )
+
+
+def _empty_git_pathlike_verdict(
+    repo_root: str, since_iso: str, until_iso: str, value_with_suffix: str,
+    denom_unit: str = GIT_DENOM_UNIT,
+) -> EvalResult:
+    """git.paths/git.pathset: вызывается ТОЛЬКО когда наблюдённое число
+    коммитов С pathspec == 0 (кандидат на ПУСТ). control -- то же
+    git_commit_count БЕЗ pathspec (позитивный контроль той же формы,
+    §4.5). control is None -- git недоступен на контроле -> ЖИВ
+    fail-closed. control == 0 -- вторая ступень (общая, A14д)."""
+    control = git_commit_count(repo_root, since_iso, until_iso, pathspecs=None)
+    if control is None:
+        return EvalResult(alive=True, reason=f"{value_with_suffix} -- git недоступен "
+                                               f"при контроле сторожа (§4.5), ЖИВ "
+                                               f"(fail-closed)")
+    if control == 0:
+        git_alive, dead_reason = _second_stage_git_alive_check(repo_root)
+        if not git_alive:
+            return EvalResult(alive=True, reason=f"{value_with_suffix} -- {dead_reason}")
+        return _zero_form_alive_verdict(value_with_suffix, denom_unit)
+    return EvalResult(alive=False, observed=0, denom=control, denom_unit=denom_unit,
+                       reason=value_with_suffix)
+
+
+def _empty_git_zero_guard(
+    repo_root: str, value_with_suffix: str, denom_unit: str = GIT_DENOM_UNIT,
+) -> EvalResult:
+    """A14(д): git.any/git.diff_lines -- НЕТ отдельного pathspec-контроля
+    (уже посчитанное наблюдённое число САМО и есть контроль без
+    сужения); нужна только вторая ступень -- отличить настоящий пустой
+    коммитами-окна от _run_git, молча отдавшего "" по сбою."""
+    git_alive, dead_reason = _second_stage_git_alive_check(repo_root)
+    if not git_alive:
+        return EvalResult(alive=True, reason=f"{value_with_suffix} -- {dead_reason}")
+    return _zero_form_alive_verdict(value_with_suffix, denom_unit)
+
+
+# W4-1b (A6, DoD-3): git.pathset -- закрытый список имён; сегодня только
+# "hooks" (chek 26, Р4). Неизвестное имя -- ЖИВ fail-closed (тот же
+# принцип, что deploy.exists с несконфигурированным именем).
+_KNOWN_PATHSETS = {"hooks"}
+
+
+def _resolve_pathset(name: str) -> Tuple[Optional[List[str]], str]:
+    """(chain_or_None, reason). chain -- ОТСОРТИРОВАННЫЙ список путей из
+    tools/enforcement_probe.py::_chain_paths() (переиспользование --
+    ЕДИНСТВЕННЫЙ вывод множества путей enforcement-chain, D-0043: второй
+    вывод того же факта не заводится). A14(ж): enforcement_probe
+    импортируется под try/except в шапке модуля -- отказ импорта здесь
+    читается как ep is None, ЖИВ fail-closed с причиной (не traceback).
+    A14(е): позитивный контроль ОБЯЗАН МОЧЬ УПАСТЬ -- settings.json
+    ОБЯЗАН парситься как валидный JSON, И множество ОБЯЗАНО нести хотя
+    бы ОДИН член СВЕРХ двух безусловно посеянных _chain_paths()
+    (.claude/settings.json + tools/wiring_check.py сеются ВСЕГДА,
+    независимо от содержимого settings.json -- контроль, построенный
+    только на их присутствии, не может упасть НИКОГДА, это и есть
+    молчаливый ноль DoD-3 не по букве)."""
+    if name not in _KNOWN_PATHSETS:
+        return None, f"неизвестное имя pathset: {name!r}"
+    if ep is None:
+        return None, (f"enforcement_probe недоступен (импорт не удался: "
+                       f"{_EP_IMPORT_ERROR})")
+    settings_path = ep.SETTINGS_PATH
+    if not os.path.isfile(settings_path):
+        return None, f".claude/settings.json нечитаем ({settings_path})"
+    try:
+        with open(settings_path, "r", encoding="utf-8") as fh:
+            raw = fh.read()
+    except OSError as exc:
+        return None, f".claude/settings.json нечитаем: {exc}"
+    try:
+        json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return None, f".claude/settings.json не парсится как JSON: {exc}"
+    chain = sorted(ep._chain_paths())
+    known_sample = ".claude/settings.json"
+    seeded = {known_sample, ep.WIRING_CHECK_REL}
+    extra = set(chain) - seeded
+    if not chain or known_sample not in chain or not extra:
+        return None, (f"множество путей вырождено (размер {len(chain)}, членов "
+                       f"сверх двух безусловно посеянных -- {len(extra)}) -- "
+                       f"контроль DoD-3/A14е не пройден")
+    return chain, (f"размер множества {len(chain)}, {len(extra)} членов сверх "
+                    f"посеянных, образец {known_sample} присутствует")
+
+
 def evaluate_predicate(value: str, run_ctx: RunContext) -> EvalResult:
     ctx = run_ctx.journal_ctx
     if value == "always":
@@ -1368,7 +1507,13 @@ def evaluate_predicate(value: str, run_ctx: RunContext) -> EvalResult:
         if n is None:
             return EvalResult(alive=True, reason="git.any -- git недоступен, ЖИВ "
                                                    "(fail-closed)")
-        return EvalResult(alive=n > 0, observed=n, denom=None, reason="git.any")
+        if n > 0:
+            return EvalResult(alive=True, observed=n, denom=None, reason="git.any")
+        # A14(д): та же вторая ступень -- отличить настоящий пустой
+        # диапазон от _run_git, молча отдавшего "" по сбою (git.any не
+        # сужен pathspec'ом -- контроль без сужения совпал бы с самим
+        # n, поэтому здесь используется только вторая ступень).
+        return _empty_git_zero_guard(run_ctx.repo_root, "git.any")
 
     if value.startswith("git.paths:"):
         rest = value[len("git.paths:"):]
@@ -1380,11 +1525,42 @@ def evaluate_predicate(value: str, run_ctx: RunContext) -> EvalResult:
         globs = rest.split(",")
         n = git_commit_count(run_ctx.repo_root, run_ctx.window_start_iso,
                               run_ctx.window_end_iso, pathspecs=globs)
+        full_value = value + (f" ({deploy_suffix})" if deploy_suffix else "")
         if n is None:
             return EvalResult(alive=True, reason=f"{value} -- git недоступен, ЖИВ "
                                                    f"(fail-closed)")
-        return EvalResult(alive=n > 0, observed=n, denom=None,
-                           reason=value + (f" ({deploy_suffix})" if deploy_suffix else ""))
+        if n > 0:
+            # A14(в)/§4.3: "ТЕЛА К ЧТЕНИЮ" тоже несёт наблюдённое/контроль
+            # дословно -- считаем control ТОЙ ЖЕ формы (коммиты окна без
+            # pathspec) и на живой ветке, не только на ПУСТ.
+            control = git_commit_count(run_ctx.repo_root, run_ctx.window_start_iso,
+                                        run_ctx.window_end_iso, pathspecs=None)
+            return EvalResult(alive=True, observed=n, denom=control,
+                               denom_unit=GIT_DENOM_UNIT, reason=full_value)
+        # W4-1b §4.5 (класс «молчаливый ноль»): ПУСТ -- сторож живости
+        # требует позитивный контроль ТОЙ ЖЕ формы вместо голого "0 из 0".
+        return _empty_git_pathlike_verdict(run_ctx.repo_root, run_ctx.window_start_iso,
+                                            run_ctx.window_end_iso, full_value)
+
+    if value.startswith("git.pathset:"):
+        name = value[len("git.pathset:"):]
+        chain, resolve_reason = _resolve_pathset(name)
+        if chain is None:
+            return EvalResult(alive=True, reason=f"{value} -- {resolve_reason}, ЖИВ "
+                                                   f"(fail-closed)")
+        n = git_commit_count(run_ctx.repo_root, run_ctx.window_start_iso,
+                              run_ctx.window_end_iso, pathspecs=chain)
+        full_value = f"{value} ({resolve_reason})"
+        if n is None:
+            return EvalResult(alive=True, reason=f"{value} -- git недоступен, ЖИВ "
+                                                   f"(fail-closed)")
+        if n > 0:
+            control = git_commit_count(run_ctx.repo_root, run_ctx.window_start_iso,
+                                        run_ctx.window_end_iso, pathspecs=None)
+            return EvalResult(alive=True, observed=n, denom=control,
+                               denom_unit=GIT_DENOM_UNIT, reason=full_value)
+        return _empty_git_pathlike_verdict(run_ctx.repo_root, run_ctx.window_start_iso,
+                                            run_ctx.window_end_iso, full_value)
 
     if value.startswith("git.diff_lines:>"):
         threshold = int(value[len("git.diff_lines:>"):])
@@ -1393,7 +1569,16 @@ def evaluate_predicate(value: str, run_ctx: RunContext) -> EvalResult:
         if n is None:
             return EvalResult(alive=True, reason=f"{value} -- git недоступен, ЖИВ "
                                                    f"(fail-closed)")
-        return EvalResult(alive=n > threshold, observed=n, denom=None, reason=value)
+        if n > threshold:
+            return EvalResult(alive=True, observed=n, denom=None, reason=value)
+        if n == 0:
+            # A14(д): вторая ступень -- n==0 может быть "честный ноль
+            # строк диффа" ИЛИ _run_git, молча отдавший "" по сбою;
+            # n>0<=threshold (малый, но настоящий диф) -- НЕ этот класс,
+            # гвард не применяется (не искусственно занижаем небольшое
+            # честное число).
+            return _empty_git_zero_guard(run_ctx.repo_root, value)
+        return EvalResult(alive=False, observed=n, denom=None, reason=value)
 
     if value.startswith("path.exists:"):
         p = value[len("path.exists:"):]
@@ -1516,6 +1701,12 @@ def compute_body_verdicts(
             ev = evaluate_predicate(bodypred_value, run_ctx)
             alive = ev.alive
             reason = ev.reason
+            # A14(в)/§4.3: форма «X из Y» видна дословно И на ЖИВОЙ
+            # ("ТЕЛА К ЧТЕНИЮ"), И на ПУСТ ("ТЕЛА ПРОПУЩЕНЫ") ветке --
+            # ЛЮБОЙ предикат, несущий реальный denom (не только ПУСТ).
+            if ev.denom is not None:
+                reason = (f"{ev.reason} -> {ev.observed if ev.observed is not None else 0} "
+                          f"из {ev.denom} {ev.denom_unit}")
         else:
             # bodypred без body уже дефект формы (проверка №13); для
             # учёта байт -- ЖИВ fail-closed (нет валидного предиката,
@@ -1604,7 +1795,7 @@ def build_window_report(
                 reason = ev.reason
                 if not ev.alive and ev.empty_reasons_needed:
                     reason = (f"{ev.reason} -> {ev.observed if ev.observed is not None else 0} "
-                              f"из {ev.denom if ev.denom is not None else 0} строк окна")
+                              f"из {ev.denom if ev.denom is not None else 0} {ev.denom_unit}")
                 cv = CheckVerdict(
                     check_number=number, id_str=header.id_str, verdict=verdict,
                     line_range=line_range, byte_size=byte_size, reason=reason,
@@ -1667,7 +1858,7 @@ def build_window_report(
             reason = ev.reason
             if not ev.alive and ev.empty_reasons_needed:
                 reason = (f"{ev.reason} -> {ev.observed if ev.observed is not None else 0} "
-                          f"из {ev.denom if ev.denom is not None else 0} строк окна")
+                          f"из {ev.denom if ev.denom is not None else 0} {ev.denom_unit}")
             sv = SubitemVerdict(id_str=sh.id_str, verdict=verdict, byte_size=sub_byte_size,
                                  reason=reason)
             cand_val = sh.fields.get("cand")
@@ -1753,28 +1944,260 @@ def build_window_report(
 
 CONTROL_TRIGGER_N = 4
 
+# W4-1b §4.4: streak подряд идущих калибровок с ПРОПУЩЕНО, начиная с
+# которого тело читается ПРИНУДИТЕЛЬНО (§7.1: 2 -- ПУСТ легален, 3 --
+# ПРИНУДИТЕЛЬНО, 4 -- форсируется + "счётчик перешагнул порог").
+FORCE_STREAK_THRESHOLD = 3
 
-def read_registry(registry_path: Path) -> Tuple[List[Dict[str, Any]], int]:
-    """Возвращает (entries, bad_line_count). W4-1a (A10/§4.7): битые
-    строки СЧИТАЮТСЯ (раньше молча глотались, SIBLING_MAP «молчаливый
-    ноль счётчика», t-508) -- форсирование чтения тел по счётчику
-    остаётся W4-1b; здесь только счёт + печать (--check-form не пишет и
-    не читает сайдкар вовсе)."""
+
+def _read_registry_items(registry_path: Path) -> List[Tuple[bool, Optional[Dict[str, Any]]]]:
+    """Единая точка чтения файла сайдкара (D-0043): 0-indexed по
+    НЕПУСТЫМ строкам, в порядке появления, (is_good, entry_or_None).
+    read_registry и sidecar_bad_after_last_valid_calibration оба берут
+    срезы этого списка -- не два независимых прохода по файлу с
+    расходящимся счётом."""
     if not registry_path.exists():
-        return [], 0
-    out = []
-    bad = 0
+        return []
+    items: List[Tuple[bool, Optional[Dict[str, Any]]]] = []
     with open(registry_path, "r", encoding="utf-8", errors="replace") as fh:
         for ln in fh:
             ln = ln.strip()
             if not ln:
                 continue
             try:
-                out.append(json.loads(ln))
+                items.append((True, json.loads(ln)))
             except json.JSONDecodeError:
-                bad += 1
+                items.append((False, None))
+    return items
+
+
+def read_registry(registry_path: Path) -> Tuple[List[Dict[str, Any]], int]:
+    """Возвращает (entries, bad_line_count). W4-1a (A10/§4.7): битые
+    строки СЧИТАЮТСЯ (раньше молча глотались, SIBLING_MAP «молчаливый
+    ноль счётчика», t-508) -- форсирование чтения тел по счётчику --
+    W4-1b (см. sidecar_bad_after_last_valid_calibration); здесь только
+    счёт + печать (--check-form не пишет и не читает сайдкар вовсе)."""
+    items = _read_registry_items(registry_path)
+    entries = [e for ok, e in items if ok]
+    bad = sum(1 for ok, _e in items if not ok)
+    return entries, bad
+
+
+def sidecar_bad_after_last_valid_calibration(registry_path: Path) -> Tuple[bool, int]:
+    """W4-1b A10/§4.7: битая строка сайдкара форсирует ВСЕ тела ТОЛЬКО в
+    окне ПОСЛЕ последней валидной калибровочной записи (kind==
+    "калибровка", сама строка парсится) -- не форсирует вечно: если
+    после порчи уже была свежая валидная калибровка, битые строки ДО неё
+    не форсируют текущий прогон. Нет ни одной валидной калибровочной
+    записи вовсе -> любая битая строка форсирует (позиция -1 меньше
+    позиции любой битой строки). Возвращает (forces, bad_count)."""
+    items = _read_registry_items(registry_path)
+    bad = sum(1 for ok, _e in items if not ok)
+    if bad == 0:
+        return False, 0
+    last_valid_calib_idx = -1
+    for i, (ok, entry) in enumerate(items):
+        if ok and isinstance(entry, dict) and entry.get("kind") == "калибровка":
+            last_valid_calib_idx = i
+    forces = any((not ok) for i, (ok, _e) in enumerate(items) if i > last_valid_calib_idx)
+    return forces, bad
+
+
+def find_last_calibrated_ts(ctx: "JournalContext") -> Optional[datetime]:
+    """W4-1b Р7(A): ts ПОСЛЕДНЕГО event=="calibrated" среди ВСЕХ
+    распарсенных строк журнала (не только строк окна -- ctx.parsed_lines
+    несёт ВСЕ распарсенные строки независимо от окна, см.
+    build_journal_context). Журнал недоступен -> None (журнальные линии
+    просто не попадают в parsed_lines; determine_kind отдельно решает
+    "журнал недоступен -> калибровка")."""
+    last: Optional[datetime] = None
+    for pl in ctx.parsed_lines:
+        if not isinstance(pl.data, dict):
+            continue
+        if pl.data.get("event") == "calibrated" and pl.ts is not None:
+            if last is None or pl.ts > last:
+                last = pl.ts
+    return last
+
+
+def determine_kind(
+    window_start: datetime, journal_ctx: "JournalContext", explicit_calibration: bool,
+) -> Tuple[str, str]:
+    """W4-1b §4.4/Р7(A): kind=="калибровка" если --window-start совпадает
+    с ts последнего calibrated В ЖУРНАЛЕ, ЛИБО явный флаг --calibration;
+    журнал недоступен (ВСЕ заданные пути отсутствуют) -> калибровка
+    (fail-closed в сторону учёта skip-каунтера); журнал доступен, но
+    события calibrated нет -- ad-hoc (равенство с "ts последнего
+    calibrated" структурно ложно без такого ts)."""
+    if explicit_calibration:
+        return "калибровка", "явный флаг --calibration"
+    if not journal_ctx.journal_available:
+        return "калибровка", "журнал недоступен -- калибровка (fail-closed)"
+    last_ts = find_last_calibrated_ts(journal_ctx)
+    if last_ts is None:
+        return "ad-hoc", "журнал доступен, событий calibrated не найдено"
+    if last_ts == window_start:
+        return "калибровка", (f"--window-start совпадает с ts последнего "
+                               f"calibrated ({last_ts.isoformat()})")
+    return "ad-hoc", (f"--window-start не совпадает с ts последнего calibrated "
+                       f"({last_ts.isoformat()})")
+
+
+_READ_LIKE_STATUSES = ("ПРОЧИТАНО", "ПРИНУДИТЕЛЬНО")
+
+
+def compute_skip_streak(registry_entries: List[Dict[str, Any]], body_id: str) -> int:
+    """W4-1b §4.4/A14(б): streak подряд идущих ПОСЛЕДНИХ калибровок
+    (kind=="калибровка"), сгруппированных по window_start. A14(б)
+    ИСПРАВЛЯЕТ формулу A3 "берётся последняя запись группы" -- она
+    порождала недолговечное обнуление (несколько прогонов ОДНОГО окна
+    поверх форсированного (streak 3) писали ПРОПУЩЕНО следующим
+    прогоном и "перезаписывали" ПРИНУДИТЕЛЬНО последней записью группы,
+    снова накапливая streak -- critic t-536 witness). Новая формула --
+    МОНОТОННАЯ СВЁРТКА: группа window_start считается "тело читалось"
+    (ПРОЧИТАНО/ПРИНУДИТЕЛЬНО), если ЛЮБАЯ её запись несёт такой статус
+    -- раз выигранное "читалось" внутри группы уже не откатывается более
+    поздней записью той же группы с ПРОПУЩЕНО. Сканирование по группам
+    (в обратном порядке появления) стопится на первой "читалось";
+    группа без единой записи, несущей данные по body_id, ИГНОРИРУЕТСЯ
+    (не рвёт и не продолжает streak). Группы без "калибровка" (ad-hoc)
+    не входят в рассмотрение вовсе (К8)."""
+    calib_entries = [
+        e for e in registry_entries
+        if isinstance(e, dict) and e.get("kind") == "калибровка" and "window_start" in e
+    ]
+    # group_status[ws]: None (нет данных по body_id) | "ПРОПУЩЕНО" |
+    # "ПРОЧИТАНО"/"ПРИНУДИТЕЛЬНО" (свёрнутое монотонно -- см. докстринг).
+    group_status: Dict[str, Optional[str]] = {}
+    group_order: List[str] = []
+    for e in calib_entries:
+        ws = e["window_start"]
+        if ws not in group_status:
+            group_order.append(ws)
+            group_status[ws] = None
+        bodies = e.get("bodies")
+        if not isinstance(bodies, dict) or body_id not in bodies:
+            continue
+        status = bodies[body_id]
+        if status in _READ_LIKE_STATUSES:
+            group_status[ws] = status  # монотонная свёртка: побеждает НАВСЕГДА
+        elif status == "ПРОПУЩЕНО" and group_status[ws] not in _READ_LIKE_STATUSES:
+            group_status[ws] = "ПРОПУЩЕНО"
+
+    streak = 0
+    for ws in reversed(group_order):
+        status = group_status[ws]
+        if status is None:
+            continue  # группа без данных по этому телу -- игнорируется
+        if status == "ПРОПУЩЕНО":
+            streak += 1
+            continue
+        break  # ПРОЧИТАНО/ПРИНУДИТЕЛЬНО (свёрнутое) -- стоп
+    return streak
+
+
+def apply_skip_counter(
+    report: Dict[str, Any], registry_entries: List[Dict[str, Any]],
+    registry_path: Path, kind: str, kind_reason: str,
+) -> Dict[str, Any]:
+    """W4-1b §4.4/§4.5/A10: применяет forcing к report["body_verdicts"]
+    (уже посчитанным build_window_report по bodypred), пересчитывает
+    bodies_forced_bytes/to_read_bytes, готовит bodies-словарь для записи
+    в сайдкар. Мир без body-шапок -> body_verdicts пуст -> report почти
+    не меняется (К2-нейтральность, А7/тест (п))."""
+    raw_verdicts: List[BodyVerdict] = report.get("body_verdicts", [])
+    if not raw_verdicts:
+        report["bodies_status"] = {}
+        report["forced_lines"] = []
+        report["skip_streaks"] = {}
+        report["kind"] = kind
+        report["kind_reason"] = kind_reason
+        report["registry_path"] = str(registry_path)
+        report["sidecar_forces_all"] = False
+        report["sidecar_bad_count_for_force"] = 0
+        return report
+
+    raw_by_id = {bv.id_str: bv for bv in raw_verdicts}
+    forced_lines: List[str] = []
+    # A14(в)/§4.3: skip-streak счётчик видим оператору ДО срабатывания
+    # (0/3..2/3), не только в момент форсирования -- считается для КАЖДОГО
+    # ещё-не-живого тела, а не только для тех, что дошли до порога.
+    skip_streaks: Dict[str, int] = {}
+
+    # §4.4 -- per-id skip-streak forcing (streak>=3, §7.1 граница ровно 3).
+    working: List[BodyVerdict] = []
+    for bv in raw_verdicts:
+        if bv.alive:
+            working.append(bv)
+            continue
+        streak = compute_skip_streak(registry_entries, bv.id_str)
+        skip_streaks[bv.id_str] = streak
+        if streak >= FORCE_STREAK_THRESHOLD:
+            msg = (f"ПРИНУДИТЕЛЬНО ЖИВ: {bv.id_str} — тело пропущено 3 калибровки "
+                   f"подряд (skip-каунтер), предикат {bv.bodypred_value} ложен")
+            defect = bv.defect
+            if not bv.exists:
+                defect = (f"ТЕЛО ОТСУТСТВУЕТ: {bv.path_value} -- дефект формы, "
+                          f"чек читается по ядру")
+            working.append(replace(bv, alive=True, reason=msg, defect=defect))
+            forced_lines.append(msg)
+            if streak > FORCE_STREAK_THRESHOLD:
+                # §7.1 "за границей 3": счётчик перешагнул порог (не
+                # должно случаться в штатной работе -- forcing на streak==3
+                # уже пишет ПРИНУДИТЕЛЬНО и обнуляет streak; если всё же
+                # случилось -- явная строка, не молчание).
+                forced_lines.append(
+                    f"{bv.id_str}: счётчик перешагнул порог — разобрать (streak={streak})"
+                )
+        else:
+            working.append(bv)
+
+    # A10 -- сайдкар-дефект форсирует ВСЕ оставшиеся ПРОПУЩЕННЫЕ тела,
+    # только если битая строка встречена ПОСЛЕ последней валидной
+    # калибровочной записи (не вечно, §7.2/A10).
+    sidecar_forces, bad_count = sidecar_bad_after_last_valid_calibration(registry_path)
+    if sidecar_forces:
+        next_working: List[BodyVerdict] = []
+        for bv in working:
+            if bv.alive:
+                next_working.append(bv)
                 continue
-    return out, bad
+            reason = (f"САЙДКАР ДЕФЕКТЕН ({bad_count} битых строк) -- тело "
+                      f"принудительно живо (§4.7/A10)")
+            defect = bv.defect
+            if not bv.exists:
+                defect = (f"ТЕЛО ОТСУТСТВУЕТ: {bv.path_value} -- дефект формы, "
+                          f"чек читается по ядру")
+            next_working.append(replace(bv, alive=True, reason=reason, defect=defect))
+        working = next_working
+
+    bodies_status: Dict[str, str] = {}
+    for bv in working:
+        raw = raw_by_id[bv.id_str]
+        if raw.alive:
+            bodies_status[bv.id_str] = "ПРОЧИТАНО"
+        elif bv.alive:
+            bodies_status[bv.id_str] = "ПРИНУДИТЕЛЬНО"
+        else:
+            bodies_status[bv.id_str] = "ПРОПУЩЕНО"
+
+    bodies_forced_bytes = sum(
+        bv.byte_size for bv in working
+        if bv.exists and bv.alive and not raw_by_id[bv.id_str].alive
+    )
+    old_forced = report.get("bodies_forced_bytes", 0)
+    report["to_read_bytes"] = report["to_read_bytes"] - old_forced + bodies_forced_bytes
+    report["bodies_forced_bytes"] = bodies_forced_bytes
+    report["body_verdicts"] = working
+    report["bodies_status"] = bodies_status
+    report["forced_lines"] = forced_lines
+    report["skip_streaks"] = skip_streaks
+    report["kind"] = kind
+    report["kind_reason"] = kind_reason
+    report["registry_path"] = str(registry_path)
+    report["sidecar_forces_all"] = sidecar_forces
+    report["sidecar_bad_count_for_force"] = bad_count
+    return report
 
 
 def last_header_touching_commit(repo_root: str, protocol_rel_path: str) -> Optional[str]:
@@ -1868,6 +2291,18 @@ def render_window_report(
             out.append(f"  WARN: {w}")
     if sidecar_bad_count > 0:
         out.append(f"  САЙДКАР: битых строк {sidecar_bad_count}")
+    # W4-1b §4.4/A3/A10: основание классификации kind и путь сайдкара
+    # печатаются строкой -- ВСЕГДА, включая streak==0 (A10 явно требует
+    # печать пути сайдкара даже когда стрику нечего сообщить). Отсутствует
+    # (report без apply_skip_counter, старые вызовы render_window_report
+    # напрямую от build_window_report) -> строка просто опускается.
+    kind = report.get("kind")
+    if kind is not None:
+        out.append(f"  СКИП-КАУНТЕР: kind={kind} ({report.get('kind_reason', '')}) · "
+                    f"сайдкар: {report.get('registry_path', '')}")
+    if report.get("sidecar_forces_all"):
+        out.append(f"  САЙДКАР ДЕФЕКТЕН ({report.get('sidecar_bad_count_for_force', 0)} "
+                    f"битых строк)")
 
     verdict_by_number = {cv.check_number: cv for cv in report["check_verdicts"]}
     for section_no in sorted(SECTION_NAMES):
@@ -1916,25 +2351,50 @@ def render_window_report(
     if to_read_bodies:
         out.append("\nТЕЛА К ЧТЕНИЮ:")
         for bv in to_read_bodies:
-            out.append(f"  {bv.path_value} ({bv.byte_size} Б, предикат "
-                       f"{bv.bodypred_value} -> {bv.reason})")
+            # A14(в)/§4.3 дословно: «предикат <pred> -> <наблюдено> из
+            # <контроль>» -- bv.reason УЖЕ несёт значение предиката своим
+            # префиксом по общему соглашению этого модуля (см. evaluate_
+            # predicate: reason всегда начинается со значения предиката);
+            # повторное приписывание bodypred_value спереди дало бы
+            # видимое дублирование ("git.paths:X -> git.paths:X -> …") --
+            # префикс добавляется ТОЛЬКО когда reason его ещё не несёт
+            # (deploy.exists и т.п., чей reason начинается по-другому).
+            pred_display = (bv.reason if bv.reason.startswith(bv.bodypred_value or "")
+                             else f"{bv.bodypred_value} -> {bv.reason}")
+            out.append(f"  {bv.path_value} ({bv.byte_size} Б, предикат {pred_display})")
     if skipped_bodies:
         out.append("\nТЕЛА ПРОПУЩЕНЫ:")
+        skip_streaks: Dict[str, int] = report.get("skip_streaks") or {}
         for bv in skipped_bodies:
-            out.append(f"  {bv.path_value} ({bv.reason})")
+            # A14(в)/§4.3 дословно: «<путь> (<причина>; skip-streak <n>/3)» --
+            # счётчик виден оператору ДО срабатывания (0/3..2/3).
+            streak = skip_streaks.get(bv.id_str, 0)
+            out.append(f"  {bv.path_value} ({bv.reason}; skip-streak {streak}/3)")
     body_defects = [bv for bv in body_verdicts if bv.defect]
     if body_defects:
         out.append("\n=== ДЕФЕКТЫ ТЕЛ (находка прогона) ===")
         for bv in body_defects:
             out.append(f"  {bv.defect}")
 
+    forced_lines = report.get("forced_lines") or []
+    if forced_lines:
+        out.append("\n=== ПРИНУДИТЕЛЬНО ЖИВЫЕ ТЕЛА (skip-каунтер, §4.4) ===")
+        for ln in forced_lines:
+            out.append(f"  {ln}")
+
     total = report["total_bytes"]
     to_read = report["to_read_bytes"]
     bodies_bytes = report.get("bodies_to_read_bytes", 0)
     forced_bytes = report.get("bodies_forced_bytes", 0)
     pct = (to_read / total * 100.0) if total else 0.0
-    gate_diff = to_read - GATE_A_THRESHOLD_BYTES
-    gate_verdict = "ВЗЯТ" if to_read <= GATE_A_THRESHOLD_BYTES else "НЕ ВЗЯТ"
+    # A14(a)/Р10 буквально: вердикт гейта (а) и ±d считаются от N−F
+    # ("к чтению" МИНУС "принудительно"), НЕ от N -- принудительные байты
+    # не должны решать судьбу гейта (Р10 "надбавка отдельным слагаемым",
+    # уже исполнено печатью N и F по отдельности; теперь исполнена и БАЗА
+    # вердикта). Строка ИТОГ по-прежнему печатает N и F как есть.
+    gate_base = to_read - forced_bytes
+    gate_diff = gate_base - GATE_A_THRESHOLD_BYTES
+    gate_verdict = "ВЗЯТ" if gate_base <= GATE_A_THRESHOLD_BYTES else "НЕ ВЗЯТ"
     sign = "+" if gate_diff >= 0 else ""
     # Решение Lead (фикс 8а критика): оба слагаемых печатаются ВСЕГДА
     # симметрично (включая нули) -- стабильная каноническая форма для
@@ -1963,6 +2423,11 @@ def write_registry_entry(
         "to_read_bytes": report["to_read_bytes"],
         "total_bytes": report["total_bytes"],
         "verdicts": {cv.id_str: cv.verdict for cv in report["check_verdicts"]},
+        # W4-1b §4.4: kind/bodies -- отсутствуют (None/{}), если report не
+        # прошёл apply_skip_counter (старые прямые вызовы write_registry_entry
+        # в тестах W4-1a) -- совместимо с существующими вызовами.
+        "kind": report.get("kind"),
+        "bodies": report.get("bodies_status", {}),
     }
     registry_path.parent.mkdir(parents=True, exist_ok=True)
     with open(registry_path, "a", encoding="utf-8") as fh:
@@ -2031,6 +2496,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--check-form", action="store_true")
     p.add_argument("--require-all", action="store_true")
     p.add_argument("--control", action="store_true")
+    p.add_argument("--calibration", action="store_true",
+                    help="явно классифицировать прогон как калибровку (Р7(A), "
+                         "W4-1b) вместо авто-сравнения --window-start с ts "
+                         "последнего calibrated")
     return p.parse_args(argv)
 
 
@@ -2112,6 +2581,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             registry_entries, str(REPO_ROOT), protocol_rel, args.control,
         )
         report = build_window_report(protocol_path, run_ctx)
+        # W4-1b §4.4: kind/skip-каунтер/сторож -- ПОД ТЕМ ЖЕ перехватом
+        # (единый оконный тракт, §4.7/P4).
+        kind, kind_reason = determine_kind(window_start, journal_ctx, args.calibration)
+        report = apply_skip_counter(report, registry_entries, registry_path,
+                                     kind, kind_reason)
     except Exception as exc:  # noqa: BLE001 -- fail-closed §4.7/P4: ЛЮБОЙ
         # отказ оконного тракта -> "читается всё" + гейт не измерен,
         # exit 2 (не только ожидаемый ProtocolError).
@@ -2145,6 +2619,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             "bodies_total_bytes": report.get("bodies_total_bytes", 0),
             "bodies_to_read_bytes": report.get("bodies_to_read_bytes", 0),
             "bodies_forced_bytes": report.get("bodies_forced_bytes", 0),
+            "kind": report.get("kind"),
+            "bodies": report.get("bodies_status", {}),
             "sidecar_bad_count": sidecar_bad_count,
             "gate_a_threshold": GATE_A_THRESHOLD_BYTES,
             "verdicts": {cv.id_str: cv.verdict for cv in report["check_verdicts"]},
