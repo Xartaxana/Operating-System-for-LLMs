@@ -232,6 +232,8 @@ import json
 import os
 import re
 import sys
+import threading
+from pathlib import Path
 
 try:
     from tools.md_regions import scan, KIND_FENCED, KIND_BLOCKQUOTE, KIND_INLINE_CODE  # package-style
@@ -1002,15 +1004,68 @@ def _reconfigure_stdout_utf8():
         pass
 
 
-def _read_stdin_bytes():
-    """Reads stdin as raw bytes, but ONLY when stdin is not a TTY (same
-    guard and rationale as tools/hygiene_gate.py's `_read_stdin_bytes`):
-    a PreToolUse hook receives the harness's JSON on stdin, piped; a
-    human running this script by hand from an interactive shell has no
-    piped input, and blocking on a read there would hang forever."""
-    if sys.stdin.isatty():
-        return b""
-    return sys.stdin.buffer.read()
+# --- BEGIN stdin-deadline helper (П4; ЛОКАЛЬНАЯ копия, общий модуль запрещён) ---
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Секунды дедлайна: env-переопределение, иначе дефолт. Невалидное,
+    нечисловое, <=0 и > _STDIN_DEADLINE_MAX -> дефолт; режима
+    "0 = ждать вечно" НЕТ намеренно (он воскрешает саму дыру)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """(bytes, timed_out). Читает stdin до EOF, но не дольше дедлайна.
+    Форма кроссплатформенная: select/poll на Windows не работает с
+    пайпами, поэтому читает поток-демон, а дедлайн держит join(timeout).
+    TTY -> b"" без чтения (прежний guard трёх файлов, теперь у всех).
+    Любая ошибка чтения -> b"" (fail-open, как везде в этих хуках)."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+# --- END stdin-deadline helper ---
+
+# P4/В3.1 (К7-эмпирика): a background reader thread left blocked on the REAL
+# stdin buffered-reader at normal interpreter shutdown crashes with "Fatal
+# Python error: _enter_buffered_busy" instead of exiting cleanly. main()
+# itself is UNCHANGED (still a plain `return 0`, safe in-process); only the
+# actual __main__ script-exit path below escalates to os._exit().
+_STDIN_DEADLINE_STATE = {"hit": False}
 
 
 def main():
@@ -1018,10 +1073,17 @@ def main():
     (mirrors tools/hygiene_gate.py's main()): WARN mode is absolute --
     exit 0 on every path, including a TTY with nothing piped in,
     malformed stdin, a non-dict payload, or any unexpected exception.
-    Never raises, never returns non-zero."""
+    Never raises, never returns non-zero. P4: the former private
+    `_read_stdin_bytes()` (its own TTY guard + sys.stdin.buffer.read())
+    is replaced by the shared deadline helper below -- keeps this file
+    to ONE stdin-read call site (K3)."""
     try:
         _reconfigure_stdout_utf8()
-        raw_bytes = _read_stdin_bytes()
+        raw_bytes, timed_out = _read_stdin_bytes_deadline()
+        if timed_out:
+            _STDIN_DEADLINE_STATE["hit"] = True
+            sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
+            return 0
         if not raw_bytes:
             return 0
         raw = raw_bytes.decode("utf-8", errors="replace")
@@ -1035,4 +1097,15 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if _STDIN_DEADLINE_STATE["hit"]:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

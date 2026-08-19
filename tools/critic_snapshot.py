@@ -215,6 +215,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -326,12 +327,79 @@ def _write_failure_snapshot(snap: Path, exc: Exception, prev_fields: dict) -> No
         pass  # только stderr -- см. докстринг модуля, "П2"
 
 
+# --- BEGIN stdin-deadline helper (П4; ЛОКАЛЬНАЯ копия, общий модуль запрещён) ---
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Секунды дедлайна: env-переопределение, иначе дефолт. Невалидное,
+    нечисловое, <=0 и > _STDIN_DEADLINE_MAX -> дефолт; режима
+    "0 = ждать вечно" НЕТ намеренно (он воскрешает саму дыру)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """(bytes, timed_out). Читает stdin до EOF, но не дольше дедлайна.
+    Форма кроссплатформенная: select/poll на Windows не работает с
+    пайпами, поэтому читает поток-демон, а дедлайн держит join(timeout).
+    TTY -> b"" без чтения (прежний guard трёх файлов, теперь у всех).
+    Любая ошибка чтения -> b"" (fail-open, как везде в этих хуках)."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+# --- END stdin-deadline helper ---
+
+# P4/В3.1 (К7-эмпирика): a background reader thread left blocked on the REAL
+# stdin buffered-reader at normal interpreter shutdown crashes with "Fatal
+# Python error: _enter_buffered_busy" instead of exiting cleanly. main()
+# itself is UNCHANGED (still a plain `return 0`, safe in-process); only the
+# actual __main__ script-exit path below escalates to os._exit().
+_STDIN_DEADLINE_STATE = {"hit": False}
+
+
 def main() -> int:
-    # STAGING_HQ (t-159 п.7-style): байтовое stdin-чтение, тот же
-    # класс правки, что t-159 п.3/dispatch_gate.py -- применено
-    # единообразно ко всем staging_hq хукам, не только к тому, что
-    # спека называла явно.
-    raw_bytes = sys.stdin.buffer.read()
+    # P4: byte-safe read via the stdin-deadline helper (replaces the
+    # former direct sys.stdin.buffer.read() -- bounded by
+    # OSLLM_STDIN_TIMEOUT instead of blocking forever with no EOF).
+    raw_bytes, timed_out = _read_stdin_bytes_deadline()
+    if timed_out:
+        _STDIN_DEADLINE_STATE["hit"] = True
+        sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
+        return 0
     raw = raw_bytes.decode("utf-8", errors="replace")
     try:
         payload = json.loads(raw)
@@ -390,4 +458,15 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if _STDIN_DEADLINE_STATE["hit"]:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

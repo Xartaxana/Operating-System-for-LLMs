@@ -141,6 +141,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 # N4 (critic t-027, carried forward unchanged): this import used to sit
@@ -589,6 +590,75 @@ def quota_lines(gateway_root: Path, now: datetime.datetime = None) -> list:
     return lines
 
 
+# --- BEGIN stdin-deadline helper (П4; ЛОКАЛЬНАЯ копия, общий модуль запрещён) ---
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Секунды дедлайна: env-переопределение, иначе дефолт. Невалидное,
+    нечисловое, <=0 и > _STDIN_DEADLINE_MAX -> дефолт; режима
+    "0 = ждать вечно" НЕТ намеренно (он воскрешает саму дыру)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """(bytes, timed_out). Читает stdin до EOF, но не дольше дедлайна.
+    Форма кроссплатформенная: select/poll на Windows не работает с
+    пайпами, поэтому читает поток-демон, а дедлайн держит join(timeout).
+    TTY -> b"" без чтения (прежний guard трёх файлов, теперь у всех).
+    Любая ошибка чтения -> b"" (fail-open, как везде в этих хуках)."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+# --- END stdin-deadline helper ---
+
+# P4/В3.1 (К7-эмпирика): a background reader thread left blocked on the REAL
+# stdin buffered-reader at normal interpreter shutdown crashes with "Fatal
+# Python error: _enter_buffered_busy" instead of exiting cleanly (reproduced
+# empirically: this file's own main() does NOT abort on a stdin timeout --
+# read_stdin_payload() returns None and main() keeps building/printing the
+# full context, same as its empty-input path -- so the crash surfaces LATER,
+# at main()'s own normal completion, not at the read call site itself).
+# read_stdin_payload() is UNCHANGED in return contract (still returns None,
+# safe in-process); it only flips this module-level flag, which the actual
+# __main__ script-exit path below checks AFTER main() has fully returned.
+_STDIN_DEADLINE_STATE = {"hit": False}
+
+
 # ---------------------------------------------------------------------------
 # New in b3: MODEL line (D-0056a)
 # ---------------------------------------------------------------------------
@@ -598,16 +668,26 @@ def read_stdin_payload():
     """Reads and JSON-parses stdin, but ONLY when stdin is not a TTY.
     A SessionStart hook receives the harness's JSON on stdin; a human
     running this script by hand from an interactive shell has no piped
-    input, and blocking on sys.stdin.read() there would hang forever --
-    the isatty() guard is what keeps both modes safe. Any failure
-    (unreadable stdin, empty input, invalid JSON) returns None rather
-    than raising; callers treat None exactly like "no model info"."""
-    if sys.stdin.isatty():
+    input, and blocking on the read there would hang forever -- the
+    TTY guard (now inside _read_stdin_bytes_deadline(), P4) is what
+    keeps both modes safe, and a non-TTY read that never reaches EOF is
+    now bounded by OSLLM_STDIN_TIMEOUT (P4 stdin-deadline batch) instead
+    of blocking forever. Any failure (unreadable stdin, empty input,
+    invalid JSON, a stdin deadline) returns None rather than raising;
+    callers treat None exactly like "no model info". P4/K10: byte read
+    via the deadline helper + decode("utf-8", "replace"), replacing the
+    former direct sys.stdin.read() (removes the t-159-class carrier:
+    this hook now reads bytes and decodes explicitly, same as the other
+    12 P4 siblings, instead of going through Python's platform-encoding
+    text layer)."""
+    raw_bytes, timed_out = _read_stdin_bytes_deadline()
+    if timed_out:
+        _STDIN_DEADLINE_STATE["hit"] = True
+        sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
         return None
-    try:
-        data = sys.stdin.read()
-    except Exception:
+    if not raw_bytes:
         return None
+    data = raw_bytes.decode("utf-8", "replace")
     if not data or not data.strip():
         return None
     try:
@@ -1084,6 +1164,7 @@ def _try_hookspath_autofix(root: Path, reason: str) -> str:
             encoding="utf-8",
             errors="replace",
             timeout=5,
+            stdin=subprocess.DEVNULL,
         )
     except Exception as e:
         detail = _ascii_sanitize(f"git config write failed ({type(e).__name__})", 120)
@@ -1162,6 +1243,7 @@ def git_hooks_channel(root: Path) -> list:
             encoding="utf-8",
             errors="replace",
             timeout=5,
+            stdin=subprocess.DEVNULL,
         )
     except Exception as e:
         detail = _ascii_sanitize(f"git config core.hooksPath failed ({type(e).__name__})", 120)
@@ -1209,6 +1291,7 @@ def git_hooks_channel(root: Path) -> list:
             encoding="utf-8",
             errors="replace",
             timeout=5,
+            stdin=subprocess.DEVNULL,
         )
     except Exception as e:
         detail = _ascii_sanitize(f"git ls-files -s failed ({type(e).__name__})", 120)
@@ -1432,7 +1515,18 @@ def wiring_lines(root: Path = None) -> list:
         # any failure degrades to one WARNING string, same contract as
         # the channels above.
         try:
-            import wiring_check as _wc
+            # P4 (coordinator fix Ф1 follow-up, builder t-536, 2026-08-19):
+            # prefer the wiring_check_p4 SIBLING (carries stdin=DEVNULL on
+            # its own git ls-files call -- see that file's own "P4 SIBLING
+            # NOTE") over the live wiring_check, same sibling-first
+            # discipline this whole batch already uses -- avoids the SAME
+            # stuck-stdin-pipe hang class this batch fixes, one level
+            # removed (skills_casing_channel's git call inherits a stuck
+            # pipe just like session_context's own three git calls did).
+            try:
+                import wiring_check_p4 as _wc
+            except ImportError:
+                import wiring_check as _wc
             skills_warnings, skills_ok_count = _wc.skills_casing_channel(root)
         except Exception as e:
             skills_warnings = [
@@ -1984,4 +2078,15 @@ def main(root: Path = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if _STDIN_DEADLINE_STATE["hit"]:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

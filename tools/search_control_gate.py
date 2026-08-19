@@ -129,12 +129,17 @@ tools/claim_control_gate.py's own docstring):
   surrounding try/except -- genuinely raising UnicodeDecodeError
   (exit 1) on invalid UTF-8 under a UTF-8-locked locale
   (`PYTHONIOENCODING=utf-8`), breaking the documented "exit 0 always"
-  contract instead of merely risking it. Fixed: `_read_stdin_bytes()` +
-  `_reconfigure_stdout_utf8()`, identical in shape to
-  tools/hygiene_gate.py and to this delivery's own
+  contract instead of merely risking it. Fixed (at the time): a private
+  `_read_stdin_bytes()` + `_reconfigure_stdout_utf8()`, identical in
+  shape to tools/hygiene_gate.py and to this delivery's own
   tools/claim_control_gate.py, and the entire body of `main()`
   (stdin read, JSON parse, ledger write, sample write, warn) now runs
   inside ONE fail-open try/except, mirroring those two files' `main()`.
+  STALE as of P4 (builder t-535, 2026-08-19): `_read_stdin_bytes()` no
+  longer exists in THIS sibling -- it is replaced by the shared
+  `_read_stdin_bytes_deadline()` call-site (see the "P4 SIBLING NOTE" /
+  marker block above) -- D3's fail-open contract and try/except shape
+  are UNCHANGED, only the stdin-read call itself moved.
 
   D4a -- Read calls are now ALSO recorded to the ledger (same line
   shape, tool="Read", term=the file_path from tool_input), alongside
@@ -153,7 +158,9 @@ tools/claim_control_gate.py's own docstring):
 import json
 import os
 import sys
+import threading
 from datetime import datetime
+from pathlib import Path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEFAULT_SAMPLE = os.path.join(REPO, "logs", "posttooluse-schema-sample.json")
@@ -572,21 +579,68 @@ def _reconfigure_stdout_utf8():
         pass
 
 
-def _read_stdin_bytes():
-    """Reads stdin as raw bytes, but ONLY when stdin is not a TTY (same
-    guard and rationale as tools/hygiene_gate.py's `_read_stdin_bytes`):
-    a PostToolUse hook receives the harness's JSON on stdin, piped; a
-    human running this script by hand from an interactive shell has no
-    piped input, and blocking on a read there would hang forever.
-    t-021 D3: this REPLACES attempt 1's bare `sys.stdin.read()`, which
-    read stdin in TEXT mode via Python's default codec and had no
-    surrounding try/except -- invalid UTF-8 on stdin under a
-    UTF-8-locked locale (PYTHONIOENCODING=utf-8) raised
-    UnicodeDecodeError and exited 1, breaking the "exit 0 always"
-    contract this docstring documents everywhere else."""
-    if sys.stdin.isatty():
-        return b""
-    return sys.stdin.buffer.read()
+# --- BEGIN stdin-deadline helper (П4; ЛОКАЛЬНАЯ копия, общий модуль запрещён) ---
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Секунды дедлайна: env-переопределение, иначе дефолт. Невалидное,
+    нечисловое, <=0 и > _STDIN_DEADLINE_MAX -> дефолт; режима
+    "0 = ждать вечно" НЕТ намеренно (он воскрешает саму дыру)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """(bytes, timed_out). Читает stdin до EOF, но не дольше дедлайна.
+    Форма кроссплатформенная: select/poll на Windows не работает с
+    пайпами, поэтому читает поток-демон, а дедлайн держит join(timeout).
+    TTY -> b"" без чтения (прежний guard трёх файлов, теперь у всех).
+    Любая ошибка чтения -> b"" (fail-open, как везде в этих хуках)."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+# --- END stdin-deadline helper ---
+
+# P4/В3.1 (К7-эмпирика): a background reader thread left blocked on the REAL
+# stdin buffered-reader at normal interpreter shutdown crashes with "Fatal
+# Python error: _enter_buffered_busy" instead of exiting cleanly. main()
+# itself is UNCHANGED (still a plain `return 0`, safe in-process); only the
+# actual __main__ script-exit path below escalates to os._exit().
+_STDIN_DEADLINE_STATE = {"hit": False}
 
 
 def main():
@@ -596,10 +650,19 @@ def main():
     -- exit 0 on every path, including a TTY with nothing piped in,
     malformed stdin, invalid UTF-8 bytes, a non-dict payload, or any
     unexpected exception anywhere in `_process` (ledger I/O, sample
-    I/O, the warn print). Never raises, never returns non-zero."""
+    I/O, the warn print). Never raises, never returns non-zero. P4: the
+    former private `_read_stdin_bytes()` is replaced by the shared
+    deadline helper below (K3: one stdin-read call site); on a stdin
+    deadline `_process` is deliberately NOT called (named deviation
+    from the empty-input path, which DOES call `_process({}, "")` and
+    writes the schema-sample warning -- see this batch's report)."""
     try:
         _reconfigure_stdout_utf8()
-        raw_bytes = _read_stdin_bytes()
+        raw_bytes, timed_out = _read_stdin_bytes_deadline()
+        if timed_out:
+            _STDIN_DEADLINE_STATE["hit"] = True
+            sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
+            return 0
         raw = raw_bytes.decode("utf-8", errors="replace") if raw_bytes else ""
         try:
             payload = json.loads(raw) if raw.strip() else {}
@@ -612,4 +675,15 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if _STDIN_DEADLINE_STATE["hit"]:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

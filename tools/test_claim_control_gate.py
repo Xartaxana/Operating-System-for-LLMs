@@ -329,13 +329,63 @@ def test_adversarial_very_large_write_payload_no_crash(tmp_path):
     )
 
 
-def test_read_stdin_bytes_tty_guard_no_block(monkeypatch):
+def _p4_sibling_module_or_none(base_name: str):
+    """Стенд-ин "мира после посадки П4" (координатор, t-535, 2026-08-19,
+    Б1): tools/<base_name>_p4.py несёт содержимое, которое landing
+    сольёт на боевой путь -- пока сиблинг существует, грузим его
+    НАПРЯМУЮ (importlib), чтобы проверить пост-посадочную ветку прямо
+    сейчас, не дожидаясь реальной посадки. None, если сиблинг уже снят
+    (посадка прошла -- тогда живой модуль САМ несёт этот мир)."""
+    path = Path(__file__).resolve().parent / f"{base_name}_p4.py"
+    if not path.exists():
+        return None
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(f"_p4_probe_{base_name}", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _assert_stdin_reader_tty_guard_no_block(mod, monkeypatch):
+    """Двухмирная проверяемая форма (Б1): ДО посадки П4 модуль несёт
+    приватную `_read_stdin_bytes()` (TTY guard + sys.stdin.buffer.read(),
+    возвращает bytes); ПОСЛЕ посадки её заменяет П4-хелпер
+    `_read_stdin_bytes_deadline()` (тот же TTY guard, форма
+    (bytes, timed_out)) -- getattr выбирает точку чтения, реально
+    присутствующую в mod, вместо жёсткого имени. Проверяемое
+    утверждение теста сохранено буквально в обеих ветках: TTY -> пустые
+    байты, read() не вызывается (не блокирует)."""
+
     class FakeStdin:
         def isatty(self):
             return True
 
-    monkeypatch.setattr(m.sys, "stdin", FakeStdin())
-    assert m._read_stdin_bytes() == b""
+        def read(self):
+            raise AssertionError("read() must not be called when stdin is a TTY")
+
+    monkeypatch.setattr(mod.sys, "stdin", FakeStdin())
+    new_reader = getattr(mod, "_read_stdin_bytes_deadline", None)
+    if new_reader is not None:
+        raw, timed_out = new_reader()
+        assert raw == b""
+        assert timed_out is False
+    else:
+        assert mod._read_stdin_bytes() == b""
+
+
+def test_read_stdin_bytes_tty_guard_no_block(monkeypatch):
+    """ДВУХМИРНО зелен: (а) `m` -- ЖИВОЙ модуль, каким бы он сейчас ни
+    был (до посадки: несёт `_read_stdin_bytes`; после: несёт П4-хелпер
+    -- getattr в _assert_stdin_reader_tty_guard_no_block решает сам);
+    (б) `claim_control_gate_p4.py`, если ещё существует как отдельный
+    файл -- прямая проверка мира ПОСЛЕ посадки прямо сейчас, без
+    ожидания реального landing."""
+    _assert_stdin_reader_tty_guard_no_block(m, monkeypatch)
+
+    sibling = _p4_sibling_module_or_none("claim_control_gate")
+    if sibling is not None:
+        _assert_stdin_reader_tty_guard_no_block(sibling, monkeypatch)
 
 
 # ---------------------------------------------------------------------

@@ -26,6 +26,30 @@ makes the ALREADY-LIVE session_context checks runnable as
 tools/enforcement_probe.py's design already assumed), without
 duplicating their logic.
 
+P4 SIBLING NOTE (builder, 2026-08-19, docs/tasks/2026-08-19_p4-stdin-deadline-spec.md,
+coordinator fix Ф1 follow-up): `skills_casing_channel()`'s own
+`subprocess.run(["git", ...])` below is the SAME defect class Ф1 fixes
+in session_context_p4.py's three git calls -- a stuck/open stdin pipe
+(P4's exact scenario: a hook's writer never closes stdin) is inherited
+by this call too (no `stdin=` argument means CreateProcess passes the
+parent's own stdin handle through), stalling this call for its own
+full timeout=5 instead of the ~0.05s it takes with a closed pipe.
+Discovered EMPIRICALLY while verifying Ф1's own DoD ("timeout-world
+prints no false WIRING WARNING"): session_context_p4.py's
+`wiring_lines()` calls THIS file's `skills_casing_channel()`
+(dynamic `import wiring_check`), so a stuck pipe surfaces here even
+after the three direct session_context calls are fixed. Same
+discipline as Ф1 itself ("чинить в сиблинге, не в живом" -- fix in a
+sibling, never the self-activating live file): the ONLY change from
+`tools/wiring_check.py` is `stdin=subprocess.DEVNULL` added to the one
+`subprocess.run()` call in `skills_casing_channel()` below.
+`tools/session_context_p4.py` imports THIS sibling in preference to
+the live `wiring_check` module, mirroring the sibling-first resolution
+this whole P4 batch already uses for its own test loading. Landing
+this alongside session_context_p4.py (merging this ONE line into the
+live `tools/wiring_check.py`) is the same Lead-owned act as the rest
+of the batch's landing -- not decided or executed here.
+
 KIT-TWIN NOTE (critic t-339, D-0043-class sibling report -- an
 analog, not a fix, since the two files are not the same class of gap):
 `toolkit/tools/wiring_check.py` DOES already exist, under a DIFFERENT
@@ -163,6 +187,7 @@ def skills_casing_channel(root):
             encoding="utf-8",
             errors="replace",
             timeout=5,
+            stdin=subprocess.DEVNULL,
         )
     except Exception as e:
         detail = session_context._ascii_sanitize(

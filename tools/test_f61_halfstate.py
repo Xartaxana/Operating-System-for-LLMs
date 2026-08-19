@@ -969,9 +969,29 @@ def _write_bg_fact(track_dir: Path, session_id: str, ts: str = "t1", reason: str
 
 
 class _FakeTextStdin:
-    """session_context.read_stdin_payload() читает sys.stdin.read() (ТЕКСТ,
-    не .buffer, в отличие от dod_track/critic_snapshot/dod_gate/main_gate) --
-    отдельный фейк от _FakeStdin выше."""
+    """ДВУХМИРНЫЙ пин (перепин П4/K10, builder, 2026-08-19,
+    docs/tasks/2026-08-19_p4-stdin-deadline-spec.md): этот файл всегда
+    резолвит "session_context" на ЖИВОЙ tools/session_context.py (нет
+    tools/session_context_f61.py -- F61_TARGET здесь не влияет), так что
+    ниже проверяется ТЕКУЩИЙ мир этого файла буквально. Форма фейка,
+    однако, специально совместима с ОБОИМИ мирами читателя:
+     - МИР ДО посадки П4 (сегодняшний живой session_context.py):
+       read_stdin_payload() читает sys.stdin.read() НАПРЯМУЮ (ТЕКСТ, не
+       .buffer, в отличие от dod_track/critic_snapshot/dod_gate/
+       main_gate) -- этот фейк подходит буквально (только .read()/
+       .isatty(), без .buffer).
+     - МИР ПОСЛЕ посадки П4 (tools/session_context_p4.py, живёт СЕЙЧАС
+       рядом как сиблинг батча П4): read_stdin_payload() читает БАЙТЫ
+       через общий stdin-deadline хелпер (`_read_stdin_bytes_deadline()`)
+       + decode("utf-8", "replace") -- К10. Тот же фейк остаётся
+       совместим и там: хелпер берёт `stream = getattr(stdin, "buffer",
+       stdin)`, у этого фейка `.buffer` нет -- значит `stream` это сам
+       фейк, `stream.read()` возвращает str, хелпер сам приводит
+       нестрочный (не-bytes) результат через
+       `str(data).encode("utf-8", "replace")` -- проверено отдельной
+       батареей tools/test_p4_stdin_deadline.py
+       (test_k10_session_context_text_only_fake_still_works). Отдельный
+       фейк от _FakeStdin выше (та несёт .buffer, эта -- нет)."""
 
     def __init__(self, text: str, tty: bool = False):
         self._text = text
