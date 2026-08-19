@@ -1,82 +1,82 @@
 {
-  "thresholds_version": 0,
+  "thresholds_version": 1,
   "artifacts": [
     {
       "path": "docs/DECISIONS_FULL.md",
       "unit": "решение",
       "record_re": "^## D-\\d{4}\\b",
       "owner": "corpus",
-      "bpr_max": null
+      "bpr_max": 2880
     },
     {
       "path": "docs/FINDINGS.md",
       "unit": "находка",
       "record_re": "^## F-\\d+\\b",
       "owner": "corpus",
-      "bpr_max": null
+      "bpr_max": 4467
     },
     {
       "path": "PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md",
       "unit": "чек",
       "record_re": "^\\d+\\. \\*\\*",
       "owner": "corpus",
-      "bpr_max": null
+      "bpr_max": 4304
     },
     {
       "path": "docs/POLICY_FULL.md",
       "unit": "секция",
       "record_re": "^## ",
       "owner": "corpus",
-      "bpr_max": null
+      "bpr_max": 8027
     },
     {
       "path": "docs/SIBLING_MAP.md",
       "unit": "ось/класс",
       "record_re": "^(## Ось \\d+|### Класс:)",
       "owner": "corpus",
-      "bpr_max": null
+      "bpr_max": 4431
     },
     {
       "path": "docs/RULE_COVERAGE.md",
       "unit": "строка реестра",
       "record_re": "^\\| + exclude разделители/шапки",
       "owner": "corpus",
-      "bpr_max": null
+      "bpr_max": 1058
     },
     {
       "path": "DECISIONS.md",
       "unit": "строка индекса",
       "record_re": "^- D-\\d{4}",
       "owner": "corpus",
-      "bpr_max": null
+      "bpr_max": 241
     },
     {
       "path": "docs/OPERATIONAL_NOTES.md",
       "unit": "секция",
       "record_re": "^## §\\d+\\.",
       "owner": "corpus",
-      "bpr_max": null
+      "bpr_max": 4214
     },
     {
       "path": "docs/RETRO_PATTERNS.md",
       "unit": "секция",
       "record_re": "^## ",
       "owner": "corpus",
-      "bpr_max": null
+      "bpr_max": 2579
     },
     {
       "path": "docs/DECISIONS_ARCHIVE.md",
       "unit": "решение",
       "record_re": "^## D-\\d{4}\\b",
       "owner": "corpus-archive",
-      "bpr_max": null
+      "bpr_max": 2100
     },
     {
       "path": "docs/FINDINGS_ARCHIVE.md",
       "unit": "находка",
       "record_re": "^## F-\\d+\\b",
       "owner": "corpus-archive",
-      "bpr_max": null
+      "bpr_max": 6233
     },
     {
       "path": "CLAUDE.md",

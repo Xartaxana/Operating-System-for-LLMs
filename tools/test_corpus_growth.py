@@ -98,7 +98,15 @@ def test_key1_manifest_has_12_artifacts_verbatim_record_re():
         expected_re, expected_owner = EXPECTED_TABLE[a["path"]]
         assert a["record_re"] == expected_re, a["path"]
         assert a["owner"] == expected_owner, a["path"]
-        assert a["bpr_max"] is None, f"поставляемый манифест: bpr_max должен быть null у {a['path']}"
+        # Мир ПОСЛЕ посадки порогов (Lead 2026-08-19, посадка чека 34):
+        # corpus-артефакты несут int-порог (замер x1.15), boot-mirror
+        # — только null (порог запрещён формой).
+        if a["owner"] == "boot-mirror":
+            assert a["bpr_max"] is None, f"boot-mirror с порогом: {a['path']}"
+        else:
+            assert isinstance(a["bpr_max"], int) and a["bpr_max"] > 0, (
+                f"corpus-артефакт без назначенного порога: {a['path']}"
+            )
 
 
 def test_key1_delivered_manifest_passes_form_validation_cleanly():

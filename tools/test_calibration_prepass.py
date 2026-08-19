@@ -1337,12 +1337,14 @@ def test_real_protocol_has_pilot_headers():
 
 
 def test_real_protocol_all_34_checks_headered():
-    # M2: все 34 чека (не только пилотная партия M1) несут ВЕРХНЮЮ
+    # M2: все чеки (не только пилотная партия M1) несут ВЕРХНЮЮ
     # шапку -- require_all=True не находит ни одного чека без неё.
+    # Мир ПОСЛЕ посадки чека 34 (Phase 5 W3, Lead 2026-08-19): живой
+    # протокол несёт чеки 0..34 сплошно.
     result = prep.run_check_form(prep.DEFAULT_PROTOCOL, prep.DEFAULT_RULE_COVERAGE, True)
     assert result.defects == [], "\n".join(result.defects)
     top_numbers = {h.check_number for h in result.headers if h.subitem_letter is None}
-    assert top_numbers == set(range(34)), sorted(set(range(34)) - top_numbers)
+    assert top_numbers == set(range(35)), sorted(set(range(35)) ^ top_numbers)
 
 
 def test_real_protocol_window_run_exit0():
