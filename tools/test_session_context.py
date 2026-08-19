@@ -358,7 +358,8 @@ def test_main_fail_open_on_broken_journal(tmp_path, capsys):
     (root / "logs" / "routing-log.jsonl").write_text("{not valid json\n", encoding="utf-8")
     code = main(root)
     assert code == 0
-    out = capsys.readouterr().out.strip().splitlines()
+    captured = capsys.readouterr()
+    out = (captured.out + captured.err).strip().splitlines()
     assert len(out) == 1
     assert out[0].startswith("session-context warning:")
 
@@ -550,7 +551,8 @@ def test_deferred_import_error_reaches_mains_fail_open_boundary(tmp_path, capsys
     root = _seed_repo(tmp_path, events=[_event("delegated", task_id="t-001")])
     code = sc.main(root)
     assert code == 0
-    out = capsys.readouterr().out.strip().splitlines()
+    captured = capsys.readouterr()
+    out = (captured.out + captured.err).strip().splitlines()
     assert len(out) == 1
     assert out[0].startswith("session-context warning:")
 
@@ -587,7 +589,8 @@ def test_module_survives_broken_preflight_quota_import_and_fails_open(tmp_path, 
                 importlib.import_module(name)
 
     assert code == 0
-    out = capsys.readouterr().out.strip().splitlines()
+    captured = capsys.readouterr()
+    out = (captured.out + captured.err).strip().splitlines()
     assert len(out) == 1
     assert out[0].startswith("session-context warning:")
 

@@ -907,3 +907,559 @@ def test_e2e_subprocess_irrelevant_payload_is_noop(base_name, tmp_path):
     )
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
     assert not (tmp_path / ".claude").exists()
+
+
+# ===========================================================================
+# УЗЕЛ B -- F-61 session_context (builder, 2026-08-19, docs/tasks/
+# 2026-08-19_f61-f58-remediation-spec.md, узел B). Дозапись в этот файл
+# (Р2а спеки): та же F61_TARGET индирекция, _load("session_context")
+# резолвится в tools/session_context_f61.py, если он существует (default),
+# либо в живой tools/session_context.py (F61_TARGET=live -- контр-прогон,
+# КРАСНЫЙ до посадки: ack происходит ДО печати на живом коде, F-61 экз. 3).
+#
+# Ключи узла B:
+#  B1 -- ack ТОЛЬКО после успешной выдачи, КОНСТРУКЦИЕЙ (ключи строк,
+#        реально вошедших в срез и напечатанных), не позиционно.
+#  B2 -- одна запись вывода + flush ВНУТРИ try.
+#  B3/fix5 (критик, пересдача 2026-08-19, fit_with_fixes) -- предупреждение
+#        СНАЧАЛА в stdout (та же строка, что видела бы здоровая выдача --
+#        отказ СБОРКИ при исправном stdout обязан остаться видимым); ТОЛЬКО
+#        если сама эта запись в stdout бросает (мёртвый канал) -- фолбэк в
+#        stderr; оба канала мертвы -> rc=0 молча. Обе попытки внутри try.
+#  fix4 -- str(e) санитизируется через СУЩЕСТВУЮЩИЙ (не новый)
+#        session_context._ascii_sanitize(text, 300) перед форматированием
+#        строки предупреждения, на любом канале.
+#  B4 -- guard не-dict корня в read_stdin_payload (образец
+#        journal_echo.py:1885). NB (расхождение спеки с реальностью,
+#        см. отчёт builder): тот же ключ спеки называет ещё и guard
+#        "не-dict tool_input" -- у SessionStart-payload'а этого хука нет
+#        поля tool_input вообще (см. .claude/settings.json: session_context
+#        зарегистрирован только на SessionStart, не на PostToolUse/
+#        PreToolUse) -- второй половине ключа применять некуда.
+#
+# Существующие тесты tools/test_session_context.py И
+# tools/test_session_context_autoboot.py НЕ трогаются этим батчем --
+# ПЯТЬ их пинов канала/шва (перечитаны в этом дереве builder'ом узла B
+# при пересдаче по вердикту критика 2026-08-19) требуют двухмирной
+# правки. Эти правки НЕ выполняются здесь (живые тест-файлы вне owns
+# узла B) -- они часть акта посадки Lead (см. handoff в отчёте
+# builder'а, готовые диффы + witness проверки на копии дерева в
+# scratchpad).
+# ===========================================================================
+
+
+def _seed_sc_repo(tmp_path: Path) -> Path:
+    """Минимальный сид для session_context.main()/build_context_lines():
+    только logs/routing-log.jsonl -- gateway/* НЕ обязателен (quota_lines
+    уже fail-open на отсутствующем gateway/, проверено эмпирически)."""
+    root = tmp_path
+    (root / "logs").mkdir(parents=True, exist_ok=True)
+    (root / "logs" / "routing-log.jsonl").write_text("", encoding="utf-8")
+    return root
+
+
+def _write_bg_fact(track_dir: Path, session_id: str, ts: str = "t1", reason: str = "no-green-run") -> Path:
+    track_dir.mkdir(parents=True, exist_ok=True)
+    path = track_dir / f"{session_id}.json"
+    path.write_text(
+        json.dumps({"main_gate_state": {"unsafe_completion": {"ts": ts, "reason": reason}}}),
+        encoding="utf-8",
+    )
+    return path
+
+
+class _FakeTextStdin:
+    """session_context.read_stdin_payload() читает sys.stdin.read() (ТЕКСТ,
+    не .buffer, в отличие от dod_track/critic_snapshot/dod_gate/main_gate) --
+    отдельный фейк от _FakeStdin выше."""
+
+    def __init__(self, text: str, tty: bool = False):
+        self._text = text
+        self._tty = tty
+
+    def isatty(self):
+        return self._tty
+
+    def read(self):
+        return self._text
+
+
+class _MarkerRaisingStdout:
+    """Раскалывает ЛЮБОЙ write(), чей аргумент содержит `marker` -- всё,
+    что было успешно записано ДО этого, накапливается в .chunks (можно
+    проверить, дошло ли хоть что-то). На сиблинге (B2: одна запись) весь
+    вывод -- ОДИН write()-вызов, так что маркер где угодно внутри рвёт
+    этот единственный вызов целиком, ничего не доходит. На живом коде
+    (много print()) маркер рвёт вызов ИМЕННО в этой позиции -- строки до
+    неё уже могли быть напечатаны, но факт был ack'нут ещё РАНЬШЕ печати
+    (F-61 экз. 3), так что ack-дискриминатор одинаково красен на всех трёх
+    позициях маркера."""
+
+    def __init__(self, marker: str):
+        self._marker = marker
+        self.chunks = []
+        self.raised = False
+
+    def write(self, s):
+        if self._marker in s:
+            self.raised = True
+            raise OSError(f"simulated stdout failure at marker {self._marker!r} (test)")
+        self.chunks.append(s)
+        return len(s)
+
+    def flush(self):
+        pass
+
+
+class _RecordingStream:
+    def __init__(self):
+        self.chunks = []
+
+    def write(self, s):
+        self.chunks.append(s)
+        return len(s)
+
+    def flush(self):
+        pass
+
+
+class _AlwaysRaisingStream:
+    def write(self, s):
+        raise OSError("simulated channel down (test)")
+
+    def flush(self):
+        raise OSError("simulated channel down (test)")
+
+
+class _CountingStdout:
+    """Оборачивает РЕАЛЬНЫЙ (уже подменённый capsys) sys.stdout -- считает
+    write()/flush() вызовы, но реально делегирует запись, чтобы
+    capsys.readouterr() продолжал видеть содержимое."""
+
+    def __init__(self, real):
+        self._real = real
+        self.write_calls = 0
+        self.flush_calls = 0
+
+    def write(self, s):
+        self.write_calls += 1
+        return self._real.write(s)
+
+    def flush(self):
+        self.flush_calls += 1
+        return self._real.flush()
+
+
+# ---------------------------------------------------------------------
+# B2 -- одна запись вывода + flush ВНУТРИ try.
+# ---------------------------------------------------------------------
+
+
+def test_session_context_b2_main_writes_output_exactly_once_with_flush(tmp_path, monkeypatch, capsys):
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+    spy = _CountingStdout(mod.sys.stdout)
+    monkeypatch.setattr(mod.sys, "stdout", spy)
+
+    rc = mod.main(root)
+
+    assert rc == 0
+    label = "live" if is_live else "sibling"
+    assert spy.write_calls == 1, (
+        f"[{label}] ожидалась РОВНО одна запись stdout (B2), вызовов: {spy.write_calls}"
+    )
+    assert spy.flush_calls >= 1, f"[{label}] flush() не был вызван внутри try (B2)"
+    out = capsys.readouterr().out
+    assert "NOW:" in out
+    assert "AUTO-BOOT (D-0103" in out
+
+
+# ---------------------------------------------------------------------
+# B1 -- ack ТОЛЬКО после успешной выдачи, КОНСТРУКЦИЕЙ (не позиционно).
+# Отказ канала на первой строке / в середине / на autoboot-блоке -- все
+# три должны красно ловить ack-до-печати на живом коде (F-61, экз. 3).
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "marker",
+    ["NOW:", "GATE BREAK-GLASS", "AUTO-BOOT (D-0103"],
+    ids=["first-line", "middle-break-glass", "autoboot-block"],
+)
+def test_session_context_b1_stdout_failure_leaves_break_glass_fact_unacked(marker, tmp_path, monkeypatch):
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+    track_dir = root / ".claude" / "dod_track"
+    _write_bg_fact(track_dir, "sess-b1")
+
+    candidates_before = mod._break_glass_candidates(root)
+    assert len(candidates_before) == 1, "sanity: ожидался ровно один pending-факт до прогона"
+    fact_key = candidates_before[0]["key"]
+    assert fact_key
+
+    monkeypatch.setattr(mod.sys, "stdout", _MarkerRaisingStdout(marker))
+    err_fake = _RecordingStream()
+    monkeypatch.setattr(mod.sys, "stderr", err_fake)
+
+    raised = None
+    rc = None
+    try:
+        rc = mod.main(root)
+    except Exception as exc:  # noqa: BLE001 -- exactly what we're probing
+        raised = exc
+
+    label = "live" if is_live else "sibling"
+    assert raised is None, f"[{label}, marker={marker!r}] main() бросил наружу: {raised!r}"
+    assert rc == 0
+
+    ack_data = mod._load_break_glass_ack(mod._break_glass_ack_path(root))
+    assert fact_key not in ack_data, (
+        f"[{label}, marker={marker!r}] факт ack'нут ДО того, как его строка реально "
+        f"была выдана (F-61, экз. 3: ack внутри build_context_lines ДО печати) -- "
+        f"ack_data={ack_data!r}"
+    )
+    err_text = "".join(err_fake.chunks)
+    assert "session-context warning:" in err_text, (
+        f"[{label}, marker={marker!r}] fail-open предупреждение не дошло до stderr: {err_text!r}"
+    )
+
+
+# ---------------------------------------------------------------------
+# B3/fix5 (критик, пересдача 2026-08-19: fit_with_fixes) -- предупреждение
+# пишется СНАЧАЛА в stdout (та же строка, что видела бы здоровая выдача);
+# фолбэк в stderr ТОЛЬКО если сама эта запись в stdout бросает (мёртвый
+# канал, не просто отказ сборки); оба канала мертвы -> rc=0 молча.
+# ---------------------------------------------------------------------
+
+
+def test_session_context_fix5a_build_failure_with_healthy_stdout_shows_warning_on_stdout(
+    tmp_path, monkeypatch, capsys
+):
+    """(а) отказ СБОРКИ (битый read_journal_events -- тот же класс, что
+    исторический инцидент с битым журналом/quota) при ИСПРАВНОМ stdout:
+    предупреждение обязано попасть в stdout (не потеряться в stderr,
+    который сессия не обязательно читает), stderr остаётся пустым."""
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+
+    def _boom(*_a, **_kw):
+        raise RuntimeError("boom-fix5a-healthy-stdout (test)")
+
+    monkeypatch.setattr(mod, "read_journal_events", _boom)
+
+    rc = mod.main(root)
+    assert rc == 0
+
+    label = "live" if is_live else "sibling"
+    captured = capsys.readouterr()
+    assert "session-context warning: boom-fix5a-healthy-stdout (test)" in captured.out, (
+        f"[{label}] предупреждение не найдено в ИСПРАВНОМ stdout: {captured.out!r}"
+    )
+    assert captured.err == "", (
+        f"[{label}] предупреждение утекло в stderr при исправном stdout: {captured.err!r}"
+    )
+
+
+def test_session_context_fix5b_dead_stdout_falls_back_to_stderr(tmp_path, monkeypatch):
+    """(б) stdout ГЕНУИННО мёртв (сама запись предупреждения бросает, не
+    только сборка) -> фолбэк на stderr, ТА ЖЕ строка."""
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+
+    monkeypatch.setattr(mod.sys, "stdout", _AlwaysRaisingStream())
+    err_fake = _RecordingStream()
+    monkeypatch.setattr(mod.sys, "stderr", err_fake)
+
+    raised = None
+    rc = None
+    try:
+        rc = mod.main(root)
+    except Exception as exc:  # noqa: BLE001
+        raised = exc
+
+    label = "live" if is_live else "sibling"
+    assert raised is None, f"[{label}] main() бросил наружу при мёртвом stdout: {raised!r}"
+    assert rc == 0
+    err_text = "".join(err_fake.chunks)
+    assert "session-context warning:" in err_text, (
+        f"[{label}] предупреждение не дошло до stderr-фолбэка: {err_text!r}"
+    )
+
+
+def test_session_context_fix5c_both_channels_dead_returns_zero_silently(tmp_path, monkeypatch):
+    """(в) оба канала мертвы -> rc=0 молча, никакого исключения наружу."""
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+
+    def _boom(*_a, **_kw):
+        raise RuntimeError("boom-fix5c-both-dead (test)")
+
+    monkeypatch.setattr(mod, "read_journal_events", _boom)
+    monkeypatch.setattr(mod.sys, "stdout", _AlwaysRaisingStream())
+    monkeypatch.setattr(mod.sys, "stderr", _AlwaysRaisingStream())
+
+    raised = None
+    rc = None
+    try:
+        rc = mod.main(root)
+    except Exception as exc:  # noqa: BLE001
+        raised = exc
+
+    label = "live" if is_live else "sibling"
+    assert raised is None, (
+        f"[{label}] main() бросил наружу при отказе ОБОИХ каналов (rc=0 молча ожидался): {raised!r}"
+    )
+    assert rc == 0
+
+
+# ---------------------------------------------------------------------
+# fix4 (критик, пересдача 2026-08-19) -- str(e) санитизируется через
+# СУЩЕСТВУЮЩИЙ session_context._ascii_sanitize(text, 300) (тот же хелпер,
+# что уже используют MODEL/OPEN DISPATCH/WIRING -- НЕ новый хелпер, см.
+# отчёт builder'а) перед форматированием строки предупреждения, на ЛЮБОМ
+# канале. Лимит 300 -- НОВОЕ место применения этого хелпера в файле =>
+# отдельный граничный тест (правило 6а), не только позитивный кейс с
+# кириллицей/переводами строк.
+# ---------------------------------------------------------------------
+
+
+def test_session_context_fix4_warning_message_is_ascii_sanitized_single_line(
+    tmp_path, monkeypatch, capsys
+):
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+
+    def _boom(*_a, **_kw):
+        raise RuntimeError("клод\nпричина с кириллицей\r\nвторая строка")
+
+    monkeypatch.setattr(mod, "read_journal_events", _boom)
+
+    rc = mod.main(root)
+    assert rc == 0
+
+    label = "live" if is_live else "sibling"
+    combined = capsys.readouterr().out  # здоровый stdout -> fix5(а) кладёт сюда
+    warning_lines = [l for l in combined.splitlines() if l.startswith("session-context warning:")]
+    assert len(warning_lines) == 1, (
+        f"[{label}] ожидалась РОВНО одна строка предупреждения: {combined!r}"
+    )
+    assert warning_lines[0].isascii(), (
+        f"[{label}] предупреждение не ASCII-safe (кириллица/не-ASCII не санитизированы): "
+        f"{warning_lines[0]!r}"
+    )
+
+
+def test_session_context_fix4_warning_length_at_300_boundary_not_truncated(
+    tmp_path, monkeypatch, capsys
+):
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+
+    def _boom(*_a, **_kw):
+        raise RuntimeError("x" * 300)
+
+    monkeypatch.setattr(mod, "read_journal_events", _boom)
+    rc = mod.main(root)
+    assert rc == 0
+    combined = capsys.readouterr().out
+    assert f"session-context warning: {'x' * 300}" in combined
+
+
+def test_session_context_fix4_warning_length_beyond_300_boundary_truncated(
+    tmp_path, monkeypatch, capsys
+):
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+
+    def _boom(*_a, **_kw):
+        raise RuntimeError("y" * 301)
+
+    monkeypatch.setattr(mod, "read_journal_events", _boom)
+    rc = mod.main(root)
+    assert rc == 0
+    combined = capsys.readouterr().out
+    label = "live" if is_live else "sibling"
+    assert f"session-context warning: {'y' * 300}" in combined, (
+        f"[{label}] за границей (301) ожидалось усечение ровно до 300 символов: {combined!r}"
+    )
+    assert "y" * 301 not in combined, (
+        f"[{label}] полное непочиненное 301-символьное сообщение обнаружено -- нет усечения"
+    )
+
+
+# ---------------------------------------------------------------------
+# B4 -- guard не-dict корня в read_stdin_payload.
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_json", ["[1, 2, 3]", '"just a string"', "5", "true"])
+def test_session_context_b4_read_stdin_payload_non_dict_root_returns_none(bad_json, tmp_path, monkeypatch):
+    mod, script, is_live = _load("session_context")
+    fake = _FakeTextStdin(bad_json, tty=False)
+    monkeypatch.setattr(mod.sys, "stdin", fake)
+
+    result = mod.read_stdin_payload()
+
+    label = "live" if is_live else "sibling"
+    assert result is None, (
+        f"[{label}] non-dict корень {bad_json!r} должен давать None (B4), получено: {result!r}"
+    )
+
+
+def test_session_context_b4_read_stdin_payload_dict_root_still_returned(tmp_path, monkeypatch):
+    mod, script, is_live = _load("session_context")
+    fake = _FakeTextStdin('{"model": "claude-opus-4"}', tty=False)
+    monkeypatch.setattr(mod.sys, "stdin", fake)
+    assert mod.read_stdin_payload() == {"model": "claude-opus-4"}
+
+
+# ---------------------------------------------------------------------
+# Края: сайдкар отсутствует/битый -> повторный показ (fail-safe); битый
+# трек пропускается по-файлово; границы MAX_LINES (25/26) и cap (5/6).
+# ---------------------------------------------------------------------
+
+
+def test_session_context_edge_sidecar_missing_is_treated_as_nothing_acked(tmp_path):
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+    track_dir = root / ".claude" / "dod_track"
+    _write_bg_fact(track_dir, "sess-sc-missing")
+    ack_data = mod._load_break_glass_ack(mod._break_glass_ack_path(root))
+    assert ack_data == {}
+
+
+def test_session_context_edge_broken_sidecar_is_fail_safe_refires_fact(tmp_path):
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+    track_dir = root / ".claude" / "dod_track"
+    _write_bg_fact(track_dir, "sess-sc-broken")
+
+    first = mod.break_glass_lines(root)
+    assert len(first) == 1
+    ack_path = track_dir / "break_glass_ack.json"
+    assert ack_path.exists()
+
+    ack_path.write_text("{not valid json", encoding="utf-8")  # corrupt the sidecar
+    second = mod.break_glass_lines(root)
+    assert len(second) == 1, "битый сайдкар должен fail-safe пересветить факт, а не проглотить его"
+
+
+def test_session_context_edge_broken_track_file_skipped_per_file_siblings_still_shown(tmp_path):
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+    track_dir = root / ".claude" / "dod_track"
+    track_dir.mkdir(parents=True)
+    (track_dir / "broken.json").write_text("{not valid json", encoding="utf-8")
+    _write_bg_fact(track_dir, "sess-good")
+
+    lines = mod.break_glass_lines(root)
+    assert len(lines) == 1
+    assert "sess-good" in lines[0]
+
+
+def test_session_context_edge_max_lines_no_space_left_does_not_ack(tmp_path):
+    # AT the MAX_LINES boundary, from the far side: 0 slots left (25 lines
+    # of filler already fill the whole budget) -- the pending fact must be
+    # neither shown nor acked.
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+    track_dir = root / ".claude" / "dod_track"
+    _write_bg_fact(track_dir, "sess-edge-nospace")
+
+    filler = ["x"] * mod.MAX_LINES  # space_left == 0
+    shown = mod.select_and_ack_break_glass_lines(root, filler)
+    assert shown == []
+
+    shown_again = mod.select_and_ack_break_glass_lines(root, [])
+    assert len(shown_again) == 1  # still pending -- never acked
+
+
+def test_session_context_edge_max_lines_exact_one_slot_boundary_fits_and_acks(tmp_path):
+    # 24 lines of filler -> exactly 1 slot left (25th line) -- AT the
+    # boundary, the single pending fact fits and gets acked.
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+    track_dir = root / ".claude" / "dod_track"
+    _write_bg_fact(track_dir, "sess-edge-oneslot")
+
+    filler = ["x"] * (mod.MAX_LINES - 1)
+    shown = mod.select_and_ack_break_glass_lines(root, filler)
+    assert len(shown) == 1
+
+    shown_again = mod.select_and_ack_break_glass_lines(root, [])
+    assert shown_again == []  # already acked
+
+
+def test_session_context_edge_fact_cap_exactly_five_no_summary(tmp_path):
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+    track_dir = root / ".claude" / "dod_track"
+    for i in range(5):
+        _write_bg_fact(track_dir, f"sess-cap-{i}", ts=f"t{i}")
+
+    lines = mod.break_glass_lines(root)
+    assert len(lines) == 5
+    assert not any("more unsafe-completion facts pending" in l for l in lines)
+
+
+def test_session_context_edge_fact_cap_six_gets_summary_and_leaves_sixth_unacked(tmp_path):
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+    track_dir = root / ".claude" / "dod_track"
+    for i in range(6):
+        _write_bg_fact(track_dir, f"sess-cap6-{i}", ts=f"t{i}")
+
+    lines = mod.break_glass_lines(root)
+    fact_lines = [l for l in lines if l.startswith("GATE BREAK-GLASS: session")]
+    summary_lines = [l for l in lines if "more unsafe-completion facts pending" in l]
+    assert len(fact_lines) == 5
+    assert len(summary_lines) == 1
+    assert "1 more" in summary_lines[0]
+
+    # НЕ-ack невошедшего (шестого) факта: следующий вызов обязан его показать.
+    second = mod.break_glass_lines(root)
+    assert len(second) == 1
+    assert second[0].startswith("GATE BREAK-GLASS: session")
+
+
+# ---------------------------------------------------------------------
+# Сторож неизменности РЕАЛЬНОГО .claude/ -- все пробы этой секции только
+# на tmp-дереве. Снимок mtime всего дерева был бы флаки в этом окружении
+# (CLAUDE.md: "в дереве работают параллельные воркеры" -- другие живые
+# сессии тоже пишут в реальный .claude/dod_track/ конкурентно) -- вместо
+# этого ищем УНИКАЛЬНЫЙ (uuid4) маркер синтетической сессии теста: его
+# отсутствие в реальном дереве коллизионно невозможно спутать с чужой
+# конкурентной активностью, а его присутствие в tmp-дереве (позитивный
+# контроль) доказывает, что сам механизм поиска работает.
+# ---------------------------------------------------------------------
+
+
+def test_real_repo_claude_dir_untouched_by_session_context_battery(tmp_path):
+    import uuid
+
+    unique_session = f"f61-node-b-guard-{uuid.uuid4().hex}"
+    real_claude = TOOLS_DIR.parent / ".claude"
+
+    mod, script, is_live = _load("session_context")
+    root = _seed_sc_repo(tmp_path)
+    track_dir = root / ".claude" / "dod_track"
+    _write_bg_fact(track_dir, unique_session)
+    mod.main(root)
+    mod.break_glass_lines(root)
+
+    # Позитивный контроль (rule 6): маркер ДЕЙСТВИТЕЛЬНО найден там, куда
+    # тест сам писал (tmp-дерево) -- иначе отсутствие на боевой стороне
+    # ничего не доказывает (пустой результат непроверенного поиска).
+    tmp_hits = list(root.rglob(f"*{unique_session}*"))
+    assert tmp_hits, "sanity: маркер не найден даже в tmp-дереве -- проверка сломана"
+
+    name_hits = list(real_claude.rglob(f"*{unique_session}*")) if real_claude.exists() else []
+    ack_path = real_claude / "dod_track" / "break_glass_ack.json"
+    ack_hit = ack_path.exists() and unique_session in ack_path.read_text(
+        encoding="utf-8", errors="replace"
+    )
+    assert not name_hits and not ack_hit, (
+        f"боевой .claude/ репозитория несет след синтетической сессии теста "
+        f"-- root= где-то внутри съехал на репозиторный корень по умолчанию: "
+        f"name_hits={name_hits!r} ack_hit={ack_hit!r}"
+    )

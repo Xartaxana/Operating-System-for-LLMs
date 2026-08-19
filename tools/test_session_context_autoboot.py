@@ -188,7 +188,17 @@ def test_autoboot_survives_when_boot_lite_context_fills_max_lines(
     root = _seed_repo(tmp_path)
     filler = [f"FILLER {i}" for i in range(sc.MAX_LINES)]
     assert len(filler) == sc.MAX_LINES
-    monkeypatch.setattr(sc, "build_context_lines", lambda *a, **kw: filler)
+    # Двухмирная форма (посадка F-61 узла B): боевой путь main() идёт
+    # через приватную _build_context_lines_and_pending_ack, если она
+    # есть; публичная build_context_lines() — тестовый/standalone шов.
+    if hasattr(sc, "_build_context_lines_and_pending_ack"):
+        monkeypatch.setattr(
+            sc,
+            "_build_context_lines_and_pending_ack",
+            lambda *a, **kw: (filler, (tmp_path, [], None)),
+        )
+    else:
+        monkeypatch.setattr(sc, "build_context_lines", lambda *a, **kw: filler)
     fake = _FakeStdin(json.dumps({"source": "startup"}), tty=False)
     monkeypatch.setattr(sys, "stdin", fake)
     code = sc.main(root)
@@ -213,11 +223,11 @@ def test_main_fail_open_when_extract_source_raises(tmp_path, capsys, monkeypatch
     monkeypatch.setattr(sc, "extract_source", _boom)
     code = sc.main(root)
     assert code == 0
-    out = capsys.readouterr().out.strip().splitlines()
-    # main()'s single fail-open boundary still catches it -- exit 0, a
-    # warning line, and the boot-lite lines printed before the failure
-    # (already flushed to stdout by the time the exception fires) are
-    # not un-printed.
-    assert any(l.startswith("NOW:") for l in out)
+    captured = capsys.readouterr()
+    out = (captured.out + captured.err).strip().splitlines()
+    # Двухмирная форма (посадка F-61 узла B, решение Lead по фиксу 1):
+    # rc=0 и строка предупреждения; буферизация all-or-nothing
+    # отбрасывает частичный контекст по замыслу (Р6а), требование
+    # «any NOW:» снято.
     assert any(l.startswith("session-context warning:") for l in out)
     assert not any(l.startswith("AUTO-BOOT") for l in out)

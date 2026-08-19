@@ -33,12 +33,23 @@ Hard constraints inherited from t-027 (all still load-bearing, all
 still true here, and still true after the D-0076 addition -- see 2.4 in
 the spec this file was built from):
 - NEVER breaks session start: any exception anywhere below collapses to
-  ONE line, 'session-context warning: ...', and exit 0 (fail-open).
-  main() is the single try/except boundary -- see its docstring for why
-  a per-section try/except was deliberately NOT used. The new
-  open_dispatches()/open_dispatch_lines() functions follow the same
-  rule: no local try/except, failures propagate to main()'s one
-  boundary, exactly like quota_lines().
+  ONE sanitized line, 'session-context warning: <ascii-safe detail>',
+  and exit 0 (fail-open). main() is the single try/except boundary --
+  see its docstring for why a per-section try/except was deliberately
+  NOT used. The new open_dispatches()/open_dispatch_lines() functions
+  follow the same rule: no local try/except, failures propagate to
+  main()'s one boundary, exactly like quota_lines().
+  CHANNEL (F-61 node B, fixes 4/5, 2026-08-19 critic revision -- this
+  is the class "a guarantee announced totally but implemented partially"
+  the fix itself must not repeat): the warning is attempted on STDOUT
+  FIRST -- the same stream a healthy run would have used, so a build-
+  time failure (broken journal, unreadable quota config -- both
+  observed field incidents) stays VISIBLE to the session, not silently
+  redirected to a stream nobody reads. Only when that stdout write
+  itself raises (stdout genuinely dead, not merely the build) does the
+  SAME line fall back to stderr; if BOTH channels are dead the warning
+  is dropped silently and exit is still 0. See main()'s own docstring
+  for the exact nested-try shape.
 - Fast (<2s) and NO network at all (the NOW line's whole point is
   anti-F-29: read the system clock, not a narrated/inferred time).
 - ASCII-safe output: this environment's console is cp1251. Every line
@@ -50,7 +61,17 @@ the spec this file was built from):
   also externally-sourced (an agent field could in principle carry
   anything a session wrote into the journal) -- so each of those three
   values is routed through the same _ascii_sanitize helper before being
-  formatted into a line.
+  formatted into a line. F-61 node B (fix4, 2026-08-19): the fail-open
+  WARNING line itself is the same class of externally-sourced content
+  (str(e) can carry anything the failing code's exception message
+  happened to hold, including non-ASCII text or embedded newlines) and
+  used to be the ONE line in this file that bypassed _ascii_sanitize
+  entirely -- critic-measured failure mode: a cp1251 console plus a
+  non-cp1251-encodable message made the write itself raise, so the
+  diagnostic died silently instead of degrading to a replacement-
+  charactered but still-visible line. main() now routes str(e) through
+  _ascii_sanitize(text, 300) before formatting it into the warning, on
+  every channel attempt.
 - <=25 lines total (MAX_LINES) -- not raised by this change; the D-0076
   addition can only ever add up to 4 lines (3 OPEN DISPATCH + 1 summary)
   and build_context_lines() still truncates to MAX_LINES at the end.
@@ -590,9 +611,21 @@ def read_stdin_payload():
     if not data or not data.strip():
         return None
     try:
-        return json.loads(data)
+        payload = json.loads(data)
     except Exception:
         return None
+    # F-61/B4: guard a non-dict root HERE, at the read boundary (образец
+    # journal_echo.py:1885's `if not isinstance(payload, dict): return 0`)
+    # instead of trusting every caller to re-check -- valid JSON can be a
+    # list/str/number/bool/null just as easily as an object, and callers
+    # downstream (extract_model_id/extract_source) should never have to
+    # special-case a non-dict shape arriving from here. NOTE (spec/reality
+    # divergence, see report): the same acceptance key also names a
+    # "не-dict tool_input" guard, mirroring dod_track/critic_snapshot's
+    # PostToolUse payload shape -- this hook is SessionStart-only
+    # (.claude/settings.json) and its payload never carries a tool_input
+    # key at all, so there is no site to apply that half of the guard to.
+    return payload if isinstance(payload, dict) else None
 
 
 def extract_model_id(payload):
@@ -1690,25 +1723,45 @@ def _ack_break_glass_keys(root: Path, keys, now: datetime.datetime = None) -> No
             pass  # fail-open: printed line stands even if the ack-write fails
 
 
-def select_and_ack_break_glass_lines(
-    root: Path, lines_so_far: list, now: datetime.datetime = None
-) -> list:
-    """Point 1's fix, as its own testable unit: given the context lines
+def _select_pending_break_glass_lines(root: Path, lines_so_far: list) -> list:
+    """F-61/B1 fix: the SELECTION half of the old select_and_ack_break_
+    glass_lines(), with the ACK half removed. Given the context lines
     ALREADY built (before break-glass lines are appended), returns the
-    break-glass candidate lines that FIT within the module's MAX_LINES
-    budget, and acknowledges (sidecar-writes) ONLY the individual facts
-    behind those surviving lines -- a fact whose line does not fit is left
-    unacknowledged and will be offered again on the next call/SessionStart.
-    The trailing "... and N more" summary line (if present) is never
-    itself ack-able (see _break_glass_candidates) regardless of whether it
-    survives the cut."""
+    break-glass candidate {"key", "line"} dicts that FIT within the
+    module's MAX_LINES budget -- but writes NOTHING to the ack sidecar.
+    Acking is now the caller's responsibility, and per B1 it must happen
+    ONLY after the corresponding lines have actually, successfully, been
+    handed to the user (see main()) -- never at selection/construction
+    time, which is what let a fact get marked "shown" (FINDINGS F-61,
+    instance 3) even when the print that was supposed to show it never
+    ran (broken output channel) or half-ran (multi-line print aborted
+    partway). The trailing "... and N more" summary line (if present) is
+    never itself ack-able (see _break_glass_candidates) regardless of
+    whether it survives the cut."""
     candidates = _break_glass_candidates(root)
     if not candidates:
         return []
     space_left = MAX_LINES - len(lines_so_far)
     if space_left <= 0:
         return []
-    shown = candidates[:space_left]
+    return candidates[:space_left]
+
+
+def select_and_ack_break_glass_lines(
+    root: Path, lines_so_far: list, now: datetime.datetime = None
+) -> list:
+    """Immediate-ack convenience wrapper kept for standalone/ad-hoc use
+    (break_glass_lines() below; NOT used by build_context_lines()/main()
+    any more -- see _select_pending_break_glass_lines() and main()'s own
+    docstring for why the real SessionStart path defers the ack past the
+    point where output has actually, successfully, been produced).
+    Selects via _select_pending_break_glass_lines() and acks the survivors
+    immediately, synchronously, in the same call -- appropriate for a
+    caller that does not itself have a "did this actually reach the user"
+    boundary to defer to."""
+    shown = _select_pending_break_glass_lines(root, lines_so_far)
+    if not shown:
+        return []
     _ack_break_glass_keys(root, [c["key"] for c in shown], now)
     return [c["line"] for c in shown]
 
@@ -1718,10 +1771,8 @@ def break_glass_lines(root: Path = None, now: datetime.datetime = None) -> list:
     hoc scripts): equivalent to select_and_ack_break_glass_lines() called
     with an EMPTY preceding-lines list, i.e. the full MAX_LINES budget is
     available -- only _BREAK_GLASS_LINE_CAP (point 2) limits the result,
-    not the 25-line context budget. build_context_lines() itself does NOT
-    call this: it calls select_and_ack_break_glass_lines() directly with
-    the lines already built so far (see below), so a fact only gets acked
-    when its line actually survives the real 25-line cut (point 1)."""
+    not the 25-line context budget. build_context_lines()/main() do NOT
+    call this immediate-ack wrapper (see main()'s docstring)."""
     root = Path(root) if root else repo_root()
     return select_and_ack_break_glass_lines(root, [], now)
 
@@ -1737,7 +1788,49 @@ def build_context_lines(
     contract as model_tier()/model_line() themselves; tests isolating
     themselves from the real (soon-to-exist) delegation.config.yaml pass
     config_text=None explicitly through this seam, not by monkeypatching
-    mechanism_gate.CONFIG_PATH."""
+    mechanism_gate.CONFIG_PATH.
+
+    F-61/B1: this function no longer acks break-glass facts as a side
+    effect (that used to happen here, BEFORE any line was ever printed --
+    FINDINGS F-61 instance 3). It only SELECTS which break-glass lines fit
+    the MAX_LINES budget. Thin wrapper over
+    _build_context_lines_and_pending_ack() for callers that only want the
+    printable lines.
+
+    Fix2 (critic verdict on узел B, 2026-08-19): this wrapper is a
+    TEST/STANDALONE SEAM ONLY -- kept for callers that monkeypatch this
+    exact public name (tests, ad-hoc scripts) or that only want the
+    printable lines without the ack bookkeeping. The PRODUCTION path
+    (main()) does NOT go through this function -- it calls
+    _build_context_lines_and_pending_ack() directly, so it can also get
+    the pending-ack keys build_context_lines() itself discards. A test
+    that patches build_context_lines() to control main()'s output must
+    patch _build_context_lines_and_pending_ack() on THIS module instead
+    (or fall back to patching the public name when the private one is
+    absent, e.g. against the live pre-fix file) -- this asymmetry (a seam
+    that looks production-shaped but is not on main()'s actual call path)
+    is registered as a SIBLING_MAP axis by Lead at posadka."""
+    lines, _pending_ack = _build_context_lines_and_pending_ack(
+        root, now, stdin_payload, config_text
+    )
+    return lines
+
+
+def _build_context_lines_and_pending_ack(
+    root: Path = None,
+    now: datetime.datetime = None,
+    stdin_payload=None,
+    config_text=_LEAD_BINDING_CONFIG_UNSET,
+) -> "tuple[list, tuple]":
+    """Does the same assembly as build_context_lines(), but additionally
+    returns (ack_root, pending_keys, ack_now) -- the arguments main() must
+    later pass to _ack_break_glass_keys(), ONCE, and ONLY after the
+    returned `lines` have actually been printed successfully. pending_keys
+    already excludes the never-ack-able summary entry (key=None) and is
+    exactly the set of keys whose lines survived the lines[:MAX_LINES] cut
+    below -- constructively, from the same slice used to build `lines`,
+    never by trusting a line's position in isolation (B1: "позиционное
+    'перенёс ниже' без фильтра -- не принято")."""
     root = Path(root) if root else repo_root()
     now = now or datetime.datetime.now()
     gateway_root = root / "gateway"
@@ -1760,13 +1853,15 @@ def build_context_lines(
     lines.extend(quota_lines(gateway_root, now))
     lines.extend(boot_budget_lines(root))
     lines.extend(wiring_lines(root))
-    # t-325 attempt 2, point 1: pass the ALREADY-BUILT lines so this call can
-    # compute how much of the 25-line budget is actually left and ack ONLY
-    # the facts whose lines survive the [:MAX_LINES] cut below -- see
-    # select_and_ack_break_glass_lines()'s own docstring.
-    lines.extend(select_and_ack_break_glass_lines(root, lines, now))
+    # t-325 attempt 2, point 1 (kept): pass the ALREADY-BUILT lines so this
+    # call can compute how much of the 25-line budget is actually left.
+    # F-61/B1 (this batch): selection only, no ack here -- see
+    # _select_pending_break_glass_lines()'s own docstring.
+    bg_shown = _select_pending_break_glass_lines(root, lines)
+    lines.extend(c["line"] for c in bg_shown)
+    pending_keys = [c["key"] for c in bg_shown if c["key"]]
 
-    return lines[:MAX_LINES]
+    return lines[:MAX_LINES], (root, pending_keys, now)
 
 
 def main(root: Path = None) -> int:
@@ -1777,23 +1872,89 @@ def main(root: Path = None) -> int:
     a session trusting a half-populated 'reality' block is exactly the
     kind of silent gap this hook exists to prevent. So any error, from
     anywhere in reading stdin or build_context_lines(), discards
-    everything gathered so far and prints only the warning line."""
+    everything gathered so far and prints only the warning line.
+
+    F-61 remediation (node B), critic-revised contract (fit_with_fixes
+    verdict, fixes 1/3/4/5, 2026-08-19) -- four changes from the pre-fix
+    version:
+    B2/fix1 -- ALL lines (context + autoboot) are joined into ONE string
+    and handed to a SINGLE sys.stdout.write() + explicit flush(), both
+    still INSIDE this try -- not one print() per line. This is what makes
+    "discards everything gathered so far" literally true on a mid-build
+    failure: a build-time exception now ALWAYS discards the whole partial
+    context (never a partial print) -- but the warning line itself is
+    still visible (see fix5 below), so a build failure with a healthy
+    stdout is never silent, only context-less. B1 -- break-glass facts
+    are ack'd (sidecar-written) ONLY AFTER that single write+flush has
+    returned without raising -- never during
+    _build_context_lines_and_pending_ack() itself (see that function's and
+    _select_pending_break_glass_lines()'s docstrings). B3/fix5 -- the
+    fail-open warning is attempted on STDOUT FIRST (a session must see it
+    in the context stream it already reads, the same channel a healthy
+    build would have used -- historical incident: a broken journal/quota
+    read must still surface as a visible line, not vanish into a stream
+    nobody is looking at) -- ONLY when that stdout write itself raises
+    (a genuinely dead stdout, not merely a build-time exception) does the
+    SAME message fall back to stderr, under its own nested try; if BOTH
+    channels are down the warning is silently dropped and main() still
+    returns 0 -- a SessionStart hook must never itself crash the session,
+    on either channel. B4/fix4 -- the exception's str(e) is sanitized
+    through this module's own _ascii_sanitize(text, 300) (same helper
+    MODEL/OPEN DISPATCH/WIRING lines already use, see the module
+    docstring's ASCII-safe-output paragraph) before it is formatted into
+    the warning line, on EVERY channel attempt: an unsanitized non-ASCII
+    or multi-line message could silently die against a cp1251 console
+    (measured by critic) or blow the one-line/no-injected-newline
+    invariant this hook otherwise holds everywhere else."""
     try:
         stdin_payload = read_stdin_payload()
-        for line in build_context_lines(root, stdin_payload=stdin_payload):
-            print(line)
-        # AUTO-BOOT (D-0103): printed as a SEPARATE step, deliberately
+        context_lines, pending_ack = _build_context_lines_and_pending_ack(
+            root, stdin_payload=stdin_payload
+        )
+        # AUTO-BOOT (D-0103): computed as a separate block, deliberately
         # OUTSIDE build_context_lines()'s own MAX_LINES (25) truncation --
         # the directive must always survive regardless of how full the
-        # boot-lite context already is. Still inside this one try/except:
-        # a failure building the autoboot block collapses into the same
-        # fail-open warning path as everything else in this function,
-        # never breaks session start (the boot-lite lines above have
-        # already been printed by this point and are not lost).
-        for line in autoboot_lines(extract_source(stdin_payload)):
-            print(line)
+        # boot-lite context already is -- but still folded into the SAME
+        # single write below (B2), not a second print loop.
+        autoboot = autoboot_lines(extract_source(stdin_payload))
+        all_lines = context_lines + autoboot
+        output = "\n".join(all_lines)
+        if all_lines:
+            output += "\n"
+        sys.stdout.write(output)
+        sys.stdout.flush()
+        # B1: ack ONLY now, after the single write+flush above has
+        # actually succeeded -- a failure anywhere above raises before
+        # this line is ever reached, so no break-glass key is ever marked
+        # acknowledged for content the user never actually saw.
+        ack_root, pending_keys, ack_now = pending_ack
+        _ack_break_glass_keys(ack_root, pending_keys, ack_now)
     except Exception as e:  # fail-open: this hook must never break session start
-        print(f"session-context warning: {e}")
+        # fix4: sanitize BEFORE formatting -- applies to whichever channel
+        # below actually ends up carrying the line, not just one of them.
+        safe_detail = _ascii_sanitize(str(e), 300)
+        warning = f"session-context warning: {safe_detail}\n"
+        try:
+            # fix5: stdout FIRST -- a healthy stdout (the common case: a
+            # broken journal/quota/wiring read, not a dead channel) must
+            # show the warning in the same stream the session already
+            # reads, exactly like the pre-B2 behavior did. This write is
+            # a FRESH attempt, independent of the one above -- reaching
+            # here means that one either never ran or raised before
+            # completing, so there is no partial content underneath it.
+            sys.stdout.write(warning)
+            sys.stdout.flush()
+        except Exception:
+            # stdout is genuinely dead (not just the build) -- fall back
+            # to stderr, same sanitized message, own try: if stderr is
+            # ALSO unusable, swallow that too and still return 0 silently
+            # rather than let a diagnostic-printing attempt itself crash
+            # session start.
+            try:
+                sys.stderr.write(warning)
+                sys.stderr.flush()
+            except Exception:
+                pass
     return 0
 
 
