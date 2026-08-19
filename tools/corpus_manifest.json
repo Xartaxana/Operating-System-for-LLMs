@@ -1,0 +1,89 @@
+{
+  "thresholds_version": 0,
+  "artifacts": [
+    {
+      "path": "docs/DECISIONS_FULL.md",
+      "unit": "решение",
+      "record_re": "^## D-\\d{4}\\b",
+      "owner": "corpus",
+      "bpr_max": null
+    },
+    {
+      "path": "docs/FINDINGS.md",
+      "unit": "находка",
+      "record_re": "^## F-\\d+\\b",
+      "owner": "corpus",
+      "bpr_max": null
+    },
+    {
+      "path": "PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md",
+      "unit": "чек",
+      "record_re": "^\\d+\\. \\*\\*",
+      "owner": "corpus",
+      "bpr_max": null
+    },
+    {
+      "path": "docs/POLICY_FULL.md",
+      "unit": "секция",
+      "record_re": "^## ",
+      "owner": "corpus",
+      "bpr_max": null
+    },
+    {
+      "path": "docs/SIBLING_MAP.md",
+      "unit": "ось/класс",
+      "record_re": "^(## Ось \\d+|### Класс:)",
+      "owner": "corpus",
+      "bpr_max": null
+    },
+    {
+      "path": "docs/RULE_COVERAGE.md",
+      "unit": "строка реестра",
+      "record_re": "^\\| + exclude разделители/шапки",
+      "owner": "corpus",
+      "bpr_max": null
+    },
+    {
+      "path": "DECISIONS.md",
+      "unit": "строка индекса",
+      "record_re": "^- D-\\d{4}",
+      "owner": "corpus",
+      "bpr_max": null
+    },
+    {
+      "path": "docs/OPERATIONAL_NOTES.md",
+      "unit": "секция",
+      "record_re": "^## §\\d+\\.",
+      "owner": "corpus",
+      "bpr_max": null
+    },
+    {
+      "path": "docs/RETRO_PATTERNS.md",
+      "unit": "секция",
+      "record_re": "^## ",
+      "owner": "corpus",
+      "bpr_max": null
+    },
+    {
+      "path": "docs/DECISIONS_ARCHIVE.md",
+      "unit": "решение",
+      "record_re": "^## D-\\d{4}\\b",
+      "owner": "corpus-archive",
+      "bpr_max": null
+    },
+    {
+      "path": "docs/FINDINGS_ARCHIVE.md",
+      "unit": "находка",
+      "record_re": "^## F-\\d+\\b",
+      "owner": "corpus-archive",
+      "bpr_max": null
+    },
+    {
+      "path": "CLAUDE.md",
+      "unit": "правило",
+      "record_re": "^R\\d+[a-z]?\\.",
+      "owner": "boot-mirror",
+      "bpr_max": null
+    }
+  ]
+}
