@@ -7,8 +7,7 @@ routing policy and command hygiene (D-0041). Norms live HERE;
 rationale and history live in docs/POLICY_FULL.md and
 docs/DECISIONS_FULL.md. Permanent behaviour (D-0011): never invent
 project state — retrieve it from the repository; the repository
-overrides chat. This repo is the reference (dogfooding) deployment;
-the pilot is D:\AO3_tests.
+overrides chat. This repo is the reference (dogfooding) deployment.
 
 Size budget: this file is capped at 35815 bytes (breach 36115); an
 amendment to a rule with a registry block is a ROW in that registry,
@@ -33,10 +32,8 @@ binding is a deployment property; it LIVES in delegation.config.yaml
 journal_validator, session_context) resolve it from there, defaulting
 to fable when the file is absent. A RESERVE tier sits ABOVE the Lead
 binding (`roles.reserve`) and is summoned only by the operator's word
-for the hardest cases (D-0099). Grades intern/junior/middle/senior
-(API contour) are model price/capability vocabulary for accounting and
-DELEGATION_TABLE.md, never used in rules (bridge: ARCHITECTURE.md
-"Two Vocabularies").
+for the hardest cases (D-0099). Grades (API contour) are accounting
+vocabulary, never rule words (ARCHITECTURE.md "Two Vocabularies").
 
 ## Routing rules
 
@@ -308,8 +305,7 @@ analysis). Over budget = the note carries what belongs elsewhere —
 a load-bearing fact goes to a typed field, an analysis to its own
 carrier (task DAG, commit message, report), the note keeps the
 pointer. Machine layer: the NOTES LEN warn of journal_echo at write
-time (never a block; silent in the hook's fallback base, which
-prints its own marker). Event SHAPES — mandatory typed fields on top of the base
+time (warn, never a block). Event SHAPES — mandatory typed fields on top of the base
 (D-0053; load-bearing facts as fields, notes is surplus):
 
 | event | adds on top of base |
@@ -323,18 +319,16 @@ prints its own marker). Event SHAPES — mandatory typed fields on top of the ba
 
 task_id issuance: re-read the journal tail immediately before
 writing the delegated — max(t-NNN)+1; never reuse a remembered id.
-A repeat `delegated` on a CLOSED task is forbidden (D-0060). The past is never rewritten: a later-noticed collision or
+The past is never rewritten: a later-noticed collision or
 wrong ts gets a note in the NEXT event's notes; a missed event is
 fixed by a retro pair NOW — current ts, "retroactive" mark, actual
 bounds in notes (D-0089); inserting lines into the past is
 forbidden. CLOSING an open dispatch: bare token `closes:t-NNN`
 (several allowed) in the notes of any LATER event — the SessionStart
 hook reads ONLY this token; prose closures are invisible to it; never
-write the literal form with a live id in prose. The validator
-tools/journal_validator.py enforces the format and the acceptance
-matrix (D-0069) at TWO points: the pre-commit gate, and the WRITE
-moment — the journal_echo PostToolUse hook warns immediately on a
-defective appended line; its message explains the violation.
+write the literal form with a live id in prose. Enforced at TWO
+points: the pre-commit validator and the journal_echo write-time warn
+(tools/journal_validator.py).
 
 ```mermaid
 stateDiagram-v2
@@ -428,12 +422,14 @@ Triggers: refusal of the Lead-binding model (safety/dual-use,
 subscription limit, unavailability) OR the operator explicitly
 switching to a lower tier.
 
-```mermaid
-stateDiagram-v2
-    Lead(binding) --> Degraded: trigger → lead_degraded (cause, scope)\nBEFORE the first Lead action
-    Degraded --> Degraded: coordination and authorized tasks — yes;\ntable statuses, gates — no; new DECISIONS → queue;\nacceptance per the Role≠tier matrix
-    Degraded --> Lead(binding): default at task/session boundary → lead_restored\n+ acceptance of the window (journal + diffs of ALL repos\ntouched by the session, D-0044) in the event's notes;\nan empty window is noted explicitly
-```
+While degraded (the window is opened by `lead_degraded` naming cause
+and scope): coordination and authorized tasks — yes; table statuses
+and gates — no; new DECISIONS → the Lead queue; acceptance per the
+Role ≠ tier matrix.
+Return is the DEFAULT at the task/session boundary → `lead_restored`
++ acceptance of the window (journal + diffs of ALL repos touched by
+the session, D-0044) in the event's notes; an empty window is noted
+explicitly.
 
 The tier is verified at BOTH ends (D-0056, F-21) — either alone is
 insufficient: (а) ENTRY — before the FIRST Lead action of a session
@@ -445,7 +441,7 @@ the binding (`roles.reserve`) is a full Lead with margin — no window
 needed, its use is the operator's word (D-0099). (б) EXIT — a visible ascent is by
 itself PROOF of a window, regardless of the journal: in the same
 move, a retroactive `lead_degraded` (mark + actual bounds), window
-acceptance per the diagram, `lead_restored`. (в) EXTERNAL NET —
+acceptance as stated above, `lead_restored`. (в) EXTERNAL NET —
 calibration check 5: actual Lead-session models from transcripts vs
 window coverage by event pairs; catches both in-session points
 failing, incl. a session that died degraded. A degradation crossing
@@ -485,10 +481,9 @@ all sessions and subagents of this repo:
    structured registry (escalations, decisions, tasks, ledgers) is
    valid only after reading THROUGH that entry's status line, or
    grepping the status FIELD itself; the presence of the entry or of
-   its header inside a read window is NOT a check. Append-only
-   registries put the verdict at the END of a multi-section entry, so
-   a truncated window systematically shows the problem without its
-   resolution (F-55).
+   its header inside a read window is NOT a check. (F-55: the verdict
+   sits at the END of an append-only entry — a truncated window shows
+   the problem without its resolution).
 7. **Temporary corruption is rolled back by a BYTE COPY, never by
    `git checkout`** — that idiom wipes ANOTHER session's uncommitted
    changes to the file along with the corruption. For any

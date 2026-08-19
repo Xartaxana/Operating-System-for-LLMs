@@ -96,14 +96,16 @@ CLAUDE.md сознательно НЕ трогают core-текст (а)-(г): 
 
 | п.7 | when | duty | src |
 |---|---|---|---|
-| д | discarding OWN uncommitted work in a path inside own declared owns, edited in the SAME session | legal; porcelain checked IMMEDIATELY before the rollback (start-of-move baseline ≠ check); witness = owns declaration + diff BEFORE discard + EMPTY diff after | F-58 |
-| е | owns undeclared, path outside owns, or edits not this session's | (б) unchanged: porcelain shows the FACT, not the AUTHOR — non-empty status outside own owns = a legitimate parallel writer (R4.d), rollback forbidden | F-58 |
+| д | discarding OWN uncommitted work in a path inside own declared owns, edited in the SAME session | legal; porcelain checked IMMEDIATELY before the rollback (baseline ≠ check); witness = owns declaration + diff BEFORE discard + EMPTY diff after | F-58 |
+| е | owns undeclared, path outside owns, or edits not this session's | (б) unchanged: porcelain shows FACT, not AUTHOR — non-empty status outside own owns = a legitimate parallel writer (R4.d), rollback forbidden | F-58 |
 ```
 
 Байт-дельта (точный подсчёт, UTF-8, включая ведущий перевод строки
-разделителя и оба конца строк добавляемого блока): **557 байт**
-(РЕВИЗИЯ 3, сжатие Lead 08-19 по развилке Р10 спеки W2c — история:
-438 Б рев.1 → 872 Б рев.2 после фиксов критика → 557 Б рев.3;
+разделителя и оба конца строк добавляемого блока): **535 байт**
+(РЕВИЗИЯ 4, дожим Lead 08-19 после замера W2c-1: нетто диеты 517 Б
+при пороге рев.3 526 Б — недобор 9 Б закрыт сжатием блока, не
+добором диеты сверх P1; история: 438 Б рев.1 → 872 Б рев.2 после
+фиксов критика → 557 Б рев.3 → 535 Б рев.4;
 сжатие формой «две строки (д)/(е)» — строка RULE_COVERAGE «регистр
 (д/е)» резолвится буквально; семантический чек-лист критика
 сохранён полностью: тайминг IMMEDIATELY-before-rollback, зеркало

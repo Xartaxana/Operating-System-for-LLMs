@@ -596,8 +596,9 @@ API-эквивалента окна 14.06-14.07 при 30.4% токенов); к
    же доказывает вердикт чистой функции или порча КОПИИ дерева
    (прецедент того же дня: проба пина судьи гонялась на испорченных
    копиях, боевой файл не тронут). Детектор — чек 25(в) калибровки.
-   Твины: critic.md правило 14 (за экзаменом №3, PASS 08-05),
-   builder.md п.10.
+   Твины: critic.md правило «БЕЗОПАСНОСТЬ СОБСТВЕННОЙ ПРОБЫ» (за
+   экзаменом №3, PASS 08-05; номерная форма снята 08-19 — в файле
+   два пункта «14», ссылка по фразе), builder.md п.10.
    [Ретро-примечание синхронизации 2026-08-05, Fable-ревью первой
    Opus-Lead сессии: п.7 вошёл в ядро коммитом aa4bbd2, зеркало этой
    секции догнало ядро ОТДЕЛЬНЫМ коммитом того же дня — осевой блок
@@ -958,6 +959,72 @@ pytest-мишени может не существовать), но конкре
   привязки рядом с delegation.config.yaml. Кандидат на снятие по тому
   же классу, но это ПЕРЕСТРОЙКА таблицы, а не сжатие истории;
   за пределами слова оператора этого хода.
+
+### Диета W2c-1 2026-08-19 (builder t-516)
+
+Спека: docs/tasks/2026-08-19_w2c-diet-spec.md §4.2; ключ-карта:
+docs/tasks/2026-08-19_w2c-keys.md §1. Рамка та же, что 08-16:
+режется дублирование/протухшее, нормы не тронуты. Ниже — ДОСЛОВНО всё, что снято с не-правило-секций ядра
+CLAUDE.md этим ходом; каждый кусок подписан срезом, из которого снят.
+
+- **C1** (шапка, хвост про пилота): `; the pilot is D:\AO3_tests` —
+  снято БЕЗ указателя-замены (нетто-положительный срез, файл растёт
+  на разницу пунктуации): `deploys:` в delegation.config.yaml уже
+  единственный машинный носитель факта пилота (утверждение «README
+  называет пилота прозой» из спеки опровергнуто критиком t-516 —
+  README пилота не называет; срез верен и без него).
+- **C2** (ярусы, хвост про grades): `Grades intern/junior/middle/senior
+  (API contour) are model price/capability vocabulary for accounting
+  and DELEGATION_TABLE.md, never used in rules (bridge:
+  ARCHITECTURE.md "Two Vocabularies").` → сжато на месте в `Grades
+  (API contour) are accounting vocabulary, never rule words
+  (ARCHITECTURE.md "Two Vocabularies").` Норма о ярусах/имени модели
+  стоит предложением выше и не тронута.
+- **C5** (Journal, абзац о валидаторе): `The validator
+  tools/journal_validator.py enforces the format and the acceptance
+  matrix (D-0069) at TWO points: the pre-commit gate, and the WRITE
+  moment — the journal_echo PostToolUse hook warns immediately on a
+  defective appended line; its message explains the violation.` →
+  сжато в `Enforced at TWO points: the pre-commit validator and the
+  journal_echo write-time warn (tools/journal_validator.py).` Сторож
+  назван, обязанность прогона не пересказывается.
+- **C6** (Lead degradation, мермейд петли Degraded) — снят целиком,
+  заменён двумя строками прозы на месте (петля Degraded переписана,
+  не просто удалена). ДОСЛОВНАЯ форма снятого блока (история):
+
+  ```mermaid
+  stateDiagram-v2
+      Lead(binding) --> Degraded: trigger → lead_degraded (cause, scope)\nBEFORE the first Lead action
+      Degraded --> Degraded: coordination and authorized tasks — yes;\ntable statuses, gates — no; new DECISIONS → queue;\nacceptance per the Role≠tier matrix
+      Degraded --> Lead(binding): default at task/session boundary → lead_restored\n+ acceptance of the window (journal + diffs of ALL repos\ntouched by the session, D-0044) in the event's notes;\nan empty window is noted explicitly
+  ```
+
+- **C7** (командная гигиена п.6, хвост про F-55): `Append-only
+  registries put the verdict at the END of a multi-section entry, so
+  a truncated window systematically shows the problem without its
+  resolution (F-55).` → сжато в `(F-55: the verdict sits at the END
+  of an append-only entry — a truncated window shows the problem
+  without its resolution).` Полный хвост F-55 уже дословно живёт в
+  п.6 этого файла (см. выше, «Append-only реестры кладут вердикт в
+  КОНЕЦ…») — второй адрес не заводился.
+- **C10** (Р15A досылки designer t-512b): `A repeat delegated on a
+  CLOSED task is forbidden (D-0060).` снято целиком — дубль мермейда
+  жизненного цикла Journal (`reopen forbidden (D-0060)` там остаётся
+  дословно, второй адрес не нужен).
+- **C13** (Р15A, скобка journal_echo fallback): `(never a block;
+  silent in the hook's fallback base, which prints its own marker)` →
+  сжато в `(warn, never a block)`.
+
+**К4, замер builder t-516 (PYTHONUTF8=1, скрипт по байтам файла).**
+Нетто по срезам: C1=27, C2=90, C5=159, C6=81, C7=40, C10=61, C13=59 Б
+(сумма сходится с прямым замером файла до/после). ИТОГ нетто 517 Б;
+размер CLAUDE.md после узла 35 567 Б. Против порога РЕВИЗИИ 3 спеки
+(≥526 Б) это был недобор 9 Б — исполнитель ЧЕСТНО встал по P1 (добор
+сверх плана не производился, рамка Архитектора ограничивает срезы
+списком). Закрыто Lead-опцией, предусмотренной той же спекой:
+реестровый блок узла C дожат 557 → 535 Б (ревизия 4 пакета), порог
+стал 504 Б ≤ 517 — К4 ВЗЯТ; развилка Р2 Архитектору НЕ понадобилась.
+После посадки узла C: 35 567 + 535 = 36 102 ≤ BREACH 36 115.
 
 ## Role ≠ tier: разное лечение частям секции (2026-08-16, слово оператора)
 

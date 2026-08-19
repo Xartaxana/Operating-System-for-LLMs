@@ -1,0 +1,10 @@
+# Форма переносов пришпилена для файлов с БАЙТОВЫМ бюджетом,
+# меряемым по диску (tools/session_context.py stat().st_size;
+# tools/calibration_prepass.py «к чтению»): git с core.autocrlf=true
+# переписывает LF→CRLF при stash/checkout, и тот же контент меняет
+# размер (+498 Б на CLAUDE.md — замер критика t-516). Класс
+# «бюджет меряется формой на диске» — реестр режимов отказа
+# docs/SIBLING_MAP.md, заведён 2026-08-19.
+CLAUDE.md text eol=lf
+PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md text eol=lf
+PROCESS/checks/*.md text eol=lf
