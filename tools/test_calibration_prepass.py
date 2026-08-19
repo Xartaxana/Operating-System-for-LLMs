@@ -1336,15 +1336,15 @@ def test_real_protocol_has_pilot_headers():
         assert expected in ids, f"пилотная шапка {expected} не найдена"
 
 
-def test_real_protocol_all_34_checks_headered():
+def test_real_protocol_all_35_checks_headered():
     # M2: все чеки (не только пилотная партия M1) несут ВЕРХНЮЮ
     # шапку -- require_all=True не находит ни одного чека без неё.
-    # Мир ПОСЛЕ посадки чека 34 (Phase 5 W3, Lead 2026-08-19): живой
-    # протокол несёт чеки 0..34 сплошно.
+    # Мир ПОСЛЕ посадки чека 35 (кросс-пункт среза sibling-map AO3,
+    # 2026-08-19): живой протокол несёт чеки 0..35 сплошно.
     result = prep.run_check_form(prep.DEFAULT_PROTOCOL, prep.DEFAULT_RULE_COVERAGE, True)
     assert result.defects == [], "\n".join(result.defects)
     top_numbers = {h.check_number for h in result.headers if h.subitem_letter is None}
-    assert top_numbers == set(range(35)), sorted(set(range(35)) ^ top_numbers)
+    assert top_numbers == set(range(36)), sorted(set(range(36)) ^ top_numbers)
 
 
 def test_real_protocol_window_run_exit0():
