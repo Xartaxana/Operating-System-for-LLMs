@@ -1322,15 +1322,27 @@ def test_predicate_never_hides_material_journal_event_superset_of_field():
 # ---------------------------------------------------------------------------
 
 def test_real_protocol_check_form_clean():
-    result = prep.run_check_form(prep.DEFAULT_PROTOCOL, prep.DEFAULT_RULE_COVERAGE, False)
+    # A8.1: M2 переключает require_all на каноне -- после сплошной
+    # раскладки шапок (34/34) канон обязан оставаться зелёным И ловить
+    # регресс (чек без шапки роняет канон), а не только форму полей.
+    result = prep.run_check_form(prep.DEFAULT_PROTOCOL, prep.DEFAULT_RULE_COVERAGE, True)
     assert result.defects == [], "\n".join(result.defects)
 
 
 def test_real_protocol_has_pilot_headers():
-    result = prep.run_check_form(prep.DEFAULT_PROTOCOL, prep.DEFAULT_RULE_COVERAGE, False)
+    result = prep.run_check_form(prep.DEFAULT_PROTOCOL, prep.DEFAULT_RULE_COVERAGE, True)
     ids = {h.id_str for h in result.headers}
     for expected in ("0", "3", "13", "26", "33", "12(а)", "12(б)"):
         assert expected in ids, f"пилотная шапка {expected} не найдена"
+
+
+def test_real_protocol_all_34_checks_headered():
+    # M2: все 34 чека (не только пилотная партия M1) несут ВЕРХНЮЮ
+    # шапку -- require_all=True не находит ни одного чека без неё.
+    result = prep.run_check_form(prep.DEFAULT_PROTOCOL, prep.DEFAULT_RULE_COVERAGE, True)
+    assert result.defects == [], "\n".join(result.defects)
+    top_numbers = {h.check_number for h in result.headers if h.subitem_letter is None}
+    assert top_numbers == set(range(34)), sorted(set(range(34)) - top_numbers)
 
 
 def test_real_protocol_window_run_exit0():
