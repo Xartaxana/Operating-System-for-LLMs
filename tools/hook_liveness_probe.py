@@ -70,10 +70,31 @@ mtime_ns, sha256) every real state path a gate could have touched had
 isolation failed -- .claude/critic_snapshot.json, .claude/dod_track/
 (recursively), logs/owns_registry.jsonl, logs/.search-ledger/
 (recursively), logs/routing-log.jsonl, logs/posttooluse-schema-sample.json,
-all under THIS repo's own root. Any difference -> LIVE-STATE-TOUCHED,
-overall run is non-OK regardless of individual case verdicts -- a
-passing case that quietly touched the live repo is a WORSE finding
-than a case that plainly failed.
+all under THIS repo's own root.
+
+ATTRIBUTION (Р6(а), 2026-08-19, t-522, docs/tasks/2026-08-19_q503-
+remediation-spec.md node N2): a difference is no longer automatically
+LIVE-STATE-TOUCHED. It is split by whether it carries this probe's own
+"liveness-probe-" marker -- the prefix this probe's isolated cases
+always use for their session_id values (see "ISOLATION" above) -- in
+EITHER the changed path's name OR the changed file's current content
+(read fresh off disk for exactly the diffed paths, not from the stored
+fingerprint hash). A marker match means the probe's OWN isolation
+failed and it wrote into a live path -- still reported as
+LIVE-STATE-TOUCHED and still fails the run (chek 26(д)'s carve-out
+never applies to a genuine leak: PostToolUse hooks belonging to this
+session_id family are never legitimate ambient noise). No marker match
+means some OTHER activity changed that path during the run -- most
+often the enclosing Claude Code session's own concurrent hooks writing
+to the very same paths this probe fingerprints (the documented benign
+flake, PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md chek 26(д)) -- reported
+as the separate, non-fatal LIVE-STATE-AMBIENT finding instead. A path
+whose content cannot be read at all when checked (e.g. the file was
+deleted between the two snapshots, or a permission error) cannot be
+positively cleared, so it stays on the LIVE-STATE-TOUCHED (fail) side
+-- the conservative default, never silently downgraded. A passing case
+whose OWN isolation quietly leaked into the live repo is still a WORSE
+finding than a case that plainly failed.
 
 VERDICTS (per case): OK, DEAD (a trail was expected -- neither output
 nor artifact appeared), MISMATCH (output/artifact appeared but the
@@ -88,11 +109,15 @@ accepted decision Р4а), STALE-CASE (a case names a script no hook
 command in .claude/settings.json references), SETTINGS-UNREADABLE
 (.claude/settings.json missing/unparsable -- cases still run, overall
 result is non-OK), NO-CASES (the CASES table itself is empty -- a
-defect of this probe, not of any gate).
+defect of this probe, not of any gate). LIVE-STATE-AMBIENT (Р6(а),
+above): an unmarked live-state diff -- informational, does NOT affect
+the exit code, distinct from the still-fatal LIVE-STATE-TOUCHED.
 
-EXIT CODE (accepted decision Р5б): 0 iff every case is OK AND
-composition checks are clean AND settings.json was readable AND no
-live-state drift was detected; 1 otherwise.
+EXIT CODE (accepted decision Р5б, amended by Р6(а)): 0 iff every case
+is OK AND composition checks are clean AND settings.json was readable
+AND no MARKER-ATTRIBUTED live-state leak (LIVE-STATE-TOUCHED) was
+detected; 1 otherwise. An unattributed LIVE-STATE-AMBIENT finding
+alone never flips this to 1.
 
 LIMITS (rule 6a CLAUDE.md -- boundary tests live in
 tools/test_hook_liveness_probe.py): PER_CASE_TIMEOUT_SECONDS=20 is a
@@ -131,10 +156,14 @@ MISSING = "MISSING"
 CASE_MISSING = "CASE-MISSING"
 STALE_CASE = "STALE-CASE"
 LIVE_STATE_TOUCHED = "LIVE-STATE-TOUCHED"
+LIVE_STATE_AMBIENT = "LIVE-STATE-AMBIENT"
 NO_CASES = "NO-CASES"
 SETTINGS_UNREADABLE = "SETTINGS-UNREADABLE"
 
 _TRACEBACK_MARKER = "Traceback (most recent call last):"
+
+# --- live-state diff attribution (Р6(а)) ----------------------------------
+LIVENESS_MARKER = "liveness-probe-"
 
 # --- pre/post live-state fingerprint (Р8а) --------------------------------
 _LIVE_STATE_TARGETS = (
@@ -188,6 +217,48 @@ def diff_live_state(before: dict, after: dict) -> list:
     disappeared between the two snapshots."""
     keys = set(before) | set(after)
     return sorted(k for k in keys if before.get(k) != after.get(k))
+
+
+def _content_contains_marker(path: str):
+    """True/False when *path* is readable right now and its content
+    does/doesn't contain LIVENESS_MARKER; None when it cannot be read at
+    all (deleted since the "after" snapshot, a permission error, or any
+    other OSError) -- content attribution is then UNDECIDABLE. Reads
+    fresh off disk (the stored fingerprint only keeps a hash, not the
+    bytes) -- called only for the small set of PATHS ALREADY KNOWN to
+    differ (diff_live_state's output), never for the whole snapshot."""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return None
+    return LIVENESS_MARKER.encode("ascii") in data
+
+
+def attribute_live_state_diff(diff: list) -> "tuple[list, list]":
+    """Splits *diff* (diff_live_state()'s output) into (leaked, ambient)
+    per Р6(а)'s marker rule -- see module docstring "ATTRIBUTION". A
+    path is attributed to a genuine LEAK (this probe's own isolation
+    failing) when LIVENESS_MARKER appears either in the path's own name
+    or in the file's CURRENT content; everything else is AMBIENT
+    (informational, non-fatal). A path that cannot be read at all right
+    now (deleted, permission error) is UNDECIDABLE and stays on the
+    leak side -- the conservative default: content attribution can only
+    ever CLEAR a diff to ambient, never silently drop it."""
+    leaked = []
+    ambient = []
+    for path in diff:
+        if LIVENESS_MARKER in path:
+            leaked.append(path)
+            continue
+        has_marker = _content_contains_marker(path)
+        if has_marker is False:
+            ambient.append(path)
+        else:
+            # True (marker found in content) or None (unreadable/
+            # undecidable) both stay on the fail side.
+            leaked.append(path)
+    return leaked, ambient
 
 
 # --- output excerpt truncation (rule 6a boundary) -------------------------
@@ -1074,7 +1145,8 @@ def run_all() -> dict:
             "no_cases": True,
             "settings_unreadable": False,
             "case_missing": [], "stale_case": [], "info_lines": [],
-            "results": [], "live_state_diff": [], "import_findings": IMPORT_FINDINGS,
+            "results": [], "live_state_diff": [], "live_state_leaked": [],
+            "live_state_ambient": [], "import_findings": IMPORT_FINDINGS,
         }
 
     settings_unreadable, case_missing, stale_case, info_lines = check_composition()
@@ -1083,6 +1155,7 @@ def run_all() -> dict:
     results = [run_case(c) for c in CASES]
     after = snapshot_live_state()
     live_state_diff = diff_live_state(before, after)
+    live_state_leaked, live_state_ambient = attribute_live_state_diff(live_state_diff)
 
     return {
         "no_cases": False,
@@ -1092,6 +1165,8 @@ def run_all() -> dict:
         "info_lines": info_lines,
         "results": results,
         "live_state_diff": live_state_diff,
+        "live_state_leaked": live_state_leaked,
+        "live_state_ambient": live_state_ambient,
         "import_findings": IMPORT_FINDINGS,
     }
 
@@ -1103,7 +1178,7 @@ def overall_ok(report: dict) -> bool:
         return False
     if report["case_missing"] or report["stale_case"]:
         return False
-    if report["live_state_diff"]:
+    if report["live_state_leaked"]:
         return False
     return all(r["verdict"] == OK for r in report["results"])
 
@@ -1136,8 +1211,10 @@ def format_human_report(report: dict) -> str:
     for r in report["results"]:
         lines.append(f"[{r['verdict']}] {r['name']} ({r['script']}) -- {r['detail']}")
 
-    for path in report["live_state_diff"]:
+    for path in report["live_state_leaked"]:
         lines.append(f"LIVE-STATE-TOUCHED: {path}")
+    for path in report["live_state_ambient"]:
+        lines.append(f"LIVE-STATE-AMBIENT: {path}")
 
     total = len(report["results"])
     ok_count = sum(1 for r in report["results"] if r["verdict"] == OK)

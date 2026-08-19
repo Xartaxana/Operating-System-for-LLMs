@@ -1015,19 +1015,40 @@ def _try_hookspath_autofix(root: Path, reason: str) -> str:
     path, LOCAL repo config only -- never --global/--system, per the
     spec's explicit constraint) and recheck.
 
+    Р5(в) ORDER (2026-08-19, t-522, docs/tasks/2026-08-19_q503-
+    remediation-spec.md node N2): the required .githooks/* files are
+    checked for presence FIRST, BEFORE the `git config` write is even
+    attempted -- not after the write, as an earlier version of this
+    function did. Writing hooksPath at a directory whose hook files
+    don't exist would "succeed" as a git operation while leaving the
+    wiring exactly as broken as before, AND it would leave behind a
+    config value nothing here can attribute or roll back afterward (a
+    later run seeing hooksPath already set to .githooks has no way to
+    tell "a human configured this deliberately" from "the autofix wrote
+    it while the required files were still missing"). Checking first
+    means that ambiguous, unrecoverable state is never CONSTRUCTED in
+    the first place: on a missing-files finding, the `git config` write
+    call is never made at all, and hooksPath is left exactly as this
+    run found it (unset) -- the caller's own unconditional per-file
+    "hook file missing" warning loop (git_hooks_channel, independent of
+    this function) remains the safety net that keeps reporting the gap
+    to the operator on every subsequent run, including the case where
+    hooksPath was ALREADY correctly configured by someone else earlier
+    and the files were deleted afterward.
+
     Returns the AUTOFIX fact (_AUTOFIX_FACT_PREFIX + "core.hooksPath set
-    to .githooks") on a confirmed success: the `git config` write itself
-    exited 0 AND both required hook files are actually present on disk
-    under .githooks/ afterward (setting hooksPath to a directory whose
-    hook files don't exist would "succeed" as a git operation while
-    leaving the wiring exactly as broken as before). Any other outcome
-    returns the ORIGINAL 'core.hooksPath not set' warning fact with an
-    "; autofix failed: <reason>" suffix -- covering the three failure
-    causes named in the spec: git itself unavailable/erroring (the write
-    call raises), the config being unwritable e.g. read-only (the write
-    call exits non-zero), and .githooks's required files missing even
-    after a successful config write. Never raises -- same fail-open
-    contract as the rest of this channel.
+    to .githooks") on a confirmed success: both required hook files were
+    already present on disk under .githooks/ BEFORE the write was even
+    attempted, AND the `git config` write itself then exited 0. Any
+    other outcome returns the ORIGINAL 'core.hooksPath not set' warning
+    fact with a suffix -- covering the three failure causes named in
+    the spec: the required hook files missing (caught BEFORE any write
+    is attempted -- suffix "; autofix skipped: ...", nothing was even
+    tried), git itself unavailable/erroring (the write call raises --
+    suffix "; autofix failed: ..."), and the config being unwritable
+    e.g. read-only (the write call exits non-zero -- suffix "; autofix
+    failed: ..."). Never raises -- same fail-open contract as the rest
+    of this channel.
 
     Deliberately attempted ONLY for the UNSET case -- NOT when
     core.hooksPath already resolves to some OTHER path (that branch,
@@ -1038,6 +1059,22 @@ def _try_hookspath_autofix(root: Path, reason: str) -> str:
     чужой выбор молча"). Only a genuinely unset hooksPath is treated as
     "nothing to preserve, safe to wire up automatically"."""
     base_warning = f"core.hooksPath not set -- {reason}"
+
+    missing = [
+        name
+        for name in _REQUIRED_GITHOOKS
+        if not (root / _GITHOOKS_DIRNAME / name).is_file()
+    ]
+    if missing:
+        missing_str = _ascii_sanitize(", ".join(missing), 120)
+        return (
+            f"{base_warning}; autofix skipped: required hook file(s)"
+            f" missing under {_GITHOOKS_DIRNAME}/: {missing_str}"
+            f" (git config left untouched -- writing core.hooksPath at a"
+            f" directory with no hooks would create state this run"
+            f" cannot roll back)"
+        )
+
     try:
         set_result = subprocess.run(
             ["git", "config", "--local", "core.hooksPath", str(_GITHOOKS_DIRNAME)],
@@ -1057,18 +1094,6 @@ def _try_hookspath_autofix(root: Path, reason: str) -> str:
         raw_detail = stderr_lines[0] if stderr_lines else f"exit code {set_result.returncode}"
         detail = _ascii_sanitize(raw_detail, 120)
         return f"{base_warning}; autofix failed: git config write error ({detail})"
-
-    missing = [
-        name
-        for name in _REQUIRED_GITHOOKS
-        if not (root / _GITHOOKS_DIRNAME / name).is_file()
-    ]
-    if missing:
-        missing_str = _ascii_sanitize(", ".join(missing), 120)
-        return (
-            f"{base_warning}; autofix set core.hooksPath but required"
-            f" file(s) still missing: {missing_str}"
-        )
 
     return f"{_AUTOFIX_FACT_PREFIX}core.hooksPath set to {_GITHOOKS_DIRNAME}"
 

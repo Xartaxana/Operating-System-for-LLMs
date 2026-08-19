@@ -8,6 +8,7 @@ docstring of hook_liveness_probe.py, "ISOLATION" / "PRE/POST LIVE-STATE
 CHECK").
 """
 
+import importlib.util
 import json
 import os
 import sys
@@ -18,6 +19,48 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hook_liveness_probe as hlp  # noqa: E402
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# --- Q503 dual-world resolver (t-522, K13: docs/tasks/2026-08-19_q503-
+# remediation-spec.md node N2) -- mirrors tools/test_f61_halfstate.py's
+# _resolve_module_path/_load (:73-112) for the TWO pins below whose
+# assertion shape genuinely differs between the two worlds (the rest of
+# this file keeps using the plain `hlp` top-level import, unaffected).
+# Q503_TARGET is a LOCAL copy of the same env var name
+# test_q503_selfreport.py uses -- no shared helper module (non-goal,
+# N1 sibling precedent: local copies).
+Q503_TARGET = os.environ.get("Q503_TARGET", "").strip().lower()
+_HLP_Q503_LIVE = REPO_ROOT / "tools" / "hook_liveness_probe.py"
+_HLP_Q503_SIBLING = REPO_ROOT / "tools" / "hook_liveness_probe_q503.py"
+_HLP_Q503_CACHE: dict = {}
+
+
+def _resolve_hlp_q503_path():
+    """(path, is_unpatched) -- same three-world semantics as
+    test_f61_halfstate.py:73-90 / test_session_context_wiring.py's own
+    _resolve_sc_q503_path: is_unpatched is True ONLY for Q503_TARGET=live
+    while the sibling still exists (world 2, pre-landing counter-mode).
+    Default (unset) -> the hook_liveness_probe_q503.py sibling when
+    present (world 2, this dispatch's own fix), else the live file
+    (world 3, post-landing -- is_unpatched is always False there)."""
+    if Q503_TARGET == "live":
+        return _HLP_Q503_LIVE, _HLP_Q503_SIBLING.exists()
+    if _HLP_Q503_SIBLING.exists():
+        return _HLP_Q503_SIBLING, False
+    return _HLP_Q503_LIVE, False
+
+
+def _load_hlp_q503():
+    path, is_unpatched = _resolve_hlp_q503_path()
+    key = str(path)
+    if key not in _HLP_Q503_CACHE:
+        alias = f"hlp_q503_pin_{'live' if path == _HLP_Q503_LIVE else 'sibling'}"
+        spec = importlib.util.spec_from_file_location(alias, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _HLP_Q503_CACHE[key] = module
+    return _HLP_Q503_CACHE[key], is_unpatched
 
 
 def _write_script(tmp_path: Path, name: str, body: str) -> str:
@@ -376,23 +419,51 @@ def test_diff_live_state_detects_new_file_appearing(tmp_path):
 
 
 def test_overall_ok_false_on_live_state_diff():
-    report = {
-        "no_cases": False, "settings_unreadable": False,
-        "case_missing": [], "stale_case": [],
-        "live_state_diff": ["some/path"],
-        "results": [{"verdict": hlp.OK}],
-    }
-    assert hlp.overall_ok(report) is False
+    # Р6(а) DUAL-WORLD PIN (K13, t-522, docs/tasks/2026-08-19_q503-
+    # remediation-spec.md node N2). Old world (is_unpatched, live file
+    # pre-landing): ANY live-state diff fails the run via the plain
+    # "live_state_diff" key. New world (hook_liveness_probe_q503.py
+    # sibling, this dispatch's own fix): only a MARKER-ATTRIBUTED leak
+    # ("live_state_leaked") fails it -- K11's invariant that a genuine
+    # leak still fails the run, even under the new attribution logic.
+    mod, is_unpatched = _load_hlp_q503()
+    if is_unpatched:
+        report = {
+            "no_cases": False, "settings_unreadable": False,
+            "case_missing": [], "stale_case": [],
+            "live_state_diff": ["some/path"],
+            "results": [{"verdict": mod.OK}],
+        }
+    else:
+        report = {
+            "no_cases": False, "settings_unreadable": False,
+            "case_missing": [], "stale_case": [],
+            "live_state_leaked": ["liveness-probe-some/path"],
+            "results": [{"verdict": mod.OK}],
+        }
+    assert mod.overall_ok(report) is False
 
 
 def test_overall_ok_true_when_everything_clean():
-    report = {
-        "no_cases": False, "settings_unreadable": False,
-        "case_missing": [], "stale_case": [],
-        "live_state_diff": [],
-        "results": [{"verdict": hlp.OK}, {"verdict": hlp.OK}],
-    }
-    assert hlp.overall_ok(report) is True
+    # Dual-world sibling of the pin above (K13) -- an empty diff/leak
+    # list is OK in both worlds, no shape change to the assertion
+    # itself, only to the report dict's key name.
+    mod, is_unpatched = _load_hlp_q503()
+    if is_unpatched:
+        report = {
+            "no_cases": False, "settings_unreadable": False,
+            "case_missing": [], "stale_case": [],
+            "live_state_diff": [],
+            "results": [{"verdict": mod.OK}, {"verdict": mod.OK}],
+        }
+    else:
+        report = {
+            "no_cases": False, "settings_unreadable": False,
+            "case_missing": [], "stale_case": [],
+            "live_state_leaked": [],
+            "results": [{"verdict": mod.OK}, {"verdict": mod.OK}],
+        }
+    assert mod.overall_ok(report) is True
 
 
 # --------------------------------------------------------------------

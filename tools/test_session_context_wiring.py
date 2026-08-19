@@ -8,7 +8,9 @@ boundaries, no full regress.
 Run from the repo root: python -m pytest tools/test_session_context_wiring.py -q
 """
 
+import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +21,46 @@ import session_context as sc
 from wallclock_guard import WALLCLOCK_HARNESS_TIMEOUT
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# --- Q503 dual-world resolver (t-522, K8: docs/tasks/2026-08-19_q503-
+# remediation-spec.md node N2) -- mirrors tools/test_f61_halfstate.py's
+# _resolve_module_path/_load (:73-112) for ONE specific pin below whose
+# assertion genuinely differs between the two worlds (the rest of this
+# file keeps using the plain `sc` top-level import, unaffected). Q503_TARGET
+# is a LOCAL copy of the same env var name test_q503_selfreport.py uses --
+# no shared helper module (non-goal, N1 sibling precedent: local copies).
+Q503_TARGET = os.environ.get("Q503_TARGET", "").strip().lower()
+_SC_Q503_LIVE = REPO_ROOT / "tools" / "session_context.py"
+_SC_Q503_SIBLING = REPO_ROOT / "tools" / "session_context_q503.py"
+_SC_Q503_CACHE: dict = {}
+
+
+def _resolve_sc_q503_path():
+    """(path, is_unpatched) -- three-world semantics per
+    test_f61_halfstate.py:73-90's own corrected docstring: is_unpatched
+    is True ONLY for Q503_TARGET=live while the sibling still exists
+    (world 2, pre-landing: forces the OLD hookspath-autofix order on
+    purpose, a counter-mode). Default (unset) -> the session_context_q503.py
+    sibling when present (world 2, this dispatch's own fix), else the
+    live file (world 3, post-landing -- no counter-mode exists anymore,
+    is_unpatched is always False there)."""
+    if Q503_TARGET == "live":
+        return _SC_Q503_LIVE, _SC_Q503_SIBLING.exists()
+    if _SC_Q503_SIBLING.exists():
+        return _SC_Q503_SIBLING, False
+    return _SC_Q503_LIVE, False
+
+
+def _load_sc_q503():
+    path, is_unpatched = _resolve_sc_q503_path()
+    key = str(path)
+    if key not in _SC_Q503_CACHE:
+        alias = f"wiring_q503_sc_{'live' if path == _SC_Q503_LIVE else 'sibling'}"
+        spec = importlib.util.spec_from_file_location(alias, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _SC_Q503_CACHE[key] = module
+    return _SC_Q503_CACHE[key], is_unpatched
 
 
 def _git(args, cwd):
@@ -265,14 +307,22 @@ def test_git_channel_hookspath_unset_autofix_degrades_to_warn_when_git_write_fai
 def test_git_channel_hookspath_unset_autofix_reports_failure_when_hook_files_missing(
     tmp_path,
 ):
-    # The `git config` write itself succeeds (nothing stops it from
-    # pointing hooksPath at a directory whose files don't exist yet), but
-    # the recheck must catch that the required hook files are still
-    # missing -- reported as a failed autofix, not a false AUTOFIX line.
+    # Р5(в) DUAL-WORLD PIN (K8, t-522, docs/tasks/2026-08-19_q503-
+    # remediation-spec.md node N2). Old world (is_unpatched, live file
+    # pre-landing): the `git config` write itself succeeds (nothing stops
+    # it from pointing hooksPath at a directory whose files don't exist
+    # yet), and a POST-write recheck catches that the required hook files
+    # are still missing. New world (session_context_q503.py sibling, this
+    # dispatch's own fix): the files are checked FIRST, so the write is
+    # never even attempted -- no irreversible-looking config value is
+    # left behind (the whole point of the Р5в reorder: that state is
+    # never constructed in the first place). Both worlds report the same
+    # class of WARNING text and never emit a false AUTOFIX line.
+    mod, is_unpatched = _load_sc_q503()
     _git(["init", "-q"], tmp_path)
     (tmp_path / ".githooks").mkdir()
     # Deliberately do NOT create pre-commit/commit-msg under .githooks.
-    warnings = sc.git_hooks_channel(tmp_path)
+    warnings = mod.git_hooks_channel(tmp_path)
     assert any(
         "core.hooksPath not set" in w
         and "autofix" in w
@@ -281,11 +331,16 @@ def test_git_channel_hookspath_unset_autofix_reports_failure_when_hook_files_mis
     ), warnings
     assert not any(w.startswith("AUTOFIX:") for w in warnings), warnings
     assert all(w.isascii() for w in warnings), warnings
-    # The write itself DID succeed (git doesn't validate the target
-    # directory's contents when setting the config) -- confirms the
-    # failure is caught by the recheck, not by the write call.
     result = _git(["config", "core.hooksPath"], tmp_path)
-    assert result.stdout.strip() == ".githooks"
+    if is_unpatched:
+        # OLD order: the write itself DID succeed (git doesn't validate
+        # the target directory's contents when setting the config) --
+        # confirms the failure is caught by the recheck, not the write.
+        assert result.stdout.strip() == ".githooks"
+    else:
+        # NEW order (Р5в): files checked BEFORE the write is attempted --
+        # hooksPath is left exactly as this run found it (unset).
+        assert result.returncode != 0 or not result.stdout.strip()
 
 
 # ---------------------------------------------------------------------------
