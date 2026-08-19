@@ -173,11 +173,48 @@ tools/test_critic_snapshot.py (файла с тестами critic_snapshot.py �
 репозитории не было ВООБЩЕ) -- возвращено координатору явным частичным
 статусом при первой сдаче. Пересдача (2026-08-05) явно расширила owns
 на "их тесты" -- tools/test_critic_snapshot.py заведён этим коммитом
-(см. отчёт билдера)."""
+(см. отчёт билдера).
+
+===========================================================================
+F-61 СИБЛИНГ (t-503, builder, 2026-08-19) -- узел A ремедиации F-61
+(docs/tasks/2026-08-19_f61-f58-remediation-spec.md). Три правки
+ПОИМЁННО (НЕТ тотального try -- Р3а/A7 применяется только к
+dod_gate.py/main_gate.py, этого файла не касается; здесь остаётся
+существующая fail-open архитектура с ДВУМЯ раздельными try/except):
+ A3. GUARD не-dict root И не-dict tool_input -- return 0 молча (тот
+     же образец journal_echo.py:1885), сосед D-0100 к
+     dod_track_f61.py.build_fact()'ову guard'у. ДО этой правки
+     `tool_input = payload.get("tool_input") or {}` подменял на {}
+     только FALSY значения -- непустой не-dict (список/строка/число)
+     проходил бы дальше и падал на `.get("subagent_type")` внутри
+     ОБЩЕГО except main() (уже был fail-open, но НЕ молча -- шёл бы
+     тем же путём, что П2 "ГРОМКИЙ fail-open", хотя это ожидаемый
+     нераспознанный вход, не подлинная ошибка среды).
+ A2. АТОМАРНАЯ ЗАПИСЬ ОБОИХ документов (успешного И отказного) --
+     _atomic_write_text() (mkstemp в той же папке + os.replace,
+     суффикс .tmp последний/не .json -- та же схема, что
+     dod_track_f61.py._atomic_write_text(), локальная копия, не
+     импорт -- см. owns-спека, "общий модуль atomic_write" в
+     не-целях).
+ A4. PREV-ПРОЕКЦИЯ ДО РИСКОВАННОЙ ЗАПИСИ: main() читает
+     _read_prior_snapshot_fields(snap) ОДИН РАЗ, СРАЗУ ПОСЛЕ
+     вычисления snap-пути и ДО обоих try (обход дерева И запись) --
+     это и есть фикс класса F-61: раньше (см. живой файл)
+     _write_failure_snapshot() читал prev_* из snap ПОСЛЕ того, как
+     неудавшийся snap.write_text() уже усёк файл (Path.write_text
+     truncates on open('w'), до первого байта) -- в этой версии
+     _write_failure_snapshot() prev_fields ПОЛУЧАЕТ ПАРАМЕТРОМ и
+     файл больше НЕ читает вовсе. Инвариант "отказный документ без
+     tree_hash" -- буквально сохранён (см. существующие тесты pins,
+     A5 -- НЕ ТРОНУТЫ).
+===========================================================================
+"""
 
 import hashlib
 import json
+import os
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -217,7 +254,13 @@ def _read_prior_snapshot_fields(snap: Path) -> dict:
     успешный снимок -- несёт ключ "tree_hash", не сам был отказом) --
     fail-open: отсутствие файла / битый JSON / отказный документ без
     tree_hash -- {} (баз prev_* полей в результирующем отказе, ничего
-    не выдумываем). Не бросает исключений наружу."""
+    не выдумываем). Не бросает исключений наружу.
+
+    F-61 A4 (t-503): вызывается ИЗ main() ДО обеих рискованных
+    операций (обход дерева, запись) -- НЕ из _write_failure_snapshot()
+    (которая больше не читает файл вовсе, см. её докстринг). Это и
+    закрывает класс F-61: к моменту вызова этой функции snap ещё НЕ
+    тронут этим вызовом хука (ни усечён, ни переписан)."""
     try:
         prev = json.loads(snap.read_text(encoding="utf-8"))
     except Exception:
@@ -227,7 +270,34 @@ def _read_prior_snapshot_fields(snap: Path) -> dict:
     return {"prev_ts": prev.get("ts"), "prev_tree_hash": prev.get("tree_hash")}
 
 
-def _write_failure_snapshot(snap: Path, exc: Exception) -> None:
+def _atomic_write_text(path: Path, text: str) -> None:
+    """F-61 A2 (t-503): та же схема, что dod_track_f61.py (локальная
+    копия -- не-цель "общий модуль atomic_write", см. докстринг модуля
+    выше). mkstemp В ТОЙ ЖЕ папке, суффикс ".tmp" последний/не ".json",
+    Path.write_text на tmp-путь (не os.fdopen дескриптора -- тот же
+    вызываемый метод, что дискриминирующий мок test_f61_halfstate.py
+    патчит, см. dod_track_f61.py._atomic_write_text за полное
+    обоснование), os.replace поверх боевого пути. mkdir(parents=True,
+    exist_ok=True) сохранён на пути записи (родитель snap -- .claude/,
+    может не существовать на свежем tmp_path в тестах)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        tmp_path.write_text(text, encoding="utf-8")
+        os.replace(str(tmp_path), str(path))
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _write_failure_snapshot(snap: Path, exc: Exception, prev_fields: dict) -> None:
     """П2 (батч после калибровки №6): fail-open остаётся (хук никогда
     не роняет диспатч), но отказ теперь ГРОМКИЙ -- см. докстринг
     модуля, "П2". Отказный документ ЗАМЕЩАЕТ обычный (не несёт
@@ -235,19 +305,14 @@ def _write_failure_snapshot(snap: Path, exc: Exception) -> None:
     смешиваются -- инвариант "отказ не выглядит валидным снимком"
     сохранён БУКВАЛЬНО (нет ключа "tree_hash" в отказном документе).
 
-    Пересдача (не-блокер (б), критик): ДО этой правки отказный документ
-    ЗАТИРАЛ последний успешный снимок целиком -- будущий грейдер терял
-    ЛЮБУЮ базовую линию сверки "финал не ревьюился" (прежнее поведение
-    без этого хука оставляло УСТАРЕВШИЙ, но РЕАЛЬНЫЙ снимок с настоящим
-    tree_hash). ФИКС: если СУЩЕСТВУЮЩИЙ файл на snap -- настоящий
-    успешный снимок (несёт "tree_hash"), его ts/tree_hash копируются в
-    отказный документ ОТДЕЛЬНЫМИ ключами `prev_ts`/`prev_tree_hash`
-    (шейпы НЕ смешиваются -- отказный документ по-прежнему не несёт
-    "tree_hash" САМ, только "prev_tree_hash", различимый ключ) -- см.
-    _read_prior_snapshot_fields(). Если запись файла отказа тоже
-    невозможна -- только stderr (исключение здесь проглатывается молча,
-    НАМЕРЕННО -- это последний рубеж fail-open, сообщение уже ушло в
-    stderr выше)."""
+    F-61 A4 (t-503): prev_fields -- ПАРАМЕТР, читается вызывающим
+    main() ДО рискованной записи (см. докстринг модуля, "A4" и
+    _read_prior_snapshot_fields()) -- эта функция САМА snap на чтение
+    БОЛЬШЕ НЕ открывает (до фикса читала здесь, ПОСЛЕ того, как
+    неудавшийся write_text уже усекал файл -- класс F-61). Если
+    запись файла отказа тоже невозможна -- только stderr (исключение
+    здесь проглатывается молча, НАМЕРЕННО -- это последний рубеж
+    fail-open, сообщение уже ушло в stderr выше)."""
     diag = f"critic_snapshot.py: FAILED to take snapshot ({type(exc).__name__}: {exc})"
     print(diag, file=sys.stderr)
     try:
@@ -255,12 +320,8 @@ def _write_failure_snapshot(snap: Path, exc: Exception) -> None:
             "error": f"{type(exc).__name__}: {exc}",
             "error_ts": datetime.now().isoformat(),
         }
-        doc.update(_read_prior_snapshot_fields(snap))
-        snap.parent.mkdir(parents=True, exist_ok=True)
-        snap.write_text(
-            json.dumps(doc, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        doc.update(prev_fields)
+        _atomic_write_text(snap, json.dumps(doc, ensure_ascii=False) + "\n")
     except Exception:
         pass  # только stderr -- см. докстринг модуля, "П2"
 
@@ -277,8 +338,16 @@ def main() -> int:
     except Exception:
         return 0  # fail open: не наш формат -- не мешаем
 
+    # F-61 A3 (t-503): GUARD не-dict root И не-dict tool_input -- тот
+    # же образец, что journal_echo.py:1885/dod_track_f61.py.build_fact().
+    if not isinstance(payload, dict):
+        return 0
+
     tool_name = payload.get("tool_name")
-    tool_input = payload.get("tool_input") or {}
+    tool_input_raw = payload.get("tool_input")
+    if tool_input_raw is not None and not isinstance(tool_input_raw, dict):
+        return 0
+    tool_input = tool_input_raw or {}
     if tool_name not in ("Task", "Agent"):
         return 0
     if tool_input.get("subagent_type") != "critic":
@@ -287,17 +356,23 @@ def main() -> int:
     cwd = Path(payload.get("cwd") or ".")
     snap = cwd / SNAPSHOT_REL_PATH
 
+    # F-61 A4 (t-503): prev-проекция читается ЗДЕСЬ, ДО обеих
+    # рискованных операций ниже (обход дерева, запись) -- см.
+    # докстринг модуля/_read_prior_snapshot_fields за полное
+    # обоснование класса.
+    prev_fields = _read_prior_snapshot_fields(snap)
+
     # П2: две РАЗЛИЧНЫЕ точки отказа -- обход дерева и запись снимка --
     # см. докстринг модуля, "ДВЕ РАЗЛИЧНЫЕ ТОЧКИ ОТКАЗА".
     try:
         tree_hash, files_count, skipped_files = compute_tree_hash(cwd)
     except Exception as exc:
-        _write_failure_snapshot(snap, exc)
+        _write_failure_snapshot(snap, exc, prev_fields)
         return 0
 
     try:
-        snap.parent.mkdir(parents=True, exist_ok=True)
-        snap.write_text(
+        _atomic_write_text(
+            snap,
             json.dumps(
                 {
                     "ts": datetime.now().isoformat(),
@@ -308,10 +383,9 @@ def main() -> int:
                 ensure_ascii=False,
             )
             + "\n",
-            encoding="utf-8",
         )
     except Exception as exc:
-        _write_failure_snapshot(snap, exc)
+        _write_failure_snapshot(snap, exc, prev_fields)
     return 0
 
 

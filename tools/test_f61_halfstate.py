@@ -71,16 +71,23 @@ NO_FAIL_OPEN_AT_MAIN_LEVEL = {"dod_gate", "main_gate"}
 
 
 def _resolve_module_path(base_name: str) -> "tuple[Path, bool]":
-    """(путь, is_live). F61_TARGET=live -> живой файл всегда (контр-
-    прогон). default -> сиблинг tools/<base_name>_f61.py, если
-    существует, иначе живой -- см. докстринг модуля."""
+    """(путь, is_unpatched). ТРИ мира спеки (посадка Lead 2026-08-19,
+    правка семантики второго поля): is_unpatched=True означает
+    «цель ЗАВЕДОМО непочинена» и легален ТОЛЬКО в контр-режиме
+    F61_TARGET=live ПРИ СУЩЕСТВУЮЩЕМ сиблинге (мир 2: живой файл ещё
+    старый, сиблинг несёт фикс). После посадки (мир 3: сиблингов нет,
+    живой файл = фикс) контр-режима не существует — is_unpatched
+    всегда False, батарея проверяет починенное поведение на живом
+    пути. Прежняя семантика (is_live по факту загрузки живого)
+    ошибочно ждала старого поведения от починенного файла —
+    дефект батареи против требования «зелена во всех трёх мирах»."""
     live = TOOLS_DIR / f"{base_name}.py"
-    if F61_TARGET == "live":
-        return live, True
     sibling = TOOLS_DIR / f"{base_name}_f61.py"
+    if F61_TARGET == "live":
+        return live, sibling.exists()
     if sibling.exists():
         return sibling, False
-    return live, True
+    return live, False
 
 
 _MODULE_CACHE: dict = {}

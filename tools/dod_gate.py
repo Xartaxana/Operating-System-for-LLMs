@@ -156,10 +156,24 @@ STAGING_HQ ВАРИАНТ (t-159, п.7 -- АКТИВИРОВАН 2026-07-16; и�
     Нет зелёного вообще -- анкера "после" нет, doc-only проверяется по
     ВСЕЙ отфильтрованной истории (поведение сохранено).
 ===========================================================================
+
+F-61 СИБЛИНГ (t-503, builder, 2026-08-19) -- узел A ремедиации F-61
+(docs/tasks/2026-08-19_f61-f58-remediation-spec.md), решение Р3а/A7:
+"dod_gate/main_gate -- ТОЛЬКО A2, внешний try НЕ ставится" (enforcement
+выше косметики отказа -- гейты обязаны продолжать реально БЛОКИРОВАТЬ
+(exit 2), fail-open-обёртка поверх ВСЕГО main() смазала бы это). Ровно
+ОДНА правка против живого файла: _save_track() пишет трек атомарно
+(mkstemp в той же папке + os.replace, суффикс .tmp последний/не .json
+-- та же локальная схема, что dod_track_f61.py/critic_snapshot_f61.py,
+не общий модуль -- см. owns-спека, не-цели). mkdir(parents=True,
+exist_ok=True) сохранён дословно. Никаких guard'ов/total-try здесь НЕ
+добавлено -- вне scope A7.
 """
 
 import json
+import os
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -270,10 +284,34 @@ def _load_track(path: Path) -> dict:
     return data
 
 
-def _save_track(path: Path, data: dict) -> None:
+def _atomic_write_text(path: Path, text: str) -> None:
+    """F-61 A2 (t-503): mkdir(parents=True, exist_ok=True) СОХРАНЁН
+    ДОСЛОВНО (регресс-пин) -- запись идёт в mkstemp-файл В ТОЙ ЖЕ
+    папке, что path, затем os.replace() поверх боевого пути. Локальная
+    копия -- та же схема, что dod_track_f61.py/critic_snapshot_f61.py
+    (не общий модуль, см. докстринг модуля, не-цели owns-спеки).
+    Суффикс ".tmp" ПОСЛЕДНИЙ и НЕ ".json" -- session_context.py:1616
+    глобит "*.json" и берёт .stem как session_id."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        tmp_path.write_text(text, encoding="utf-8")
+        os.replace(str(tmp_path), str(path))
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _save_track(path: Path, data: dict) -> None:
+    _atomic_write_text(
+        path, json.dumps(data, ensure_ascii=False, indent=2) + "\n"
     )
 
 

@@ -145,7 +145,9 @@ ts -- локальное время без таймзоны, с системны
 "выигрывает", может потерять факт от параллельного вызова). Спека
 t-150 такого сценария не описывает; фиксируется как то же по духу,
 что self-documented ограничение critic_gate.py (state на каталог,
-не на процесс) -- не решается кодом.
+не на процесс) -- не решается кодом. F-61-БАТЧ (см. ниже) делает эту
+гонку НЕ РАЗРУШИТЕЛЬНОЙ (уникальный tmp на каждую запись), но саму
+гонку по-прежнему НЕ решает -- non-goal подтверждён буквально.
 
 Хук НИКОГДА не блокирует (только логирует) -- exit 0 всегда, кроме
 нераспознаваемого/несвязанного входа, тоже exit 0 без побочных
@@ -175,11 +177,45 @@ main-edit-скоупа, хотя лежит внутри репо. Рамка г
 (per-repo), не по имени файла, принята координатором ранее; единственный
 оставшийся критерий -- "путь целиком вне cwd" -- уже покрывает реальный
 scratchpad-каталог харнесса без этой дыры.
+
+===========================================================================
+F-61 СИБЛИНГ (t-503, builder, 2026-08-19) -- узел A ремедиации F-61
+(docs/tasks/2026-08-19_f61-f58-remediation-spec.md). Три правки поверх
+всего вышеописанного, ПОИМЁННО:
+ A1. ТОТАЛЬНЫЙ try в main(): весь код после _reconfigure_stderr_utf8()
+     (которая остаётся ДО try) обёрнут в try/except Exception -- любое
+     необработанное исключение схлопывается в ОДНУ строку stderr
+     "dod_track.py: FAILED to save track (<Type>: <msg>)", return 0
+     безусловен. Ничего из существующих ранних fail-open return'ов
+     (битый JSON, не-dict payload, нет fact'а, нет session_id) не
+     меняет поведение -- они по-прежнему тихие (без stderr), только
+     ПОДЛИННО непредвиденное исключение (напр. PermissionError на
+     записи трека, залоченный файл) теперь тоже exit 0, но ГРОМКО.
+ A2. АТОМАРНАЯ ЗАПИСЬ: _save_track() больше не вызывает
+     Path.write_text() на боевой путь напрямую -- mkdir(parents=True,
+     exist_ok=True) СОХРАНЁН ДОСЛОВНО (регресс-пин), запись идёт в
+     mkstemp-файл В ТОЙ ЖЕ папке, затем os.replace() поверх боевого
+     пути -- см. _atomic_write_text(). Имя tmp: suffix=".tmp"
+     ПОСЛЕДНИЙ и НЕ заканчивается на ".json" -- session_context.py:1616
+     глобит "*.json" и берёт .stem как session_id; окончание ".json"
+     заставило бы читателя принять осколок за чужой трек.
+ A3. GUARD не-dict root И не-dict tool_input: build_fact() возвращает
+     None молча (без исключения, без stderr) на не-dict payload и на
+     не-dict tool_input -- тот же образец, что journal_echo.py:1885
+     (`if not isinstance(payload, dict): return 0`). main() дублирует
+     проверку payload не-dict ДО вызова build_fact() (belt-and-
+     suspenders, тот же стиль, что остальной файл) -- оба уровня
+     возвращают 0 тихо, не долетая до A1-обработчика (тот громкий,
+     этот -- ожидаемый нераспознанный вход, тот же класс, что битый
+     JSON выше).
+===========================================================================
 """
 
 import json
+import os
 import re
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -450,12 +486,25 @@ def build_fact(payload: dict):
     main-only записи; tools/dod_gate.py (SubagentStop-хук) читает ВСЕ
     записи как раньше -- добавление поля НЕ ломает его логику (только
     новый ключ в уже существующих dict'ах edits/runs, старые ts/
-    tool_name/command/outcome не тронуты)."""
+    tool_name/command/outcome не тронуты).
+
+    F-61 A3 (t-503): GUARD не-dict root И не-dict tool_input -- return
+    None молча, тот же образец, что journal_echo.py:1885 (`if not
+    isinstance(payload, dict): return 0`). Проверяется ОДИН раз здесь
+    (не в каждой ветке отдельно, D-0100-сосед critic_snapshot несёт
+    свою копию того же guard'а в своём main() -- см. критик_snapshot_f61.py)."""
+    if not isinstance(payload, dict):
+        return None
+
     tool_name = payload.get("tool_name")
     agent_id = _extract_agent_id(payload)
 
+    tool_input_raw = payload.get("tool_input")
+    if tool_input_raw is not None and not isinstance(tool_input_raw, dict):
+        return None
+
     if is_edit_tool(tool_name):
-        tool_input = payload.get("tool_input") or {}
+        tool_input = tool_input_raw or {}
         file_path = tool_input.get("file_path")
         file_path = file_path if isinstance(file_path, str) else None
         # t-278 п.3: scratchpad/вне-корня правки исключены из
@@ -479,7 +528,7 @@ def build_fact(payload: dict):
     # no-green-run блока main_gate при фактически зелёных прогонах,
     # runs=[] в живом треке. Kit-версию не трогать -- её среда Bash.
     if tool_name in ("Bash", "PowerShell"):
-        tool_input = payload.get("tool_input") or {}
+        tool_input = tool_input_raw or {}
         command = tool_input.get("command") or ""
         if is_verification_command(command):
             outcome = determine_outcome(payload.get("tool_response"))
@@ -516,10 +565,48 @@ def _load_track(path: Path) -> dict:
     return data
 
 
-def _save_track(path: Path, data: dict) -> None:
+def _atomic_write_text(path: Path, text: str) -> None:
+    """F-61 A2 (t-503): mkdir(parents=True, exist_ok=True) СОХРАНЁН
+    ДОСЛОВНО (регресс-пин) -- запись идёт в mkstemp-файл В ТОЙ ЖЕ
+    папке, что path, затем os.replace() поверх боевого пути.
+    Уникальность имени -- ОС-уровневая (mkstemp, схема
+    prefix=path.name+"." + suffix=".tmp", решение t-470/Р4а вместо
+    ручного pid+uuid). Суффикс ".tmp" ПОСЛЕДНИЙ и НЕ ".json" --
+    session_context.py:1616 глобит "*.json" и берёт .stem как
+    session_id; окончание на ".json" заставило бы его прочитать
+    осколок как чужой трек. Запись идёт через Path.write_text() на
+    tmp-путь (НЕ через os.fdopen дескриптора mkstemp) НАМЕРЕННО:
+    тот же вызываемый метод, что старый (небезопасный) код применял
+    напрямую к боевому пути -- дискриминирующий мок
+    tools/test_f61_halfstate.py патчит именно Path.write_text и
+    полагается на то, что на НЕПАТЧЕННОМ коде self -- боевой файл
+    (усечение реально), а на этом атомарном коде self -- временный
+    файл (усечение свежесозданного tmp безвредно, боевой путь тронут
+    не будет, пока os.replace не выполнится). Если запись в tmp
+    падает -- сам tmp удаляется (best-effort, не роняет исходное
+    исключение) и исключение перевыбрасывается вызывающему коду
+    (main()/`_write_failure_snapshot`-эквивалент решают, что делать
+    дальше -- эта функция не глотает ошибки сама)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        tmp_path.write_text(text, encoding="utf-8")
+        os.replace(str(tmp_path), str(path))
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _save_track(path: Path, data: dict) -> None:
+    _atomic_write_text(
+        path, json.dumps(data, ensure_ascii=False, indent=2) + "\n"
     )
 
 
@@ -533,36 +620,62 @@ def _reconfigure_stderr_utf8():
 def main() -> int:
     _reconfigure_stderr_utf8()
 
-    # STAGING_HQ: та же байтовая stdin-правка, что t-159 п.3
-    # (dispatch_gate.py) -- платформенная кодировка stdin на Windows
-    # (cp1251, эмпирика в tools/dispatch_gate.py кита) искажает
-    # кириллицу при sys.stdin.read(); применено ко ВСЕМ staging_hq
-    # хукам единообразно, не только к тому, что спека называла явно.
-    raw_bytes = sys.stdin.buffer.read()
-    raw = raw_bytes.decode("utf-8", errors="replace")
+    # F-61 A1 (t-503): ТОТАЛЬНЫЙ try -- ВЕСЬ код ниже (кроме
+    # _reconfigure_stderr_utf8() выше, которая остаётся ДО try) обёрнут
+    # в один try/except Exception. Существующие ранние fail-open
+    # return'ы (битый JSON, не-dict payload, build_fact()->None, нет
+    # session_id) остаются ТИХИМИ (это распознанный, ожидаемый
+    # нерелевантный вход, не ошибка) -- только НЕПРЕДВИДЕННОЕ
+    # исключение (напр. PermissionError записи трека, залоченный
+    # файл -- живой инцидент 2026-08-04) долетает до except ниже и
+    # схлопывается в ОДНУ строку stderr, return 0 безусловен.
     try:
-        payload = json.loads(raw)
-    except Exception:
+        # STAGING_HQ: та же байтовая stdin-правка, что t-159 п.3
+        # (dispatch_gate.py) -- платформенная кодировка stdin на Windows
+        # (cp1251, эмпирика в tools/dispatch_gate.py кита) искажает
+        # кириллицу при sys.stdin.read(); применено ко ВСЕМ staging_hq
+        # хукам единообразно, не только к тому, что спека называла явно.
+        raw_bytes = sys.stdin.buffer.read()
+        raw = raw_bytes.decode("utf-8", errors="replace")
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return 0
+
+        if not isinstance(payload, dict):
+            # F-61 A3: не-dict root -- тот же образец, что
+            # journal_echo.py:1885. main() дублирует build_fact()'ову
+            # проверку (belt-and-suspenders) ДО вызова build_fact,
+            # чтобы не полагаться на то, что build_fact всегда успеет
+            # выполниться первой (следующая строка всё равно вызывает
+            # build_fact(payload), которое САМО тоже проверяет -- этот
+            # ранний return лишь избегает лишнего вызова).
+            return 0
+
+        fact = build_fact(payload)
+        if fact is None:
+            return 0
+
+        session_id = payload.get("session_id")
+        if not session_id:
+            # Без session_id некуда писать трек (файл именован по
+            # session_id) -- fail open, факт теряется, но хук не падает.
+            return 0
+
+        cwd = payload.get("cwd") or "."
+        path = _track_path(cwd, session_id)
+        data = _load_track(path)
+
+        kind, entry = fact
+        data.setdefault(kind + "s", []).append(entry)
+        _save_track(path, data)
         return 0
-
-    fact = build_fact(payload)
-    if fact is None:
+    except Exception as exc:
+        print(
+            f"dod_track.py: FAILED to save track ({type(exc).__name__}: {exc})",
+            file=sys.stderr,
+        )
         return 0
-
-    session_id = payload.get("session_id")
-    if not session_id:
-        # Без session_id некуда писать трек (файл именован по
-        # session_id) -- fail open, факт теряется, но хук не падает.
-        return 0
-
-    cwd = payload.get("cwd") or "."
-    path = _track_path(cwd, session_id)
-    data = _load_track(path)
-
-    kind, entry = fact
-    data.setdefault(kind + "s", []).append(entry)
-    _save_track(path, data)
-    return 0
 
 
 if __name__ == "__main__":
