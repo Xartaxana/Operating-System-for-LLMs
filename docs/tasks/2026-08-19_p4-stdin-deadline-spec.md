@@ -134,6 +134,20 @@ payload → усечение (цена принята, В2-очередь). Те
 dispatch_gate/dod_gate/main_gate НЕ добавляется (решение Р3а F-61);
 payload-зависимая логика недостижима на таймаутном пути.
 
+## Поправка Lead при диспатче (08-19, чеклист п.5 — свежесть)
+
+Греп `sys.stdin|stdin.buffer` по tools/*.py перед диспатчем: 14
+не-тестовых читателей, не 12+critic_verdict_check. Драфт t-527
+пропустил `tools/tier_echo.py` (`:247` — блокирующее
+`sys.stdin.buffer.read()` payload'а, тот же класс дыры). Решение
+Lead: батч расширен до **13 файлов** (В4 «единообразно»; молча
+оставленный известный сиблинг = нарушение R9); все ключи K1-K13
+применяются к tier_echo той же формой (в K2/K13 счёт «12» читать
+«13»); owns += tools/tier_echo_p4.py. Перечисление 13 (греп-факт):
+session_context, hygiene_gate, journal_echo, dispatch_gate,
+owns_gate, dod_track, dod_gate, main_gate, negative_lint,
+claim_control_gate, search_control_gate, critic_snapshot, tier_echo.
+
 ## DoD (команды из драфта §7 — дословно; красная половина ~1.5 мин
 по конструкции — назвать; негативный контроль K2 с хеш-откатом;
 суженный прогон — 22 тест-файла списком из драфта; BATCH CANON —
