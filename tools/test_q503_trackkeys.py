@@ -54,9 +54,33 @@ tools/test_main_gate.py НЕ ТРОГАЮТСЯ этим узлом -- их SCRI
            `.setdefault()` на списке) -- красно в обоих случаях; на
            FIXED -- своя секция чинится, ЧУЖОЙ ключ доказуемо не
            тронут -- зелено.
+
+Q503B ДОБАВЛЕНИЕ (t-531, builder, 2026-08-19) -- поздний дефект узла N1
+(defect_found ref t-521, посаженного в живой файл): F61-батарея
+test_a8_path_occupied_by_directory красная на ТРЁХ писателях -- карантин
+ошибочно срабатывал на "путь занят КАТАЛОГОМ" (OSError самого
+open()/read(), не JSON-проблема содержимого), что (а) у dod_track давало
+os.replace() каталога прочь (каталог исчезал) и (б) у dod_gate/main_gate
+глотало OSError, который ОБЯЗАН пробрасываться наружу (A7 -- нет
+тотального try). Резолвер Q503B_TARGET/_resolve_module_path_b -- ТА ЖЕ
+форма, что Q503_TARGET выше, суффикс сиблинга "_q503b" вместо "_q503".
+Тесты test_path_occupied_by_directory_* -- ниже, в конце файла;
+дискриминатор красный на Q503B_TARGET=live (текущий живой код, ещё БЕЗ
+Q503B-фикса на момент сдачи этого узла).
+
+СОВМЕСТИМОСТЬ С F61-БАТАРЕЕЙ (не правит tools/test_f61_halfstate.py):
+f61-battery резолвер знает ТОЛЬКО суффикс "_f61"/живой -- у него нет
+понятия о "_q503b"-сиблингах (более поздний слой ремедиации). Модуль-
+уровневый шим ниже (после импорта test_f61_halfstate) подменяет ЕГО
+_resolve_module_path на обёртку, которая для dod_track/dod_gate/
+main_gate СНАЧАЛА пробует "_q503b"-сиблинг (если F61_TARGET не "live"),
+иначе делегирует оригинальному резолверу без изменений -- живой файл
+батареи не редактируется, шим живёт целиком в ЭТОМ файле (в owns этого
+узла) и активен только когда ОБА файла собраны в одном pytest-прогоне.
 """
 
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -485,4 +509,200 @@ def test_subprocess_rc_unchanged_under_own_section_corruption(
     assert "Traceback" not in proc.stderr, (
         f"K4 КРАСНО НА ЖИВОМ: {base_name} крашится под битой своей "
         f"секцией вместо fail-open: stderr={proc.stderr!r}"
+    )
+
+
+# ===========================================================================
+# Q503B (t-531) -- "путь занят каталогом" НЕ должен уходить в карантин:
+# OSError самого open()/read() (не JSON-проблема содержимого) обязан
+# пробрасываться ПРЕЖНИМ ПОТОКОМ (dod_track -- существующий тотальный
+# try A1 ловит наверху, каталог не тронут; dod_gate/main_gate -- наружу
+# main() целиком, A7 -- нет тотального try).
+# ===========================================================================
+
+Q503B_TARGET = os.environ.get("Q503B_TARGET", "").strip().lower()
+
+
+def _resolve_module_path_b(base_name: str) -> "tuple[Path, bool]":
+    """Та же форма, что _resolve_module_path() выше (Q503_TARGET), но
+    суффикс сиблинга "_q503b" и отдельная env-переменная Q503B_TARGET --
+    ДВА РАЗНЫХ узла ремедиации (t-521 и его поздний дефект-фикс t-531)
+    держат СВОИ, не связанные контр-режимы: Q503_TARGET=live проверяет
+    первый класс дефекта (потеря чужих ключей), Q503B_TARGET=live --
+    второй (карантин на каталоге). Смешение одной переменной на оба
+    узла сделало бы контр-прогон одного узла случайно красным/зелёным
+    из-за состояния другого."""
+    live = TOOLS_DIR / f"{base_name}.py"
+    sibling = TOOLS_DIR / f"{base_name}_q503b.py"
+    if Q503B_TARGET == "live":
+        return live, sibling.exists()
+    if sibling.exists():
+        return sibling, False
+    return live, False
+
+
+_MODULE_CACHE_B: dict = {}
+
+
+def _load_b(base_name: str):
+    path, _is_unpatched = _resolve_module_path_b(base_name)
+    cache_key = (base_name, str(path))
+    if cache_key not in _MODULE_CACHE_B:
+        alias = f"q503b_battery_{base_name}_{path.stem}"
+        spec = importlib.util.spec_from_file_location(alias, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _MODULE_CACHE_B[cache_key] = module
+    return _MODULE_CACHE_B[cache_key], path
+
+
+# ---------------------------------------------------------------------
+# F61-battery совместимость (см. докстринг модуля, "СОВМЕСТИМОСТЬ С
+# F61-БАТАРЕЕЙ") -- НЕ правит tools/test_f61_halfstate.py, только
+# подменяет его _resolve_module_path В ПАМЯТИ этого pytest-процесса,
+# когда оба файла собраны вместе. sys.path получает TOOLS_DIR (тот же
+# приём, что test_dod_track.py и др.) ДО импорта, чтобы "import
+# test_f61_halfstate" разрешился даже если pytest ещё не вставил этот
+# каталог сам (не полагаемся на порядок коллекции).
+# ---------------------------------------------------------------------
+
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+import test_f61_halfstate as _f61  # noqa: E402
+
+_F61_ORIGINAL_RESOLVE = _f61._resolve_module_path
+_Q503B_AFFECTED_MODULES = {"dod_track", "dod_gate", "main_gate"}
+
+
+def _f61_resolve_with_q503b_compat(base_name: str):
+    """Обёртка (см. докстринг модуля): F61_TARGET=live -- ОРИГИНАЛЬНОЕ
+    поведение без изменений (явный контр-режим самой f61-батареи не
+    трогаем); base_name вне {dod_track, dod_gate, main_gate}
+    (critic_snapshot) -- тоже оригинал (Q503B их не касается). Иначе --
+    сперва пробуем "_q503b"-сиблинг (мой узел), при отсутствии --
+    падаем обратно на ОРИГИНАЛЬНЫЙ резолвер (его собственная логика
+    "_f61"-сиблинг/живой)."""
+    if _f61.F61_TARGET == "live" or base_name not in _Q503B_AFFECTED_MODULES:
+        return _F61_ORIGINAL_RESOLVE(base_name)
+    q503b_sibling = _f61.TOOLS_DIR / f"{base_name}_q503b.py"
+    if q503b_sibling.exists():
+        return q503b_sibling, False
+    return _F61_ORIGINAL_RESOLVE(base_name)
+
+
+_f61._resolve_module_path = _f61_resolve_with_q503b_compat
+
+
+class _FakeStdin:
+    """Тот же приём, что test_f61_halfstate.py._FakeStdin -- main()
+    всех трёх модулей читает ТОЛЬКО sys.stdin.buffer.read()."""
+
+    def __init__(self, data: bytes):
+        self.buffer = io.BytesIO(data)
+
+
+def _run_main_direct(mod, payload_bytes: bytes, monkeypatch) -> int:
+    """Прямой (не subprocess) вызов main() -- нужен, чтобы отличить
+    "исключение поднято" (dod_gate/main_gate, A7) от "исключение
+    поймано где-то и rc=0" (dod_track, A1): subprocess этого различия
+    не даёт (снаружи виден только итоговый rc/traceback-в-stderr)."""
+    monkeypatch.setattr(mod.sys, "stdin", _FakeStdin(payload_bytes))
+    return mod.main()
+
+
+def _dod_track_edit_payload_b(tmp_path: Path, session_id: str) -> dict:
+    target_file = tmp_path / "x.py"
+    if not target_file.exists():
+        target_file.write_text("x = 1\n", encoding="utf-8")
+    return {
+        "session_id": session_id,
+        "cwd": str(tmp_path),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(target_file)},
+        "tool_response": {},
+    }
+
+
+def _subagent_stop_payload_b(tmp_path: Path, session_id: str) -> dict:
+    return {
+        "session_id": session_id,
+        "cwd": str(tmp_path),
+        "hook_event_name": "SubagentStop",
+        "agent_id": "agent-1",
+        "stop_hook_active": False,
+    }
+
+
+def _stop_payload_b(tmp_path: Path, session_id: str) -> dict:
+    return {
+        "session_id": session_id,
+        "cwd": str(tmp_path),
+        "hook_event_name": "Stop",
+        "stop_hook_active": False,
+    }
+
+
+_Q503B_PAYLOAD_BUILDERS = {
+    "dod_track": _dod_track_edit_payload_b,
+    "dod_gate": _subagent_stop_payload_b,
+    "main_gate": _stop_payload_b,
+}
+
+# dod_track несёt A1 (тотальный try main()) -- fail-open БУКВАЛЬНО (K4):
+# исключение НЕ поднимается наружу, rc==0, но каталог должен остаться
+# каталогом (карантин не должен был тронуть его вовсе). dod_gate/
+# main_gate НЕ несут тотального try (A7) -- ожидается ИМЕННО
+# непойманное исключение наружу main().
+_Q503B_FAIL_OPEN_AT_MAIN_LEVEL = {"dod_track"}
+
+
+@pytest.mark.parametrize("base_name", ("dod_track", "dod_gate", "main_gate"))
+def test_path_occupied_by_directory_no_quarantine(base_name, tmp_path, monkeypatch):
+    """Q503B дискриминатор: путь трека занят КАТАЛОГОМ (не файлом) --
+    карантин НЕ должен был даже попытаться его тронуть (это не
+    JSON-проблема содержимого, это OSError самого open()/read()).
+    Красно на Q503B_TARGET=live (текущий живой код на момент сдачи
+    узла): карантин срабатывает ошибочно -- dod_track теряет каталог
+    (os.replace() успевает переименовать его прочь), dod_gate/main_gate
+    глотают исключение, которое обязано пробрасываться (A7)."""
+    mod, _path = _load_b(base_name)
+    session_id = "sess-dir-occupied"
+    track_path = tmp_path / ".claude" / "dod_track" / f"{session_id}.json"
+    track_path.parent.mkdir(parents=True)
+    track_path.mkdir()  # путь занят каталогом, не файлом
+
+    payload = _Q503B_PAYLOAD_BUILDERS[base_name](tmp_path, session_id)
+
+    raised = None
+    rc = None
+    try:
+        rc = _run_main_direct(mod, json.dumps(payload).encode("utf-8"), monkeypatch)
+    except Exception as exc:  # noqa: BLE001
+        raised = exc
+
+    if base_name in _Q503B_FAIL_OPEN_AT_MAIN_LEVEL:
+        assert raised is None, (
+            f"[{base_name}] main() бросил наружу неожиданно: {raised!r} "
+            "(A1 -- тотальный try обязан был поймать)"
+        )
+        assert rc == 0
+    else:
+        assert raised is not None, (
+            f"[{base_name}] Q503B КРАСНО НА ЖИВОМ: ожидалось исключение "
+            "наружу (A7 -- нет тотального try), карантин проглотил его"
+        )
+
+    assert track_path.is_dir(), (
+        f"[{base_name}] Q503B КРАСНО НА ЖИВОМ: каталог не должен был "
+        "исчезнуть/замениться файлом при отказе"
+    )
+    leftovers = list(track_path.parent.glob("*.corrupt"))
+    assert not leftovers, (
+        f"[{base_name}] карантинный осколок появился на пути занятом "
+        f"каталогом -- карантин не должен был сработать вовсе: {leftovers}"
+    )
+    tmp_leftovers = list(track_path.parent.glob("*.tmp"))
+    assert not tmp_leftovers, (
+        f"[{base_name}] осиротевший .tmp фрагмент рядом с каталогом: {tmp_leftovers}"
     )

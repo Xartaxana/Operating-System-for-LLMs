@@ -147,6 +147,29 @@ decide()'s gate_log.append() остаётся ВНЕ этого owns -- смеж
      карантин сам проглатывает OSError (см. докстринг
      _quarantine_bad_track -- дословная копия dod_track_q503.py/
      dod_gate_q503.py здесь), новое исключение наружу не всплывает.
+
+Q503B СИБЛИНГ (t-531, builder, 2026-08-19) -- поздний дефект узла N1
+(defect_found ref t-521, посаженного в живой файл): F61-батарея
+test_a8_path_occupied_by_directory[main_gate] красная -- "путь занят
+КАТАЛОГОМ" на СУЩЕСТВУЮЩИЙ путь: до этой правки OSError от
+path.read_text() (напр. PermissionError -- Windows-эмпирика открытия
+каталога на чтение) ловился ТЕМ ЖЕ широким `except Exception`, что и
+JSONDecodeError, и уходил в _quarantine_bad_track(), которая глотает
+OSError ВНУТРИ СЕБЯ -- итог: НИКАКОЕ исключение не долетало наружу
+main(), что нарушает A7-контракт этого файла (НЕТ тотального try --
+main_gate ОБЯЗАН пробрасывать непредвиденные сбои, а не тихо
+fail-open'иться -- enforcement выше косметики отказа, Р3а). ФИКС
+(решение Lead, t-531), СИММЕТРИЧНО dod_track_q503b.py/dod_gate_q503b.py:
+ЧТЕНИЕ разделено на ДВА шага -- (1) `path.read_bytes()` СНАРУЖИ try --
+любой OSError отсюда (директория, доступ, ...) НЕ ловится этим кодом,
+пробрасывается ПРЕЖНИМ ПОТОКОМ ВООБЩЕ наружу main() (нет тотального
+try -- ожидаемое поведение A7). (2) `raw_bytes.decode("utf-8")` +
+`json.loads(...)` ВНУТРИ try -- ловит ТОЛЬКО (UnicodeDecodeError,
+json.JSONDecodeError): СОДЕРЖИМОЕ файла, который РЕАЛЬНО удалось
+прочитать байт-в-байт, но оно не валидный UTF-8/JSON -- ЭТА ветка (и
+только она) квaрантинит, ровно как до этой правки. Ветка "корень
+не-dict" НЕ меняется. _quarantine_bad_track() САМА не изменена (см. её
+докстринг).
 """
 
 import json
@@ -221,7 +244,11 @@ def _quarantine_bad_track(path: Path) -> None:
     запись): ЛЮБАЯ OSError здесь проглатывается молча -- существующий
     fail-open вызывающего кода (свежий дефолт в памяти) остаётся
     ЕДИНСТВЕННЫМ эффектом, новое исключение наружу не всплывает
-    (буквально K4/Р4: rc-контракты хуков не меняются)."""
+    (буквально K4/Р4: rc-контракты хуков не меняются).
+
+    Q503B (t-531): эта функция НЕ ИЗМЕНЕНА -- фикс Q503B -- НЕ
+    ВЫЗЫВАТЬ эту функцию вовсе на "путь занят каталогом" (см.
+    _load_track())."""
     try:
         fd, tmp_name = tempfile.mkstemp(
             dir=str(path.parent), prefix=path.name + ".", suffix=_QUARANTINE_SUFFIX
@@ -241,12 +268,25 @@ def _quarantine_bad_track(path: Path) -> None:
 def _load_track(path: Path) -> dict:
     if not path.exists():
         return _default_track()
+    # Q503B (t-531, 2026-08-19): ЧТЕНИЕ вынесено ИЗ-ПОД try -- OSError
+    # (IsADirectoryError/PermissionError и т.п. от самого open()/read(),
+    # напр. путь занят КАТАЛОГОМ) НЕ ловится этим кодом и НЕ карантинится
+    # -- пробрасывается ПРЕЖНИМ ПОТОКОМ ВООБЩЕ наружу main() (A7 -- нет
+    # тотального try, enforcement выше косметики отказа). ДО этой правки
+    # path.read_text() был ВНУТРИ try/except ниже -- один и тот же
+    # широкий except ловил и JSONDecodeError, и OSError одинаково, что
+    # на "путь занят каталогом" уводило в _quarantine_bad_track(),
+    # которая глотает OSError ВНУТРИ СЕБЯ -- НИКАКОЕ исключение не
+    # долетало наружу (регресс против F-61 A8-пина "исключение наружу
+    # ожидается, нет тотального try").
+    raw_bytes = path.read_bytes()
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        # Q503 K1/Р4(а)+(в): нераспарсиваемый JSON -- КАРАНТИН, не
-        # роняем хук (fail-open в памяти НЕ меняется), байты уходят
-        # под карантинное имя вместо молчаливой потери.
+        data = json.loads(raw_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        # Q503 K1/Р4(а)+(в): нераспарсиваемое СОДЕРЖИМОЕ файла, который
+        # РЕАЛЬНО удалось прочитать байт-в-байт -- КАРАНТИН, не роняем
+        # хук (fail-open в памяти НЕ меняется), байты уходят под
+        # карантинное имя вместо молчаливой потери.
         _quarantine_bad_track(path)
         return _default_track()
     if not isinstance(data, dict):
