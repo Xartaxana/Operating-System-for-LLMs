@@ -228,7 +228,11 @@ boot-пути.** Читать ПЕРЕД: подъёмом прокси и пр�
   calibration_prepass+тест+протокол-с-шапками СОДЕРЖИМЫМ;
   corpus_growth+манифест+тест+чек 34; md_regions+тест; f61-фиксы
   четырёх хуков; test_norm_form+norm_keys; суффикс CLAUDE_WARN
-  session_context; CLAUDE.md конверсии (hq-drift пары). КРОСС-ЗАПИСЬ
+  session_context; CLAUDE.md конверсии (hq-drift пары); (з)
+  ПОПОЛНЕНИЕ 08-19: узел B session_context + партия 1 region-aware
+  сторожей + md_regions в неводе + ветка (д/е) F-58 шести носителей
+  + перенумерация critic.md (14→15/16/17) + диета W2c-1 + .gitattributes
+  eol=lf + батч q503 по мере посадки. КРОСС-ЗАПИСЬ
   AO3/Dog отложена (их репо заняты); передаётся при безопасном
   касании.
   ЖИВОЕ: конвергенция wiring_check двух сторон; латентная pytest-коллизия

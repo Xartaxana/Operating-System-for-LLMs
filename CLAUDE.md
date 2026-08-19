@@ -496,3 +496,8 @@ all sessions and subagents of this repo:
    function's verdict proves the same thing — corrupt a COPY of the
    tree instead. Detector: calibration check 25 — its transcript scan
    covers this command class.
+
+| п.7 | when | duty | src |
+|---|---|---|---|
+| д | discarding OWN uncommitted work in a path inside own declared owns, edited in the SAME session | legal; porcelain checked IMMEDIATELY before the rollback (baseline ≠ check); witness = owns declaration + diff BEFORE discard + EMPTY diff after | F-58 |
+| е | owns undeclared, path outside owns, or edits not this session's | (б) unchanged: porcelain shows FACT, not AUTHOR — non-empty status outside own owns = a legitimate parallel writer (R4.d), rollback forbidden | F-58 |
