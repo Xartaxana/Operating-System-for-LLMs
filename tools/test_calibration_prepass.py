@@ -74,10 +74,61 @@ def default_rc(tmp_path: Path) -> Path:
 
 
 def check_form(tmp_path: Path, body: str, require_all: bool = False,
-                rc_path: Path = None) -> prep.CheckFormResult:
+                rc_path: Path = None, repo_root: Path = None) -> prep.CheckFormResult:
     proto = write_protocol(tmp_path, body)
     rc = rc_path or default_rc(tmp_path)
+    if repo_root is not None:
+        return prep.run_check_form(proto, rc, require_all, repo_root=repo_root)
     return prep.run_check_form(proto, rc, require_all)
+
+
+# ---------------------------------------------------------------------------
+# Хелперы W4-1a: тела чеков (body/bodypred, синтетика в tmp_path/PROCESS/checks/)
+# ---------------------------------------------------------------------------
+
+def write_body_file(tmp_path: Path, check_number, content: str = None,
+                     name: str = None) -> Path:
+    checks_dir = tmp_path / "PROCESS" / "checks"
+    checks_dir.mkdir(parents=True, exist_ok=True)
+    fname = name or f"CHK-{check_number}.md"
+    p = checks_dir / fname
+    if content is None:
+        content = (
+            f"# CHK-{check_number}\n\n"
+            f"ВЛАДЕЛЕЦ: Lead\n"
+            f"ПРАВИЛО ВЕДЕНИЯ: живёт здесь; ядро остаётся в протоколе.\n\n"
+            f"ядро -- в протоколе, чек {check_number}.\n"
+        )
+    p.write_bytes(content.encode("utf-8"))
+    return p
+
+
+def body_header_check(number: int = 0, body_path: str = None, bodypred: str = "always",
+                       extra_core: str = "доп. содержимое ядра, чтобы ядро не было пустым.",
+                       pointer: bool = True, pointer_body_path: str = None) -> str:
+    """Протокольный фрагмент: чек с полями body/bodypred, доп. строкой
+    ядра и строкой-указателем ПОСЛЕДНЕЙ строкой ядра (§7.3/A9(8))."""
+    body_path = body_path if body_path is not None else f"PROCESS/checks/CHK-{number}.md"
+    pointer_body_path = pointer_body_path if pointer_body_path is not None else body_path
+    fields = f"<!--CHK {number}|src:журнал|pred:always|rules:RC§1/R6|status:живой"
+    if body_path:
+        fields += f"|body:{body_path}"
+    if bodypred:
+        fields += f"|bodypred:{bodypred}"
+    fields += "-->\n"
+    pointer_line = ""
+    if pointer:
+        pointer_line = (
+            f"полное тело: {pointer_body_path} (читается по вердикту пре-пасса; "
+            f"при отказе пре-пасса — читается всегда)\n"
+        )
+    return (
+        f"{number}. **Чек с телом.**\n"
+        f"{fields}"
+        f"    {extra_core}\n"
+        f"{pointer_line}"
+        "\n\n"
+    )
 
 
 def defects_str(result: prep.CheckFormResult) -> str:
@@ -1090,9 +1141,10 @@ def test_registry_write_and_read(tmp_path):
     report = prep.build_window_report(proto, run_ctx)
     prep.write_registry_entry(reg, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный",
                                "test", report, None)
-    entries = prep.read_registry(reg)
+    entries, bad_count = prep.read_registry(reg)
     assert len(entries) == 1
     assert entries[0]["alive_count"] == report["alive_count"]
+    assert bad_count == 0
 
 
 def _make_hermetic_git_repo(tmp_path: Path) -> Path:
@@ -1128,10 +1180,12 @@ def test_control_mode_periodic_trigger(tmp_path):
     for i in range(3):
         with open(reg, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({"mode": "обычный (x)"}) + "\n")
-    mode, reason = prep.determine_mode(prep.read_registry(reg), str(hermetic_repo),
+    entries, bad_count = prep.read_registry(reg)
+    mode, reason = prep.determine_mode(entries, str(hermetic_repo),
                                         "PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md", False)
     assert mode == "КОНТРОЛЬНЫЙ"
     assert "N=4" in reason
+    assert bad_count == 0
 
 
 def test_control_mode_event_trigger_after_header_commit(tmp_path):
@@ -1151,10 +1205,12 @@ def test_control_mode_event_trigger_after_header_commit(tmp_path):
     reg = tmp_path / "registry2.jsonl"
     with open(reg, "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"mode": "обычный (x)"}) + "\n")
-    mode, reason = prep.determine_mode(prep.read_registry(reg), str(hermetic_repo),
+    entries, bad_count = prep.read_registry(reg)
+    mode, reason = prep.determine_mode(entries, str(hermetic_repo),
                                         protocol_rel, False)
     assert mode == "КОНТРОЛЬНЫЙ"
     assert "правк" in reason and "шапок" in reason
+    assert bad_count == 0
 
 
 def test_control_mode_explicit_flag(tmp_path):
@@ -1347,8 +1403,13 @@ def test_real_protocol_all_35_checks_headered():
     assert top_numbers == set(range(36)), sorted(set(range(36)) ^ top_numbers)
 
 
-def test_real_protocol_window_run_exit0():
-    proc = run_cli(["--window-start", "2026-08-14T12:12:34"])
+def test_real_protocol_window_run_exit0(tmp_path):
+    """Критик-фикс №7: --registry на scratch -- иначе каждый прогон
+    теста дописывает БОЕВОЙ сайдкар logs/calibration_prepass.jsonl
+    строками с window_start==ts калибровки (после W4-1b это двигало бы
+    skip-каунтер; класс «неинъектируемый дефолт пути»)."""
+    proc = run_cli(["--window-start", "2026-08-14T12:12:34",
+                     "--registry", str(tmp_path / "reg.jsonl")])
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "ИТОГ:" in proc.stdout
 
@@ -1395,3 +1456,923 @@ def test_known_script_commands_negative_control_invented_name_absent():
     короткая/тривиальная"."""
     text = prep.read_protocol_text(prep.DEFAULT_PROTOCOL)
     assert "totally_invented_script_xyz_not_real" not in text
+
+
+# ---------------------------------------------------------------------------
+# 19. W4-1a -- поля body/bodypred: грамматика, MAX_FIELDS_TOTAL 8->10
+# ---------------------------------------------------------------------------
+
+def test_field_order_has_body_and_bodypred_between_status_and_cand():
+    assert prep.FIELD_ORDER == [
+        "src", "pred", "rules", "status", "body", "bodypred", "cand", "since", "note",
+    ]
+
+
+def test_max_fields_total_is_10_now():
+    assert prep.MAX_FIELDS_TOTAL == 10
+
+
+def test_body_bodypred_valid_pair_ok(tmp_path):
+    body_dir_content = body_header_check(0)
+    write_body_file(tmp_path, 0)
+    result = check_form(tmp_path, body_dir_content, repo_root=tmp_path)
+    assert result.defects == [], defects_str(result)
+
+
+def test_body_field_space_in_value_rejected(tmp_path):
+    body = (
+        "0. **Чек.**\n"
+        "<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой|"
+        "body:PROCESS/checks/CHK 0.md|bodypred:always-->\n"
+        "    тело.\n\n"
+    )
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("body: пробел" in d for d in result.defects), defects_str(result)
+
+
+def test_body_field_empty_value_rejected(tmp_path):
+    body = (
+        "0. **Чек.**\n"
+        "<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой|"
+        "body:|bodypred:always-->\n"
+        "    тело.\n\n"
+    )
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("body: пустое значение" in d for d in result.defects), defects_str(result)
+
+
+def test_bodypred_unknown_predicate_rejected(tmp_path):
+    body = (
+        "0. **Чек.**\n"
+        "<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой|"
+        "body:PROCESS/checks/CHK-0.md|bodypred:frobnicate-->\n"
+        "    тело.\n\n"
+    )
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("bodypred:" in d and "не резолвящийся" in d for d in result.defects), \
+        defects_str(result)
+
+
+@pytest.mark.parametrize("bodypred", [
+    "always", "git.any", "git.paths:tools/**", "path.exists:tools",
+    "script:parity_check", "manual:транскрипты",
+])
+def test_bodypred_reuses_existing_predicate_grammar(bodypred):
+    """A1: bodypred валидируется СУЩЕСТВУЮЩЕЙ грамматикой (никаких новых
+    форм в W4-1a -- git.pathset заведён W4-1b)."""
+    assert prep.validate_predicate_value(bodypred) is None, bodypred
+
+
+def test_max_fields_total_boundary_all_9_fields_ok(tmp_path):
+    """Граница MAX_FIELDS_TOTAL=10 (rule 6a): все 9 полей FIELD_ORDER +
+    CHK = 10 -- PASS. "За границей" (11) структурно недостижим замкнутым
+    словарём из 9 известных ключей без дублей (то же свойство было и у
+    старого MAX=8/7 полей -- не новый пробел, см. отчёт)."""
+    write_body_file(tmp_path, 0)
+    body = (
+        "0. **Чек.**\n"
+        "<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой|"
+        "body:PROCESS/checks/CHK-0.md|bodypred:always|cand:manual:x|"
+        "since:2026-08-19|note:абв-->\n"
+        "    тело.\n"
+        "полное тело: PROCESS/checks/CHK-0.md (читается по вердикту "
+        "пре-пасса; при отказе пре-пасса — читается всегда)\n\n"
+    )
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert not any("полей больше" in d for d in result.defects), defects_str(result)
+
+
+# ---------------------------------------------------------------------------
+# 20. W4-1a -- сверка пары шапка<->тело, 13 проверок (§4.6 (1)-(7) +
+#     A9 (8)-(12) + A1 (13)); адверсариальная батарея (а)-(л) для 1a.
+# ---------------------------------------------------------------------------
+
+def test_pair_positive_all_13_checks_clean(tmp_path):
+    """Позитив-эталон: валидная пара шапка<->тело не даёт ни одного
+    PAIR-дефекта (база для всех негативных вариаций ниже)."""
+    write_body_file(tmp_path, 0)
+    body = body_header_check(0)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert not any(d.startswith("PAIR:") for d in result.defects), defects_str(result)
+
+
+# --- проверка (1): тело существует, читается, LF, непусто ------------------
+
+def test_pair_check_01_missing_file_rejected(tmp_path):
+    """Битарея (г): body на несуществующий файл."""
+    body = body_header_check(0)  # тело НЕ создаётся
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("не существует" in d for d in result.defects), defects_str(result)
+
+
+def test_pair_check_01_empty_body_rejected(tmp_path):
+    """Битарея (е): тело 0 Б."""
+    write_body_file(tmp_path, 0, content="")
+    body = body_header_check(0)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("тело PROCESS/checks/CHK-0.md -- пусто" in d for d in result.defects), \
+        defects_str(result)
+
+
+def test_pair_check_01_crlf_body_rejected(tmp_path):
+    """Битарея (ж): тело CRLF (не LF)."""
+    content = (
+        "# CHK-0\r\n\r\nВЛАДЕЛЕЦ: Lead\r\nПРАВИЛО ВЕДЕНИЯ: тест.\r\n\r\n"
+        "ядро -- в протоколе, чек 0.\r\n"
+    )
+    write_body_file(tmp_path, 0, content=content)
+    body = body_header_check(0)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("не LF" in d for d in result.defects), defects_str(result)
+
+
+# --- проверка (2): путь относительный, внутри репо, ровно один чек на файл -
+
+def test_pair_check_02_absolute_path_rejected(tmp_path):
+    """Битарея (в), часть 1: body абсолютным путём."""
+    abs_path = str((tmp_path / "PROCESS" / "checks" / "CHK-0.md")).replace("\\", "/")
+    body = body_header_check(0, body_path=abs_path, pointer_body_path=abs_path)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("путь не относительный" in d for d in result.defects), defects_str(result)
+
+
+def test_pair_check_02_outside_repo_path_rejected(tmp_path):
+    """Битарея (в), часть 2: body путём вне репо (escaping .. )."""
+    body = body_header_check(0, body_path="../outside/CHK-0.md",
+                              pointer_body_path="../outside/CHK-0.md")
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("выходит за пределы репозитория" in d for d in result.defects), \
+        defects_str(result)
+
+
+def test_pair_check_02_duplicate_body_path_rejected(tmp_path):
+    """Битарея (д): два чека с одним body."""
+    write_body_file(tmp_path, 0)
+    shared_path = "PROCESS/checks/CHK-0.md"
+    body = (
+        body_header_check(0, body_path=shared_path, pointer_body_path=shared_path)
+        + body_header_check(1, body_path=shared_path, pointer_body_path=shared_path)
+    )
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("указан у нескольких чеков" in d for d in result.defects), defects_str(result)
+
+
+# --- проверка (3): шапка тела несёт владельца и правило ведения ------------
+
+def test_pair_check_03_missing_owner_marker_rejected(tmp_path):
+    write_body_file(tmp_path, 0, content=(
+        "# CHK-0\n\nПРАВИЛО ВЕДЕНИЯ: тест.\n\nядро -- в протоколе, чек 0.\n"
+    ))
+    body = body_header_check(0)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("нет маркера ВЛАДЕЛЕЦ" in d for d in result.defects), defects_str(result)
+
+
+def test_pair_check_03_missing_rule_marker_rejected(tmp_path):
+    write_body_file(tmp_path, 0, content=(
+        "# CHK-0\n\nВЛАДЕЛЕЦ: Lead\n\nядро -- в протоколе, чек 0.\n"
+    ))
+    body = body_header_check(0)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("нет маркера ПРАВИЛО ВЕДЕНИЯ" in d for d in result.defects), defects_str(result)
+
+
+# --- проверка (4): номер в теле == номеру шапки -----------------------------
+
+def test_pair_check_04_missing_check_number_in_body_rejected(tmp_path):
+    write_body_file(tmp_path, 0, content=(
+        "# CHK-0\n\nВЛАДЕЛЕЦ: Lead\nПРАВИЛО ВЕДЕНИЯ: тест.\n\nядро -- в протоколе.\n"
+    ))
+    body = body_header_check(0)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("номер чека 0 не найден" in d for d in result.defects), defects_str(result)
+
+
+# --- проверка (5): секционированное тело ------------------------------------
+
+def _sectioned_pilot(tmp_path, body_section_id: str, body_extra: str = "",
+                      subheader_id: str = "0(а)"):
+    write_body_file(tmp_path, 0, content=(
+        "# CHK-0\n\nВЛАДЕЛЕЦ: Lead\nПРАВИЛО ВЕДЕНИЯ: тест.\n\n"
+        "ядро -- в протоколе, чек 0.\n\n"
+        f"## {body_section_id}\n\nтекст секции.\n" + body_extra
+    ))
+    proto_body = (
+        "0. **Чек с подпунктом.**\n"
+        "<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой|"
+        "body:PROCESS/checks/CHK-0.md|bodypred:always-->\n"
+        "    преамбула.\n"
+        f"<!--CHK {subheader_id}|src:журнал|pred:journal.any|rules:RC§1/R6|status:живой-->\n"
+        f"    ({subheader_id[2:-1]}) подпункт с начала строки.\n"
+        "полное тело: PROCESS/checks/CHK-0.md (читается по вердикту пре-пасса; "
+        "при отказе пре-пасса — читается всегда)\n\n"
+    )
+    return check_form(tmp_path, proto_body, repo_root=tmp_path)
+
+
+def test_pair_check_05_section_matching_known_subheader_ok(tmp_path):
+    result = _sectioned_pilot(tmp_path, body_section_id="0(а)")
+    assert not any(d.startswith("PAIR:") and "секция" in d for d in result.defects), \
+        defects_str(result)
+
+
+def test_pair_check_05_section_without_subheader_rejected(tmp_path):
+    result = _sectioned_pilot(tmp_path, body_section_id="0(я)")
+    assert any("без под-шапки в протоколе" in d for d in result.defects), defects_str(result)
+
+
+def test_pair_check_05_subheader_without_section_is_legal(tmp_path):
+    """под-шапка без секции легальна: тело секционировано ДРУГИМ id,
+    существующая под-шапка 0(а) не требует своей секции."""
+    write_body_file(tmp_path, 0, content=(
+        "# CHK-0\n\nВЛАДЕЛЕЦ: Lead\nПРАВИЛО ВЕДЕНИЯ: тест.\n\n"
+        "ядро -- в протоколе, чек 0.\n"
+    ))
+    proto_body = (
+        "0. **Чек с подпунктом.**\n"
+        "<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой|"
+        "body:PROCESS/checks/CHK-0.md|bodypred:always-->\n"
+        "    преамбула.\n"
+        "<!--CHK 0(а)|src:журнал|pred:journal.any|rules:RC§1/R6|status:живой-->\n"
+        "    (а) подпункт с начала строки.\n"
+        "полное тело: PROCESS/checks/CHK-0.md (читается по вердикту пре-пасса; "
+        "при отказе пре-пасса — читается всегда)\n\n"
+    )
+    result = check_form(tmp_path, proto_body, repo_root=tmp_path)
+    assert not any(d.startswith("PAIR:") for d in result.defects), defects_str(result)
+
+
+def test_pair_check_05_duplicate_section_id_rejected(tmp_path):
+    write_body_file(tmp_path, 0, content=(
+        "# CHK-0\n\nВЛАДЕЛЕЦ: Lead\nПРАВИЛО ВЕДЕНИЯ: тест.\n\n"
+        "ядро -- в протоколе, чек 0.\n\n"
+        "## 0(а)\n\nтекст.\n\n## 0(а)\n\nповтор.\n"
+    ))
+    proto_body = (
+        "0. **Чек с подпунктом.**\n"
+        "<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой|"
+        "body:PROCESS/checks/CHK-0.md|bodypred:always-->\n"
+        "    преамбула.\n"
+        "<!--CHK 0(а)|src:журнал|pred:journal.any|rules:RC§1/R6|status:живой-->\n"
+        "    (а) подпункт с начала строки.\n"
+        "полное тело: PROCESS/checks/CHK-0.md (читается по вердикту пре-пасса; "
+        "при отказе пре-пасса — читается всегда)\n\n"
+    )
+    result = check_form(tmp_path, proto_body, repo_root=tmp_path)
+    assert any("повтор секции" in d for d in result.defects), defects_str(result)
+
+
+# --- проверка (6): body/bodypred у под-шапки -- дефект ----------------------
+
+def test_pair_check_06_body_at_subheader_rejected(tmp_path):
+    """Битарея (б): body у под-шапки."""
+    write_body_file(tmp_path, 0)
+    proto_body = (
+        "0. **Чек с подпунктом.**\n"
+        "<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой-->\n"
+        "    преамбула.\n"
+        "<!--CHK 0(а)|src:журнал|pred:journal.any|rules:RC§1/R6|status:живой|"
+        "body:PROCESS/checks/CHK-0.md-->\n"
+        "    (а) подпункт с начала строки.\n\n"
+    )
+    result = check_form(tmp_path, proto_body, repo_root=tmp_path)
+    assert any("под-шапка 0(а)" in d and "легально только у шапки чека" in d
+               for d in result.defects), defects_str(result)
+
+
+def test_pair_check_06_bodypred_at_subheader_rejected(tmp_path):
+    proto_body = (
+        "0. **Чек с подпунктом.**\n"
+        "<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой-->\n"
+        "    преамбула.\n"
+        "<!--CHK 0(а)|src:журнал|pred:journal.any|rules:RC§1/R6|status:живой|"
+        "bodypred:always-->\n"
+        "    (а) подпункт с начала строки.\n\n"
+    )
+    result = check_form(tmp_path, proto_body, repo_root=tmp_path)
+    assert any("под-шапка 0(а)" in d and "легально только у шапки чека" in d
+               for d in result.defects), defects_str(result)
+
+
+# --- проверка (7): чек с body обязан иметь непустое ядро --------------------
+
+def test_pair_check_07_empty_core_rejected(tmp_path):
+    write_body_file(tmp_path, 0)
+    body = body_header_check(0, extra_core="")
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("пустое ядро" in d for d in result.defects), defects_str(result)
+
+
+def test_pair_check_07_nonempty_core_ok(tmp_path):
+    write_body_file(tmp_path, 0)
+    body = body_header_check(0, extra_core="непустое содержимое ядра.")
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert not any("пустое ядро" in d for d in result.defects), defects_str(result)
+
+
+# --- проверка (8): строка-указатель -- присутствие/позиция -----------------
+
+def test_pair_check_08_pointer_missing_rejected(tmp_path):
+    write_body_file(tmp_path, 0)
+    body = body_header_check(0, pointer=False)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("строка-указатель на тело отсутствует" in d for d in result.defects), \
+        defects_str(result)
+
+
+def test_pair_check_08_pointer_not_last_line_rejected(tmp_path):
+    write_body_file(tmp_path, 0)
+    body = (
+        "0. **Чек с телом.**\n"
+        "<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой|"
+        "body:PROCESS/checks/CHK-0.md|bodypred:always-->\n"
+        "    доп. содержимое ядра.\n"
+        "полное тело: PROCESS/checks/CHK-0.md (читается по вердикту пре-пасса; "
+        "при отказе пре-пасса — читается всегда)\n"
+        "    хвост ПОСЛЕ указателя -- нарушает позицию.\n\n"
+    )
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("не последней строкой ядра" in d for d in result.defects), defects_str(result)
+
+
+def test_pair_check_08_duplicate_pointer_rejected(tmp_path):
+    write_body_file(tmp_path, 0)
+    ptr = ("полное тело: PROCESS/checks/CHK-0.md (читается по вердикту пре-пасса; "
+           "при отказе пре-пасса — читается всегда)\n")
+    body = (
+        "0. **Чек с телом.**\n"
+        "<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой|"
+        "body:PROCESS/checks/CHK-0.md|bodypred:always-->\n"
+        "    доп. содержимое ядра.\n" + ptr + ptr + "\n\n"
+    )
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("больше одной строки-указателя" in d for d in result.defects), \
+        defects_str(result)
+
+
+# --- проверка (9): файл-сирота в PROCESS/checks/ ----------------------------
+
+def test_pair_check_09_orphan_file_rejected(tmp_path):
+    write_body_file(tmp_path, 0)
+    (tmp_path / "PROCESS" / "checks" / "CHK-99.md").write_text(
+        "# CHK-99\n\nВЛАДЕЛЕЦ: Lead\nПРАВИЛО ВЕДЕНИЯ: сирота.\n", encoding="utf-8",
+    )
+    body = body_header_check(0)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("файл-сирота" in d and "CHK-99.md" in d for d in result.defects), \
+        defects_str(result)
+
+
+def test_pair_check_09_no_orphan_when_referenced(tmp_path):
+    write_body_file(tmp_path, 0)
+    body = body_header_check(0)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert not any("файл-сирота" in d for d in result.defects), defects_str(result)
+
+
+# --- проверка (10): запрет строк <!--CHK внутри тела ------------------------
+
+def test_pair_check_10_chk_marker_inside_body_rejected(tmp_path):
+    write_body_file(tmp_path, 0, content=(
+        "# CHK-0\n\nВЛАДЕЛЕЦ: Lead\nПРАВИЛО ВЕДЕНИЯ: тест.\n\n"
+        "ядро -- в протоколе, чек 0.\n"
+        "<!--CHK 5|src:журнал|pred:always|rules:RC§1/R6|status:живой-->\n"
+    ))
+    body = body_header_check(0)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("запрещённый маркер <!--CHK" in d for d in result.defects), defects_str(result)
+
+
+# --- проверка (11): BOM -----------------------------------------------------
+
+def test_pair_check_11_bom_rejected(tmp_path):
+    content = (
+        "# CHK-0\n\nВЛАДЕЛЕЦ: Lead\nПРАВИЛО ВЕДЕНИЯ: тест.\n\n"
+        "ядро -- в протоколе, чек 0.\n"
+    )
+    p = tmp_path / "PROCESS" / "checks" / "CHK-0.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"\xef\xbb\xbf" + content.encode("utf-8"))
+    body = body_header_check(0)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("содержит BOM" in d for d in result.defects), defects_str(result)
+
+
+# --- проверка (12): имя файла выводится из id -------------------------------
+
+def test_pair_check_12_filename_mismatch_rejected(tmp_path):
+    write_body_file(tmp_path, 0, name="WRONG-NAME.md")
+    body = body_header_check(0, body_path="PROCESS/checks/WRONG-NAME.md",
+                              pointer_body_path="PROCESS/checks/WRONG-NAME.md")
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("не выводится из id" in d for d in result.defects), defects_str(result)
+
+
+# --- проверка (13, A1): body без bodypred / bodypred без body ---------------
+
+def test_pair_check_13_body_without_bodypred_rejected(tmp_path):
+    write_body_file(tmp_path, 0)
+    body = body_header_check(0, bodypred=None)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("body без bodypred" in d for d in result.defects), defects_str(result)
+
+
+def test_pair_check_13_bodypred_without_body_rejected(tmp_path):
+    body = body_header_check(0, body_path="", bodypred="always", pointer=False)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("bodypred без body" in d for d in result.defects), defects_str(result)
+
+
+# ---------------------------------------------------------------------------
+# 21. W4-1a -- учёт байт тел (Р2(A)/A7/A8): M = протокол + ВСЕ тела,
+#     "к чтению" += байты ЖИВЫХ по bodypred; печать адресов; К2/тест(п).
+# ---------------------------------------------------------------------------
+
+def test_body_accounting_no_bodies_all_zero_k2_test_p(tmp_path):
+    """DoD п / К2 (A7): протокол без единой body-шапки -- добавки
+    нулевые, числа to_read/total/alive идентичны миру до W4. Решение Lead
+    (фикс 8а критика): оба слагаемых ИТОГ печатаются ВСЕГДА симметрично
+    (включая нули) -- "из них тела 0 Б · принудительно 0 Б"."""
+    j = write_journal(tmp_path, [])
+    proto = write_protocol(tmp_path, _pilot_body())
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    assert report["body_verdicts"] == []
+    assert report["bodies_total_bytes"] == 0
+    assert report["bodies_to_read_bytes"] == 0
+    assert report["bodies_forced_bytes"] == 0
+    assert report["protocol_total_bytes"] == report["total_bytes"]
+    assert report["protocol_to_read_bytes"] == report["to_read_bytes"]
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "из них тела 0 Б · принудительно 0 Б" in rendered
+    assert "ТЕЛА К ЧТЕНИЮ" not in rendered
+    assert "ТЕЛА ПРОПУЩЕНЫ" not in rendered
+    assert "ДЕФЕКТЫ ТЕЛ" not in rendered
+
+
+def test_body_accounting_alive_body_bytes_included_in_to_read(tmp_path):
+    write_body_file(tmp_path, 0)
+    body_size = (tmp_path / "PROCESS" / "checks" / "CHK-0.md").stat().st_size
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="always"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    assert len(report["body_verdicts"]) == 1
+    bv = report["body_verdicts"][0]
+    assert bv.alive is True and bv.exists is True
+    assert report["bodies_to_read_bytes"] == body_size
+    assert report["bodies_total_bytes"] == body_size
+    assert report["to_read_bytes"] == report["protocol_to_read_bytes"] + body_size
+    assert report["total_bytes"] == report["protocol_total_bytes"] + body_size
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "ТЕЛА К ЧТЕНИЮ:" in rendered
+    assert "PROCESS/checks/CHK-0.md" in rendered
+    assert f"из них тела {body_size} Б" in rendered
+
+
+def test_body_accounting_dead_body_excluded_from_to_read_but_in_total(tmp_path):
+    """bodypred=journal.any на ПУСТОМ окне -> тело ПУСТ (не читается),
+    но его байты входят в M (знаменатель, A8) через bodies_total_bytes."""
+    write_body_file(tmp_path, 0)
+    body_size = (tmp_path / "PROCESS" / "checks" / "CHK-0.md").stat().st_size
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="journal.any"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    bv = report["body_verdicts"][0]
+    assert bv.alive is False
+    assert report["bodies_to_read_bytes"] == 0
+    assert report["bodies_total_bytes"] == body_size
+    assert report["total_bytes"] == report["protocol_total_bytes"] + body_size
+    assert report["to_read_bytes"] == report["protocol_to_read_bytes"]
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "ТЕЛА ПРОПУЩЕНЫ:" in rendered
+    assert "из них тела 0 Б" in rendered
+
+
+def test_body_accounting_missing_file_alive_verdict_is_defect(tmp_path):
+    """§4.7: тело отсутствует ПРИ ЖИВОМ вердикте -> дефект формы + 0 Б
+    (файл тела не создаётся вовсе; bodypred=always -> alive)."""
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="always"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    bv = report["body_verdicts"][0]
+    assert bv.alive is True and bv.exists is False and bv.byte_size == 0
+    assert bv.defect is not None and "ТЕЛО ОТСУТСТВУЕТ" in bv.defect
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "ДЕФЕКТЫ ТЕЛ" in rendered
+    assert "ТЕЛО ОТСУТСТВУЕТ" in rendered
+
+
+# ---------------------------------------------------------------------------
+# 22. W4-1a -- fail-closed (§4.7 + A10): сайдкар-счётчик, перехват
+#     оконного тракта в main(), тест-пин "--check-form сайдкар не пишет".
+# ---------------------------------------------------------------------------
+
+def test_sidecar_bad_line_counted(tmp_path):
+    reg = tmp_path / "reg.jsonl"
+    reg.write_text('{"ts": "x"}\nне-json-строка\n{"ts": "y"}\n', encoding="utf-8")
+    entries, bad = prep.read_registry(reg)
+    assert len(entries) == 2
+    assert bad == 1
+
+
+def test_sidecar_bad_line_zero_when_clean(tmp_path):
+    reg = tmp_path / "reg.jsonl"
+    reg.write_text('{"ts": "x"}\n', encoding="utf-8")
+    entries, bad = prep.read_registry(reg)
+    assert bad == 0
+
+
+def test_sidecar_missing_file_zero_bad(tmp_path):
+    entries, bad = prep.read_registry(tmp_path / "no-such-registry.jsonl")
+    assert entries == [] and bad == 0
+
+
+def test_sidecar_bad_count_printed_in_render_when_nonzero(tmp_path):
+    j = write_journal(tmp_path, [])
+    proto = write_protocol(tmp_path, _pilot_body())
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto, sidecar_bad_count=2,
+    )
+    assert "САЙДКАР: битых строк 2" in rendered
+
+
+def test_sidecar_bad_count_not_printed_when_zero(tmp_path):
+    j = write_journal(tmp_path, [])
+    proto = write_protocol(tmp_path, _pilot_body())
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto, sidecar_bad_count=0,
+    )
+    assert "САЙДКАР" not in rendered
+
+
+def test_check_form_does_not_write_sidecar(tmp_path):
+    """A10 тест-пин: --check-form НЕ пишет (и не читает) сайдкар --
+    проверка формы не окно."""
+    proto = write_protocol(tmp_path, CHK0_VALID)
+    rc = default_rc(tmp_path)
+    reg = tmp_path / "reg.jsonl"
+    assert not reg.exists()
+    proc = run_cli(["--check-form", "--protocol", str(proto), "--rule-coverage", str(rc),
+                     "--registry", str(reg)])
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert not reg.exists(), "check-form не должен создавать/писать сайдкар"
+
+
+def test_main_fail_closed_generic_exception_from_build_window_report(tmp_path, monkeypatch, capsys):
+    """Тест monkeypatch build_window_report (§4.7/P4)."""
+    proto = write_protocol(tmp_path, CHK0_VALID)
+    j = write_journal(tmp_path, [])
+    reg = tmp_path / "reg.jsonl"
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(prep, "build_window_report", _boom)
+    rc = prep.main([
+        "--window-start", "2026-08-14T00:00:00", "--protocol", str(proto),
+        "--journal", str(j), "--registry", str(reg),
+    ])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "ПРЕ-ПАСС НЕ ОТРАБОТАЛ: RuntimeError" in captured.err
+    assert "ЧИТАЕТСЯ ВСЁ: протокол +" in captured.err
+    assert "ГЕЙТ (а): НЕ ИЗМЕРЕН" in captured.err
+    assert not reg.exists(), "сайдкар не пишется при отказе пре-пасса"
+
+
+def test_main_fail_closed_protocol_error_uses_new_format(tmp_path, capsys):
+    """ProtocolError (ожидаемый класс) идёт через ТОТ ЖЕ перехват --
+    единый формат оконного тракта, не старое "calibration_prepass: ...""."""
+    missing_proto = tmp_path / "does-not-exist.md"
+    j = write_journal(tmp_path, [])
+    reg = tmp_path / "reg.jsonl"
+    rc = prep.main([
+        "--window-start", "2026-08-14T00:00:00", "--protocol", str(missing_proto),
+        "--journal", str(j), "--registry", str(reg),
+    ])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "ПРЕ-ПАСС НЕ ОТРАБОТАЛ: ProtocolError" in captured.err
+    assert "ГЕЙТ (а): НЕ ИЗМЕРЕН" in captured.err
+
+
+def test_fallback_body_listing_directory_exists_lists_files(tmp_path):
+    checks_dir = tmp_path / "PROCESS" / "checks"
+    checks_dir.mkdir(parents=True)
+    (checks_dir / "CHK-0.md").write_text("x", encoding="utf-8")
+    (checks_dir / "CHK-1.md").write_text("x", encoding="utf-8")
+    proto = write_protocol(tmp_path, CHK0_VALID)
+    listing = prep._fallback_body_listing(proto, repo_root=tmp_path)
+    assert "PROCESS/checks/CHK-0.md" in listing
+    assert "PROCESS/checks/CHK-1.md" in listing
+
+
+def test_fallback_body_listing_directory_absent_uses_headers(tmp_path):
+    proto = write_protocol(tmp_path, body_header_check(0))
+    listing = prep._fallback_body_listing(proto, repo_root=tmp_path)
+    assert "PROCESS/checks/CHK-0.md" in listing
+    assert "каталога PROCESS/checks/ нет" in listing
+
+
+def test_fallback_body_listing_directory_absent_no_bodies(tmp_path):
+    proto = write_protocol(tmp_path, CHK0_VALID)
+    listing = prep._fallback_body_listing(proto, repo_root=tmp_path)
+    assert "не найдено" in listing
+
+
+# ---------------------------------------------------------------------------
+# 23. W4-1a -- CLI --window-start мусор -> exit 2 (битарея (л); уже
+#     покрыто test_cli_invalid_window_start_exit2 выше -- регрессия
+#     подтверждена явным дубль-пином здесь на случай переноса).
+# ---------------------------------------------------------------------------
+
+def test_battery_l_window_start_garbage_exit2_pin(tmp_path):
+    proc = run_cli(["--window-start", "совсем-не-дата-мусор"])
+    assert proc.returncode == 2
+
+
+# --- битарея (а): шапка 300/301 Б С body ------------------------------------
+
+def _header_with_body_of_len(payload_filler: str) -> str:
+    base = ("<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой|"
+            "body:PROCESS/checks/CHK-0.md|bodypred:always|note:{}-->")
+    return base.format(payload_filler)
+
+
+def test_battery_a_header_300_bytes_with_body_ok(tmp_path):
+    write_body_file(tmp_path, 0)
+    base_no_note = ("<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой|"
+                     "body:PROCESS/checks/CHK-0.md|bodypred:always|note:-->")
+    pad_needed = 300 - len(base_no_note.encode("utf-8"))
+    header = _header_with_body_of_len("x" * pad_needed)
+    assert len(header.encode("utf-8")) == 300
+    pointer = ("полное тело: PROCESS/checks/CHK-0.md (читается по вердикту пре-пасса; "
+               "при отказе пре-пасса — читается всегда)\n")
+    proto_body = f"0. **Чек.**\n{header}\n    доп. содержимое ядра.\n{pointer}\n\n"
+    result = check_form(tmp_path, proto_body, repo_root=tmp_path)
+    assert not any("длиннее 300" in d for d in result.defects), defects_str(result)
+
+
+def test_battery_a_header_301_bytes_with_body_rejected(tmp_path):
+    write_body_file(tmp_path, 0)
+    base_no_note = ("<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой|"
+                     "body:PROCESS/checks/CHK-0.md|bodypred:always|note:-->")
+    pad_needed = 301 - len(base_no_note.encode("utf-8"))
+    header = _header_with_body_of_len("x" * pad_needed)
+    assert len(header.encode("utf-8")) == 301
+    pointer = ("полное тело: PROCESS/checks/CHK-0.md (читается по вердикту пре-пасса; "
+               "при отказе пре-пасса — читается всегда)\n")
+    proto_body = f"0. **Чек.**\n{header}\n    доп. содержимое ядра.\n{pointer}\n\n"
+    result = check_form(tmp_path, proto_body, repo_root=tmp_path)
+    assert any("длиннее 300" in d for d in result.defects), defects_str(result)
+
+
+# ---------------------------------------------------------------------------
+# 24. Критик-фиксы W4-1a (fit_with_fixes, семь пунктов + решение Lead 8а)
+# ---------------------------------------------------------------------------
+
+# --- фикс 1: шапка с ЛЮБОЙ ошибкой формы не должна ронять тело из учёта ----
+
+def test_critic_fix1_header_with_unrelated_form_error_still_counts_body(tmp_path):
+    """Красная половина ДО фикса: since:НЕ-ДАТА (ошибка формы, к body
+    отношения не имеющая) роняла тело из body_verdicts/M/"к чтению"
+    целиком. После фикса: тело ЖИВО fail-closed с причиной, байты
+    считаются."""
+    write_body_file(tmp_path, 0)
+    body_size = (tmp_path / "PROCESS" / "checks" / "CHK-0.md").stat().st_size
+    proto_body = (
+        "0. **Чек с дефектной шапкой.**\n"
+        "<!--CHK 0|src:журнал|pred:always|rules:RC§1/R6|status:живой|"
+        "body:PROCESS/checks/CHK-0.md|bodypred:always|since:НЕ-ДАТА-->\n"
+        "    доп. содержимое ядра.\n"
+        "полное тело: PROCESS/checks/CHK-0.md (читается по вердикту пре-пасса; "
+        "при отказе пре-пасса — читается всегда)\n\n"
+    )
+    proto = write_protocol(tmp_path, proto_body)
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    assert len(report["body_verdicts"]) == 1, "тело не должно пропадать из учёта"
+    bv = report["body_verdicts"][0]
+    assert bv.alive is True
+    assert "дефектом формы" in bv.reason
+    assert report["bodies_total_bytes"] == body_size
+    assert report["bodies_to_read_bytes"] == body_size
+
+
+def test_critic_fix1_clean_header_unaffected(tmp_path):
+    """Позитив-контроль фикса 1: шапка БЕЗ ошибок формы по-прежнему
+    считается обычным путём (через bodypred), не через fail-closed
+    ветку дефектной шапки."""
+    write_body_file(tmp_path, 0)
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="always"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    bv = report["body_verdicts"][0]
+    assert bv.alive is True
+    assert "дефектом формы" not in bv.reason
+
+
+# --- фикс 2: не-UTF8 сайдкар не должен ронять UnicodeDecodeError наружу ----
+
+def test_critic_fix2_non_utf8_sidecar_no_crash_exit0_with_bad_count(tmp_path, capsys):
+    """ДО фикса: не-UTF8 байт в сайдкаре давал необработанный
+    UnicodeDecodeError -- exit 1 без «ЧИТАЕТСЯ ВСЁ»/«ГЕЙТ (а): НЕ
+    ИЗМЕРЕН». После errors="replace" строка декодируется без исключения,
+    не парсится JSON-ом -> считается битой (не крэш, не fail-closed
+    оконного тракта целиком -- прогон состоялся, битая строка сайдкара
+    отражена счётчиком, W4-1b добавит форсирование)."""
+    proto = write_protocol(tmp_path, CHK0_VALID)
+    j = write_journal(tmp_path, [])
+    reg = tmp_path / "reg.jsonl"
+    reg.write_bytes(b'{"mode": "\xff\xfe\x00broken"}\n')
+    rc = prep.main([
+        "--window-start", "2026-08-14T00:00:00", "--protocol", str(proto),
+        "--journal", str(j), "--registry", str(reg),
+    ])
+    captured = capsys.readouterr()
+    assert rc == 0, captured.out + captured.err
+    assert "САЙДКАР: битых строк 1" in captured.out
+    assert "ПРЕ-ПАСС НЕ ОТРАБОТАЛ" not in captured.err
+
+
+def test_critic_fix2_registry_path_is_directory_is_fail_closed(tmp_path, capsys):
+    """Фикс 2, вторая половина: read_registry/determine_mode -- ПОД ТЕМ
+    ЖЕ перехватом, что build_window_report. Ошибка, которую errors=
+    "replace" не лечит (--registry указывает на КАТАЛОГ, не файл ->
+    PermissionError/IsADirectoryError на open()) -- обязана уйти через
+    единый fail-closed, не наружу необработанным исключением."""
+    proto = write_protocol(tmp_path, CHK0_VALID)
+    j = write_journal(tmp_path, [])
+    reg_as_dir = tmp_path / "reg-is-a-dir"
+    reg_as_dir.mkdir()
+    rc = prep.main([
+        "--window-start", "2026-08-14T00:00:00", "--protocol", str(proto),
+        "--journal", str(j), "--registry", str(reg_as_dir),
+    ])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "ПРЕ-ПАСС НЕ ОТРАБОТАЛ" in captured.err
+    assert "ГЕЙТ (а): НЕ ИЗМЕРЕН" in captured.err
+
+
+def test_critic_fix2_read_registry_non_utf8_no_crash():
+    """read_registry сама по себе не падает на не-UTF8 байтах (errors=
+    "replace"); строка не парсится JSON-ом -> считается битой."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "reg.jsonl"
+        p.write_bytes(b'{"ts": "ok"}\n\xff\xfe\x00broken\n')
+        entries, bad = prep.read_registry(p)
+        assert len(entries) == 1
+        assert bad == 1
+
+
+# --- фикс 3: секцией считается ТОЛЬКО форма "## N(буква)", не проза;    ----
+# --- фенсы игнорируются                                                 ----
+
+def test_critic_fix3_prose_heading_owner_rule_no_false_defect(tmp_path):
+    """Проба критика: тело с шапкой файла в форме markdown H2 "##
+    ВЛАДЕЛЕЦ"/"## ПРАВИЛО ВЕДЕНИЯ" (буквально форма §4.1) НЕ должно
+    давать ложных PAIR-дефектов "секция без под-шапки"."""
+    write_body_file(tmp_path, 0, content=(
+        "# CHK-0\n\n"
+        "## ВЛАДЕЛЕЦ\nLead\n\n"
+        "## ПРАВИЛО ВЕДЕНИЯ\nчто живёт здесь.\n\n"
+        "ядро -- в протоколе, чек 0.\n"
+    ))
+    body = body_header_check(0)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert not any("секция" in d and "без под-шапки" in d for d in result.defects), \
+        defects_str(result)
+
+
+def test_critic_fix3_section_form_without_subheader_still_a_defect(tmp_path):
+    """Позитив-контроль: форма "## N(буква)" по-прежнему детектится и
+    по-прежнему даёт дефект без под-шапки (регресс не в одну сторону)."""
+    write_body_file(tmp_path, 0, content=(
+        "# CHK-0\n\nВЛАДЕЛЕЦ: Lead\nПРАВИЛО ВЕДЕНИЯ: тест.\n\n"
+        "ядро -- в протоколе, чек 0.\n\n## 0(я)\n\nтекст.\n"
+    ))
+    body = body_header_check(0)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("без под-шапки в протоколе" in d for d in result.defects), defects_str(result)
+
+
+def test_critic_fix3_section_marker_inside_fence_ignored(tmp_path):
+    """"## 5(а)" внутри ```-фенса (пример кода в теле) -- не секция,
+    игнорируется целиком."""
+    write_body_file(tmp_path, 0, content=(
+        "# CHK-0\n\nВЛАДЕЛЕЦ: Lead\nПРАВИЛО ВЕДЕНИЯ: тест.\n\n"
+        "ядро -- в протоколе, чек 0.\n\n"
+        "```\n## 5(а)\nпример разметки внутри кода\n```\n"
+    ))
+    body = body_header_check(0)
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert not any("5(а)" in d for d in result.defects), defects_str(result)
+
+
+# --- фикс 4: нормализация body в posix-форму -- дедуп и сирота ------------
+
+def test_critic_fix4_dedup_not_bypassed_by_separator_style(tmp_path):
+    """ДО фикса: два чека, один и тот же файл, но записанный '/' и '\\'
+    -- дедуп (проверка №2) не срабатывал, т.к. ключом был НЕнормализо-
+    ванный body_value."""
+    write_body_file(tmp_path, 0)
+    body = (
+        body_header_check(0, body_path="PROCESS/checks/CHK-0.md",
+                           pointer_body_path="PROCESS/checks/CHK-0.md")
+        + body_header_check(1, body_path="PROCESS\\checks\\CHK-0.md",
+                             pointer_body_path="PROCESS\\checks\\CHK-0.md")
+    )
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert any("указан у нескольких чеков" in d for d in result.defects), defects_str(result)
+
+
+def test_critic_fix4_no_false_orphan_with_backslash_body_path(tmp_path):
+    """ДО фикса: body: с обратными слэшами давал ложную сироту (glob
+    всегда отдаёт posix-путь, сравнение шло с НЕнормализованным
+    значением)."""
+    write_body_file(tmp_path, 0)
+    body = body_header_check(0, body_path="PROCESS\\checks\\CHK-0.md",
+                              pointer_body_path="PROCESS\\checks\\CHK-0.md")
+    result = check_form(tmp_path, body, repo_root=tmp_path)
+    assert not any("файл-сирота" in d for d in result.defects), defects_str(result)
+
+
+# --- фикс 5: живое-но-отсутствующее тело -- ТОЛЬКО в "ДЕФЕКТЫ ТЕЛ" --------
+
+def test_critic_fix5_alive_missing_body_not_in_skipped_section(tmp_path):
+    """ДО фикса: тело с alive=True (bodypred:always) и отсутствующим
+    файлом попадало И в "ДЕФЕКТЫ ТЕЛ" (правильно), И в "ТЕЛА ПРОПУЩЕНЫ"
+    с причиной "always" (самопротиворечие -- "пропущено, потому что
+    always жив"?)."""
+    proto = write_protocol(tmp_path, body_header_check(0, bodypred="always"))
+    j = write_journal(tmp_path, [])
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "ДЕФЕКТЫ ТЕЛ" in rendered and "ТЕЛО ОТСУТСТВУЕТ" in rendered
+    assert "ТЕЛА ПРОПУЩЕНЫ" not in rendered, (
+        "живое-но-отсутствующее тело не должно попадать в 'ТЕЛА ПРОПУЩЕНЫ'"
+    )
+
+
+# --- фикс 6: диагностика fail-closed несёт текст исключения, не только ----
+# --- имя класса                                                        ----
+
+def test_critic_fix6_fail_closed_message_carries_exception_text(tmp_path, monkeypatch, capsys):
+    proto = write_protocol(tmp_path, CHK0_VALID)
+    j = write_journal(tmp_path, [])
+    reg = tmp_path / "reg.jsonl"
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("причина-маркер-XYZ")
+
+    monkeypatch.setattr(prep, "build_window_report", _boom)
+    rc = prep.main([
+        "--window-start", "2026-08-14T00:00:00", "--protocol", str(proto),
+        "--journal", str(j), "--registry", str(reg),
+    ])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "RuntimeError: причина-маркер-XYZ" in captured.err, captured.err
+
+
+# --- решение Lead 8а: оба слагаемых ИТОГ ВСЕГДА симметрично ---------------
+
+def test_lead_8a_itog_always_prints_both_addends_symmetrically(tmp_path):
+    j = write_journal(tmp_path, [])
+    proto = write_protocol(tmp_path, _pilot_body())
+    run_ctx = _run_ctx_for(tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00")
+    report = prep.build_window_report(proto, run_ctx)
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "из них тела 0 Б · принудительно 0 Б" in rendered

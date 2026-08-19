@@ -88,9 +88,10 @@ HEADER_ANYWHERE_RE = re.compile(r"<!--CHK\b")
 CHECK_TITLE_RE = re.compile(r"^\s*(\d+)\.\s+\*\*")
 CHECK_ID_RE = re.compile(r"^(\d+)(?:\((.+)\))?$")
 
-FIELD_ORDER = ["src", "pred", "rules", "status", "cand", "since", "note"]
+FIELD_ORDER = ["src", "pred", "rules", "status", "body", "bodypred", "cand", "since", "note"]
 REQUIRED_FIELDS = ["src", "pred", "rules", "status"]
-MAX_FIELDS_TOTAL = 8  # CHK + 7 остальных максимум
+# Phase 5 W4-1a (A1): body+bodypred -- +2 поля, MAX_FIELDS_TOTAL 8->10.
+MAX_FIELDS_TOTAL = 10  # CHK + 9 остальных максимум
 MAX_HEADER_BYTES = 300
 MAX_SRC_VALUES = 4
 MAX_RULES_VALUES = 4
@@ -490,6 +491,21 @@ def validate_cand(value: str, status_kind: str) -> List[str]:
     return errors
 
 
+def validate_body_field(value: str) -> List[str]:
+    """W4-1a (A1): базовая грамматика значения body: (путь-от-корня).
+    Глубокая проверка (относительность, принадлежность репо, факт файла,
+    LF/BOM/владелец и т.д.) -- отдельная секция сверки пары в
+    run_check_form (§4.6/A9), НЕ здесь (эта функция -- только форма
+    значения поля, как у остальных полей шапки)."""
+    errors = []
+    if value == "":
+        errors.append("body: пустое значение")
+        return errors
+    if _has_bare_space(value):
+        errors.append(f"body: пробел в значении {value!r}")
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # Полная семантическая проверка одной шапки (id, поля, лимиты)
 # ---------------------------------------------------------------------------
@@ -530,6 +546,12 @@ def validate_header_semantics(raw: RawHeader) -> ParsedHeader:
     if "status" in fields:
         st_errors, status_kind, _guard = validate_status(fields["status"])
         errors.extend(st_errors)
+    if "body" in fields:
+        errors.extend(validate_body_field(fields["body"]))
+    if "bodypred" in fields:
+        err = validate_predicate_value(fields["bodypred"])
+        if err:
+            errors.append(f"bodypred: {err}")
     if "cand" in fields:
         errors.extend(validate_cand(fields["cand"], status_kind))
     if "since" in fields:
@@ -610,6 +632,31 @@ def validate_ids_unique(headers: List[ParsedHeader]) -> List[str]:
         if c > MAX_HEADERS_PER_ID:
             errors.append(f"больше {MAX_HEADERS_PER_ID} шапки на id {id_str!r}: {c}")
     return errors
+
+
+def group_headers_by_number(
+    parsed_headers: List[ParsedHeader], skip_errored: bool = True,
+) -> Tuple[Dict[int, ParsedHeader], Dict[int, List[ParsedHeader]]]:
+    """number -> шапка чека (без подпункта); number -> список под-шапок
+    (отсортирован по line_no). skip_errored=True -- поведение
+    build_window_report (шапки с ошибками формы не участвуют в
+    вердиктах, D-0043 -- единая точка группировки вместо дублей).
+    Сверка пары (run_check_form) вызывает с skip_errored=False: дефекты
+    пары body/bodypred ортогональны прочим ошибкам формы шапки."""
+    top: Dict[int, ParsedHeader] = {}
+    subs: Dict[int, List[ParsedHeader]] = {}
+    for ph in parsed_headers:
+        if skip_errored and ph.errors:
+            continue
+        if ph.check_number == -1:
+            continue
+        if ph.subitem_letter is None:
+            top[ph.check_number] = ph
+        else:
+            subs.setdefault(ph.check_number, []).append(ph)
+    for number in subs:
+        subs[number].sort(key=lambda h: h.line_no)
+    return top, subs
 
 
 def validate_no_hardcoded_deploy_path(source_text: str) -> List[str]:
@@ -711,8 +758,241 @@ class CheckFormResult:
     headers: List[ParsedHeader]
 
 
+# ---------------------------------------------------------------------------
+# Сверка пары шапка<->тело (Р11(A), §4.6 + A9 + A1 -- 13 проверок).
+# W4-1a: тела -- всё-или-ничего (без секций-по-под-шапкам, git.pathset --
+# W4-1b); функция вызывается ПОСЛЕ разбора шапок, ДО rules-форварда
+# (§7.3).
+# ---------------------------------------------------------------------------
+
+BODY_OWNER_MARKER = "ВЛАДЕЛЕЦ"
+BODY_RULE_MARKER = "ПРАВИЛО ВЕДЕНИЯ"
+POINTER_PREFIX = "полное тело:"
+POINTER_HINT = "читается по вердикту пре-пасса"
+BODY_SECTION_LINE_RE = re.compile(r"^##\s+(\d+\([^)]+\))\s*$")
+
+
+def _resolve_body_path(repo_root: Path, body_value: str) -> Tuple[Optional[Path], Optional[str]]:
+    """(full_path, error). error -- None, если значение синтаксически
+    валидно (относительный путь, не выходящий за пределы repo_root)."""
+    if os.path.isabs(body_value) or re.match(r"^[A-Za-z]:[\\/]", body_value):
+        return None, f"путь не относительный: {body_value!r}"
+    normalized = os.path.normpath(body_value)
+    if normalized.startswith("..") or os.path.isabs(normalized):
+        return None, f"путь выходит за пределы репозитория: {body_value!r}"
+    return (repo_root / normalized), None
+
+
+def _find_pointer_lines(lines: List[str], start: int, end: int) -> List[int]:
+    """0-indexed индексы строк в [start, end], несущих строку-указатель
+    формы 'полное тело: ... (читается по вердикту пре-пасса; ...)'."""
+    out = []
+    for i in range(start, min(end, len(lines) - 1) + 1):
+        s = lines[i].strip()
+        if s.startswith(POINTER_PREFIX) and POINTER_HINT in s:
+            out.append(i)
+    return out
+
+
+def validate_body_pair(
+    lines: List[str],
+    titles_by_number: Dict[int, CheckTitle],
+    ranges: Dict[int, Tuple[int, int]],
+    parsed_headers: List[ParsedHeader],
+    repo_root: Path,
+) -> List[str]:
+    """13 проверок сверки пары шапка<->тело (§4.6 (1)-(7) + A9 (8)-(12)
+    + A1 "body без bodypred" (13)). Возвращает список 'PAIR: ...'
+    строк-дефектов."""
+    errors: List[str] = []
+    top_by_number, sub_by_number = group_headers_by_number(parsed_headers, skip_errored=False)
+
+    # (6) body/bodypred легальны ТОЛЬКО у шапки чека -- у под-шапки дефект.
+    for _number, subs in sub_by_number.items():
+        for sh in subs:
+            if "body" in sh.fields or "bodypred" in sh.fields:
+                errors.append(
+                    f"PAIR: под-шапка {sh.id_str}: поле body/bodypred легально "
+                    f"только у шапки чека -- дефект формы"
+                )
+
+    seen_body_values: Dict[str, List[str]] = {}
+
+    for number, header in sorted(top_by_number.items()):
+        has_body = "body" in header.fields
+        has_bodypred = "bodypred" in header.fields
+        if not has_body and not has_bodypred:
+            continue
+
+        # (13, A1) body без bodypred / bodypred без body -- дефект пары.
+        if has_body and not has_bodypred:
+            errors.append(f"PAIR: {header.id_str}: body без bodypred -- дефект пары")
+        if has_bodypred and not has_body:
+            errors.append(f"PAIR: {header.id_str}: bodypred без body -- дефект пары")
+        if not has_body:
+            continue
+
+        body_value = header.fields["body"]
+
+        full_path, path_err = _resolve_body_path(repo_root, body_value)
+        if path_err:
+            errors.append(f"PAIR: {header.id_str}: body -- {path_err}")
+            continue
+
+        # Критик-фикс №4: нормализуем body в posix-относительную форму
+        # ОДИН раз (relative_to+as_posix -- убирает "\\" vs "/" и разный
+        # регистр разделителей) и используем эту форму И ключом дедупа
+        # seen_body_values, И сверкой файла-сироты (иначе разное
+        # написание пути обходит дедуп/даёт ложную сироту).
+        norm_rel = full_path.relative_to(repo_root).as_posix()
+        seen_body_values.setdefault(norm_rel, []).append(header.id_str)
+
+        # (12, A9) имя файла выводится из id.
+        expected_name = f"CHK-{number}.md"
+        if full_path.name != expected_name:
+            errors.append(
+                f"PAIR: {header.id_str}: имя файла тела {full_path.name!r} не "
+                f"выводится из id (ожидалось {expected_name!r})"
+            )
+
+        text: Optional[str] = None
+        # (1) тело существует, читается, непусто, LF.
+        if not full_path.is_file():
+            errors.append(f"PAIR: {header.id_str}: тело {body_value} -- не существует")
+        else:
+            try:
+                raw = full_path.read_bytes()
+            except OSError as exc:
+                errors.append(f"PAIR: {header.id_str}: тело {body_value} -- не читается: {exc}")
+                raw = None
+            if raw is not None:
+                if len(raw) == 0:
+                    errors.append(f"PAIR: {header.id_str}: тело {body_value} -- пусто")
+                else:
+                    # (11, A9) BOM.
+                    if raw.startswith(b"\xef\xbb\xbf"):
+                        errors.append(f"PAIR: {header.id_str}: тело {body_value} -- содержит BOM")
+                    try:
+                        text = raw.decode("utf-8")
+                    except UnicodeDecodeError as exc:
+                        errors.append(f"PAIR: {header.id_str}: тело {body_value} -- не UTF-8: {exc}")
+                        text = None
+                    if text is not None and "\r" in text:
+                        errors.append(f"PAIR: {header.id_str}: тело {body_value} -- не LF "
+                                       f"(обнаружен CR)")
+
+        if text is not None:
+            body_lines = text.split("\n")
+            # (10, A9) запрет строк <!--CHK внутри тела.
+            for i, bln in enumerate(body_lines):
+                if HEADER_ANYWHERE_RE.search(bln):
+                    errors.append(
+                        f"PAIR: {header.id_str}: тело {body_value}: строка {i + 1} "
+                        f"содержит запрещённый маркер <!--CHK"
+                    )
+            # (3) шапка тела несёт владельца и правило ведения.
+            if BODY_OWNER_MARKER not in text:
+                errors.append(f"PAIR: {header.id_str}: тело {body_value} -- нет маркера "
+                               f"{BODY_OWNER_MARKER}")
+            if BODY_RULE_MARKER not in text:
+                errors.append(f"PAIR: {header.id_str}: тело {body_value} -- нет маркера "
+                               f"{BODY_RULE_MARKER}")
+            # (4) номер в теле == номеру шапки.
+            if not re.search(rf"чек\s+{number}\b", text):
+                errors.append(f"PAIR: {header.id_str}: тело {body_value} -- номер чека "
+                               f"{number} не найден в тексте тела")
+            # (5) секционированное тело: секция без под-шапки -- дефект;
+            # под-шапка без секции легальна; дубль id секции -- дефект.
+            # Критик-фикс №3: секцией считается ТОЛЬКО форма "## N(буква)"
+            # (BODY_SECTION_LINE_RE) -- прочие "## " (проза, включая
+            # маркеры-заголовки §4.1 "## ВЛАДЕЛЕЦ"/"## ПРАВИЛО ВЕДЕНИЯ")
+            # секцией не считаются; строки внутри ```-фенсов пропускаются.
+            section_ids: Dict[str, int] = {}
+            in_fence = False
+            for i, bln in enumerate(body_lines):
+                if bln.strip().startswith("```"):
+                    in_fence = not in_fence
+                    continue
+                if in_fence:
+                    continue
+                m = BODY_SECTION_LINE_RE.match(bln)
+                if not m:
+                    continue
+                sec_id = m.group(1).strip()
+                if sec_id in section_ids:
+                    errors.append(
+                        f"PAIR: {header.id_str}: тело {body_value} -- повтор секции "
+                        f"{sec_id!r} (строки {section_ids[sec_id] + 1}, {i + 1})"
+                    )
+                else:
+                    section_ids[sec_id] = i
+            known_sub_ids = {sh.id_str for sh in sub_by_number.get(number, [])}
+            for sec_id in section_ids:
+                if sec_id not in known_sub_ids:
+                    errors.append(
+                        f"PAIR: {header.id_str}: тело {body_value} -- секция {sec_id!r} "
+                        f"без под-шапки в протоколе -- дефект"
+                    )
+
+        # (8, A9) строка-указатель: присутствие и позиция ПОСЛЕДНЕЙ строкой
+        # ядра; (7) чек с body обязан иметь непустое ядро.
+        title = titles_by_number.get(number)
+        rng = ranges.get(number)
+        if title is not None and rng is not None:
+            r_start, r_end = rng
+            pointer_positions = _find_pointer_lines(lines, r_start, r_end)
+            last_non_blank = r_end
+            while last_non_blank > r_start and not lines[last_non_blank].strip():
+                last_non_blank -= 1
+            if not pointer_positions:
+                errors.append(f"PAIR: {header.id_str}: строка-указатель на тело отсутствует "
+                               f"в ядре")
+            elif len(pointer_positions) > 1:
+                errors.append(f"PAIR: {header.id_str}: больше одной строки-указателя в ядре")
+            else:
+                p_idx = pointer_positions[0]
+                if p_idx != last_non_blank:
+                    errors.append(
+                        f"PAIR: {header.id_str}: строка-указатель не последней строкой "
+                        f"ядра (строка {p_idx + 1}, ожидалась {last_non_blank + 1})"
+                    )
+                if body_value not in lines[p_idx]:
+                    errors.append(f"PAIR: {header.id_str}: строка-указатель не ссылается "
+                                   f"на {body_value}")
+
+            excluded = set(range(title.title_start, title.title_close + 1))
+            excluded.add(header.line_no)
+            excluded.update(pointer_positions)
+            non_trivial = any(
+                lines[i].strip() for i in range(r_start, r_end + 1) if i not in excluded
+            )
+            if not non_trivial:
+                errors.append(
+                    f"PAIR: {header.id_str}: чек с body несёт пустое ядро (кроме "
+                    f"заголовка/шапки/указателя содержимого нет)"
+                )
+
+    # (2, часть "ровно один чек на файл").
+    for body_value, ids in seen_body_values.items():
+        if len(ids) > 1:
+            errors.append(f"PAIR: путь body:{body_value} указан у нескольких чеков: "
+                           f"{sorted(ids)}")
+
+    # (9, A9) файл-сирота в PROCESS/checks/.
+    checks_dir = repo_root / "PROCESS" / "checks"
+    if checks_dir.is_dir():
+        known = set(seen_body_values.keys())
+        for f in sorted(checks_dir.glob("*.md")):
+            rel = f.relative_to(repo_root).as_posix()
+            if rel not in known:
+                errors.append(f"PAIR: файл-сирота {rel} -- не сослан ни одной шапкой (body:)")
+
+    return errors
+
+
 def run_check_form(
     protocol_path: Path, rule_coverage_path: Path, require_all: bool,
+    repo_root: Path = REPO_ROOT,
 ) -> CheckFormResult:
     lines, bounds, titles = load_protocol_structure(protocol_path)
     titles_by_number = {t.number: t for t in titles}
@@ -749,6 +1029,11 @@ def run_check_form(
                 f"FORM: шапка {ph.id_str}: номер {ph.check_number} не совпадает ни "
                 f"с одним номером чека в тексте"
             )
+
+    # Сверка пары шапка<->тело (Р11(A), §7.3 -- ПОСЛЕ разбора шапок, ДО
+    # rules-форварда ниже).
+    ranges = check_ranges(titles, bounds[1])
+    defects.extend(validate_body_pair(lines, titles_by_number, ranges, parsed_headers, repo_root))
 
     source_text = Path(__file__).read_text(encoding="utf-8")
     defects.extend(f"FORM: {e}" for e in validate_no_hardcoded_deploy_path(source_text))
@@ -1176,6 +1461,78 @@ class SubitemVerdict:
     perevzvedenie: Optional[str] = None
 
 
+@dataclass
+class BodyVerdict:
+    """Учёт байт тела чека (Р2(A)/A7/A8, W4-1a). W4-1a: тело всё-или-
+    ничего (секции -- W4-1b/W4-2 Р3), «принудительно» -- заглушка (skip-
+    каунтер -- W4-1b)."""
+    id_str: str
+    check_number: int
+    path_value: str
+    exists: bool
+    byte_size: int
+    bodypred_value: Optional[str]
+    alive: bool
+    reason: str
+    defect: Optional[str] = None  # "ТЕЛО ОТСУТСТВУЕТ: ..." (§4.7)
+
+
+def compute_body_verdicts(
+    top_header_by_number: Dict[int, ParsedHeader], run_ctx: RunContext,
+) -> List[BodyVerdict]:
+    """Вердикты тел по bodypred (W4-1a: всё-или-ничего, никакого
+    секционирования -- то W4-1b/W4-2). Мир без body-шапок -> пустой
+    список (К2-нейтральность, A7/тест (п)). ВХОД -- ВСЕ верхние шапки,
+    включая шапки с ошибками формы (group_headers_by_number(...,
+    skip_errored=False)): критик-фикс №1 -- шапка с ЛЮБОЙ ошибкой формы
+    (например since:НЕ-ДАТА) не должна молча ронять тело из учёта; её
+    дефект уже ловит --check-form отдельно, здесь тело fail-closed ЖИВО
+    (не доверяем bodypred сломанной шапки)."""
+    out: List[BodyVerdict] = []
+    repo_root = Path(run_ctx.repo_root)
+    for number, header in sorted(top_header_by_number.items()):
+        body_value = header.fields.get("body")
+        if not body_value:
+            continue
+        bodypred_value = header.fields.get("bodypred")
+        full_path, path_err = _resolve_body_path(repo_root, body_value)
+        if path_err or full_path is None:
+            # Дефект формы (проверка пары №2/13) -- при учёте байт тело
+            # недоступно, 0 Б, ПУСТ.
+            out.append(BodyVerdict(
+                id_str=header.id_str, check_number=number, path_value=body_value,
+                exists=False, byte_size=0, bodypred_value=bodypred_value, alive=False,
+                reason=f"body -- {path_err or 'путь не резолвится'}",
+            ))
+            continue
+        exists = full_path.is_file()
+        byte_size = full_path.stat().st_size if exists else 0
+        if header.errors:
+            # Критик-фикс №1: шапка чека несёт ошибку формы -- не
+            # доверяем её bodypred-вердикту, тело читается fail-closed.
+            alive = True
+            reason = "шапка чека с дефектом формы -- тело читается (fail-closed)"
+        elif bodypred_value:
+            ev = evaluate_predicate(bodypred_value, run_ctx)
+            alive = ev.alive
+            reason = ev.reason
+        else:
+            # bodypred без body уже дефект формы (проверка №13); для
+            # учёта байт -- ЖИВ fail-closed (нет валидного предиката,
+            # чтобы отказать в чтении).
+            alive = True
+            reason = "bodypred отсутствует -- ЖИВ (fail-closed, дефект формы см. --check-form)"
+        defect = None
+        if alive and not exists:
+            defect = f"ТЕЛО ОТСУТСТВУЕТ: {body_value} -- дефект формы, чек читается по ядру"
+        out.append(BodyVerdict(
+            id_str=header.id_str, check_number=number, path_value=body_value,
+            exists=exists, byte_size=byte_size, bodypred_value=bodypred_value,
+            alive=alive, reason=reason, defect=defect,
+        ))
+    return out
+
+
 def build_window_report(
     protocol_path: Path, run_ctx: RunContext,
 ) -> Dict[str, Any]:
@@ -1187,15 +1544,13 @@ def build_window_report(
 
     raw_headers = find_raw_headers(lines, bounds)
     parsed_headers = [validate_header_semantics(r) for r in raw_headers if not r.malformed]
-    top_header_by_number: Dict[int, ParsedHeader] = {}
-    sub_headers_by_number: Dict[int, List[ParsedHeader]] = {}
-    for ph in parsed_headers:
-        if ph.errors or ph.check_number == -1:
-            continue
-        if ph.subitem_letter is None:
-            top_header_by_number[ph.check_number] = ph
-        else:
-            sub_headers_by_number.setdefault(ph.check_number, []).append(ph)
+    top_header_by_number, sub_headers_by_number = group_headers_by_number(parsed_headers)
+    # Критик-фикс №1: учёт байт тел работает по ВСЕМ верхним шапкам,
+    # включая шапки с ошибками формы (skip_errored=True выше служит
+    # только вердиктам ЧЕКОВ, не телам -- см. compute_body_verdicts).
+    top_header_by_number_all, _sub_headers_all = group_headers_by_number(
+        parsed_headers, skip_errored=False,
+    )
 
     check_verdicts: List[CheckVerdict] = []
     subitem_verdicts: Dict[int, List[SubitemVerdict]] = {}
@@ -1358,17 +1713,37 @@ def build_window_report(
 
     alive_count = sum(1 for cv in check_verdicts if cv.verdict in ("ЖИВ", "ДЕФЕРРЕД"))
 
+    # Учёт байт тел (Р2(A)/A7/A8, W4-1a): знаменатель M = протокол + ВСЕ
+    # тела; числитель "к чтению" получает байты тел ЖИВЫХ по bodypred
+    # (независимо от вердикта самого чека -- pred/bodypred разные поля).
+    # "принудительно" -- заглушка 0 до W4-1b (skip-каунтер).
+    body_verdicts = compute_body_verdicts(top_header_by_number_all, run_ctx)
+    bodies_total_bytes = sum(bv.byte_size for bv in body_verdicts)
+    bodies_to_read_bytes = sum(bv.byte_size for bv in body_verdicts if bv.alive and bv.exists)
+    bodies_forced_bytes = 0  # W4-1b (skip-каунтер, A10)
+
+    protocol_total_bytes = total_bytes
+    protocol_to_read_bytes = to_read_bytes
+    total_bytes = protocol_total_bytes + bodies_total_bytes
+    to_read_bytes = protocol_to_read_bytes + bodies_to_read_bytes + bodies_forced_bytes
+
     return {
         "titles": titles,
         "check_verdicts": check_verdicts,
         "subitem_verdicts": subitem_verdicts,
         "total_bytes": total_bytes,
         "to_read_bytes": to_read_bytes,
+        "protocol_total_bytes": protocol_total_bytes,
+        "protocol_to_read_bytes": protocol_to_read_bytes,
         "alive_count": alive_count,
         "total_checks": len(check_verdicts),
         "empty_lines": empty_lines,
         "perevzvedenie_lines": perevzvedenie_lines,
         "journal_ctx": run_ctx.journal_ctx,
+        "body_verdicts": body_verdicts,
+        "bodies_total_bytes": bodies_total_bytes,
+        "bodies_to_read_bytes": bodies_to_read_bytes,
+        "bodies_forced_bytes": bodies_forced_bytes,
     }
 
 
@@ -1379,11 +1754,17 @@ def build_window_report(
 CONTROL_TRIGGER_N = 4
 
 
-def read_registry(registry_path: Path) -> List[Dict[str, Any]]:
+def read_registry(registry_path: Path) -> Tuple[List[Dict[str, Any]], int]:
+    """Возвращает (entries, bad_line_count). W4-1a (A10/§4.7): битые
+    строки СЧИТАЮТСЯ (раньше молча глотались, SIBLING_MAP «молчаливый
+    ноль счётчика», t-508) -- форсирование чтения тел по счётчику
+    остаётся W4-1b; здесь только счёт + печать (--check-form не пишет и
+    не читает сайдкар вовсе)."""
     if not registry_path.exists():
-        return []
+        return [], 0
     out = []
-    with open(registry_path, "r", encoding="utf-8") as fh:
+    bad = 0
+    with open(registry_path, "r", encoding="utf-8", errors="replace") as fh:
         for ln in fh:
             ln = ln.strip()
             if not ln:
@@ -1391,8 +1772,9 @@ def read_registry(registry_path: Path) -> List[Dict[str, Any]]:
             try:
                 out.append(json.loads(ln))
             except json.JSONDecodeError:
+                bad += 1
                 continue
-    return out
+    return out, bad
 
 
 def last_header_touching_commit(repo_root: str, protocol_rel_path: str) -> Optional[str]:
@@ -1462,6 +1844,7 @@ def render_window_report(
     report: Dict[str, Any], window_start_iso: str, window_end_iso: str,
     mode: str, mode_reason: str, journal_paths: List[str], protocol_path: Path,
     control_result: Optional[Tuple[int, int, List[str]]] = None,
+    sidecar_bad_count: int = 0,
 ) -> str:
     out: List[str] = []
     out.append(f"ОКНО: {window_start_iso} .. {window_end_iso}")
@@ -1483,6 +1866,8 @@ def render_window_report(
     if ctx.warnings:
         for w in ctx.warnings[:20]:
             out.append(f"  WARN: {w}")
+    if sidecar_bad_count > 0:
+        out.append(f"  САЙДКАР: битых строк {sidecar_bad_count}")
 
     verdict_by_number = {cv.check_number: cv for cv in report["check_verdicts"]}
     for section_no in sorted(SECTION_NAMES):
@@ -1519,15 +1904,45 @@ def render_window_report(
         for ln in disc_lines:
             out.append(f"  РАСХОЖДЕНИЕ: {ln}")
 
+    # Учёт байт тел (Р2(A)/A7/A8, §4.3): адреса к чтению/пропуску ПЕРЕД
+    # ИТОГ. Мир без body-шапок -> body_verdicts пуст -> обе секции
+    # опущены (К2-нейтральность, тест (п)).
+    body_verdicts: List[BodyVerdict] = report.get("body_verdicts", [])
+    to_read_bodies = [bv for bv in body_verdicts if bv.alive and bv.exists]
+    # Критик-фикс №5: живое-но-отсутствующее тело (bv.defect) идёт ТОЛЬКО
+    # в "ДЕФЕКТЫ ТЕЛ" -- в "ТЕЛА ПРОПУЩЕНЫ" оно самопротиворечиво (причина
+    # там осталась бы "always"/предикат-ЖИВ при факте пропуска).
+    skipped_bodies = [bv for bv in body_verdicts if not bv.alive]
+    if to_read_bodies:
+        out.append("\nТЕЛА К ЧТЕНИЮ:")
+        for bv in to_read_bodies:
+            out.append(f"  {bv.path_value} ({bv.byte_size} Б, предикат "
+                       f"{bv.bodypred_value} -> {bv.reason})")
+    if skipped_bodies:
+        out.append("\nТЕЛА ПРОПУЩЕНЫ:")
+        for bv in skipped_bodies:
+            out.append(f"  {bv.path_value} ({bv.reason})")
+    body_defects = [bv for bv in body_verdicts if bv.defect]
+    if body_defects:
+        out.append("\n=== ДЕФЕКТЫ ТЕЛ (находка прогона) ===")
+        for bv in body_defects:
+            out.append(f"  {bv.defect}")
+
     total = report["total_bytes"]
     to_read = report["to_read_bytes"]
+    bodies_bytes = report.get("bodies_to_read_bytes", 0)
+    forced_bytes = report.get("bodies_forced_bytes", 0)
     pct = (to_read / total * 100.0) if total else 0.0
     gate_diff = to_read - GATE_A_THRESHOLD_BYTES
     gate_verdict = "ВЗЯТ" if to_read <= GATE_A_THRESHOLD_BYTES else "НЕ ВЗЯТ"
     sign = "+" if gate_diff >= 0 else ""
+    # Решение Lead (фикс 8а критика): оба слагаемых печатаются ВСЕГДА
+    # симметрично (включая нули) -- стабильная каноническая форма для
+    # витнесов К1/К2/К4 и W4-1b.
     out.append(
         f"\nИТОГ: живых {report['alive_count']}/{report['total_checks']} · "
         f"к чтению {to_read} Б из {total} Б ({pct:.1f}%) · "
+        f"из них тела {bodies_bytes} Б · принудительно {forced_bytes} Б · "
         f"гейт (а) ≤{GATE_A_THRESHOLD_BYTES} Б: {gate_verdict} ({sign}{gate_diff} Б)"
     )
     return "\n".join(out)
@@ -1552,6 +1967,33 @@ def write_registry_entry(
     registry_path.parent.mkdir(parents=True, exist_ok=True)
     with open(registry_path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def _fallback_body_listing(protocol_path: Path, repo_root: Path = REPO_ROOT) -> str:
+    """§4.7/P4: перечень тел для сообщения fail-closed. Каталог
+    PROCESS/checks/ есть -> ОБХОД КАТАЛОГА (не через уже упавший
+    build_window_report); каталога нет -> best-effort перечень body:
+    прямо из шапок протокола, независимо парсимых заново (не полагаемся
+    на структуры, которые могли и не построиться)."""
+    checks_dir = repo_root / "PROCESS" / "checks"
+    if checks_dir.is_dir():
+        files = sorted(p.relative_to(repo_root).as_posix() for p in checks_dir.glob("*.md"))
+        return ", ".join(files) if files else "(каталог PROCESS/checks/ пуст)"
+    try:
+        text = read_protocol_text(protocol_path)
+    except Exception:
+        return "(каталога PROCESS/checks/ нет; протокол недоступен для перечня из шапок)"
+    bodies: List[str] = []
+    for ln in split_lines(text):
+        m = HEADER_LINE_RE.match(ln)
+        if not m:
+            continue
+        fields, _order, _errs = parse_header_fields(m.group(2))
+        if "body" in fields:
+            bodies.append(fields["body"])
+    if bodies:
+        return ", ".join(bodies) + " (каталога PROCESS/checks/ нет — перечень из шапок)"
+    return "(каталога PROCESS/checks/ нет, body-шапок в протоколе не найдено)"
 
 
 # ---------------------------------------------------------------------------
@@ -1659,15 +2101,27 @@ def main(argv: Optional[List[str]] = None) -> int:
         protocol_rel = str(protocol_path)
 
     registry_path = Path(args.registry)
-    registry_entries = read_registry(registry_path)
-    mode, mode_reason = determine_mode(
-        registry_entries, str(REPO_ROOT), protocol_rel, args.control,
-    )
 
     try:
+        # Критик-фикс №2: read_registry/determine_mode -- ПОД ТЕМ ЖЕ
+        # перехватом, что build_window_report (единый оконный тракт,
+        # §4.7/P4): не-UTF8/OSError сайдкара не должны уходить наружу
+        # необработанным исключением мимо fail-closed сообщения.
+        registry_entries, sidecar_bad_count = read_registry(registry_path)
+        mode, mode_reason = determine_mode(
+            registry_entries, str(REPO_ROOT), protocol_rel, args.control,
+        )
         report = build_window_report(protocol_path, run_ctx)
-    except ProtocolError as exc:
-        print(f"calibration_prepass: {exc}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 -- fail-closed §4.7/P4: ЛЮБОЙ
+        # отказ оконного тракта -> "читается всё" + гейт не измерен,
+        # exit 2 (не только ожидаемый ProtocolError).
+        listing = _fallback_body_listing(protocol_path)
+        print(
+            f"ПРЕ-ПАСС НЕ ОТРАБОТАЛ: {type(exc).__name__}: {exc} — ЧИТАЕТСЯ ВСЁ: "
+            f"протокол + {listing}",
+            file=sys.stderr,
+        )
+        print("ГЕЙТ (а): НЕ ИЗМЕРЕН", file=sys.stderr)
         return 2
 
     control_result = None
@@ -1688,6 +2142,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             "total_checks": report["total_checks"],
             "to_read_bytes": report["to_read_bytes"],
             "total_bytes": report["total_bytes"],
+            "bodies_total_bytes": report.get("bodies_total_bytes", 0),
+            "bodies_to_read_bytes": report.get("bodies_to_read_bytes", 0),
+            "bodies_forced_bytes": report.get("bodies_forced_bytes", 0),
+            "sidecar_bad_count": sidecar_bad_count,
             "gate_a_threshold": GATE_A_THRESHOLD_BYTES,
             "verdicts": {cv.id_str: cv.verdict for cv in report["check_verdicts"]},
             "empty_lines": report["empty_lines"],
@@ -1702,6 +2160,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(render_window_report(
             report, args.window_start, window_end_iso, mode, mode_reason,
             journal_paths, protocol_path, control_result,
+            sidecar_bad_count=sidecar_bad_count,
         ))
     return 0
 

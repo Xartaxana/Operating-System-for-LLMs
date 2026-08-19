@@ -7,4 +7,5 @@
 # docs/SIBLING_MAP.md, заведён 2026-08-19.
 CLAUDE.md text eol=lf
 PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md text eol=lf
+PROCESS/CALIBRATION_HISTORY.md text eol=lf
 PROCESS/checks/*.md text eol=lf

@@ -103,29 +103,40 @@ D:\AO3_tests), cc_usage через tools/usage_report.py, git-история
    fb41872).
 
 13. **D-0052/D-0053 — доказательная приёмка (обе стороны), типизи-
-    рованные поля.** (а) Каждый accepted по builder-диспатчу несёт
+    рованные поля.**
 <!--CHK 13|src:журнал,журнал-AO3|pred:journal.any|rules:RC§1/D-0052,RC§2/D-0053|status:живой-->
-    поле `witness` — фактический вывод проверочного прогона
-    (команда + результат); accepted(builder) без witness =
-    нарушение. (б) События `defect_found` ссылаются полем `ref` на
-    task_id исходного accepted; false-accept rate по ярусам
-    (defect_found / accepted за окно) считается и пишется в notes
-    события `calibrated`; систематический false-accept по ярусу —
-    evidence для движения статуса таблицы ВНИЗ (Update Rule 1).
-    (в) Каждый `rejected` несёт `failure_class`
-    (spec / capability / recon / tooling); без класса = нарушение
-    (смотреть вместе с чеком 3). Поля — D-0053; на AO3 их отсутствие
-    отсекает scripts/log_append.py, в OS-репо журнал пишется
-    Edit-тулом и проверяется этим чеком. События до 2026-07-08
-    читаются вручную (append-only, не переписаны). Счёт чеков 3/13
-    и A4 исполняется скриптом tools/calibration_counts.py (t-040,
-    2026-07-11): скрипт печатает КАНДИДАТОВ, вердикты за калибрующим
-    Lead (D-0063). Детектор отказа САМОГО счётчика: (а) тесты в
-    каноническом прогоне suite; (б) baseline-кросс — числа первого
-    ручного прогона зафиксированы в notes `calibrated` 2026-07-11 и
-    воспроизведены скриптом; (в) при каждом прогоне Lead выборочно
-    сверяет 1–2 счётчика с журналом вручную (слой 2); (г) дрейф
-    схемы от journal_validator ловит тест синхронизации констант
+<!--CHK 13(а)|src:журнал,журнал-AO3|pred:journal.event:accepted,agent=builder|rules:RC§1/D-0052|status:ретирован:2026-08-19;сторож:journal_validator;живость:python -m pytest tools/test_journal_validator.py -q-->
+    (а) СТАБ (ретирован 2026-08-19, K1): witness-норма builder-
+    приёмки держится сторожем journal_validator (:763-766, непустой
+    `witness` для accepted+agent=builder); остаточный риск — строка,
+    не дошедшая до коммита, гейта не встречает — второй слой ловит
+    WITNESS-warn tools/journal_echo.py в момент записи строки
+    (RULE_COVERAGE.md:39); 13(л) — дополнительный указатель именно
+    для доковых витнессов, не адресат этого риска.
+    Полнотекст — PROCESS/CALIBRATION_HISTORY.md.
+<!--CHK 13(б)|src:журнал,журнал-AO3|pred:journal.event:defect_found|rules:RC§2/D-0053|status:живой-->
+    (б) События `defect_found` ссылаются полем `ref` на task_id
+    исходного accepted; false-accept rate по ярусам (defect_found /
+    accepted за окно) считается и пишется в notes события
+    `calibrated`; систематический false-accept по ярусу — evidence
+    для движения статуса таблицы ВНИЗ (Update Rule 1).
+<!--CHK 13(в)|src:журнал,журнал-AO3|pred:journal.any|rules:RC§2/D-0053|status:живой-->
+    (в) `failure_class`-обязательность `rejected` — СТАБ K5
+    (2026-08-19): сторож FAILURE_CLASSES (journal_validator.py:276);
+    живость: python -m pytest tools/test_journal_validator.py -q;
+    полнотекст — PROCESS/CALIBRATION_HISTORY.md. Поля —
+    D-0053; на AO3 их отсутствие отсекает scripts/log_append.py, в
+    OS-репо журнал пишется Edit-тулом и проверяется этим чеком.
+    События до 2026-07-08 читаются вручную (append-only, не
+    переписаны). Счёт чеков 3/13 и A4 исполняется скриптом
+    tools/calibration_counts.py (t-040, 2026-07-11): скрипт печатает
+    КАНДИДАТОВ, вердикты за калибрующим Lead (D-0063). Детектор
+    отказа САМОГО счётчика: (а) тесты в каноническом прогоне suite;
+    (б) baseline-кросс — числа первого ручного прогона зафиксированы
+    в notes `calibrated` 2026-07-11 и воспроизведены скриптом; (в)
+    при каждом прогоне Lead выборочно сверяет 1–2 счётчика с
+    журналом вручную (слой 2); (г) дрейф схемы от journal_validator
+    ловит тест синхронизации констант
     (test_schema_constants_match_journal_validator).
 <!--CHK 13(г)|src:журнал|pred:journal.field:failure_class=spec|rules:RC§1/R11|status:живой-->
     (г) D-0054/D-0073: систематический `failure_class=spec` по ярусу
@@ -318,12 +329,16 @@ D:\AO3_tests), cc_usage через tools/usage_report.py, git-история
 30. **Leaf-routing D-0087 (механизм 2026-07-21).** Механизм: правило
 <!--CHK 30|src:файлы,журнал|pred:always|rules:RC§1/R13|status:живой-->
     R13 ядра + "judge" в BASIS_VALUES валидатора + judge_accept-класс
-    инструментов. Проверка окна: (а) живость — R13 в ядре, "judge" в
-    whitelist, judge-калибровка жива (13/13, D-0031); ОБЕ формы
-    судьи: шлюзовой алиас И подписочный судья-субагент — промпт
-    последнего ДОСЛОВНО равен JUDGE_SYSTEM_PROMPT из
-    gateway/shadow_eval.py (дрейф = находка), точка эквивалентности
-    t-254 (13/13) жива в журнале; (б)
+    инструментов. Проверка окна:
+<!--CHK 30(а)|src:файлы,журнал|pred:always|rules:RC§1/R13|status:живой-->
+    (а) живость — R13 в ядре, judge-whitelist — СТАБ K3 (2026-08-19,
+    JUDGE_BASIS_VALUE, живость: python -m pytest
+    tools/test_journal_validator.py -q, PROCESS/CALIBRATION_HISTORY.md);
+    judge-калибровка жива (13/13, D-0031); ОБЕ формы судьи: шлюзовой
+    алиас И подписочный судья-субагент — промпт последнего ДОСЛОВНО
+    равен JUDGE_SYSTEM_PROMPT из gateway/shadow_eval.py (дрейф =
+    находка), точка эквивалентности t-254 (13/13) жива в журнале;
+    (б)
     по-событийно: каждый accepted с basis "judge" — действительно
     лист-класс (recon/реализация по спеке; механизм/политика/
     интеграция под judge-basis = самосертификация класса F-22,
