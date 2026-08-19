@@ -1,20 +1,26 @@
-# ЖИВОЙ ХУК (правка t-447, найдено builder'ом как протухшая шапка): этот
-# файл, tools/journal_echo.py, -- ЖИВОЙ hook-путь САМ ПО СЕБЕ, не staged-
-# копия. .claude/settings.json:33 регистрирует ровно
-# `python tools/journal_echo.py` на PostToolUse -- это И ЕСТЬ файл,
-# который исполняется. Более ранняя версия этой шапки утверждала
-# обратное ("STAGED COPY ... tools/journal_echo.py -- ЖИВОЙ hook-путь,
-# НЕ ТРОНУТ этой правкой") -- верно было на МОМЕНТ той более ранней
-# постановки (D-0069, приём tools/test_witness_echo.py: staged-копия
-# рядом, Lead ретаргетит хук и сливает копию в живой файл при приёмке),
-# но с тех пор ретаргет уже случился и живой файл -- ЭТОТ, шапка не
-# обновлялась и лгала о себе задним числом (найдено при постановке t-447,
-# исправлено здесь, а не молча). Сиблинги tools/test_journal_echo_tsdrift.py
-# / tools/test_journal_echo_escalation.py по-прежнему используют
-# staged-конвенцию ДЛЯ СВОИХ СОБСТВЕННЫХ будущих добавлений (её описание
-# в их докстрингах не тронуто этой правкой, вне owns этой задачи) -- она
-# относится к процессу постановки НОВОГО слоя, не к текущему состоянию
-# этого файла.
+# SIBLING, НЕ ЖИВОЙ ПУТЬ (t-503 узел N3, q503-remediation, 2026-08-19):
+# tools/journal_echo_q503.py -- сиблинг живого tools/journal_echo.py по
+# образцу узлов A/B F-61 (dod_track_q503.py и т.п.) -- .claude/settings.json
+# по-прежнему запускает `python tools/journal_echo.py`, ЭТОТ файл не
+# исполняется PostToolUse-хуком. Посадка (слияние в живой путь) --
+# отдельный акт Lead байт-копией, вне owns этой задачи (см. non-цели узла
+# N3). Разница от живого файла -- ровно секция "PAYLOAD-SCOPED ECHO BASE"
+# и main() ниже (K14/K15/К16/K17 узла N3, докстринги отмечают правки
+# буквально "q503"); остальной код -- дословная копия живого файла на
+# момент 2026-08-19, НЕ трогается этой задачей за пределами этих правок.
+#
+# Слои, накопленные в этом файле по сей день (аддитивно, один и тот же
+# живой путь): TS DRIFT ECHO (константы TS_FUTURE_TOLERANCE_SECONDS/
+# TS_STALE_TOLERANCE_SECONDS, функции _detect_ts_drift/
+# _collect_ts_drift_events/_format_ts_drift_line/build_ts_drift_segment),
+# TIER ECHO, WITNESS ECHO (+ WITNESS ECHO STALENESS), ESCALATION ECHO
+# (batch B6), PAYLOAD-SCOPED ECHO BASE (t-277/t-279) и, этой задачей
+# (t-447, замер 2026-08-16), NOTES LEN ECHO -- WARN при записи строки,
+# чьё поле notes длиннее порога, назначенного типу события (константы
+# NOTES_LEN_THRESHOLDS_CHARS/MAX_NOTES_LEN_LINES, функции
+# _collect_notes_len_events/_format_notes_len_line/build_notes_len_segment,
+# точки вставки в combine_context()/main() -- см. секцию "NOTES LEN ECHO"
+# ниже за полный разбор).
 #
 # Слои, накопленные в этом файле по сей день (аддитивно, один и тот же
 # живой путь): TS DRIFT ECHO (константы TS_FUTURE_TOLERANCE_SECONDS/
@@ -777,14 +783,17 @@ def combine_context(violations: list, tier_events: list, witness_events: list = 
     ПОСЛЕДНИМ всегда -- ни один сегмент не является условием видимости
     другого, каждый делает вызов видимым самостоятельно.
 
-    fallback_marker -- ЛИТЕРАЛ (FALLBACK_MARKER_TEXT, см. секцию
-    "PAYLOAD-SCOPED ECHO BASE" выше), НЕ проходит ни через один
-    санитайзер (статическая ASCII-строка, никогда не несёт стороннего
+    fallback_marker -- ЛИТЕРАЛ (FALLBACK_MARKER_TEXT + Q503 K15
+    диагностический код причины хвостом, см. секцию "PAYLOAD-SCOPED ECHO
+    BASE" -> "Q503 REMEDIATION" выше), НЕ проходит ни через один
+    санитайзер (склейка ДВУХ статических ASCII-констант этого файла --
+    префикса и одного из REASON_*, никогда не несёт стороннего/payload-
     текста -- тот же принцип, что статический префикс build_context).
     Вызывающий код (main()) передаёт его пустой строкой, если TIER/
-    WITNESS/TS-DRIFT/ESCALATION/NOTES-LEN в ЭТОМ вызове хука не
-    деградировали до HEAD-дифф-фолбэка (см. _resolve_echo_base) --
-    поэтому его отсутствие в старых 2-/3-/4-позиционных вызовах ничего
+    WITNESS/ESCALATION в ЭТОМ вызове хука не деградировали до HEAD-дифф-
+    фолбэка (см. _resolve_echo_base); TS-DRIFT/NOTES-LEN отключаются
+    полностью в этом же случае (K14) -- поэтому его отсутствие в старых
+    2-/3-/4-позиционных вызовах ничего
     не меняет.
 
     witness_events=None / ts_drift_events=None / escalation_events=None
@@ -1557,15 +1566,19 @@ def build_escalation_segment(escalation_events: list, ascii_only: bool = False) 
 # БАЗА (Ф5, наследование класса F-57): используется ТА ЖЕ payload-scoped
 # база (echo_new_lines/echo_base_lines из _resolve_echo_base), что уже
 # несут TIER/WITNESS/TS-DRIFT/ESCALATION выше в этом файле, -- НО, в
-# отличие от них, этот слой ПОЛНОСТЬЮ ОТКЛЮЧАЕТСЯ целиком, когда
-# used_fallback == True (см. main()): в фолбэк-режиме (payload
-# нечитаем/не-хвостовая правка) слой не даёт ни одного notes-len события,
-# а не просто "меньше уверен" -- иначе он переоценивал бы ВЕСЬ
+# отличие от TIER/WITNESS/ESCALATION, этот слой ПОЛНОСТЬЮ ОТКЛЮЧАЕТСЯ
+# целиком, когда used_fallback == True (см. main()): в фолбэк-режиме
+# (payload нечитаем/не-хвостовая правка) слой не даёт ни одного notes-len
+# события, а не просто "меньше уверен" -- иначе он переоценивал бы ВЕСЬ
 # незакоммиченный хвост журнала при каждой записи (тот же класс, что
 # F-57 уже поймал: детектор с растущими ложными срабатываниями на
-# накопленном фолбэк-диффе). FALLBACK_MARKER_TEXT печатается КАК И
-# РАНЬШЕ независимо от этого отключения -- "слой промолчал" остаётся
-# видимым читателю через существующую пометку, не тихая смерть.
+# накопленном фолбэк-диффе). TS DRIFT ECHO (Q503 K14, узел N3, t-503,
+# 2026-08-19) присоединился к этой же ветке позже -- та же причина,
+# тот же класс, см. секцию "PAYLOAD-SCOPED ECHO BASE" -> "Q503
+# REMEDIATION" -> K14 выше за полный разбор асимметрии. FALLBACK_MARKER_TEXT
+# печатается КАК И РАНЬШЕ независимо от этого отключения -- "слой
+# промолчал" остаётся видимым читателю через существующую (Q503:
+# теперь диагностическую) пометку, не тихая смерть.
 #
 # ТЕКСТ ПРЕДУПРЕЖДЕНИЯ (Ф6): статический ASCII-шаблон, БЕЗ фрагмента
 # notes -- см. _format_notes_len_line. Все динамические значения,
@@ -1766,43 +1779,108 @@ def build_notes_len_segment(events: list, ascii_only: bool = False) -> str:
 # state either way whether the marker fires on an otherwise-silent
 # call; resolved here in favor of the file's pre-existing "silence on
 # clean" invariant, flagged in the builder report for Lead's review.)
+#
+# --- Q503 REMEDIATION (узел N3, t-503, 2026-08-19, F-57 остаток) ------
+# N0-замер (t-520) РАЗРЕШИЛ развилку Р1: originalFile ЖИВ в 100%
+# реальных payload (77/77 записей контрольной выборки) -- фолбэк
+# остаётся редким легитимным путём (единичный fail-open по 26(г)), не
+# признаком сломанной базы. Форма фикса Lead (Р1(б) + K15):
+#
+# K14 -- ОДНА семантика фолбэка, но АСИММЕТРИЧНАЯ между пятью слоями,
+# документированная здесь одним местом (все пять читают её отсюда, не
+# изобретают заново):
+#   - TIER ECHO / WITNESS ECHO / ESCALATION ECHO остаются на
+#     фолбэковой (кумулятивной HEAD-дифф) базе БЕЗ ИЗМЕНЕНИЙ этой
+#     задачей -- они ШУМНЫЕ в фолбэке (могут повторно отэхоить уже
+#     виденное событие), но НЕ КОРРЕКТНОСТНО-ЛОЖНЫЕ: mismatch/witness-
+#     противоречие/эскалационный триггер не зависят от "сколько времени
+#     прошло с несвязанного коммита", здесь нет неверного вердикта,
+#     только избыточный повтор.
+#   - NOTES LEN ECHO (t-447, уже отключён в фолбэке -- см. main() ниже)
+#     и TS DRIFT ECHO (эта задача, отключается ЗДЕСЬ ВПЕРВЫЕ) -- ОБА
+#     ПОЛНОСТЬЮ ОТКЛЮЧЕНЫ при used_fallback == True: единственные два
+#     слоя из пяти, чей вердикт КОРРЕКТНОСТНО-ЛОЖЕН на кумулятивной
+#     базе -- TS DRIFT меряет возраст ЧУЖИХ (уже присутствовавших на
+#     диске, не добавленных этим вызовом) незакоммиченных строк против
+#     `now` ЭТОГО вызова -- та же природа ошибки, что F-29/D-0079
+#     изначально поймал для payload-scoping в целом (см. секцию выше);
+#     NOTES LEN по симметричной причине (t-447 F5) -- оценивал бы ВЕСЬ
+#     незакоммиченный хвост на каждой записи, не только добавленное
+#     этим вызовом. Асимметрия между "выключить" (NOTES LEN/TS DRIFT) и
+#     "оставить шумным" (TIER/WITNESS/ESCALATION) -- это именно
+#     различие "даёт неверный вердикт" vs "даёт избыточный, но верный
+#     вердикт"; не для симметрии ради симметрии.
+#
+# K15 -- фолбэк-метка (FALLBACK_MARKER_TEXT) становится ДИАГНОСТИЧЕСКОЙ:
+# несёт код причины фолбэка хвостом, ТЕКСТ-ПРЕФИКС "echo base: HEAD-diff
+# fallback" остаётся ДОСЛОВНО (его цитируют чек 26(г) протокола и чек
+# 13(ж) калибровки -- рвать нельзя), причина дописывается как
+# " (reason: <код>)" -- см. _REASON_* константы и _extract_original_file/
+# _resolve_echo_base ниже за точки, где каждый код присваивается.
 _ORIGINAL_FILE_UNAVAILABLE = object()
 EDIT_LIKE_TOOL_NAMES = ("Edit", "Write")
 FALLBACK_MARKER_TEXT = "echo base: HEAD-diff fallback"
 
+# K15 коды причины (диагностическая метка, узел N3) -- ровно пять,
+# по числу развилок fail-open, перечисленных в спеке узла N3: tool вне
+# Edit/Write, нет tool_response, нет ключа originalFile, originalFile
+# не строка, не строгий аппенд к originalFile. "not an append" -- код
+# ПОСЛЕДНЕЙ развилки буквально из спеки (край "не-строгий аппенд ->
+# код причины «not an append»").
+REASON_TOOL_OUTSIDE_EDIT_WRITE = "tool_name outside Edit/Write"
+REASON_NO_TOOL_RESPONSE = "no tool_response"
+REASON_NO_ORIGINAL_FILE_KEY = "no originalFile key"
+REASON_ORIGINAL_FILE_NOT_STR = "originalFile not a string"
+REASON_NOT_AN_APPEND = "not an append"
+
 
 def _extract_original_file(payload, tool_name):
     """tool_response.originalFile -- see the section docstring above for
-    the empirical basis. Returns:
-      - _ORIGINAL_FILE_UNAVAILABLE when tool_name isn't Edit/Write, or
-        tool_response isn't a dict, or the "originalFile" key is absent,
-        or present with a type that's neither str nor None (a
-        malformed/foreign payload -- fail open, don't guess).
-      - "" when originalFile is None (Write creating a brand-new file;
-        Edit's schema is nullable too, treated identically -- an empty
-        previous file for the purposes of this hook).
-      - the string itself otherwise (the full file content immediately
-        before this specific tool call)."""
+    the empirical basis. Returns a (value, reason) TUPLE (Q503 K15,
+    changed from the single-value form the live journal_echo.py still
+    carries -- see the section docstring's "Q503 REMEDIATION" block):
+      - (_ORIGINAL_FILE_UNAVAILABLE, REASON_*) when tool_name isn't
+        Edit/Write, or tool_response isn't a dict, or the "originalFile"
+        key is absent, or present with a type that's neither str nor
+        None (a malformed/foreign payload -- fail open, don't guess).
+        `reason` names WHICH of these four held, for the K15
+        diagnostic fallback marker.
+      - ("", None) when originalFile is None (Write creating a
+        brand-new file; Edit's schema is nullable too, treated
+        identically -- an empty previous file for the purposes of this
+        hook). NOT a fallback by itself -- reason is None here.
+      - (the string itself, None) otherwise (the full file content
+        immediately before this specific tool call)."""
     if tool_name not in EDIT_LIKE_TOOL_NAMES:
-        return _ORIGINAL_FILE_UNAVAILABLE
+        return _ORIGINAL_FILE_UNAVAILABLE, REASON_TOOL_OUTSIDE_EDIT_WRITE
     tool_response = payload.get("tool_response") if isinstance(payload, dict) else None
     if not isinstance(tool_response, dict):
-        return _ORIGINAL_FILE_UNAVAILABLE
+        return _ORIGINAL_FILE_UNAVAILABLE, REASON_NO_TOOL_RESPONSE
     if "originalFile" not in tool_response:
-        return _ORIGINAL_FILE_UNAVAILABLE
+        return _ORIGINAL_FILE_UNAVAILABLE, REASON_NO_ORIGINAL_FILE_KEY
     original_file = tool_response["originalFile"]
     if original_file is None:
-        return ""
+        return "", None
     if not isinstance(original_file, str):
-        return _ORIGINAL_FILE_UNAVAILABLE
-    return original_file
+        return _ORIGINAL_FILE_UNAVAILABLE, REASON_ORIGINAL_FILE_NOT_STR
+    return original_file, None
 
 
 def _resolve_echo_base(payload, tool_name, staged_lines: list, head_lines: list):
-    """Returns (echo_base_lines, echo_new_lines, used_fallback) -- the ONE
-    base shared by TIER ECHO/WITNESS ECHO/TS DRIFT ECHO (Lead's decision:
-    "one semantics for all three collectors"; VALIDATION/JOURNAL ECHO
-    stays on the separate, cumulative HEAD-diff base -- see main()).
+    """Returns (echo_base_lines, echo_new_lines, used_fallback, reason)
+    -- Q503 K15 adds `reason` as a FOURTH return value (live
+    journal_echo.py still returns a 3-tuple; see the section docstring's
+    "Q503 REMEDIATION" block) -- the ONE base shared by TIER ECHO/
+    WITNESS ECHO/ESCALATION ECHO (K14: TS DRIFT ECHO/NOTES LEN ECHO are
+    disabled entirely in fallback -- see main()); VALIDATION/JOURNAL
+    ECHO stays on the separate, cumulative HEAD-diff base -- see
+    main()).
+
+    `reason` is None whenever used_fallback is False (the normal,
+    non-fallback path -- including the originalFile == "" Write-new-
+    file case, which is NOT a fallback); one of the REASON_* constants
+    above whenever used_fallback is True -- this is the K15 diagnostic
+    fallback-marker payload.
 
     Primary path: recover this call's own previous-disk-state from
     tool_response.originalFile (_extract_original_file); if disk_text
@@ -1811,20 +1889,23 @@ def _resolve_echo_base(payload, tool_name, staged_lines: list, head_lines: list)
     added -- echo_new_lines = staged_lines[len(base_lines):].
 
     Fallback (payload unrecoverable, OR the recovered base doesn't hold
-    as a strict append -- a non-tail edit): reuses this file's
-    PRE-EXISTING HEAD-diff computation unchanged (identical to the logic
-    that lived inline in main() before this task) -- so every call site
-    that used to depend on that computation keeps behaving exactly as
-    before whenever payload-scoping isn't available."""
-    original_file = _extract_original_file(payload, tool_name)
+    as a strict append -- a non-tail edit, reason becomes
+    REASON_NOT_AN_APPEND regardless of how original_file was obtained):
+    reuses this file's PRE-EXISTING HEAD-diff computation unchanged
+    (identical to the logic that lived inline in main() before this
+    task) -- so every call site that used to depend on that computation
+    keeps behaving exactly as before whenever payload-scoping isn't
+    available."""
+    original_file, reason = _extract_original_file(payload, tool_name)
     if original_file is not _ORIGINAL_FILE_UNAVAILABLE:
         base_lines = journal_validator.split_lines(original_file)
         op_ok, _ = journal_validator.check_append_only(staged_lines, base_lines)
         if op_ok:
-            return base_lines, staged_lines[len(base_lines):], False
+            return base_lines, staged_lines[len(base_lines):], False, None
+        reason = REASON_NOT_AN_APPEND
     append_ok, _ = journal_validator.check_append_only(staged_lines, head_lines)
     new_lines = staged_lines[len(head_lines):] if append_ok else []
-    return head_lines, new_lines, True
+    return head_lines, new_lines, True, reason
 
 
 def _reconfigure_streams_utf8():
@@ -1871,9 +1952,16 @@ def main() -> int:
        payload-scoped база, тот же вызов, отдельный смысл использования.
        NOTES LEN ECHO -- ЕЩЁ ОДНО отличие (Ф5 спеки t-447, наследование
        класса F-57): при used_fallback == True этот слой ПОЛНОСТЬЮ
-       отключён (ноль событий), в отличие от TIER/WITNESS/TS-DRIFT/
-       ESCALATION, которые продолжают работать (с фолбэковой базой) и
-       в фолбэк-режиме -- см. секцию "NOTES LEN ECHO" выше за мотив."""
+       отключён (ноль событий) -- см. секцию "NOTES LEN ECHO" выше за
+       мотив. TS DRIFT ECHO -- Q503 K14 (узел N3, t-503, 2026-08-19):
+       ТЕПЕРЬ отключается ТАК ЖЕ, как NOTES LEN, при used_fallback ==
+       True -- единственные ДВА из пяти слоёв, чей вердикт на
+       кумулятивной фолбэковой базе КОРРЕКТНОСТНО-ЛОЖЕН (мерят возраст/
+       длину ЧУЖИХ, не добавленных этим вызовом строк), в отличие от
+       TIER/WITNESS/ESCALATION, которые в фолбэке остаются ШУМНЫМИ, но
+       НЕ ЛОЖНЫМИ, и потому продолжают работать -- полный разбор
+       асимметрии см. секцию "PAYLOAD-SCOPED ECHO BASE" -> "Q503
+       REMEDIATION" -> K14 выше."""
     _reconfigure_streams_utf8()
     try:
         raw_bytes = sys.stdin.buffer.read()
@@ -1912,7 +2000,7 @@ def main() -> int:
         staged_lines = journal_validator.split_lines(disk_text)
         head_lines = journal_validator.split_lines(head_text)
         tool_name = payload.get("tool_name")
-        echo_base_lines, echo_new_lines, used_fallback = _resolve_echo_base(
+        echo_base_lines, echo_new_lines, used_fallback, fallback_reason = _resolve_echo_base(
             payload, tool_name, staged_lines, head_lines)
 
         tier_events = _collect_tier_events(echo_new_lines, echo_base_lines)
@@ -1941,10 +2029,24 @@ def main() -> int:
         # переменная, уже вычисленная выше для decide()/_get_head_text --
         # не вычисляется повторно. Warn-only, ВСЕГДА видимые (нет "note"-
         # варианта, в отличие от WITNESS ECHO).
-        try:
-            ts_drift_events = _collect_ts_drift_events(echo_new_lines, echo_base_lines, now)
-        except Exception:
+        #
+        # Q503 K14 (узел N3, t-503, 2026-08-19, остаток F-57): при
+        # used_fallback == True этот слой ТЕПЕРЬ ПОЛНОСТЬЮ ОТКЛЮЧЁН (ноль
+        # событий), СИММЕТРИЧНО NOTES LEN ECHO ниже -- echo_base_lines в
+        # фолбэке -- HEAD, не собственный originalFile этого вызова, так
+        # что TS DRIFT мерил бы возраст ЧУЖИХ незакоммиченных строк
+        # против `now` этого вызова -- ровно корректностно-ложный класс
+        # F-29/D-0079, что и заставил ввести payload-scoping изначально
+        # (см. секцию "PAYLOAD-SCOPED ECHO BASE" выше). TIER/WITNESS/
+        # ESCALATION НЕ отключаются (K14: шумные-но-не-ложные, остаются
+        # на фолбэковой базе как есть).
+        if used_fallback:
             ts_drift_events = []
+        else:
+            try:
+                ts_drift_events = _collect_ts_drift_events(echo_new_lines, echo_base_lines, now)
+            except Exception:
+                ts_drift_events = []
 
         # ESCALATION ECHO (batch B6, задача 1 -- R6-эскалация машинный
         # страж): ТА ЖЕ payload-scoped база, что TIER/WITNESS/TS-DRIFT
@@ -1989,11 +2091,24 @@ def main() -> int:
                 and not ts_drift_events and not escalation_events and not notes_len_events):
             return 0
 
-        # Фолбэк-пометка (эта задача): видна ТОЛЬКО когда мы всё равно
-        # что-то печатаем (см. секцию "PAYLOAD-SCOPED ECHO BASE" выше за
-        # обоснование -- полностью чистый вызов остаётся тихим даже в
-        # фолбэке, тот же принцип "без шума на чистой записи").
-        fallback_marker = FALLBACK_MARKER_TEXT if used_fallback else ""
+        # Фолбэк-пометка: видна ТОЛЬКО когда мы всё равно что-то печатаем
+        # (см. секцию "PAYLOAD-SCOPED ECHO BASE" выше за обоснование --
+        # полностью чистый вызов остаётся тихим даже в фолбэке, тот же
+        # принцип "без шума на чистой записи", K17 узла N3).
+        #
+        # Q503 K15 (узел N3, t-503, 2026-08-19): метка ТЕПЕРЬ
+        # ДИАГНОСТИЧЕСКАЯ -- несёт код причины фолбэка хвостом.
+        # FALLBACK_MARKER_TEXT остаётся ПРЕФИКСОМ ДОСЛОВНО (его цитируют
+        # чек 26(д) протокола и чек 13(ж) калибровки -- рвать нельзя),
+        # причина дописывается как " (reason: <код>)" -- fallback_reason
+        # всегда один из REASON_* (см. _resolve_echo_base), никогда
+        # произвольный/сторонний текст -- та же гарантия "марker --
+        # ЛИТЕРАЛ, не проходит санитайзер", что и раньше (см. докстринг
+        # combine_context): и префикс, и код причины -- оба статические
+        # ASCII-константы этого файла, ни один не несёт payload-данных.
+        fallback_marker = (
+            f"{FALLBACK_MARKER_TEXT} (reason: {fallback_reason})" if used_fallback else ""
+        )
 
         # Lead-правка (критик-приёмка + Lead-смок): два разных канала,
         # два разных варианта санитайза (см. докстринг build_context).

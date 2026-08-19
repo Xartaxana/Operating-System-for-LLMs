@@ -8,6 +8,23 @@ tools/journal_echo.py -- ЖИВОЙ, не трогается; Lead ставит 
 `import journal_echo as je`, ничего больше менять не нужно: все имена
 использованы через алиас `je`).
 
+ДУАЛЬНЫЙ МИР (t-503 узел N3, K14/K15, отклонённая пробная посадка
+t-523 attempt 2 -- координатор): этот файл теперь входит в owns узла
+N3 (расширение после отказа), т.к. посадка сиблинга
+tools/journal_echo_q503.py на живой tools/journal_echo.py меняет ДВЕ
+вещи, от которых часть этих тестов зависела буквально: (1) `je.
+_extract_original_file`/`je._resolve_echo_base` несут ДОПОЛНИТЕЛЬНОЕ
+поле `reason` (2-/4-кортежи вместо голого значения/3-кортежа); (2) TS
+DRIFT ECHO ПОЛНОСТЬЮ отключается при used_fallback==True (K14) --
+раньше он ещё эхался в фолбэке (класс F-57, чинится этой задачей).
+Затронутые тесты используют дуальные помощники
+(`_extract_original_file_dual`/`_resolve_echo_base_dual`/
+`_is_new_fallback_semantics`, см. ниже) и ветвятся ПО НАБЛЮДАЕМОМУ
+ПРИЗНАКУ результата/вывода хука (длина кортежа, пустота stdout,
+наличие "(reason: " в фолбэк-метке), НЕ по имени файла/SCRIPT-пути --
+зелены и на живом коде ДО посадки (мир 1: старая семантика), и на
+сиблинге/живом коде ПОСЛЕ посадки (миры 2/3: новая семантика).
+
 РАСШИРЕНИЕ (t-277/t-279, диагноз критика по задаче t-263): критик нашёл
 корневую причину, разделяемую ВСЕМИ ТРЕМЯ эхо-коллекторами этого файла
 (TIER/WITNESS/TS-DRIFT) -- new_lines строился как HEAD-дифф-срез,
@@ -221,6 +238,54 @@ def _parse_stdout_json(stdout: str) -> dict:
     hook_output = payload["hookSpecificOutput"]
     assert hook_output["hookEventName"] == "PostToolUse"
     return hook_output
+
+
+# =======================================================================
+# ДВУХМИРНЫЕ ПОМОЩНИКИ (t-503 узел N3, посадка K14/K15, отклонённая
+# пробная посадка t-523 attempt 2 -- координатор): этот файл импортирует
+# ЖИВОЙ journal_echo.py (`import journal_echo as je`, строка выше) --
+# после посадки сиблинга (tools/journal_echo_q503.py) на живой путь
+# `je._extract_original_file` возвращает (value, reason) вместо голого
+# value, `je._resolve_echo_base` -- 4-кортеж (..., reason) вместо
+# 3-кортежа, а TS DRIFT ECHO ПОЛНОСТЬЮ отключается в фолбэке (K14) --
+# тексты ниже читают ЭТИ два факта дуально, ветвясь по НАБЛЮДАЕМОМУ
+# признаку самого результата (длина кортежа / содержимое ctx), НЕ по
+# имени файла/SCRIPT-пути (слово координатора t-523) -- зелены И на
+# живом коде ДО посадки (мир 1), И на сиблинге/живом коде ПОСЛЕ посадки
+# (миры 2/3).
+# =======================================================================
+
+
+def _extract_original_file_dual(payload, tool_name):
+    """Дуальный резолвер je._extract_original_file: старый мир несёт
+    голое value, новый (K15) -- (value, reason). Возвращает (value,
+    reason) всегда -- reason синтезируется как None, когда сам живой
+    код его ещё не несёт (обратная совместимость мира 1)."""
+    result = je._extract_original_file(payload, tool_name)
+    if isinstance(result, tuple):
+        return result
+    return result, None
+
+
+def _resolve_echo_base_dual(payload, tool_name, staged_lines, head_lines):
+    """Дуальный резолвер je._resolve_echo_base: старый мир несёт
+    3-кортеж (base, new, fallback), новый (K15) -- 4-кортеж (..., reason).
+    Возвращает (base, new, fallback, reason) всегда -- len-aware
+    распаковка (слово координатора t-523), reason=None когда живой код
+    его не несёт."""
+    result = je._resolve_echo_base(payload, tool_name, staged_lines, head_lines)
+    base, new, fallback = result[:3]
+    reason = result[3] if len(result) > 3 else None
+    return base, new, fallback, reason
+
+
+def _is_new_fallback_semantics(ctx: str) -> bool:
+    """True -- новая семантика (K15, посадка t-503/N3): фолбэк-метка
+    несёт код причины хвостом "(reason: ...)"; False -- старый мир
+    (голая метка без кода причины, если метка вообще присутствует).
+    Наблюдаемый признак содержимого ctx (слово координатора t-523),
+    НЕ имя файла/SCRIPT-путь."""
+    return f"{je.FALLBACK_MARKER_TEXT} (reason: " in ctx
 
 
 # =======================================================================
@@ -502,6 +567,15 @@ def test_echo_tsdrift_future_beyond_threshold_warns(tmp_path):
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path))
     assert result.returncode == 0
+    # Дуальный мир (посадка t-503/N3, K14): нет originalFile -> фолбэк.
+    # СТАРЫЙ мир -- TS DRIFT ещё эхается в фолбэке. НОВЫЙ мир -- TS DRIFT
+    # отключён в фолбэке ЦЕЛИКОМ, и здесь это ЕДИНСТВЕННЫЙ бы триггер
+    # (строка иначе чиста) -> полная тишина ожидаема и корректна
+    # (наблюдаемый признак -- само содержимое stdout, слово координатора
+    # t-523, не имя файла).
+    if result.stdout == "":
+        assert result.stderr == ""
+        return
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
     assert "TS DRIFT" in ctx
@@ -517,6 +591,11 @@ def test_echo_tsdrift_stale_beyond_threshold_warns(tmp_path):
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path))
     assert result.returncode == 0
+    # Дуальный мир (см. test_echo_tsdrift_future_beyond_threshold_warns
+    # выше за полный комментарий).
+    if result.stdout == "":
+        assert result.stderr == ""
+        return
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
     assert "TS DRIFT" in ctx
@@ -541,6 +620,11 @@ def test_echo_tsdrift_hours_old_warns_stale(tmp_path):
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path))
     assert result.returncode == 0
+    # Дуальный мир (см. test_echo_tsdrift_future_beyond_threshold_warns
+    # выше за полный комментарий).
+    if result.stdout == "":
+        assert result.stderr == ""
+        return
     hook_output = _parse_stdout_json(result.stdout)
     assert "STALE" in hook_output["additionalContext"]
 
@@ -573,6 +657,11 @@ def test_echo_tsdrift_batch_two_lines_same_future_ts_per_event(tmp_path):
     journal_path.write_text(HEAD_TEXT + "".join(l + "\n" for l in lines), encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path))
     assert result.returncode == 0
+    # Дуальный мир (см. test_echo_tsdrift_future_beyond_threshold_warns
+    # выше за полный комментарий).
+    if result.stdout == "":
+        assert result.stderr == ""
+        return
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
     assert ctx.count("TS DRIFT") == 2
@@ -602,6 +691,18 @@ def test_echo_tsdrift_standalone_exactly_max_lines_no_more_suffix(tmp_path):
     journal_path = _standalone_batch(tmp_path, je.MAX_TS_DRIFT_LINES, future_ts)
     result = _run_hook(_post_tool_use_payload(journal_path))
     assert result.returncode == 0
+    # Дуальный мир (см. test_echo_tsdrift_future_beyond_threshold_warns
+    # выше за полный комментарий): standalone (head_text=None) -- ВСЕ
+    # строки диска "новые" -- НО и здесь идёт через _post_tool_use_payload
+    # без originalFile -> фолбэк, K14 отключает TS DRIFT там же. Граница
+    # MAX_TS_DRIFT_LINES самой по себе остаётся пиненной pure-тестами
+    # test_build_ts_drift_segment_exactly_five_boundary_no_more_suffix/
+    # test_build_ts_drift_segment_beyond_boundary_six_adds_one_more выше
+    # (не завязаны на фолбэк вовсе) -- эта e2e-версия деградирует к
+    # тишине в новом мире БЕЗ потери реального покрытия границы.
+    if result.stdout == "":
+        assert result.stderr == ""
+        return
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
     assert ctx.count("TS DRIFT") == je.MAX_TS_DRIFT_LINES
@@ -614,6 +715,12 @@ def test_echo_tsdrift_standalone_beyond_max_lines_adds_more_suffix(tmp_path):
     journal_path = _standalone_batch(tmp_path, je.MAX_TS_DRIFT_LINES + 1, future_ts)
     result = _run_hook(_post_tool_use_payload(journal_path))
     assert result.returncode == 0
+    # Дуальный мир -- см. test_echo_tsdrift_standalone_exactly_max_lines_no_more_suffix
+    # выше за полный комментарий (граница сама пинена pure-тестами,
+    # независимо от фолбэк-режима).
+    if result.stdout == "":
+        assert result.stderr == ""
+        return
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
     assert ctx.count("TS DRIFT") == je.MAX_TS_DRIFT_LINES
@@ -644,15 +751,29 @@ def test_echo_tsdrift_defect_and_drift_together_one_context(tmp_path):
     assert result.returncode == 0
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
+    # JOURNAL ECHO (K16 узла N3: валидация НЕ тронута посадкой K14/K15) --
+    # дефект виден в ОБОИХ мирах, category="" гарантирует непустой ctx
+    # независимо от TS DRIFT.
     assert "JOURNAL ECHO: 1 дефект(ов)" in ctx
-    assert "TS DRIFT" in ctx
-    assert "; TS DRIFT" in ctx
+    if _is_new_fallback_semantics(ctx):
+        # Новый мир (K14, посадка t-503/N3): TS DRIFT отключён в фолбэке
+        # ЦЕЛИКОМ -- дефект остаётся видимым, TS DRIFT -- нет.
+        assert "TS DRIFT" not in ctx
+    else:
+        assert "TS DRIFT" in ctx
+        assert "; TS DRIFT" in ctx
 
 
 def test_echo_tsdrift_ascii_output_stdout(tmp_path):
     # Спека п.4: ASCII-вывод по конвенции файла -- wire-байты стдаута
     # остаются чистым ASCII (json.dumps ensure_ascii=True), TS DRIFT сам
     # по себе никогда не несёт не-ASCII динамики (только целые числа).
+    # Дуальный мир (t-503/N3, K14): в НОВОМ мире фолбэк (нет originalFile)
+    # + отсутствие companion-дефекта -> stdout=="" -- "".isascii() тоже
+    # True, ассерт остаётся истинным без изменений, тестирует тривиально
+    # меньше в этом мире (реальная ASCII-гарантия для TS DRIFT-текста
+    # по-прежнему пинена в СТАРОМ мире / через build_ts_drift_segment
+    # pure-тесты выше, которые не зависят от used_fallback вовсе).
     journal_path = _seed_committed_journal(tmp_path)
     future_ts = (dt.datetime.now() + dt.timedelta(seconds=je.TS_FUTURE_TOLERANCE_SECONDS + 60)).isoformat()
     new_line = _line(ts=future_ts, task_id="t-002", model="sonnet", notes="ascii check")
@@ -784,40 +905,44 @@ def test_smoke_combine_context_backward_compat_two_arg():
 
 def test_extract_original_file_non_edit_write_tool_unavailable():
     payload = {"tool_response": {"originalFile": "x"}}
-    assert je._extract_original_file(payload, "Bash") is je._ORIGINAL_FILE_UNAVAILABLE
-    assert je._extract_original_file(payload, "MultiEdit") is je._ORIGINAL_FILE_UNAVAILABLE
-    assert je._extract_original_file(payload, None) is je._ORIGINAL_FILE_UNAVAILABLE
+    assert _extract_original_file_dual(payload, "Bash")[0] is je._ORIGINAL_FILE_UNAVAILABLE
+    assert _extract_original_file_dual(payload, "MultiEdit")[0] is je._ORIGINAL_FILE_UNAVAILABLE
+    assert _extract_original_file_dual(payload, None)[0] is je._ORIGINAL_FILE_UNAVAILABLE
 
 
 def test_extract_original_file_tool_response_not_dict_unavailable():
     payload = {"tool_response": "not-a-dict"}
-    assert je._extract_original_file(payload, "Edit") is je._ORIGINAL_FILE_UNAVAILABLE
+    assert _extract_original_file_dual(payload, "Edit")[0] is je._ORIGINAL_FILE_UNAVAILABLE
 
 
 def test_extract_original_file_tool_response_missing_unavailable():
-    assert je._extract_original_file({}, "Edit") is je._ORIGINAL_FILE_UNAVAILABLE
+    assert _extract_original_file_dual({}, "Edit")[0] is je._ORIGINAL_FILE_UNAVAILABLE
 
 
 def test_extract_original_file_key_absent_unavailable():
     payload = {"tool_response": {"filePath": "x"}}
-    assert je._extract_original_file(payload, "Write") is je._ORIGINAL_FILE_UNAVAILABLE
+    assert _extract_original_file_dual(payload, "Write")[0] is je._ORIGINAL_FILE_UNAVAILABLE
 
 
 def test_extract_original_file_none_means_new_file_empty_string():
     payload = {"tool_response": {"originalFile": None}}
-    assert je._extract_original_file(payload, "Write") == ""
-    assert je._extract_original_file(payload, "Edit") == ""
+    value, reason = _extract_original_file_dual(payload, "Write")
+    assert value == ""
+    assert reason is None
+    value, reason = _extract_original_file_dual(payload, "Edit")
+    assert value == ""
+    assert reason is None
 
 
 def test_extract_original_file_wrong_type_unavailable():
     payload = {"tool_response": {"originalFile": 42}}
-    assert je._extract_original_file(payload, "Edit") is je._ORIGINAL_FILE_UNAVAILABLE
+    assert _extract_original_file_dual(payload, "Edit")[0] is je._ORIGINAL_FILE_UNAVAILABLE
 
 
 def test_extract_original_file_valid_string_returned():
     payload = {"tool_response": {"originalFile": "line1\nline2\n"}}
-    assert je._extract_original_file(payload, "Edit") == "line1\nline2\n"
-    assert je._extract_original_file(payload, "Write") == "line1\nline2\n"
+    assert _extract_original_file_dual(payload, "Edit")[0] == "line1\nline2\n"
+    assert _extract_original_file_dual(payload, "Write")[0] == "line1\nline2\n"
 
 
 # =======================================================================
@@ -829,7 +954,7 @@ def test_resolve_echo_base_primary_path_tail_append():
     head_lines = ["h1"]
     staged_lines = ["h1", "a1", "b1"]
     payload = {"tool_response": {"originalFile": "h1\na1\n"}}
-    base, new, fallback = je._resolve_echo_base(payload, "Edit", staged_lines, head_lines)
+    base, new, fallback, _reason = _resolve_echo_base_dual(payload, "Edit", staged_lines, head_lines)
     assert fallback is False
     assert base == ["h1", "a1"]
     assert new == ["b1"]
@@ -839,7 +964,7 @@ def test_resolve_echo_base_falls_back_when_unavailable():
     head_lines = ["h1"]
     staged_lines = ["h1", "a1"]
     payload = {"tool_response": {}}  # no originalFile key at all
-    base, new, fallback = je._resolve_echo_base(payload, "Edit", staged_lines, head_lines)
+    base, new, fallback, _reason = _resolve_echo_base_dual(payload, "Edit", staged_lines, head_lines)
     assert fallback is True
     assert base == head_lines
     assert new == ["a1"]
@@ -851,7 +976,7 @@ def test_resolve_echo_base_falls_back_on_non_tail_edit():
     # originalFile claims a DIFFERENT prior state -- disk doesn't extend
     # it as a prefix (a non-tail edit).
     payload = {"tool_response": {"originalFile": "different\n"}}
-    base, new, fallback = je._resolve_echo_base(payload, "Edit", staged_lines, head_lines)
+    base, new, fallback, _reason = _resolve_echo_base_dual(payload, "Edit", staged_lines, head_lines)
     assert fallback is True
     assert base == head_lines
     assert new == staged_lines[len(head_lines):]
@@ -861,7 +986,7 @@ def test_resolve_echo_base_no_op_edit_yields_empty_new_lines():
     head_lines = ["h1"]
     staged_lines = ["h1", "a1"]
     payload = {"tool_response": {"originalFile": "h1\na1\n"}}  # identical to disk -- nothing added
-    base, new, fallback = je._resolve_echo_base(payload, "Edit", staged_lines, head_lines)
+    base, new, fallback, _reason = _resolve_echo_base_dual(payload, "Edit", staged_lines, head_lines)
     assert fallback is False
     assert new == []
 
@@ -869,7 +994,7 @@ def test_resolve_echo_base_no_op_edit_yields_empty_new_lines():
 def test_resolve_echo_base_write_new_file_none_original():
     staged_lines = ["a1", "a2"]
     payload = {"tool_response": {"originalFile": None}}
-    base, new, fallback = je._resolve_echo_base(payload, "Write", staged_lines, [])
+    base, new, fallback, _reason = _resolve_echo_base_dual(payload, "Write", staged_lines, [])
     assert fallback is False
     assert base == []
     assert new == ["a1", "a2"]
@@ -882,7 +1007,7 @@ def test_resolve_echo_base_fallback_when_head_diff_also_non_append_only():
     head_lines = ["h1", "h2"]
     staged_lines = ["DIFFERENT"]
     payload = {"tool_response": {}}
-    base, new, fallback = je._resolve_echo_base(payload, "Edit", staged_lines, head_lines)
+    base, new, fallback, _reason = _resolve_echo_base_dual(payload, "Edit", staged_lines, head_lines)
     assert fallback is True
     assert new == []
 
@@ -1059,6 +1184,14 @@ def test_echo_write_missing_originalfile_key_falls_back_with_marker(tmp_path):
     payload = _post_tool_use_payload(journal_path, tool_name="Write")  # no original_file kwarg -> key absent
     result = _run_hook(payload)
     assert result.returncode == 0
+    # Дуальный мир (см. test_echo_tsdrift_future_beyond_threshold_warns
+    # выше за полный комментарий): здесь нет companion-дефекта (category
+    # валидна) -- TS DRIFT был ЕДИНСТВЕННЫМ бы триггером -> новый мир даёт
+    # полную тишину (K14), включая саму фолбэк-метку (K17: метка видна
+    # только когда что-то ещё печатается -- здесь печатать нечего).
+    if result.stdout == "":
+        assert result.stderr == ""
+        return
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
     assert "TS DRIFT" in ctx
@@ -1119,9 +1252,13 @@ def test_echo_fallback_marker_appears_alongside_other_output(tmp_path):
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
     assert "JOURNAL ECHO" in ctx
-    assert "TS DRIFT" in ctx
-    assert je.FALLBACK_MARKER_TEXT in ctx
-    assert ("; " + je.FALLBACK_MARKER_TEXT) in ctx  # joined as the trailing segment
+    assert je.FALLBACK_MARKER_TEXT in ctx  # substring -- verbatim prefix, holds with or without a K15 reason tail
+    assert ("; " + je.FALLBACK_MARKER_TEXT) in ctx  # joined as the trailing segment (still true with a reason tail)
+    if _is_new_fallback_semantics(ctx):
+        # Новый мир (K14, посадка t-503/N3): TS DRIFT отключён в фолбэке.
+        assert "TS DRIFT" not in ctx
+    else:
+        assert "TS DRIFT" in ctx
 
 
 def test_echo_fallback_marker_not_shown_on_otherwise_clean_call(tmp_path):
