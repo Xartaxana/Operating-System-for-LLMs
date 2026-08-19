@@ -120,6 +120,33 @@ critic_snapshot_f61.py/dod_gate_f61.py, не общий модуль -- см.
 owns-спека, не-цели). mkdir(parents=True, exist_ok=True) сохранён
 дословно. Никаких guard'ов/total-try здесь НЕ добавлено -- вне scope
 A7.
+
+Q503 СИБЛИНГ (t-521, builder, 2026-08-19) -- узел N1 ремедиации t-503
+(docs/tasks/2026-08-19_q503-remediation-spec.md), решение Р4(а)+(в):
+потеря ЧУЖИХ ключей трека при битом JSON (F-61 находка 1, "ВТОРАЯ
+ФОРМА"), СИММЕТРИЧНО dod_track_q503.py/dod_gate_q503.py: "main_gate_state"
+(СВОЯ секция этого файла) может присутствовать, но НЕ быть словарём --
+`data["main_gate_state"].setdefault(...)` упал бы AttributeError НЕ
+пойманным (main_gate.py тоже без тотального try, Р3а/A7). Правка --
+ТОЛЬКО _load_track() (+ новая _quarantine_bad_track() рядом, ЛОКАЛЬНАЯ
+копия дословно как в dod_track_q503.py/dod_gate_q503.py -- не общий
+модуль, K2/не-цели); _save_track()/_atomic_write_text()/decide()/
+evaluate()/весь остальной файл дословно как в живом коде (регресс-пин;
+decide()'s gate_log.append() остаётся ВНЕ этого owns -- смежная
+находка того же класса, см. отчёт builder'а, НЕ фикс этим коммитом).
+ K1/K2. _load_track() различает ТРИ ветки, СИММЕТРИЧНО
+     dod_track_q503.py/dod_gate_q503.py: (а) файла нет -- дословно;
+     (б) текст не парсится ИЛИ парсится в не-dict корень -- КАРАНТИН
+     (_quarantine_bad_track, имя НЕ ".json"), в памяти -- свежий
+     дефолт с main_gate_state; (в) корень -- dict -- ПО-КЛЮЧЕВАЯ
+     ДЕГРАДАЦИЯ: если "main_gate_state" присутствует, но НЕ dict --
+     чинится ТОЛЬКО оно (сброс на {"consecutive_blocks": 0}), ЧУЖИЕ
+     ключи ("edits"/"runs"/"gate_state"/"gate_log"/...) остаются КАК
+     ЕСТЬ, буквально Р4(в).
+ K4. rc-контракты main() (0 -- пропуск/успех, 2 -- блок) не меняются;
+     карантин сам проглатывает OSError (см. докстринг
+     _quarantine_bad_track -- дословная копия dod_track_q503.py/
+     dod_gate_q503.py здесь), новое исключение наружу не всплывает.
 """
 
 import json
@@ -169,18 +196,76 @@ def _default_track() -> dict:
     return {"edits": [], "runs": [], "main_gate_state": {"consecutive_blocks": 0}}
 
 
+_QUARANTINE_SUFFIX = ".corrupt"  # НЕ ".json" -- см. _quarantine_bad_track
+
+
+def _quarantine_bad_track(path: Path) -> None:
+    """Q503 N1 (t-521, 2026-08-19), Р4(а)+(в) -- карантин
+    нераспарсиваемого/не-dict-корневого трек-файла: переименовывает
+    БИТЫЙ файл в уникальное имя, НЕ оканчивающееся на ".json"
+    (session_context.py:1649 глобит "*.json" В ЭТОМ ЖЕ каталоге и
+    берёт .stem как session_id -- окончание на ".json" заставило бы
+    карантинный осколок притвориться чужой session_id-записью).
+    Уникальность имени -- ОС-уровневая (mkstemp, та же схема
+    prefix=path.name+"."+suffix, что _atomic_write_text ниже) --
+    "карантин уже существует" НЕ требует отдельной ветки: mkstemp сам
+    гарантирует новое уникальное имя при каждом вызове, коллизии с
+    предыдущим карантинным файлом того же исходного имени не будет.
+    Сам файл здесь НЕ читается и НЕ парсится -- вызывающий код
+    (_load_track) уже установил, что он битый; эта функция только
+    переносит байты с боевого пути на карантинный (os.replace,
+    атомарно) -- оригинальное содержимое НЕ теряется, лежит рядом под
+    новым именем для форензики/ручного восстановления (НЕ
+    восстанавливается автоматически в возвращаемый dict).
+    Fail-open (карантин невозможен -- напр. каталог недоступен на
+    запись): ЛЮБАЯ OSError здесь проглатывается молча -- существующий
+    fail-open вызывающего кода (свежий дефолт в памяти) остаётся
+    ЕДИНСТВЕННЫМ эффектом, новое исключение наружу не всплывает
+    (буквально K4/Р4: rc-контракты хуков не меняются)."""
+    try:
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(path.parent), prefix=path.name + ".", suffix=_QUARANTINE_SUFFIX
+        )
+        os.close(fd)
+    except OSError:
+        return
+    try:
+        os.replace(str(path), tmp_name)
+    except OSError:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+
+
 def _load_track(path: Path) -> dict:
     if not path.exists():
         return _default_track()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
+        # Q503 K1/Р4(а)+(в): нераспарсиваемый JSON -- КАРАНТИН, не
+        # роняем хук (fail-open в памяти НЕ меняется), байты уходят
+        # под карантинное имя вместо молчаливой потери.
+        _quarantine_bad_track(path)
         return _default_track()
     if not isinstance(data, dict):
+        # Р4 "края": корень не-dict -- ТА ЖЕ ветка карантина, что
+        # нераспарсиваемый (нет dict-корня -- нет ключей для
+        # по-ключевой деградации).
+        _quarantine_bad_track(path)
         return _default_track()
     data.setdefault("edits", [])
     data.setdefault("runs", [])
-    data.setdefault("main_gate_state", {"consecutive_blocks": 0})
+    # Q503 K1/Р4(в): "main_gate_state" (СВОЯ секция этого файла) может
+    # присутствовать, но НЕ быть словарём (напр. список) --
+    # ".setdefault()" на строке ниже упал бы AttributeError НЕ
+    # пойманным (main_gate.py без тотального try, Р3а/A7). По-ключевая
+    # деградация: чинится ТОЛЬКО "main_gate_state" (сброс на дефолт),
+    # ЧУЖИЕ ключи (edits/runs/gate_state/gate_log/...) остаются КАК
+    # ЕСТЬ, ни типом не проверяются, ни трогаются.
+    if not isinstance(data.get("main_gate_state"), dict):
+        data["main_gate_state"] = {"consecutive_blocks": 0}
     data["main_gate_state"].setdefault("consecutive_blocks", 0)
     return data
 

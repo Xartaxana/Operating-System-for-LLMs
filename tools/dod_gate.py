@@ -72,7 +72,10 @@ PostToolUse и её ограничения; здесь -- только конт�
     будущего разбора, ключ "gate_log" в том же файле трека, рядом с
     "edits"/"runs"/"gate_state"; tools/dod_track.py эти ключи не
     трогает и не удаляет при своих read-modify-write (сохраняет
-    неизвестные ключи как есть).
+    неизвестные ключи как есть -- КОГДА корень парсится в dict; на
+    битом/не-dict входе действует карантин + по-ключевая деградация,
+    см. _load_track/_quarantine_bad_track здесь и в dod_track.py
+    (посадка q503, 2026-08-19).
 
 Отсутствие session_id/трек-файла или неразборчивый payload -- fail
 open (exit 0), тот же принцип, что в critic_gate.py и dod_track.py:
@@ -168,6 +171,34 @@ F-61 СИБЛИНГ (t-503, builder, 2026-08-19) -- узел A ремедиац�
 не общий модуль -- см. owns-спека, не-цели). mkdir(parents=True,
 exist_ok=True) сохранён дословно. Никаких guard'ов/total-try здесь НЕ
 добавлено -- вне scope A7.
+
+Q503 СИБЛИНГ (t-521, builder, 2026-08-19) -- узел N1 ремедиации t-503
+(docs/tasks/2026-08-19_q503-remediation-spec.md), решение Р4(а)+(в):
+потеря ЧУЖИХ ключей трека при битом JSON (F-61 находка 1, "ВТОРАЯ
+ФОРМА"), здесь -- КОНКРЕТНО именованный живой пример "секция чужая
+битая" спеки: gate_state=список -> line 282-283 (`data["gate_state"]
+.setdefault(...)`) падал бы AttributeError НЕ пойманным (dod_gate.py
+НЕ несёт тотального try, решение Р3а/A7 выше -- enforcement важнее
+косметики отказа). Правка -- ТОЛЬКО _load_track() (+ новая
+_quarantine_bad_track() рядом, ЛОКАЛЬНАЯ копия дословно как в
+dod_track_q503.py -- не общий модуль, K2/не-цели); _save_track()/
+_atomic_write_text()/decide()/evaluate()/весь остальной файл дословно
+как в живом коде (регресс-пин; decide()'s gate_log.append() остаётся
+ВНЕ этого owns -- смежная находка того же класса, см. отчёт builder'а,
+НЕ фикс этим коммитом).
+ K1/K2. _load_track() различает ТРИ ветки, СИММЕТРИЧНО
+     dod_track_q503.py: (а) файла нет -- дословно; (б) текст не
+     парсится ИЛИ парсится в не-dict корень -- КАРАНТИН
+     (_quarantine_bad_track, имя НЕ ".json"), в памяти -- свежий
+     дефолт с gate_state; (в) корень -- dict -- ПО-КЛЮЧЕВАЯ
+     ДЕГРАДАЦИЯ: если "gate_state" присутствует, но НЕ dict -- чинится
+     ТОЛЬКО оно (сброс на _default_gate_state()), ЧУЖИЕ ключи
+     ("edits"/"runs"/"main_gate_state"/"gate_log"/...) остаются КАК
+     ЕСТЬ, буквально Р4(в).
+ K4. rc-контракты main() (0 -- пропуск/успех, 2 -- блок) не меняются;
+     карантин сам проглатывает OSError (см. докстринг
+     _quarantine_bad_track в dod_track_q503.py -- дословная копия
+     здесь), новое исключение наружу не всплывает.
 """
 
 import json
@@ -264,18 +295,76 @@ def _track_path(cwd: str, session_id: str) -> Path:
     return Path(cwd or ".") / ".claude" / "dod_track" / f"{session_id}.json"
 
 
+_QUARANTINE_SUFFIX = ".corrupt"  # НЕ ".json" -- см. _quarantine_bad_track
+
+
+def _quarantine_bad_track(path: Path) -> None:
+    """Q503 N1 (t-521, 2026-08-19), Р4(а)+(в) -- карантин
+    нераспарсиваемого/не-dict-корневого трек-файла: переименовывает
+    БИТЫЙ файл в уникальное имя, НЕ оканчивающееся на ".json"
+    (session_context.py:1649 глобит "*.json" В ЭТОМ ЖЕ каталоге и
+    берёт .stem как session_id -- окончание на ".json" заставило бы
+    карантинный осколок притвориться чужой session_id-записью).
+    Уникальность имени -- ОС-уровневая (mkstemp, та же схема
+    prefix=path.name+"."+suffix, что _atomic_write_text ниже) --
+    "карантин уже существует" НЕ требует отдельной ветки: mkstemp сам
+    гарантирует новое уникальное имя при каждом вызове, коллизии с
+    предыдущим карантинным файлом того же исходного имени не будет.
+    Сам файл здесь НЕ читается и НЕ парсится -- вызывающий код
+    (_load_track) уже установил, что он битый; эта функция только
+    переносит байты с боевого пути на карантинный (os.replace,
+    атомарно) -- оригинальное содержимое НЕ теряется, лежит рядом под
+    новым именем для форензики/ручного восстановления (НЕ
+    восстанавливается автоматически в возвращаемый dict).
+    Fail-open (карантин невозможен -- напр. каталог недоступен на
+    запись): ЛЮБАЯ OSError здесь проглатывается молча -- существующий
+    fail-open вызывающего кода (свежий дефолт в памяти) остаётся
+    ЕДИНСТВЕННЫМ эффектом, новое исключение наружу не всплывает
+    (буквально K4/Р4: rc-контракты хуков не меняются)."""
+    try:
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(path.parent), prefix=path.name + ".", suffix=_QUARANTINE_SUFFIX
+        )
+        os.close(fd)
+    except OSError:
+        return
+    try:
+        os.replace(str(path), tmp_name)
+    except OSError:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+
+
 def _load_track(path: Path) -> dict:
     if not path.exists():
         return {"edits": [], "runs": [], "gate_state": _default_gate_state()}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
+        # Q503 K1/Р4(а)+(в): нераспарсиваемый JSON -- КАРАНТИН, не
+        # роняем хук (fail-open в памяти НЕ меняется), байты уходят
+        # под карантинное имя вместо молчаливой потери.
+        _quarantine_bad_track(path)
         return {"edits": [], "runs": [], "gate_state": _default_gate_state()}
     if not isinstance(data, dict):
+        # Р4 "края": корень не-dict -- ТА ЖЕ ветка карантина, что
+        # нераспарсиваемый (нет dict-корня -- нет ключей для
+        # по-ключевой деградации).
+        _quarantine_bad_track(path)
         return {"edits": [], "runs": [], "gate_state": _default_gate_state()}
     data.setdefault("edits", [])
     data.setdefault("runs", [])
-    data.setdefault("gate_state", _default_gate_state())
+    # Q503 K1/Р4(в) -- живой пример спеки: "gate_state" (СВОЯ секция
+    # этого файла) может присутствовать, но НЕ быть словарём (напр.
+    # список) -- ".setdefault()" на строке ниже упал бы AttributeError
+    # НЕ пойманным (dod_gate.py без тотального try, Р3а/A7). По-
+    # ключевая деградация: чинится ТОЛЬКО "gate_state" (сброс на
+    # дефолт), ЧУЖИЕ ключи (edits/runs/main_gate_state/gate_log/...)
+    # остаются КАК ЕСТЬ, ни типом не проверяются, ни трогаются.
+    if not isinstance(data.get("gate_state"), dict):
+        data["gate_state"] = _default_gate_state()
     # Обратная совместимость: старые треки несут только плоский
     # "consecutive_blocks" (до per-agent-правки) -- "per_agent"
     # добавляется РЯДОМ, старое поле не трогается/не удаляется.
