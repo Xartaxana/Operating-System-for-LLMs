@@ -1351,3 +1351,47 @@ def test_real_protocol_window_run_exit0():
     proc = run_cli(["--window-start", "2026-08-14T12:12:34"])
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "ИТОГ:" in proc.stdout
+
+
+# ---------------------------------------------------------------------------
+# 18. Инвариант Д1 (остаток узла W3) -- SECTION_BY_CHECK / KNOWN_SCRIPT_
+#     COMMANDS обязаны не отставать от живого протокола молчаливо.
+#     Реальный протокол -- READ-ONLY (как и раздел 17 выше).
+# ---------------------------------------------------------------------------
+
+def test_section_by_check_keys_match_real_protocol_check_numbers():
+    """(а): множество ключей SECTION_BY_CHECK == множество фактических
+    номеров чеков живого протокола. Парсинг -- ТОЙ ЖЕ формой, что сам
+    пре-пасс использует для нумерации чеков (find_check_titles через
+    load_protocol_structure), не второй самодельный парсер. Новый чек
+    в протоколе без строки в SECTION_BY_CHECK обязан валить этот тест
+    (Д1: молчаливое отставание словаря от протокола видно машинно)."""
+    _lines, _bounds, titles = prep.load_protocol_structure(prep.DEFAULT_PROTOCOL)
+    real_numbers = {t.number for t in titles}
+    dict_numbers = set(prep.SECTION_BY_CHECK.keys())
+    assert dict_numbers == real_numbers, sorted(dict_numbers ^ real_numbers)
+
+
+def test_section_by_check_values_are_known_sections():
+    """(б): каждое значение-секция SECTION_BY_CHECK лежит в фактическом
+    множестве секций §0..§5 (SECTION_NAMES) -- никакой чек не привязан
+    к несуществующей секции."""
+    assert set(prep.SECTION_BY_CHECK.values()) <= set(prep.SECTION_NAMES.keys())
+
+
+def test_known_script_commands_names_appear_in_protocol_text():
+    """(в) позитив: каждый ключ KNOWN_SCRIPT_COMMANDS упоминается в
+    тексте живого протокола (греп имени скрипта)."""
+    text = prep.read_protocol_text(prep.DEFAULT_PROTOCOL)
+    missing = [name for name in prep.KNOWN_SCRIPT_COMMANDS if name not in text]
+    assert missing == [], (
+        f"скрипты KNOWN_SCRIPT_COMMANDS отсутствуют в тексте протокола: {missing}"
+    )
+
+
+def test_known_script_commands_negative_control_invented_name_absent():
+    """(в) негативный контроль: выдуманное имя не проходит -- доказывает,
+    что позитивный тест выше не зелёный "просто потому что подстрока
+    короткая/тривиальная"."""
+    text = prep.read_protocol_text(prep.DEFAULT_PROTOCOL)
+    assert "totally_invented_script_xyz_not_real" not in text

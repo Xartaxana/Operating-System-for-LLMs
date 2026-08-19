@@ -1643,17 +1643,19 @@ def test_count_protocol_checks_unavailable_boundary(tmp_path):
     assert sm.count_protocol_checks(tmp_path / "nope.md") is None
 
 
-def test_count_protocol_checks_real_protocol_is_34():
+def test_count_protocol_checks_real_protocol_is_35():
     """Пин числа чеков живого протокола.
 
     Это НАМЕРЕННАЯ растяжка, а не хрупкость: пин ловит регресс парсера
-    (сломанный regex вернул бы 12, а не 34) и заодно обязывает того, кто
+    (сломанный regex вернул бы 12, а не 35) и заодно обязывает того, кто
     добавил чек в PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md, обновить пин
     ТЕМ ЖЕ коммитом. До 2026-08-16 обязанность была необъявленной —
     имя теста несло число, а норму нигде не писали; чек 33 (детектор
-    heartbeat-fastdeath) уронил этот тест ровно поэтому.
+    heartbeat-fastdeath) уронил этот тест ровно поэтому. 2026-08-19:
+    чек 34 (Phase 5 W3) поднял счёт с 34 до 35 -- пин обновлён тем же
+    классом правки, тест переименован вслед за числом.
     """
-    assert sm.count_protocol_checks() == 34
+    assert sm.count_protocol_checks() == 35
 
 
 # -----------------------------------------------------------------------

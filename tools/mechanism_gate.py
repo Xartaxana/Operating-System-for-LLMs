@@ -130,6 +130,11 @@ MECHANISM_PREFIXES = (
     "tools/journal_echo.py",         # PostToolUse hook
     "tools/search_control_gate.py",  # PostToolUse hook
     "tools/negative_lint.py",        # PostToolUse Task|Agent hook
+    # Р8(б) спеки md_regions (2026-08-19, F-48): общий сканер регионов
+    # входит в невод ходом посадки ПЕРВОГО потребителя (партия 1:
+    # negative_lint + claim_control_gate) — его отказ меняет вердикты
+    # двух сторожей на пути исполнения.
+    "tools/md_regions.py",           # region scanner (потребители: 2 сторожа)
     "tools/dod_gate.py",             # SubagentStop hook
     "tools/main_gate.py",            # Stop hook
     "tools/journal_validator.py",    # .githooks/pre-commit
