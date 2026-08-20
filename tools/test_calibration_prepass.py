@@ -3594,9 +3594,20 @@ def test_k2_window_gate_line_unchanged_when_no_forced_bytes(tmp_path):
     sign = "+" if gate_diff >= 0 else ""
     verdict = "ВЗЯТ" if to_read <= prep.GATE_A_THRESHOLD_BYTES else "НЕ ВЗЯТ"
     entry = prep.gate_a_active_entry()
+    # Р-D: суффикс подъёма строится ТЕМ ЖЕ правилом, что и продакшн-код.
+    raised = entry.get("raised") or {}
+    raise_suffix = ""
+    if raised:
+        raise_no = sum(1 for e in prep.GATE_A_HISTORY
+                       if not e.get("annulled") and e.get("raised"))
+        raise_suffix = (
+            f"; ПОДЪЁМ №{raise_no} словом оператора {entry.get('date')} "
+            f"с {raised.get('from')} Б от замера {raised.get('measured_breach')} Б"
+        )
     assert (
         f"гейт (а) ≤{prep.GATE_A_THRESHOLD_BYTES} Б (храповик от замера "
-        f"{entry['date']}, окно {entry['window_kind']}, K={entry['K']}): "
+        f"{entry['date']}, окно {entry['window_kind']}, K={entry['K']}"
+        f"{raise_suffix}): "
         f"{verdict} ({sign}{gate_diff} Б)"
     ) in rendered
 
@@ -3606,6 +3617,10 @@ def test_k2_window_gate_line_unchanged_when_no_forced_bytes(tmp_path):
 # монотонность, границы порога. Арифметика witness: measured=139042 (N-F
 # типового окна на посаженном дереве после W4-2, окно закреплено ts
 # 2026-08-14T12:12:34, A11) -> ceil(139042*1.05/100)*100 == 146000.
+# Р-D (2026-08-20, слово оператора, t-568): подъём -- та же формула от
+# нового замера: measured=146664 (диета узла B, +664 сверх 146000) ->
+# ceil(146664*1.05/100)*100 == 154000; прежняя запись 146000 остаётся в
+# истории нетронутой (пристройка, не переписывание).
 # =============================================================================
 
 
@@ -3623,19 +3638,39 @@ def test_gate_a_history_first_entry_is_annulled_pre_m2_bet():
 def test_gate_a_threshold_bytes_equals_last_history_entry():
     """§4.8(ii): GATE_A_THRESHOLD_BYTES == GATE_A_HISTORY[-1]["threshold"]."""
     assert prep.GATE_A_THRESHOLD_BYTES == prep.GATE_A_HISTORY[-1]["threshold"]
-    assert prep.GATE_A_THRESHOLD_BYTES == 146_000
+    assert prep.GATE_A_THRESHOLD_BYTES == 154_000
 
 
 def test_gate_a_active_entry_arithmetic_w4_3_measured_to_threshold():
-    """Арифметика порога W4-3 (отчёт п.«вывод порога»): measured=139042,
-    K=1.05 -> ceil(measured*K/100)*100 == 146000 == GATE_A_HISTORY[-1]."""
+    """Арифметика порога -- переведена на АКТИВНУЮ запись после подъёма Р-D:
+    measured=146664, K=1.05 -> ceil(measured*K/100)*100 == 154000 ==
+    GATE_A_HISTORY[-1] (прежняя арифметика 139042->146000 не потеряна --
+    отдельный тест ниже, test_gate_a_history_previous_entry_untouched_by_raise)."""
     entry = prep.gate_a_active_entry()
+    assert entry["measured"] == 146_664
+    assert entry["K"] == 1.05
+    assert entry["window_start"] == "2026-08-14T12:12:34"
+    assert entry["window_kind"] == "типовое"
+    p = math.ceil(entry["measured"] * entry["K"] / 100) * 100
+    assert p == entry["threshold"] == 154_000
+
+
+def test_gate_a_history_previous_entry_untouched_by_raise():
+    """Тест-прецедент на разграничение форм (К2): подъём -- ПРИСТРОЙКА,
+    не переписывание. Прежняя запись 146000 остаётся в истории НЕТРОНУТОЙ
+    -- на предпоследнем месте, measured==139_042, поля annulled у неё НЕТ
+    (annulled = "записи не должно было быть", raised = "запись была верна
+    и превзойдена фактом" -- разные вещи и разные поля). Прежняя арифметика
+    W4-3 (139042 -> 146000) не потеряна подъёмом."""
+    entry = prep.GATE_A_HISTORY[-2]
     assert entry["measured"] == 139_042
     assert entry["K"] == 1.05
     assert entry["window_start"] == "2026-08-14T12:12:34"
     assert entry["window_kind"] == "типовое"
     p = math.ceil(entry["measured"] * entry["K"] / 100) * 100
     assert p == entry["threshold"] == 146_000
+    assert not entry.get("annulled")
+    assert "raised" not in entry
 
 
 def test_gate_a_history_monotonic_real_history_ok():
@@ -3660,9 +3695,10 @@ def test_gate_a_history_annulled_entry_excluded_from_monotonicity():
 
 def test_gate_a_history_monotonic_red_half_growth_without_basis_flags():
     """Красная половина храповика: активная цепочка РАСТЁТ (100 -> 150) без
-    маркера слова Архитектора -- check_gate_a_history_monotonic ОБЯЗАНА
-    вернуть False с сообщением, называющим легальный выход дословно (§4.8(iv)):
-    снизить -- легально всегда; поднять -- только явным словом Архитектора."""
+    блока raised -- check_gate_a_history_monotonic ОБЯЗАНА вернуть False с
+    сообщением, называющим легальный выход дословно (Р-D §1): снизить --
+    легально всегда; поднять -- только явным словом оператора, записанным
+    блоком raised."""
     synthetic = [
         {"threshold": 100, "date": "d1", "measured": 90, "window_start": "s1",
          "window_end": "e1", "window_kind": "типовое", "K": 1.05, "basis": "b1"},
@@ -3672,7 +3708,8 @@ def test_gate_a_history_monotonic_red_half_growth_without_basis_flags():
     ok, msg = prep.check_gate_a_history_monotonic(synthetic)
     assert not ok
     assert "легально всегда" in msg
-    assert "словом Архитектора" in msg
+    assert "словом оператора" in msg
+    assert "raised" in msg
 
 
 def test_gate_a_history_monotonic_plateau_and_decrease_are_legal():
@@ -3701,9 +3738,21 @@ def test_gate_a_itog_provenance_verbatim_form(tmp_path):
         [str(j)], proto,
     )
     entry = prep.gate_a_active_entry()
+    # Р-D: активная запись сегодня несёт raised -- суффикс строится ТЕМ ЖЕ
+    # правилом, что и продакшн-код (render_window_report), иначе пин ломается
+    # первым же подъёмом.
+    raised = entry.get("raised") or {}
+    raise_suffix = ""
+    if raised:
+        raise_no = sum(1 for e in prep.GATE_A_HISTORY
+                       if not e.get("annulled") and e.get("raised"))
+        raise_suffix = (
+            f"; ПОДЪЁМ №{raise_no} словом оператора {entry.get('date')} "
+            f"с {raised.get('from')} Б от замера {raised.get('measured_breach')} Б"
+        )
     assert (
         f"(храповик от замера {entry['date']}, окно {entry['window_kind']}, "
-        f"K={entry['K']}):"
+        f"K={entry['K']}{raise_suffix}):"
     ) in rendered
 
 
@@ -3780,3 +3829,576 @@ def test_gate_a_k2_invariant_numbers_unchanged_across_threshold_bump(tmp_path, m
     assert "≤57500 Б" in itog_old, itog_old
     assert "≤146000 Б" in itog_new, itog_new
     assert itog_old != itog_new  # гейт-подстрока обязана отличаться -- обе строки выше
+
+
+# =============================================================================
+# Р-D (2026-08-20, t-568): ПОДЪЁМ ХРАПОВИКА 146000 -> 154000 словом
+# оператора. Блок raised, его четыре поля, всплытие в ИТОГ, границы нового
+# порога, отказ --check-form на битой синтетике. В КОНЕЦ существующей
+# секции W4-3, новой секции не заводим.
+# =============================================================================
+
+
+def test_gate_a_raise_entry_carries_full_provenance():
+    """К3: активная запись 154000 несёт ПОЛНЫЙ блок raised -- from==146000,
+    measured_breach==146664>from, word/reason непустые -- и сама реальная
+    история проходит собственный храповик (не только синтетика)."""
+    entry = prep.gate_a_active_entry()
+    raised = entry.get("raised")
+    assert isinstance(raised, dict)
+    assert raised["from"] == 146_000
+    assert raised["measured_breach"] == 146_664
+    assert raised["measured_breach"] > raised["from"]
+    assert raised["word"].strip()
+    assert raised["reason"].strip()
+    ok, msg = prep.check_gate_a_history_monotonic()
+    assert ok, msg
+
+
+def test_gate_a_raise_without_raised_block_is_red():
+    """Рост без блока raised вовсе (ключ отсутствует) -- красный, сообщение
+    называет легальный выход дословно."""
+    synthetic = [
+        {"threshold": 100, "date": "d1"},
+        {"threshold": 150, "date": "d2"},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(synthetic)
+    assert not ok
+    assert "БЕЗ ОБЪЯВЛЕННОГО ПОДЪЁМА" in msg
+
+
+@pytest.mark.parametrize("bad_raised", [[], "текст", True, None])
+def test_gate_a_raise_block_non_dict_is_red(bad_raised):
+    """raised не-словарь (list/str/bool/None) -- красный той же веткой, что
+    и полное отсутствие блока (изоморфно not isinstance(raised, dict))."""
+    synthetic = [
+        {"threshold": 100, "date": "d1"},
+        {"threshold": 150, "date": "d2", "raised": bad_raised},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(synthetic)
+    assert not ok
+    assert "БЕЗ ОБЪЯВЛЕННОГО ПОДЪЁМА" in msg
+
+
+def test_gate_a_raise_with_incomplete_raised_block_is_red():
+    """Битый провенанс: по прогону на каждое из четырёх полей -- красный,
+    сообщение называет ИМЕННО отсутствующее поле; пустая строка и строка
+    из одних пробелов считаются пустыми той же веткой (проверка на
+    ЛОЖНОСТЬ значения, не на наличие ключа)."""
+    base_raised = {
+        "from": 100, "word": "слово оператора", "measured_breach": 200,
+        "reason": "тестовая причина",
+    }
+    for field in ("from", "word", "measured_breach", "reason"):
+        raised = dict(base_raised)
+        del raised[field]
+        synthetic = [
+            {"threshold": 100, "date": "d1"},
+            {"threshold": 150, "date": "d2", "raised": raised},
+        ]
+        ok, msg = prep.check_gate_a_history_monotonic(synthetic)
+        assert not ok, f"поле {field} отсутствует, но вердикт зелёный"
+        assert field in msg, f"сообщение не называет отсутствующее поле {field}: {msg}"
+
+    raised_empty = dict(base_raised)
+    raised_empty["word"] = ""
+    ok, msg = prep.check_gate_a_history_monotonic([
+        {"threshold": 100, "date": "d1"},
+        {"threshold": 150, "date": "d2", "raised": raised_empty},
+    ])
+    assert not ok
+    assert "word" in msg
+
+    raised_blank = dict(base_raised)
+    raised_blank["word"] = "   "
+    ok, msg = prep.check_gate_a_history_monotonic([
+        {"threshold": 100, "date": "d1"},
+        {"threshold": 150, "date": "d2", "raised": raised_blank},
+    ])
+    assert not ok, "строка из одних пробелов обязана считаться пустой"
+    assert "word" in msg
+
+
+def test_gate_a_raise_without_measured_breach_is_red():
+    """Граница measured_breach с ОБЕИХ сторон (правило 6а): ==from ->
+    красный (не пробил), ==from-1 -> красный -- обе ветки решаются ДО
+    проверки measured/K (порядок функции), так что синтетика может их не
+    нести. ==from+1 -> зелёный ТРЕБУЕТ (Ф3 t-569, ремедиация критик-гейта)
+    валидных measured/K, согласованных с формулой (Ф3) и равных
+    measured_breach (Ф1) -- порог 150 недостижим НИКАКОЙ формулой (не
+    кратен 100 по построению ceil(...)*100), поэтому зелёная ветка несёт
+    отдельный порог 200, достижимый формулой."""
+    def synthetic(breach):
+        return [
+            {"threshold": 100, "date": "d1"},
+            {"threshold": 150, "date": "d2", "raised": {
+                "from": 100, "word": "слово оператора", "measured_breach": breach,
+                "reason": "причина",
+            }},
+        ]
+
+    ok, msg = prep.check_gate_a_history_monotonic(synthetic(100))
+    assert not ok, msg
+    assert "БЕЗ ПРОБИТОГО ЗАМЕРА" in msg
+
+    ok, msg = prep.check_gate_a_history_monotonic(synthetic(99))
+    assert not ok, msg
+    assert "БЕЗ ПРОБИТОГО ЗАМЕРА" in msg
+
+    green = [
+        {"threshold": 100, "date": "d1"},
+        {"threshold": 200, "date": "d2", "measured": 101, "K": 1.05, "raised": {
+            "from": 100, "word": "слово оператора", "measured_breach": 101,
+            "reason": "причина",
+        }},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(green)
+    assert ok, msg
+
+
+def test_gate_a_raise_off_formula_is_red():
+    """Подъём с полным валидным raised (measured_breach==cur['measured'],
+    Ф1 t-569 удовлетворён), но threshold НЕ по формуле
+    ceil(measured*K/100)*100 -- красный."""
+    synthetic = [
+        {"threshold": 100, "date": "d1"},
+        {"threshold": 999, "date": "d2", "measured": 200, "K": 1.05,
+         "raised": {
+             "from": 100, "word": "слово оператора", "measured_breach": 200,
+             "reason": "причина",
+         }},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(synthetic)
+    assert not ok
+    assert "не по формуле" in msg
+
+
+def test_gate_a_raise_from_mismatch_is_red():
+    """raised['from'] не совпадает с предыдущим активным порогом -- красный,
+    провенанс указывает не на ту запись."""
+    synthetic = [
+        {"threshold": 100, "date": "d1"},
+        {"threshold": 150, "date": "d2", "raised": {
+            "from": 999, "word": "слово оператора", "measured_breach": 1000,
+            "reason": "причина",
+        }},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(synthetic)
+    assert not ok
+    assert "указывает не на ту запись" in msg
+
+
+def test_gate_a_itog_prints_raise_mark_verbatim(tmp_path):
+    """К6/Д3: строка ИТОГ несёт метку "ПОДЪЁМ №N словом оператора <дата> с
+    <прежний> Б от замера <measured_breach> Б" -- дословный пин на реальной
+    GATE_A_HISTORY (154000, raised from=146000, measured_breach=146664),
+    без монки-патча. Ф6 (критик-гейт t-569): measured_breach обязан
+    печататься в ИТОГ -- выдуманный замер самоопровергается прогоном."""
+    j = write_journal(tmp_path, [])
+    proto = write_protocol(tmp_path, _pilot_body())
+    report = prep.build_window_report(proto, _run_ctx_for(
+        tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00"))
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert (
+        "ПОДЪЁМ №1 словом оператора 2026-08-20 с 146000 Б от замера 146664 Б"
+        in rendered
+    ), rendered
+
+
+def test_gate_a_itog_without_raise_is_byte_identical(tmp_path, monkeypatch):
+    """К6: мир БЕЗ подъёма (активная запись без raised) печатает строку ИТОГ
+    в ПРЕЖНЕЙ форме байт в байт -- суффикс пуст, между K=<K> и ): нет ничего
+    сверх этого (никакого "; ПОДЪЁМ")."""
+    j = write_journal(tmp_path, [])
+    proto = write_protocol(tmp_path, _pilot_body())
+    report = prep.build_window_report(proto, _run_ctx_for(
+        tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00"))
+
+    synthetic_history = [
+        {"date": "2099-01-01", "threshold": 100, "measured": 90,
+         "window_start": "s", "window_end": "e", "window_kind": "типовое",
+         "K": 1.05, "basis": "синтетика без подъёма"},
+    ]
+    monkeypatch.setattr(prep, "GATE_A_HISTORY", synthetic_history)
+    monkeypatch.setattr(prep, "GATE_A_THRESHOLD_BYTES", 100)
+
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    to_read = report["to_read_bytes"]
+    gate_diff = to_read - 100
+    sign = "+" if gate_diff >= 0 else ""
+    verdict = "ВЗЯТ" if to_read <= 100 else "НЕ ВЗЯТ"
+    expected_gate = (
+        f"гейт (а) ≤100 Б (храповик от замера 2099-01-01, окно типовое, "
+        f"K=1.05): {verdict} ({sign}{gate_diff} Б)"
+    )
+    assert expected_gate in rendered, rendered
+    assert "ПОДЪЁМ" not in rendered
+
+
+def test_gate_a_boundary_at_real_threshold_154000_and_154001(tmp_path):
+    """К7: реальный (не монкипатченный) порог 154000 -- измерено==154000 ->
+    ВЗЯТ (+0 Б); ==154001 -> НЕ ВЗЯТ (+1 Б)."""
+    assert prep.GATE_A_THRESHOLD_BYTES == 154_000
+    j = write_journal(tmp_path, [])
+    proto = write_protocol(tmp_path, _pilot_body())
+    report = prep.build_window_report(proto, _run_ctx_for(
+        tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00"))
+
+    report_at = dict(report)
+    report_at["to_read_bytes"] = 154_000
+    report_at["bodies_forced_bytes"] = 0
+    rendered_at = prep.render_window_report(
+        report_at, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "): ВЗЯТ (+0 Б)" in rendered_at, rendered_at
+
+    report_over = dict(report)
+    report_over["to_read_bytes"] = 154_001
+    report_over["bodies_forced_bytes"] = 0
+    rendered_over = prep.render_window_report(
+        report_over, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "): НЕ ВЗЯТ (+1 Б)" in rendered_over, rendered_over
+
+
+def test_gate_a_check_form_reports_broken_ratchet(monkeypatch):
+    """Д5: --check-form зовёт check_gate_a_history_monotonic -- битая
+    (растущая без raised) синтетика красит ДЕФЕКТ. Живой файл НЕ портится
+    (гигиена п.7(г)) -- монки-патч атрибута модуля, не запись на диск."""
+    broken_history = [
+        {"threshold": 100, "date": "d1"},
+        {"threshold": 150, "date": "d2"},
+    ]
+    monkeypatch.setattr(prep, "GATE_A_HISTORY", broken_history)
+    result = prep.run_check_form(prep.DEFAULT_PROTOCOL, prep.DEFAULT_RULE_COVERAGE, True)
+    ratchet_defects = [d for d in result.defects if "ХРАПОВИК ГЕЙТА (а)" in d]
+    assert ratchet_defects, result.defects
+    assert "БЕЗ ОБЪЯВЛЕННОГО ПОДЪЁМА" in ratchet_defects[0]
+
+
+def test_gate_a_history_monotonic_adversarial_battery():
+    """Адверсариальная мини-батарея сторожа (§4): его вход -- структура
+    данных, и он на пути прогона. threshold как None (значение, не
+    отсутствие ключа); пустой список; список из одной записи; история, где
+    ВСЕ записи annulled; measured=0/K=0 на raised -- КРАСНЫЙ (Ф3 t-569:
+    ремедиация критик-гейта закрыла атаку 5б -- "измерение ложно, формула
+    пропущена" БОЛЬШЕ НЕ пропускает ветку, красит); отрицательный
+    threshold на плато; лишние неизвестные ключи (игнорируются)."""
+    ok, msg = prep.check_gate_a_history_monotonic(
+        [{"threshold": 100}, {"threshold": None}]
+    )
+    assert not ok, msg
+
+    ok, msg = prep.check_gate_a_history_monotonic([])
+    assert not ok, msg
+
+    ok, msg = prep.check_gate_a_history_monotonic([{"threshold": 100}])
+    assert ok, msg
+
+    ok, msg = prep.check_gate_a_history_monotonic([
+        {"threshold": 100, "annulled": "тест"},
+        {"threshold": 200, "annulled": "тест"},
+    ])
+    assert not ok, msg
+
+    ok, msg = prep.check_gate_a_history_monotonic([
+        {"threshold": 100, "date": "d1"},
+        {"threshold": 150, "date": "d2", "measured": 0, "K": 0, "raised": {
+            "from": 100, "word": "слово оператора", "measured_breach": 120,
+            "reason": "причина",
+        }},
+    ])
+    assert not ok, msg
+    assert "НЕотключаема" in msg
+
+    ok, msg = prep.check_gate_a_history_monotonic([
+        {"threshold": -100, "date": "d1"}, {"threshold": -100, "date": "d2"},
+    ])
+    assert ok, msg
+
+    ok, msg = prep.check_gate_a_history_monotonic([
+        {"threshold": 100, "date": "d1", "unknown_key": "x"},
+        {"threshold": 200, "date": "d2", "unknown_key": "y", "measured": 101,
+         "K": 1.05, "raised": {
+            "from": 100, "word": "слово оператора", "measured_breach": 101,
+            "reason": "причина", "extra_field": "z",
+        }},
+    ])
+    assert ok, msg
+
+
+# =============================================================================
+# t-569 (критик-гейт, ремедиация храповика (а)): ШЕСТЬ АТАК критика --
+# каждая была зелёной ДО этого узла (см. отчёт: скрипт red-control
+# attack_redcontrol.py, OLD-копия функции против NEW), обязана быть
+# красной ПОСЛЕ. Ф1 закрывает атаки 1/2 (measured_breach отвязан от
+# cur.measured); Ф2 закрывает атаку 4 (K не сверялся с 1.05); Ф3 закрывает
+# атаки 5/5б (measured/K отключали формулу); Ф4 закрывает СБРОС
+# (аннулирование как обнуление цепочки).
+# =============================================================================
+
+
+def test_gate_a_attack1_measured_breach_disconnected_from_cur_measured_is_red():
+    """АТАКА 1 (критик): подъём 154000->525000 при РЕАЛЬНОМ пробое всего
+    +1 Б (measured_breach=154001), но формула считается от сфабрикованного
+    cur['measured']=500000 -- Ф1 обязан покраснеть: провенанс пробоя и
+    замер формулы -- РАЗНЫЕ числа."""
+    hist = [
+        {"threshold": 154_000, "date": "d1", "measured": 146_664, "K": 1.05},
+        {"threshold": 525_000, "date": "d2", "measured": 500_000, "K": 1.05, "raised": {
+            "from": 154_000, "word": "слово оператора (атака)",
+            "measured_breach": 154_001,
+            "reason": "атака 1: замер формулы не тот же замер, что доказал пробой",
+        }},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(hist)
+    assert not ok, msg
+    assert "не совпадает с cur['measured']" in msg
+
+
+def test_gate_a_attack2_emergency_window_measured_vs_typical_breach_is_red():
+    """АТАКА 2 (критик): порог считается от "аварийного" замера (200000),
+    а провенанс пробоя доказан "типовым" окном (+10 Б от прежнего порога)
+    -- та же линия Ф1, другой замер -- обязан покраснеть тем же
+    сообщением о несовпадении чисел."""
+    hist = [
+        {"threshold": 100_000, "date": "d1", "measured": 95_000, "K": 1.05},
+        {"threshold": 210_000, "date": "d2", "measured": 200_000, "K": 1.05, "raised": {
+            "from": 100_000, "word": "слово оператора (атака)",
+            "measured_breach": 100_010,
+            "reason": "атака 2: порог от аварийного окна, пробой типового +10 Б",
+        }},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(hist)
+    assert not ok, msg
+    assert "не совпадает с cur['measured']" in msg
+
+
+def test_gate_a_attack4_k_not_1_05_is_red():
+    """АТАКА 4 (критик): та же пара measured/measured_breach (Ф1
+    удовлетворён), формула самосогласована, но K=1.2 вместо канонического
+    1.05 -- Ф2 обязан покраснеть."""
+    hist = [
+        {"threshold": 100_000, "date": "d1", "measured": 95_000, "K": 1.05},
+        {"threshold": 120_100, "date": "d2", "measured": 100_001, "K": 1.2, "raised": {
+            "from": 100_000, "word": "слово оператора (атака)",
+            "measured_breach": 100_001,
+            "reason": "атака 4: K=1.2 вместо 1.05",
+        }},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(hist)
+    assert not ok, msg
+    assert "другой K" in msg
+
+
+def test_gate_a_attack5_no_measured_k_at_all_is_red():
+    """АТАКА 5 (критик): запись БЕЗ measured/K вовсе, порог 900000,
+    реальный пробой +1 Б -- Ф3 обязан покраснеть (формула НЕотключаема на
+    raised-записи)."""
+    hist = [
+        {"threshold": 800_000, "date": "d1"},
+        {"threshold": 900_000, "date": "d2", "raised": {
+            "from": 800_000, "word": "слово оператора (атака)",
+            "measured_breach": 800_001,
+            "reason": "атака 5: запись без measured/K, порог 900000",
+        }},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(hist)
+    assert not ok, msg
+    assert "НЕотключаема" in msg
+
+
+def test_gate_a_attack5b_measured_zero_k_zero_is_red():
+    """АТАКА 5б (критик): measured=0/K=0 -- ложные (falsy), формула должна
+    была бы пропуститься по старому правилу -- Ф3 обязан покраснеть."""
+    hist = [
+        {"threshold": 800_000, "date": "d1"},
+        {"threshold": 900_000, "date": "d2", "measured": 0, "K": 0, "raised": {
+            "from": 800_000, "word": "слово оператора (атака)",
+            "measured_breach": 800_001,
+            "reason": "атака 5б: measured=0/K=0",
+        }},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(hist)
+    assert not ok, msg
+    assert "НЕотключаема" in msg
+
+
+def test_gate_a_attack_reset_mass_annul_of_measured_entries_is_red():
+    """СБРОС (критик): вся реальная цепочка (несущая measured) аннулирована
+    + две фиктивные записи 900000 БЕЗ raised (плато, легально молча) --
+    Ф4 обязан покраснеть на первой же аннулированной записи с реальным
+    measured, ДО того как вычисляется активная цепочка."""
+    hist = [
+        {"threshold": 57_500, "annulled": "тест: до-M2 ставка (measured=None)"},
+        {"threshold": 146_000, "measured": 139_042,
+         "annulled": "СБРОС: попытка обнулить цепочку массовым аннулированием"},
+        {"threshold": 154_000, "measured": 146_664,
+         "annulled": "СБРОС: попытка обнулить цепочку массовым аннулированием"},
+        {"threshold": 900_000, "date": "x1"},
+        {"threshold": 900_000, "date": "x2"},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(hist)
+    assert not ok, msg
+    assert "аннулирование реальной, когда-либо активной записи запрещено" in msg
+
+
+def test_gate_a_ф4_bet_entry_without_measured_stays_annullable():
+    """Позитивный контроль Ф4 той же формы: запись-СТАВКА (measured
+    отсутствует/None, как настоящий entry[0]) легально аннулируема --
+    инвариант бьёт только по РЕАЛЬНЫМ (measured) записям, не по ставкам."""
+    hist = [
+        {"threshold": 999_999, "annulled": "тест: ставка без замера"},
+        {"threshold": 146_000, "date": "x", "measured": 1, "window_start": "x",
+         "window_end": "x", "window_kind": "типовое", "K": 1.05, "basis": "x"},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(hist)
+    assert ok, msg
+
+
+def test_gate_a_ф1_measured_breach_equals_measured_boundary():
+    """Правило 6а: measured_breach == cur['measured'] -> зелёный;
+    расхождение на 1 в ЛЮБУЮ сторону -> красный (граница и оба пересечения
+    одним тестом). breach выбран строго выше from=100000 во всех трёх
+    вариантах, чтобы срабатывала ИМЕННО проверка Ф1, а не более ранняя
+    "БЕЗ ПРОБИТОГО ЗАМЕРА"."""
+    def hist_with(breach):
+        return [
+            {"threshold": 100_000, "date": "d1", "measured": 95_000, "K": 1.05},
+            {"threshold": 105_100, "date": "d2", "measured": 100_010, "K": 1.05, "raised": {
+                "from": 100_000, "word": "слово оператора", "measured_breach": breach,
+                "reason": "причина",
+            }},
+        ]
+    ok, msg = prep.check_gate_a_history_monotonic(hist_with(100_010))
+    assert ok, msg
+    ok, msg = prep.check_gate_a_history_monotonic(hist_with(100_009))
+    assert not ok, msg
+    assert "не совпадает с cur['measured']" in msg
+    ok, msg = prep.check_gate_a_history_monotonic(hist_with(100_011))
+    assert not ok, msg
+    assert "не совпадает с cur['measured']" in msg
+
+
+def test_gate_a_ф2_k_boundary_1_05_only():
+    """Границы: K == 1.05 -> зелёный; 1.04 и 1.06 -> красный (обе стороны
+    одним тестом, правило 6а). Порог/measured пересчитаны под каждый K,
+    чтобы формула сама по себе была самосогласована -- красит именно
+    сверка с 1.05, не формула."""
+    def hist_with(k, threshold):
+        return [
+            {"threshold": 100_000, "date": "d1", "measured": 95_000, "K": 1.05},
+            {"threshold": threshold, "date": "d2", "measured": 100_001, "K": k, "raised": {
+                "from": 100_000, "word": "слово оператора", "measured_breach": 100_001,
+                "reason": "причина",
+            }},
+        ]
+    # K=1.05: ceil(100001*1.05/100)*100 = 105100.
+    ok, msg = prep.check_gate_a_history_monotonic(hist_with(1.05, 105_100))
+    assert ok, msg
+    # K=1.04: ceil(100001*1.04/100)*100 = 104100 -- формула сама сходится,
+    # но K != 1.05 -- красный.
+    ok, msg = prep.check_gate_a_history_monotonic(hist_with(1.04, 104_100))
+    assert not ok, msg
+    assert "другой K" in msg
+    # K=1.06: ceil(100001*1.06/100)*100 = 106100 -- формула сходится, K
+    # != 1.05 -- красный.
+    ok, msg = prep.check_gate_a_history_monotonic(hist_with(1.06, 106_100))
+    assert not ok, msg
+    assert "другой K" in msg
+
+
+def test_gate_a_ф5_non_numeric_raised_and_cur_fields_no_typeerror():
+    """Ф5 (критик-гейт t-569): три ранее необработанных TypeError --
+    raised['measured_breach'] строкой, cur['measured'] строкой,
+    cur['K'] строкой -- ни один НЕ роняет функцию исключением, все три
+    дают явный красный вердикт с именем типа. Плюс: raised['from']='100'
+    (строка) даёт сообщение, называющее ТИП, а не два визуально
+    одинаковых числа."""
+    base_raised = {
+        "from": 100_000, "word": "слово оператора", "measured_breach": 100_001,
+        "reason": "причина",
+    }
+
+    # (1) raised['measured_breach'] строкой.
+    r1 = dict(base_raised)
+    r1["measured_breach"] = "100001"
+    hist1 = [
+        {"threshold": 100_000, "date": "d1"},
+        {"threshold": 105_000, "date": "d2", "measured": 100_001, "K": 1.05,
+         "raised": r1},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(hist1)
+    assert not ok, msg
+    assert "не число" in msg and "str" in msg
+
+    # (2) cur['measured'] строкой.
+    hist2 = [
+        {"threshold": 100_000, "date": "d1"},
+        {"threshold": 105_000, "date": "d2", "measured": "100001", "K": 1.05,
+         "raised": dict(base_raised)},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(hist2)
+    assert not ok, msg
+    assert "не число" in msg
+
+    # (3) cur['K'] строкой.
+    hist3 = [
+        {"threshold": 100_000, "date": "d1"},
+        {"threshold": 105_000, "date": "d2", "measured": 100_001, "K": "1.05",
+         "raised": dict(base_raised)},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(hist3)
+    assert not ok, msg
+    assert "не число" in msg
+
+    # (4) raised['from']='100' (строка) -- тип назван явно, не "100 vs 100".
+    r4 = dict(base_raised)
+    r4["from"] = "100000"
+    hist4 = [
+        {"threshold": 100_000, "date": "d1"},
+        {"threshold": 105_000, "date": "d2", "measured": 100_001, "K": 1.05,
+         "raised": r4},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(hist4)
+    assert not ok, msg
+    assert "тип str" in msg
+
+
+def test_gate_a_check_form_broken_numeric_types_gives_defect_not_traceback(monkeypatch):
+    """Ф5 боевое последствие: --check-form на истории с нечисловыми
+    raised/measured/K полями обязан дать ДЕФЕКТ + exit 1 (main() ->
+    return 1), а НЕ трейсбек (SystemExit не поднимается прямым исключением
+    из check_gate_a_history_monotonic -- run_check_form ловит (ok, msg)
+    как обычный кортеж)."""
+    broken_history = [
+        {"threshold": 100_000, "date": "d1"},
+        {"threshold": 105_000, "date": "d2", "measured": "100001", "K": 1.05, "raised": {
+            "from": 100_000, "word": "слово оператора", "measured_breach": 100_001,
+            "reason": "причина",
+        }},
+    ]
+    monkeypatch.setattr(prep, "GATE_A_HISTORY", broken_history)
+    rc = prep.main(["--check-form"])
+    assert rc == 1
+
+
+def test_gate_a_empty_history_pin_index_error_on_import_path():
+    """Пустой вход (Р6(б)/§7 края): GATE_A_HISTORY == [] СЕГОДНЯ роняет
+    IndexError на модульном пути вычисления активной записи (та же
+    операция, что и GATE_A_THRESHOLD_BYTES = GATE_A_HISTORY[-1]["threshold"]
+    при импорте) -- поведение НЕ меняется этим узлом, только пинуется
+    тестом. check_gate_a_history_monotonic([]) -- ДРУГОЙ путь: он
+    fail-closed красным (см. test_gate_a_history_monotonic_adversarial_
+    battery), а не крашем -- это два разных механизма на одном пустом
+    входе, и оба закрыты явно."""
+    with pytest.raises(IndexError):
+        prep.gate_a_active_entry(history=[])

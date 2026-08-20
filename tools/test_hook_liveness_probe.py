@@ -418,6 +418,77 @@ def test_diff_live_state_detects_new_file_appearing(tmp_path):
     assert str(f) in diff
 
 
+# --------------------------------------------------------------------
+# M1 -- ambient (appeared-and-vanished) vs genuine leak attribution
+# (batch 2026-08-20, follow-up to A4: the flake this closes is a path
+# NOT present in the pre-run snapshot that is ALSO unreadable at
+# check time -- it appeared and disappeared entirely inside the
+# probe's own fingerprint window, e.g. another session's transient
+# ambient file, never this probe's own isolation leaking).
+# --------------------------------------------------------------------
+
+
+def test_m1_appeared_and_vanished_path_is_ambient_not_leak_red_control(tmp_path):
+    """RED CONTROL + fix, both shown (DoD point 2): the same diff entry
+    -- a path absent from the "before" snapshot and unreadable right
+    now -- classified TWO ways by the SAME function, differing only in
+    whether `before` is supplied.
+
+    RED (old mechanism, reproduced live): `attribute_live_state_diff`
+    called WITHOUT `before` is still this function's documented
+    back-compat default (tools/test_q503_selfreport.py's own pin uses
+    exactly this one-argument form) -- it is the untouched shape the
+    function had before this fix, and on this exact diff entry it
+    gives the FALSE leak this batch closes.
+
+    FIX: the SAME path, with `before` supplied and NOT containing it
+    (never existed at "before" time), is reclassified ambient."""
+    vanished_path = str(tmp_path / "ambient-appeared-and-gone.json")
+    # Deliberately never created -- _content_contains_marker() returns
+    # None (unreadable) for it, the "appeared and vanished inside the
+    # window" shape the diagnosis describes.
+
+    leaked_red, ambient_red = hlp.attribute_live_state_diff([vanished_path])
+    assert leaked_red == [vanished_path], leaked_red
+    assert ambient_red == [], ambient_red
+
+    leaked_fixed, ambient_fixed = hlp.attribute_live_state_diff([vanished_path], before={})
+    assert leaked_fixed == [], leaked_fixed
+    assert ambient_fixed == [vanished_path], ambient_fixed
+
+
+def test_m1_leak_when_path_existed_before_and_is_now_unreadable(tmp_path):
+    """Boundary companion (rule 6a) -- "не переусердствуй" from the
+    spec: the ONE combination the fix must NOT touch. A path that WAS
+    present in `before` (existed, was fingerprinted) and is unreadable
+    now (deleted mid-run, or a genuine permission error) stays on the
+    leak side exactly as before this fix -- only "absent from before
+    AND unreadable now" is reclassified, nothing else."""
+    existed_path = str(tmp_path / "existed-then-vanished.json")
+    before = {existed_path: (10, 123456789, "somehash")}  # fingerprinted at "before" time
+    # file itself never created here -> unreadable "now"
+    leaked, ambient = hlp.attribute_live_state_diff([existed_path], before=before)
+    assert leaked == [existed_path], leaked
+    assert ambient == []
+
+
+def test_m1_positive_control_genuine_marker_content_leak_still_caught_with_before(tmp_path):
+    """DoD point 3: a REAL leak (this probe's own marker landed in a
+    path's readable CONTENT, the path itself stays present) must keep
+    failing even when `before` is supplied and does not contain the
+    path -- proves the fix narrows ONLY the unreadable+absent-before
+    combination, never a genuine positive content match. Without this,
+    the fix could simply be blinding the check instead of narrowing
+    it."""
+    leaked_file = tmp_path / "routing-log.jsonl"
+    leaked_file.write_text(
+        '{"worker_ref":"agent:' + hlp.LIVENESS_MARKER + 'xyz"}\n', encoding="utf-8"
+    )
+    leaked, ambient = hlp.attribute_live_state_diff([str(leaked_file)], before={})
+    assert leaked == [str(leaked_file)], leaked
+    assert ambient == []
+
+
 def test_overall_ok_false_on_live_state_diff():
     # Р6(а) DUAL-WORLD PIN (K13, t-522, docs/tasks/2026-08-19_q503-
     # remediation-spec.md node N2). Old world (is_unpatched, live file
@@ -472,13 +543,46 @@ def test_overall_ok_true_when_everything_clean():
 
 
 def test_live_run_of_all_cases_is_ok():
+    """Узел C (ремедиация калибровки №8), A4 -- REWRITTEN 2026-08-20.
+    ORIGINAL form asserted the RAW `live_state_diff` was empty -- but
+    hook_liveness_probe.py's own before/after fingerprint spans the
+    WHOLE run of all 13 cases (a multi-second window), and ANY
+    concurrent session's own hook activity landing in that window
+    (its OWN legitimate PostToolUse/PreToolUse writes into the same
+    monitored paths, e.g. .claude/dod_track/<session>.json from a
+    plain Edit call) makes the raw diff non-empty for reasons that
+    have nothing to do with THIS probe's own isolation -- see узел C
+    DAG instance A4 (confirmed twice independently: this узел's own
+    W-A control run, and узел F.3's canon run on 2026-08-20, both
+    diffed on a live session's own file).
+
+    hook_liveness_probe.py itself already carries the fix for this
+    (Р6(а)/t-522, 2026-08-19): `attribute_live_state_diff()` splits the
+    raw diff into `live_state_leaked` (this probe's OWN isolation
+    failing -- carries the "liveness-probe-" marker) and
+    `live_state_ambient` (someone/something else's concurrent activity
+    -- informational, never fails the run) -- `overall_ok()` already
+    keys off `live_state_leaked` only. This TEST was the one part of
+    the class not yet updated to match -- direction "касаться, но
+    ОТЛИЧАТЬ ОКРУЖЕНИЕ" (узел C decision, A4 -- "не касаться" is
+    explicitly forbidden here BY THE TEST'S OWN PURPOSE: it exists to
+    prove the real gates do not leak into real paths, so it must keep
+    reading real state, just attributed correctly).
+
+    NON-GOAL (узел C non-goals): hook_liveness_probe.py itself is
+    NOT edited here -- byte-for-byte, per the dispatch spec. This is a
+    test-side fix only."""
     report = hlp.run_all()
     try:
         assert report["no_cases"] is False
         assert report["settings_unreadable"] is False
         assert report["case_missing"] == [], report["case_missing"]
         assert report["stale_case"] == [], report["stale_case"]
-        assert report["live_state_diff"] == [], report["live_state_diff"]
+        assert report["live_state_leaked"] == [], report["live_state_leaked"]
+        # live_state_ambient (unmarked concurrent activity from this SAME
+        # session or another live one) is INFORMATIONAL ONLY -- it is
+        # deliberately NOT asserted empty here; overall_ok() below does not
+        # key off it either (see module docstring "EXIT CODE").
         assert report["import_findings"] == [], report["import_findings"]
 
         non_ok = [r for r in report["results"] if r["verdict"] != hlp.OK]
@@ -490,10 +594,37 @@ def test_live_run_of_all_cases_is_ok():
         hlp._cleanup_temp_dirs(report)
 
 
+def test_wd_red_half_synthetic_marker_path_flips_verdict_negative(tmp_path):
+    """W-D red half for A4 (узел C DoD point 4): a SYNTHETIC diff entry
+    whose path carries hook_liveness_probe.py's own LIVENESS_MARKER
+    must be attributed as a genuine LEAK (`live_state_leaked`, not
+    `live_state_ambient`), and `overall_ok()` on a report carrying it
+    must be False -- proves `attribute_live_state_diff`/`overall_ok`
+    actually discriminate a marked leak from ordinary ambient noise,
+    not merely that a clean run happens to pass. Uses the REAL
+    (unmodified, per non-goals) hook_liveness_probe.py functions
+    against a purely synthetic path/report -- no live repo state is
+    touched."""
+    marked_path = str(tmp_path / f"{hlp.LIVENESS_MARKER}synthetic-leak.jsonl")
+    Path(marked_path).write_text("noise", encoding="utf-8")
+
+    leaked, ambient = hlp.attribute_live_state_diff([marked_path])
+    assert leaked == [marked_path]
+    assert ambient == []
+
+    report = {
+        "no_cases": False, "settings_unreadable": False,
+        "case_missing": [], "stale_case": [],
+        "live_state_leaked": leaked,
+        "results": [{"verdict": hlp.OK}],
+    }
+    assert hlp.overall_ok(report) is False
+
+
 def test_main_cli_exit_code_zero_on_live_gates(capsys):
     exit_code = hlp.main([])
     captured = capsys.readouterr()
-    assert exit_code == 0
+    assert exit_code == 0, captured.out
     assert "OVERALL: OK" in captured.out
     assert "13/13" in captured.out
 

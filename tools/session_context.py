@@ -205,8 +205,66 @@ _ALWAYS_INCLUDE_BOOT_FILE = "CLAUDE.md"
 # measured size: WARN = ceil(36102*1.015/100)*100 = 36700; BREACH =
 # WARN + 300. Ratchet discipline holds: raises happen only by
 # operator word, recorded here and in the journal (t-538 window).
-CLAUDE_BREACH = 37000
-CLAUDE_WARN = 36700
+# Р-О4 re-derivation (WORD OF THE OPERATOR 2026-08-20, not a silent
+# raise): node G posted two codifications calibration #7's check 23
+# obliged (the R11 generative edge subclass + the five-point
+# checklist's tool-sufficiency clause) -- both norm, not padding; four
+# core diets in a row had already exhausted the candidates for cutting.
+# The file grew 36102 -> a measured 36900 B, past the old WARN=36700 by
+# 200 B -- the same "guard trained to be ignored" class the W2c-4
+# re-derivation above named. Same W2b formula on the new measured
+# size: WARN = ceil(36900*1.015/100)*100 = 37500; BREACH = WARN + 300
+# = 37800. Ratchet discipline holds unchanged: raises happen only by
+# operator word, recorded here and in the journal (docs/tasks/
+# 2026-08-20_calibration-8-remediation.md, decision Р-О4).
+CLAUDE_BREACH = 37800
+CLAUDE_WARN = 37500
+
+# t-575 (2026-08-20, RATCHET GUARD -- породы instance #2 alongside gate
+# (a)'s history guard, D-0043/SIBLING_MAP axis 14): CLAUDE_WARN is not a
+# project constant but a MEASUREMENT FUNCTION -- WARN = ceil(size(CLAUDE.md)
+# * 1.015 / 100) * 100, where size is the file's on-disk size (the same
+# measurement the SessionStart suffix already prints, see
+# boot_budget_lines() below). (1) LOWERING is legal always and silently:
+# after a diet the threshold re-derives by the same expression -- no
+# operator word, no event. Lowering is free. (2) RAISING is legal only if
+# the measurement has ALREADY paid for it: a new threshold may not exceed
+# the ceiling of the file size AT THE MOMENT OF THE RAISE. Raising in
+# advance is impossible not by prohibition but by arithmetic -- to raise
+# the threshold you must first have the bytes; from a breached 37500 the
+# next legal ceiling is 38100 (+600 B), no more. (3) K = 1.015 IS PART OF
+# THE NORM, not an implementation parameter -- a different K is a change
+# of the derivation RULE: a separate operator decision plus a separate
+# edit of the literal pin below. (4) OPERATOR WORD is appended to this
+# provenance comment as an ADDITION; earlier paragraphs are not rewritten
+# -- a silent raise is a mechanism failure. SAG (WARN above the ceiling)
+# is not a violation but a DEBT: it announces itself as a line on EVERY
+# SessionStart, until cleared by re-derivation. CLAUDE_BREACH has NO code
+# path DELIBERATELY (decision Р2(iii)): it is a threshold declared to
+# sessions whose verdict a human renders; the WARN+300 relation is
+# pinned.
+CLAUDE_WARN_K_PERMILLE = 1015  # K = 1.015, в промилле: ЕДИНСТВЕННЫЙ
+# носитель коэффициента; целые числа -- чтобы двоичное округление не
+# двигало вердикт на точных кратных (пин: 20000 -> 20300, 40000 -> 40600).
+
+
+def claude_warn_ceiling(size_bytes) -> int:
+    """Потолок легального CLAUDE_WARN при данном размере CLAUDE.md.
+
+    ceil(size * K / 100) * 100 в ЦЕЛОЙ арифметике. Отрицательный,
+    None и нечисловой вход -> 0 (fail-closed: неизвестный размер даёт
+    НУЛЕВОЙ потолок, т.е. максимальную строгость, а не отключение
+    проверки -- прямой урок атаки 5б блокера t-569, где нулевой замер
+    ГАСИЛ проверку формулы).
+    """
+    try:
+        size = int(size_bytes)
+    except (TypeError, ValueError):
+        return 0
+    if size <= 0:
+        return 0
+    return -(-size * CLAUDE_WARN_K_PERMILLE // 100000) * 100
+
 
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
@@ -1020,6 +1078,19 @@ def boot_budget_lines(root: Path) -> list:
         claude_suffix = f" | {_ALWAYS_INCLUDE_BOOT_FILE}: {claude_size}/{CLAUDE_WARN}"
         if claude_size > CLAUDE_WARN:
             claude_suffix += " OVER -> boot-diet (CLAUDE layer)"
+
+        # ХРАПОВИК ЯДРА: просадка НИКОГДА не молчит. Ветка стоит ПОСЛЕ
+        # OVER и ВНУТРИ не-missing мира. Инвариант позиции: (i) мир
+        # missing печатается БАЙТ В БАЙТ как до этой правки; (ii)
+        # префикс и дословный текст OVER не сдвигаются -- их цитируют
+        # внешние носители (RULE_COVERAGE, boot-diet/SKILL.md); (iii)
+        # OVER и SAG взаимно исключены арифметически (ceiling >= size).
+        ceiling = claude_warn_ceiling(claude_size)
+        if CLAUDE_WARN > ceiling:
+            claude_suffix += (
+                f" RATCHET SAG {CLAUDE_WARN - ceiling} B: WARN {CLAUDE_WARN}"
+                f" > ceil({claude_size}*1.015) = {ceiling} -> re-derive (lower is free)"
+            )
 
     lines = [base + missing_suffix + status_suffix + claude_suffix]
 

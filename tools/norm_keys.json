@@ -94,7 +94,9 @@
       {"row": 21, "phrases": ["a bare pointer to a spec file or an earlier event is NOT a DoD"], "addr": "core"},
       {"row": 22, "phrases": ["the keys are quoted VERBATIM from the DoD as written BEFORE the run"], "addr": "R11.l"},
       {"row": 23, "phrases": ["the witness is a retelling, not a run"], "addr": "R11.m"},
-      {"row": 24, "phrases": ["the emergency net, not the normal cycle"], "addr": "R11.o"}
+      {"row": 24, "phrases": ["the emergency net, not the normal cycle"], "addr": "R11.o"},
+      {"row": 25, "phrases": ["edge sub-class (iii) GENERATIVE", "the birth's CARRIER"], "addr": "R11.p"},
+      {"row": 26, "phrases": ["the TOOLS OF THE EXECUTING TIER", "put IN THE BASKET pre-fetched by the dispatcher's own R1/R8(f)-legal route"], "addr": "checklist (D-0096 item 3, tools-sufficiency half; the FIVE-POINT CHECKLIST frame itself is row 19)"}
     ],
     "R13": [
       {"row": 1, "phrases": ["doubt = graph"], "addr": "core"},

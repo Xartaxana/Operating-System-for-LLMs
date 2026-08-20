@@ -143,7 +143,8 @@ _no_markers_whole_text). На тексте без маркера ИЛИ без �
 WRITE_INDICATORS_RE/is_path_like_token, порядок посадки безразличен);
 _EDGE_TRIM_CHARS/_TRAILING_TRIM_CHARS/_SECTION_HEADER_STOP_RE/
 CONTINUATION_LINE_LIMIT=40; normalize_path/paths_overlap (СЕМАНТИКА
-ПЕРЕСЕЧЕНИЯ ПУТЕЙ); WINDOW_SECONDS=24ч (граница включительна);
+ПЕРЕСЕЧЕНИЯ ПУТЕЙ); WINDOW_SECONDS=8ч (граница включительна, сужено с
+24ч решением оператора Р-О3, 2026-08-20 -- см. "ОКНО ЖИВОСТИ" ниже);
 REGISTRY_COMPACT_THRESHOLD_LINES=500 (500 -> append, 501 -> компакция);
 порядок "сверка живых записей ВЫШЕ, запись НОВОЙ записи ПОСЛЕ" (само-
 пересечение исключено структурно); exit_code ВСЕГДА 0 (WARN-режим). Ни
@@ -384,13 +385,16 @@ session_key; известное огрубление (разные буквал�
 того же cwd не совпадут), не устранено превентивно -- вне scope этой
 задачи.
 
-ОКНО ЖИВОСТИ 24 ЧАСА -- запись sidecar считается "живой" (кандидатом
-на пересечение), если delta = now - ts_записи УДОВЛЕТВОРЯЕТ
-0 <= delta <= 86400 секунд -- ГРАНИЦА ВКЛЮЧИТЕЛЬНА (ровно 24:00:00 --
-ещё живая; 24:00:01 -- уже нет). Запись из БУДУЩЕГО (delta < 0,
-рассинхрон часов) КОНСЕРВАТИВНО исключается -- fail-safe в сторону
+ОКНО ЖИВОСТИ 8 ЧАСОВ (D-4/DOC, вердикт критика t-554, 2026-08-20:
+сужено с 24ч решением оператора Р-О3, WINDOW_SECONDS=8*60*60=28800 --
+см. секцию ниже "УЗЕЛ D РЕМЕДИАЦИИ КАЛИБРОВКИ #8" за полный мотив
+сужения) -- запись sidecar считается "живой" (кандидатом на
+пересечение), если delta = now - ts_записи УДОВЛЕТВОРЯЕТ
+0 <= delta <= WINDOW_SECONDS секунд -- ГРАНИЦА ВКЛЮЧИТЕЛЬНА (ровно
+8:00:00 -- ещё живая; 8:00:01 -- уже нет). Запись из БУДУЩЕГО (delta <
+0, рассинхрон часов) КОНСЕРВАТИВНО исключается -- fail-safe в сторону
 "не считать живым". Собственное инженерное решение (спека называет
-только сам факт окна 24ч, не строгость границы), задокументировано.
+только сам факт окна, не строгость границы), задокументировано.
 
 СЕМАНТИКА ПЕРЕСЕЧЕНИЯ ПУТЕЙ (normalize_path/paths_overlap, ПРИБЛИЖЕНИЕ,
 задокументировано явно, как спека требует): нормализация -- .lower(),
@@ -419,7 +423,8 @@ additionalContext).
 в долгоживущем репо. Attempt 2 добавляет компакцию ПРИ ЗАПИСИ: если
 ЧИСЛО СТРОК, уже лежащих в файле ПЕРЕД записью новой, СТРОГО БОЛЬШЕ
 REGISTRY_COMPACT_THRESHOLD_LINES (= 500) -- файл ПЕРЕЗАПИСЫВАЕТСЯ
-целиком: только строки, чей ts попадает в окно живости 24ч (та же
+целиком: только строки, чей ts попадает в окно живости WINDOW_SECONDS
+(8ч, сужено с 24ч Р-О3 -- см. "ОКНО ЖИВОСТИ" выше; та же
 граница, что _load_live_records, но БЕЗ фильтра по cwd/session --
 компакция обслуживает файл ГЛОБАЛЬНО, не один конкретный диспатч),
 плюс новая запись. Если строк <= 500 -- обычный append, без
@@ -676,10 +681,13 @@ CLI, для которого лишняя зависимость от собст
 ИЗВЕСТНЫЕ ОГРАНИЧЕНИЯ SIDECAR (F5, дополнено в attempt 2 -- список,
 не устранённый превентивно, задокументирован явно):
  - ТОЧНОСТЬ WARN-FIRST: sidecar НЕ ЗНАЕТ о ЗАВЕРШЕНИИ воркера --
-   запись живёт в окне 24ч независимо от того, отработал диспатч уже
-   или нет; возможен WARN на уже полностью завершённый диспатч (цена
-   warn-first, D-0063). Суждение о реальной живости -- за
-   координатором.
+   запись живёт в окне WINDOW_SECONDS (8ч, сужено с 24ч Р-О3,
+   2026-08-20 -- "УЗЕЛ D РЕМЕДИАЦИИ КАЛИБРОВКИ #8" ниже за мотив)
+   независимо от того, отработал диспатч уже или нет; возможен WARN на
+   уже полностью завершённый диспатч (цена warn-first, D-0063; сужение
+   окна её УМЕНЬШАЕТ, но не снимает -- реально живой фоновый воркер,
+   запущенный раньше окна, тоже перестаёт ловиться, см. решение
+   оператора). Суждение о реальной живости -- за координатором.
  - КОНКУРЕНТНЫЙ APPEND ДВУХ СЕССИЙ: два процесса могут писать в
    sidecar одновременно; на большинстве ОС `open(..., "a")` атомарен
    для короткой строки, но НЕ гарантированно -- в пределе возможна
@@ -721,6 +729,7 @@ try:
         OWNS_WORD_RE,
         WRITE_INDICATORS_RE,
         is_path_like_token,
+        marker_immediately_followed_by_slash,
     )
 except ImportError:
     from dispatch_gate import (  # sibling-module fallback
@@ -728,6 +737,7 @@ except ImportError:
         OWNS_WORD_RE,
         WRITE_INDICATORS_RE,
         is_path_like_token,
+        marker_immediately_followed_by_slash,
     )
 
 try:
@@ -774,15 +784,33 @@ _BULLET_PREFIX_RE = re.compile(r"^\s*[-*•]\s+")
 _NUMBERED_PREFIX_RE = re.compile(r"^\s*\d+[.)]\s+")
 # Закрытый список секций манифеста (R11 CLAUDE.md кита): given/дано,
 # owns, non-goals, handoff -- опциональный markdown `**` перед словом.
+# D-2 (вердикт критика t-554, 2026-08-20, тот же класс, тот же коммит,
+# что dispatch_gate._MANIFEST_SECTION_HEADER_RE/_OWNS_SECTION_STOP_RE):
+# markdown-заголовок ("#{1,6}\s+") и буллет ("[-*•]\s+") добавлены ПЕРЕД
+# "**" -- ТА ЖЕ форма, что _DECLARATION_PREFIX_RE ниже уже несёт. Эта
+# константа -- ТОЛЬКО стоп-условие _paths_from_continuation() (WARN-ONLY
+# гейт, exit_code всегда 0) -- не на пути какой-либо блокировки.
 _SECTION_HEADER_STOP_RE = re.compile(
-    r"^\s*(?:\*\*)?(given|дано|owns|non-goals|handoff)\b", re.IGNORECASE
+    r"^\s*(?:#{1,6}\s+)?(?:[-*•]\s+)?(?:\*\*)?(given|дано|owns|non-goals|handoff)\b",
+    re.IGNORECASE,
 )
 # Пересдача (блокер 2): всё ДО начала совпадения owns-маркера обязано
 # быть только пробелами + опциональным буллетом + опциональным
 # markdown `**` -- иначе строка маркера НЕ декларация, а проза со
 # словом "owns" внутри (см. "Рационал ДО region-aware версии" выше,
 # "ПЕРЕСДАЧА").
-_DECLARATION_PREFIX_RE = re.compile(r"^\s*(?:[-*•]\s+)?(?:\*\*)?$")
+# УЗЕЛ D ремедиации калибровки #8 (2026-08-20, test #3 вариант "пустая
+# строка между маркером и списком"): опциональный markdown-заголовок
+# ("#{1,6}\s+") добавлен ПЕРЕД буллетом/"**" -- закрывает "## OWNS
+# (...)" (реальный промпт t-550, копилка узла D п.3): ДО этой правки
+# _is_owns_declaration_line() отвергала строку-заголовок целиком (символ
+# "#" не входил ни в один из разрешённых префиксов), continuation в
+# следующую (после пустой строки) бултенную строку никогда не пробовался.
+_DECLARATION_PREFIX_RE = re.compile(r"^\s*(?:#{1,6}\s+)?(?:[-*•]\s+)?(?:\*\*)?$")
+# УЗЕЛ D (test #3, "пустая строка между маркером и списком"): маркер-
+# строка САМА -- markdown-заголовок -- см. allow_one_leading_blank в
+# _paths_from_continuation().
+_MARKER_LINE_IS_HEADING_RE = re.compile(r"^\s*#{1,6}\s")
 CONTINUATION_LINE_LIMIT = 40
 
 # --- region-предикат (узел D, НОВОЕ) ---------------------------------
@@ -977,8 +1005,25 @@ def _paths_from_line(line: str, marker_end: int) -> list:
     """Общий хвост обоих проходов отбора: от конца совпадения маркера
     срезается мусор (_strip_owns_marker_junk), остаток токенизируется и
     фильтруется is_path_token -- см. "Рационал ДО region-aware версии"
-    выше, "ИЗВЛЕЧЕНИЕ OWNS-ПУТЕЙ", пп.2-5."""
-    remainder = _strip_owns_marker_junk(line[marker_end:])
+    выше, "ИЗВЛЕЧЕНИЕ OWNS-ПУТЕЙ", пп.2-5.
+
+    УЗЕЛ D ремедиации калибровки #8 (Р7, "Фантомный токен", форма 2,
+    2026-08-20): ПЕРЕД любой обрезкой мусора -- если остаток СРАЗУ (без
+    разделителя) начинается с "/" (marker_immediately_followed_by_slash,
+    импорт из dispatch_gate.py -- ОБЩАЯ точка правды, D-0043), строка НЕ
+    декларация -- []. Закрывает "owns/non-goals/handoff" (каноническое
+    перечисление секций манифеста R11 CLAUDE.md кита прозой): БЕЗ этой
+    проверки remainder "/non-goals/handoff" проходил бы is_path_token
+    (2 сегмента после корня -- форма 1 is_path_like_token одна её не
+    останавливает, нужна ИМЕННО форма 2). Применяется ОБОИМ проходам
+    (word-boundary и MANIFEST_OWNS_RE фоллбек -- оба вызывают эту же
+    функцию, "Рационал..." выше явно требует одинаковую многострочную
+    поддержку для обоих; эта форма 2 -- симметрично одинакова для обоих
+    по той же причине)."""
+    remainder_raw = line[marker_end:]
+    if marker_immediately_followed_by_slash(remainder_raw):
+        return []
+    remainder = _strip_owns_marker_junk(remainder_raw)
     tokens = split_and_clean_tokens(remainder)
     return [t for t in tokens if is_path_token(t)]
 
@@ -1046,7 +1091,34 @@ def _first_token_path(line: str):
     return None
 
 
-def _paths_from_continuation(lines: list, start_idx: int, scan_result, line_offsets) -> list:
+def _is_continuation_line_start_ok(scan_result, offset: int) -> bool:
+    """4-е стоп-условие _paths_from_continuation, УТОЧНЕНО узлом D
+    ремедиации калибровки #8 (2026-08-20, test #3 вариант "бэктик в
+    первой строке списка без буллета"): в отличие от _is_prose_position
+    (маркерные проверки в _extract_owns_full -- Ф5а, "маркер в
+    inline_code -- НЕ декларация"), ЗДЕСЬ excluded kinds -- ТОЛЬКО
+    fenced/blockquote, БЕЗ inline_code. Мотив -- та же "АСИММЕТРИЯ
+    ФИЛЬТРА -- ТОЛЬКО МАРКЕР, НЕ ПУТЬ" (докстринг модуля): бэктик-
+    обёрнутый ПУТЬ -- каноническая форма манифеста этого кита (см.
+    dispatch_gate.py "W1", "бэктики... НЕ гасятся"), а не реальная
+    цитата чужого текста. Строка продолжения БЕЗ буллета, начинающаяся
+    СРАЗУ с backtick-пути ("`D:/x.py`"), кладёт открывающий backtick
+    РОВНО в offset 0 -- md_regions относит его к inline_code (живой
+    прогон: scan("`D:/x.py`").regions[0] == (0, len, ("inline_code",))),
+    и ДО этой правки 4-е стоп-условие ошибочно читало это как "строка не
+    в прозе" -- конец блока НА ПЕРВОЙ ЖЕ строке, хотя строка -- РОВНО
+    канонический путь (найдено эмпирически на реальном промпте t-550,
+    копилка узла D п.3). fenced/blockquote остаются исключающими -- они
+    сигналят РЕАЛЬНУЮ цитату/фенс постороннего контента (строка-
+    ограничитель "```" сама, цитируемая "> - D:/x.py")."""
+    if scan_result is None:
+        return True
+    return _classify(_region_at(scan_result, offset)) not in ("fenced", "blockquote")
+
+
+def _paths_from_continuation(
+    lines: list, start_idx: int, scan_result, line_offsets, allow_one_leading_blank: bool = False
+) -> list:
     """П3 (см. "Рационал ДО region-aware версии" выше, "МНОГОСТРОЧНЫЙ
     OWNS-БЛОК" за три исходных стоп-условия) + НОВОЕ четвёртое
     стоп-условие узла D: строка продолжения обязана сама лежать в
@@ -1057,13 +1129,33 @@ def _paths_from_continuation(lines: list, start_idx: int, scan_result, line_offs
     исходном prompt): ЛЮБАЯ форма bullet-префикса ("- ", "* ", "1. ")
     ставит его перед backtick/кавычкой пути (F-59-3), поэтому проверка
     региона на offset 0 не задевает backtick-обёрнутые ПУТИ продолжения
-    (см. докстринг модуля, "АСИММЕТРИЯ ФИЛЬТРА") -- она исключает только
-    строки, чьё НАЧАЛО уже находится внутри fenced/blockquote/
-    inline_code (напр. строка-ограничитель фенса "```" сама, или
-    цитируемая "> - D:/x.py")."""
-    collected = []
+    -- она исключает только строки, чьё НАЧАЛО уже находится внутри
+    fenced/blockquote (строка-ограничитель фенса "```" сама, или
+    цитируемая "> - D:/x.py"); БЕЗ буллета -- см. _is_continuation_line_
+    start_ok() за УТОЧНЕНИЕ узла D ремедиации #8 (inline_code БОЛЬШЕ НЕ
+    стоп-условие ЗДЕСЬ -- бэктик-путь без буллета тоже читается).
+
+    allow_one_leading_blank (узел D ремедиации #8, test #3 вариант
+    "пустая строка между маркером и списком"): РОВНО ОДНА пустая строка
+    СРАЗУ на start_idx пропускается ПЕРЕД обычными стоп-условиями --
+    реальный промпт t-550 (копилка узла D п.3) кладёт markdown-заголовок
+    "## OWNS (...)", ПУСТУЮ строку (типографский пробел после заголовка
+    -- markdown-конвенция), ЗАТЕМ буллетный список. СУЩЕСТВУЮЩИЙ пин
+    test_extract_owns_paths_empty_line_immediately_after_marker_ends_
+    block ("owns:\\n\\n- ...") ОСТАЁТСЯ байт-в-байт -- допуск включается
+    ТОЛЬКО когда сама строка маркера -- markdown-ЗАГОЛОВОК (вызывающий
+    код передаёт True, только если строка маркера матчит "#{1,6}\\s" --
+    plain-marker формы ("owns:") эту поблажку НЕ получают: markdown-
+    конвенция "заголовок, затем пустая строка, затем контент" НЕ
+    действует для голого двоеточия, а существующий пин защищает именно
+    эту, plain-marker, форму. ВТОРАЯ пустая строка подряд (после
+    пропуска первой) остаётся стопом -- обычный цикл её поймает штатно
+    (пустой блок)."""
     idx = start_idx
     n = len(lines)
+    if allow_one_leading_blank and idx < n and lines[idx].strip() == "":
+        idx += 1
+    collected = []
     lines_consumed = 0
     while idx < n:
         line = lines[idx]
@@ -1071,8 +1163,8 @@ def _paths_from_continuation(lines: list, start_idx: int, scan_result, line_offs
             break
         if _SECTION_HEADER_STOP_RE.match(line):
             break
-        if not _is_prose_position(scan_result, line_offsets[idx]):
-            break  # НОВОЕ (узел D): строка продолжения не в прозе -- конец блока
+        if not _is_continuation_line_start_ok(scan_result, line_offsets[idx]):
+            break  # НОВОЕ (узел D): строка продолжения не в прозе (fenced/blockquote) -- конец блока
         path = _first_token_path(line)
         if path is None:
             break
@@ -1129,7 +1221,10 @@ def _extract_owns_full(prompt: str):
         if paths:
             return paths, None
         if _is_owns_declaration_line(line, m.start(), m.end()):
-            paths = _paths_from_continuation(lines, i + 1, scan_result, line_offsets)
+            paths = _paths_from_continuation(
+                lines, i + 1, scan_result, line_offsets,
+                allow_one_leading_blank=bool(_MARKER_LINE_IS_HEADING_RE.match(line)),
+            )
             if paths:
                 return paths, None
 
@@ -1147,7 +1242,10 @@ def _extract_owns_full(prompt: str):
         paths = _paths_from_line(line, m.end())
         if paths:
             return paths, None
-        paths = _paths_from_continuation(lines, i + 1, scan_result, line_offsets)
+        paths = _paths_from_continuation(
+            lines, i + 1, scan_result, line_offsets,
+            allow_one_leading_blank=bool(_MARKER_LINE_IS_HEADING_RE.match(line)),
+        )
         if paths:
             return paths, None
     return [], _diag_for(saw_any_marker, saw_prose_marker)
@@ -1196,7 +1294,14 @@ def paths_overlap(a: str, b: str) -> bool:
 
 # --- sidecar: чтение живых записей + запись новой --------------------
 
-WINDOW_SECONDS = 24 * 60 * 60
+# УЗЕЛ D ремедиации калибровки #8 (Р5, решение оператора 2026-08-20,
+# Р-О3): окно сужено с 24ч до 8ч (покрывает рабочую сессию). Принято С
+# ОТКРЫТЫМИ ГЛАЗАМИ -- компромисс, не фикс: реально живой фоновый
+# воркер, запущенный раньше окна, перестанет ловиться (R7 длинные
+# фоновые диспатчи разрешает); настоящее лечение (сигнал завершения
+# воркера) -- в очереди, упирается в пустой носитель схемы
+# (logs/posttooluse-schema-sample.json = 0 Б на момент решения).
+WINDOW_SECONDS = 8 * 60 * 60
 _TS_FORMAT = "%Y-%m-%dT%H:%M:%S"
 _DESC_TRUNC_LEN = 200
 REGISTRY_COMPACT_THRESHOLD_LINES = 500
@@ -1255,11 +1360,25 @@ def _load_live_records(registry_path: Path, cwd, now: datetime) -> list:
 
 def _compact_live_lines(existing_lines: list, now: datetime) -> list:
     """Компакция (F1): оставляет только СЫРЫЕ строки (str), чей ts
-    попадает в окно живости 24ч -- ГЛОБАЛЬНО, БЕЗ фильтра по
+    попадает в окно живости WINDOW_SECONDS (8ч, сужено с 24ч решением
+    оператора Р-О3, 2026-08-20; DOC-фикс, вердикт критика t-554,
+    прежняя формулировка "24ч" протухла) -- ГЛОБАЛЬНО, БЕЗ фильтра по
     cwd/session (компакция обслуживает файл целиком, не один
     конкретный диспатч). Битая JSON-строка -- fail-open, молча
     отбрасывается при компакции (см. "Рационал ДО region-aware
-    версии" выше, "ИЗВЕСТНЫЕ ОГРАНИЧЕНИЯ SIDECAR")."""
+    версии" выше, "ИЗВЕСТНЫЕ ОГРАНИЧЕНИЯ SIDECAR").
+
+    СЛЕДСТВИЕ СУЖЕНИЯ ОКНА (не записано нигде до этого фикса):
+    компакция делит ТУ ЖЕ константу WINDOW_SECONDS, что и "живость"
+    записи для сверки пересечений -- значит после сужения 24ч -> 8ч
+    компакция БЕЗВОЗВРАТНО СТИРАЕТ строки возрастом 8-24ч при первом же
+    срабатывании (файл > REGISTRY_COMPACT_THRESHOLD_LINES строк), хотя
+    ПРЕЖНЕЕ (24ч) окно их ещё сохраняло. logs/owns_registry.jsonl --
+    носитель ДОКАЗАТЕЛЬСТВ для замеров калибровки (счётчики срабатываний
+    WARN-слоя, разбор ложных owns-пересечений и т.п.) -- эта потеря
+    доказательной базы возраста 8-24ч необратима и не имеет отдельного
+    детектора; узнать о ней можно только чтением ЭТОГО докстринга или
+    самой компакции по факту."""
     live = []
     for line in existing_lines:
         line = line.strip()
@@ -1406,7 +1525,19 @@ def decide(payload: dict, registry_path: Path = None, now: datetime = None) -> t
     if not owns_paths:
         # НОВОЕ (D6): все найденные маркеры -- цитированы -- QUOTED_OWNS_WARN,
         # sidecar НЕ растёт (D3), приоритет ПЕРЕД старой blind-диагностикой.
-        if diag == "quoted":
+        #
+        # УЗЕЛ D ремедиации калибровки #8 (Р4, решение Lead, 2026-08-20):
+        # печатать ТОЛЬКО при НЕЗАВИСИМОМ write-признаке -- WRITE_INDICATORS_RE
+        # (те же четыре write-глагола, что BLIND_OWNS_WARN ниже уже требует,
+        # "независимый" в смысле "не сам факт цитируемого owns-маркера, а
+        # ОТДЕЛЬНЫЙ сигнал пишущего намерения в тексте"). Закрывает F10:
+        # read-only диспатч (t-546), где owns-слово стоит ИМЕНЕМ ИСКОМОГО
+        # МАРКЕРА в инлайн-коде (обсуждение/цитата механизма, owns не
+        # объявлен вовсе) -- без write-глагола нигде в тексте -- больше НЕ
+        # печатает QUOTED_OWNS_WARN, падает в тишину ниже. Вариант
+        # "исключить inline_code из триггера" ОТКЛОНЁН решением Lead -- он
+        # ИНВЕРТИРУЕТ Ф5а ("маркер в inline_code -- не декларация").
+        if diag == "quoted" and WRITE_INDICATORS_RE.search(prompt):
             return 0, {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",

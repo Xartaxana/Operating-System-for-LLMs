@@ -9,7 +9,7 @@ docs/DECISIONS_FULL.md. Permanent behaviour (D-0011): never invent
 project state — retrieve it from the repository; the repository
 overrides chat. This repo is the reference (dogfooding) deployment.
 
-Size budget: this file is capped at 36700 bytes (breach 37000); an
+Size budget: this file is capped at 37500 bytes (breach 37800); an
 amendment to a rule with a registry block is a ROW in that registry,
 never a paragraph in its core; a rule without a block has no
 amendments yet — the first amendment creates the block; rationale
@@ -224,18 +224,26 @@ requirements create is a dispatcher defect, not the performer's guess.
 | m | any of l's three properties is missing | the witness is a retelling, not a run (D-0052 class); detector — check 13(л) | D-0052 |
 | n | a checklist miss exposed by a reject or finding | a spec-defect of the dispatcher; promotion to a machine layer follows the next recurrence | D-0063 |
 | o | a worker returns a DoD-less dispatch (or a writing/parallel one without a manifest) with questions | the emergency net, not the normal cycle: frequent returns = a spec-discipline defect of the coordinator, a calibration case | D-0054 |
+| p | edge sub-class (iii) GENERATIVE — the spec's own requirement births an artifact, case or branch absent before it, BEYOND the deliverable the dispatch itself declares | the spec names the birth's CARRIER (file/field/event — where it lives) and its CLASSIFICATION (mechanism path or not; a paired entity — axis 4/registry/detector; the owner), or hands the fork down explicitly as a question; silence is a dispatcher defect, not the performer's guess | D-0054 |
 
 FIVE-POINT CHECKLIST (D-0096) run against every dispatch before it
 goes: (1) explicit question / completeness criterion or acceptance
 keys; (2) DoD inline with the exact verification run AND the edge
 behaviors NAMED — limits/truncations, empty/absent inputs, conflicting
 requirement pairs: stated, or explicitly forked down; (3) "given"
-enumerated AND sufficient — data, fixtures, paths NAMED, not implied;
-(4) writing dispatch: owns/non-goals/handoff present; a PARALLEL
-writing dispatch also names the NARROWED witness scope (R4);
-(5) freshness — the spec's load-bearing facts checked against their
-carrier, not memory (a stale note in the spec is a dispatcher defect;
-machine layer — the dispatch_gate given-path warn).
+enumerated AND sufficient — data, fixtures, paths NAMED, not implied,
+AND the TOOLS OF THE EXECUTING TIER: a fact reachable only through a
+tool the performer's role lacks (git history, live process/network
+state, anything needing Bash for a Bash-less tier) is put IN THE
+BASKET pre-fetched by the dispatcher's own R1/R8(f)-legal route, never
+assigned as something the performer must go get — assigning it anyway
+is the dispatcher's own spec defect, not a
+capability failure of the performer; (4) writing dispatch:
+owns/non-goals/handoff present; a PARALLEL writing dispatch also names
+the NARROWED witness scope (R4); (5) freshness — the spec's
+load-bearing facts checked against their carrier, not memory (a stale
+note in the spec is a dispatcher defect; machine layer — the
+dispatch_gate given-path warn).
 
 R11a. **Questions route UP, work routes DOWN (D-0077); the USER is
 the apex of the hierarchy** (above the Lead). Underspecified

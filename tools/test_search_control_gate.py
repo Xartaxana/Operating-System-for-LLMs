@@ -53,6 +53,8 @@ _SCRIPT_NEXT = Path(__file__).resolve().parent / "search_control_gate.py"
 _SCRIPT_LIVE = Path(__file__).resolve().parent / "search_control_gate.py"
 SCRIPT = _SCRIPT_NEXT if _SCRIPT_NEXT.exists() else _SCRIPT_LIVE
 
+_UNSET = object()  # sentinel: "leave SEARCH_CONTROL_GATE_LEDGER_DIR unset", узел C
+
 
 def _run_hook(payload, sample_path=None, ledger_dir=None, raw_input=None):
     env = os.environ.copy()
@@ -594,50 +596,264 @@ def test_ledger_missing_session_id_records_under_unknown_and_does_not_crash(tmp_
     assert sample_path.exists()
 
 
-def _real_ledger_snapshot():
-    """A snapshot keyed by filename -> byte SIZE/CONTENT, not merely
-    the set of filenames present -- blind to an APPEND to an existing
-    file would miss a real leak into the live ledger."""
-    real_ledger_dir = Path(scg.REPO) / "logs" / ".search-ledger"
-    if not real_ledger_dir.exists():
-        return {}
-    return {
-        p.name: p.read_bytes()
-        for p in real_ledger_dir.glob("*.jsonl")
-    }
+# ---------------------------------------------------------------------
+# узел C (ремедиация калибровки №8, F1/F14) REWRITE, 2026-08-20: the
+# ORIGINAL form of the two tests below (a since-removed helper
+# byte-snapshotting the REAL logs/.search-ledger/ before/after) read
+# LIVE repo state -- any concurrent session's own search_control_gate
+# hook writes (a real, expected effect of that OTHER session's
+# Grep/Bash/PowerShell/Read calls) landed inside the SAME window this
+# test's before/after compared, producing a false red on the canonical
+# `python -m pytest tools/ gateway/ -q` run whenever it happened to run
+# alongside another live session -- see docs/tasks/2026-08-20_
+# calibration-8-remediation.md, узел C, instances A1/A2, and the
+# Lead-closed decision there ("НЕ КАСАТЬСЯ ЖИВОГО").
+#
+# NEW DIRECTION: run a COPY of search_control_gate.py inside a fresh
+# tmp tree (`_copy_gate_to_tmp_repo`). The copy's own module-level
+# REPO constant (`REPO = os.path.dirname(os.path.dirname(os.path.
+# abspath(__file__)))`) is computed from *the copy's own on-disk
+# path* -- so its "battle" default ledger dir
+# (`_DEFAULT_LEDGER_DIR = REPO/logs/.search-ledger`) resolves ENTIRELY
+# inside tmp_path. It is structurally impossible for the copy to write
+# into the real repo's logs/.search-ledger/ (no live read, no live
+# write, ever) -- isolation no longer depends on timing or on nobody
+# else touching the real ledger during the test window.
+#
+# Every caller below asserts BYTE EQUALITY of the copy against the
+# live SCRIPT right after copying it (узел C spec: "спутник -- пин
+# байтового равенства копии живому, иначе тестируется протухший
+# клон"). C-2 FIX (критик-гейт t-554, 2026-08-20): that assert is
+# TAUTOLOGICAL, not a staleness detector -- _copy_gate_to_tmp_repo()
+# writes copy_path.write_bytes(SCRIPT.read_bytes()), so the assert
+# compares SCRIPT.read_bytes() (copy time) against SCRIPT.read_bytes()
+# (assert time) in the SAME test run; there is no code path in which
+# the copy's bytes could differ from the live file's bytes at copy
+# time, so it can only go red on a filesystem fault (a write/read
+# mismatch), never on a "протухший клон" -- someone editing
+# search_control_gate.py AFTER this test run does not make it go red
+# either way (the copy is per-test, freshly written every time). The
+# assert is harmless and stays as a cheap belt-and-suspenders check on
+# the round-trip itself; the ACTUAL freshness pin against source-SHAPE
+# drift lives in the W-D section below, `_write_broken_copy()`'s own
+# `assert marker in src` -- that one DOES fail when the live source no
+# longer contains the literal marker text a mutation probe expects to
+# replace.
+# ---------------------------------------------------------------------
+
+
+def _copy_gate_to_tmp_repo(base_dir, dirname="repo_copy"):
+    """Copies the LIVE search_control_gate.py (`SCRIPT`) into a fresh
+    <base_dir>/<dirname>/tools/search_control_gate.py. Returns
+    (copy_script_path, repo_root) -- repo_root/logs/.search-ledger is
+    the copy's own module-level default ledger dir (see this section's
+    banner comment above for why that is fully inside tmp_path).
+    Byte equality with the live source is NOT asserted here -- every
+    caller asserts it itself immediately after calling this helper
+    (C-2 fix, критик-гейт t-554: that assert is a tautological
+    round-trip check, not a staleness detector -- see the section
+    banner comment above for why, and _write_broken_copy() below for
+    the ACTUAL source-shape freshness pin)."""
+    repo_root = Path(base_dir) / dirname
+    tools_dir = repo_root / "tools"
+    tools_dir.mkdir(parents=True)
+    copy_path = tools_dir / "search_control_gate.py"
+    copy_path.write_bytes(SCRIPT.read_bytes())
+    return copy_path, repo_root
+
+
+def _run_copy_hook(script_path, payload, sample_path, ledger_dir=_UNSET):
+    """Same shape as `_run_hook` (subprocess + JSON stdin), but against
+    an explicit *script_path* (a tmp-tree copy) and WITHOUT `_run_hook`'s
+    own D2-style "always set a tmp ledger dir" convenience guard --
+    that guard is exactly what made the ORIGINAL
+    test_ledger_dir_never_defaults_to_real_logs_directory true by
+    construction of the test HARNESS, not by anything the gate itself
+    does (see узел C spec, Р6, "чтобы его ИМЯ стало правдой"). Passing
+    ledger_dir=_UNSET (the default) leaves
+    SEARCH_CONTROL_GATE_LEDGER_DIR UNSET in the child's env, exercising
+    the script's OWN default; passing an explicit path (including
+    None, which is treated the same as _UNSET is NOT supported --
+    callers pass a real Path) sets the env var explicitly."""
+    env = os.environ.copy()
+    env["SEARCH_CONTROL_GATE_SAMPLE_PATH"] = str(sample_path)
+    if ledger_dir is not _UNSET:
+        env["SEARCH_CONTROL_GATE_LEDGER_DIR"] = str(ledger_dir)
+    else:
+        env.pop("SEARCH_CONTROL_GATE_LEDGER_DIR", None)
+    return subprocess.run(
+        [sys.executable, str(script_path)],
+        input=json.dumps(payload, ensure_ascii=False),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+    )
 
 
 def test_ledger_dir_honoured_from_env_var_not_real_logs(tmp_path):
-    before = _real_ledger_snapshot()
-    ledger_dir = tmp_path / "ledger"
+    """Узел C, A1 (rewritten, 'НЕ КАСАТЬСЯ ЖИВОГО'): the claim is now
+    the STRONGER positive form the spec asks for -- not "nothing
+    changed in a noisy directory" but "the copy's OWN default dir
+    stayed EMPTY, and the env-pointed dir got EXACTLY the expected
+    write" -- both fully inside tmp_path, no live read anywhere."""
+    copy_script, repo_root = _copy_gate_to_tmp_repo(tmp_path)
+    assert copy_script.read_bytes() == SCRIPT.read_bytes(), (
+        "copy_path.write_bytes(SCRIPT.read_bytes()) failed to round-trip -- "
+        "this is a FILESYSTEM fault (write/read mismatch), NOT a stale copy "
+        "(C-2 fix, критик-гейт t-554: byte-identity holds BY CONSTRUCTION "
+        "here, the copy's bytes come directly from SCRIPT.read_bytes() at "
+        "copy time). The freshness pin against source-shape drift is "
+        "_write_broken_copy()'s own `assert marker in src` below, not this one."
+    )
+
+    env_dir = tmp_path / "env-ledger"
     payload = {
         "session_id": "sess-env-check",
         "tool_name": "Grep",
         "tool_input": {"pattern": "envcheck-token"},
         "tool_response": {"numFiles": 0, "filenames": []},
     }
-    result = _run_hook(payload, sample_path=tmp_path / "sample.json", ledger_dir=ledger_dir)
-    assert result.returncode == 0
-    assert (ledger_dir / "sess-env-check.jsonl").exists()
-    after = _real_ledger_snapshot()
-    assert after == before
+    result = _run_copy_hook(copy_script, payload, tmp_path / "sample.json", ledger_dir=env_dir)
+    assert result.returncode == 0, result.stderr
+
+    assert (env_dir / "sess-env-check.jsonl").exists()
+
+    copy_default_ledger = repo_root / "logs" / ".search-ledger"
+    assert not copy_default_ledger.exists() or list(copy_default_ledger.iterdir()) == [], (
+        "env override honoured but the copy's OWN default dir ALSO received "
+        f"a write: {list(copy_default_ledger.iterdir()) if copy_default_ledger.exists() else None}"
+    )
 
 
 def test_ledger_dir_never_defaults_to_real_logs_directory(tmp_path):
-    """Calling `_run_hook` WITHOUT an explicit ledger_dir must NOT fall
-    through to the real logs/.search-ledger/unknown.jsonl -- see
-    `_run_hook`'s own env-var handling above."""
-    before = _real_ledger_snapshot()
+    """Узел C, A2 (rewritten -- FORM A, decision Р6: 'чтобы его ИМЯ
+    стало правдой'). The ORIGINAL form of this test called `_run_hook`
+    with no explicit ledger_dir -- but `_run_hook` ITSELF always sets
+    SEARCH_CONTROL_GATE_LEDGER_DIR to a fresh tmp dir when the caller
+    omits it (see `_run_hook`'s own "D2-style guard" comment above), so
+    the ORIGINAL test could never actually exercise the SCRIPT's own
+    default -- it verified the test HARNESS's convenience default, not
+    the gate's. This form calls `_run_copy_hook` with
+    ledger_dir=_UNSET (the SEARCH_CONTROL_GATE_LEDGER_DIR env var is
+    left genuinely unset in the child process) against a tmp-tree copy
+    -- so the copy's own `_DEFAULT_LEDGER_DIR` (== <repo_root>/logs/
+    .search-ledger, fully inside tmp_path -- see this section's banner
+    comment) is what actually gets exercised, and the assertion below
+    is now literally true of the NAME."""
+    copy_script, repo_root = _copy_gate_to_tmp_repo(tmp_path)
+    assert copy_script.read_bytes() == SCRIPT.read_bytes(), (
+        "copy_path.write_bytes(SCRIPT.read_bytes()) failed to round-trip -- "
+        "this is a FILESYSTEM fault (write/read mismatch), NOT a stale copy "
+        "(C-2 fix, критик-гейт t-554: byte-identity holds BY CONSTRUCTION "
+        "here, the copy's bytes come directly from SCRIPT.read_bytes() at "
+        "copy time). The freshness pin against source-shape drift is "
+        "_write_broken_copy()'s own `assert marker in src` below, not this one."
+    )
+
     payload = {
         "session_id": "sess-d2-default-check",
         "tool_name": "Grep",
         "tool_input": {"pattern": "d2-default-check-token"},
         "tool_response": {"numFiles": 0, "filenames": []},
     }
-    result = _run_hook(payload)
-    assert result.returncode == 0
-    after = _real_ledger_snapshot()
-    assert after == before
+    result = _run_copy_hook(copy_script, payload, tmp_path / "sample.json")  # ledger_dir=_UNSET
+    assert result.returncode == 0, result.stderr
+
+    default_ledger_file = repo_root / "logs" / ".search-ledger" / "sess-d2-default-check.jsonl"
+    assert default_ledger_file.exists(), (
+        "the copy's OWN default ledger dir did not receive the write -- "
+        f"contents of {repo_root / 'logs'}: "
+        f"{list((repo_root / 'logs').iterdir()) if (repo_root / 'logs').exists() else 'MISSING'}"
+    )
+
+
+# ---------------------------------------------------------------------
+# узел C, W-D red halves (DoD point 4): each injects ONE defect into a
+# TMP-ONLY copy (command hygiene p.7(г) -- never the live artifact) and
+# asserts the rewritten test's own OBSERVABLE symptom flips -- proving
+# the detector, not merely re-running the gate. Permanent tests, not a
+# one-off probe.
+# ---------------------------------------------------------------------
+
+
+def _write_broken_copy(base_dir, dirname, marker, replacement):
+    src = SCRIPT.read_text(encoding="utf-8")
+    assert marker in src, (
+        "live search_control_gate.py source shape changed -- update this "
+        "mutation probe's marker text"
+    )
+    broken_src = src.replace(marker, replacement)
+    repo_root = Path(base_dir) / dirname
+    tools_dir = repo_root / "tools"
+    tools_dir.mkdir(parents=True)
+    broken_path = tools_dir / "search_control_gate.py"
+    broken_path.write_text(broken_src, encoding="utf-8")
+    return broken_path, repo_root
+
+
+def test_wd_red_half_ledger_dir_ignoring_env_breaks_a1_shape(tmp_path):
+    """W-D red half for A1: a tmp-only copy whose `_ledger_dir()`
+    IGNORES the env var override entirely (always returns its own
+    `_DEFAULT_LEDGER_DIR`) must make the exact observable A1 checks --
+    the env dir gets the write is a claim that becomes FALSE against
+    this mutant."""
+    broken_script, repo_root = _write_broken_copy(
+        tmp_path, "repo_copy_broken_env",
+        marker='return os.environ.get("SEARCH_CONTROL_GATE_LEDGER_DIR") or _DEFAULT_LEDGER_DIR',
+        replacement="return _DEFAULT_LEDGER_DIR  # MUTATED (W-D probe): ignores env",
+    )
+    env_dir = tmp_path / "env-ledger-wd"
+    payload = {
+        "session_id": "sess-env-check-wd",
+        "tool_name": "Grep",
+        "tool_input": {"pattern": "envcheck-token-wd"},
+        "tool_response": {"numFiles": 0, "filenames": []},
+    }
+    result = _run_copy_hook(broken_script, payload, tmp_path / "sample.json", ledger_dir=env_dir)
+    assert result.returncode == 0, result.stderr
+
+    # THE regression this probe exists to catch: with the mutation
+    # applied, the env dir must NOT have received the write (A1's own
+    # positive assertion would fail against this mutant).
+    assert not (env_dir / "sess-env-check-wd.jsonl").exists(), (
+        "mutation probe is broken: the mutated copy still honoured the env "
+        "var -- update the marker/replacement text above"
+    )
+    # And per the mutation's OWN (wrong) logic, the write landed in the
+    # copy's own default dir instead -- confirms the mutation actually
+    # ran, not merely that the env write silently vanished.
+    assert (repo_root / "logs" / ".search-ledger" / "sess-env-check-wd.jsonl").exists()
+
+
+def test_wd_red_half_wrong_default_ledger_dir_breaks_a2_shape(tmp_path):
+    """W-D red half for A2: a tmp-only copy whose `_DEFAULT_LEDGER_DIR`
+    constant points at a WRONG location must make A2's own observable
+    check (a write at <repo_root>/logs/.search-ledger/<session>.jsonl)
+    false -- proving A2 actually discriminates a broken DEFAULT, not
+    merely a broken env override (test_wd_red_half_ledger_dir_ignoring_
+    env_breaks_a1_shape above covers that angle)."""
+    broken_script, repo_root = _write_broken_copy(
+        tmp_path, "repo_copy_broken_default",
+        marker='_DEFAULT_LEDGER_DIR = os.path.join(REPO, "logs", ".search-ledger")',
+        replacement='_DEFAULT_LEDGER_DIR = os.path.join(REPO, "logs", ".search-ledger-WD-WRONG")',
+    )
+    payload = {
+        "session_id": "sess-d2-default-check-wd",
+        "tool_name": "Grep",
+        "tool_input": {"pattern": "d2-default-check-token-wd"},
+        "tool_response": {"numFiles": 0, "filenames": []},
+    }
+    result = _run_copy_hook(broken_script, payload, tmp_path / "sample.json")  # ledger_dir=_UNSET
+    assert result.returncode == 0, result.stderr
+
+    expected_path = repo_root / "logs" / ".search-ledger" / "sess-d2-default-check-wd.jsonl"
+    assert not expected_path.exists(), (
+        "mutation probe is broken: the mutated copy still wrote to the "
+        "expected default location -- update the marker/replacement text"
+    )
+    # Confirms the mutation actually ran (write landed at the WRONG path).
+    assert (repo_root / "logs" / ".search-ledger-WD-WRONG" / "sess-d2-default-check-wd.jsonl").exists()
 
 
 # ---------------------------------------------------------------------

@@ -1,8 +1,10 @@
 """Юнит-смоки tools/owns_gate.py. Покрывает DoD спеки задачи (attempt 1
 + attempt 2 регрессы вердикта критика t-333): сверка пересечения
 (равные пути / вложенный каталог / глоб обеими сторонами / соседние
-каталоги с общим префиксом имени -- НЕ пересечение), окно живости 24ч
-(НА границе -- ещё живая; ЗА границей -- уже нет), область сверки по
+каталоги с общим префиксом имени -- НЕ пересечение), окно живости 8ч
+(сужено с 24ч решением оператора Р-О3, 2026-08-20, литерально пиновано
+-- см. test_window_seconds_literal_pin_8_hours_ро3; НА границе -- ещё
+живая; ЗА границей -- уже нет), область сверки по
 cwd (F2 -- другой cwd игнорируется, тот же cwd + другой session_key ->
 WARN с меткой D-0060), read-only диспатч -- тишина и sidecar не
 растёт, не-Task тул -- тишина, sidecar отсутствует/битая строка --
@@ -852,7 +854,23 @@ def test_sibling_directories_common_name_prefix_do_not_overlap():
 
 
 # ---------------------------------------------------------------------
-# decide(): окно 24ч -- НА границе и ЗА ней (правило 6а).
+# D-4 (вердикт критика t-554, 2026-08-20): литеральный пин окна.
+# Оба граничных теста ниже переведены на СИМВОЛИЧЕСКУЮ ссылку
+# owns_gate.WINDOW_SECONDS -- поэтому правка константы ОБРАТНО на 24ч
+# прошла бы с зелёным каноном, у решения оператора (Р-О3, сужение окна
+# живости с 24ч до 8ч, 2026-08-20) не было бы детектора (R10(в)). Этот
+# assert -- ЛИТЕРАЛЬНЫЙ, не символический: он краснеет РОВНО тогда,
+# когда кто-то меняет константу, символические тесты ниже -- нет.
+# ---------------------------------------------------------------------
+
+
+def test_window_seconds_literal_pin_8_hours_ро3():
+    assert owns_gate.WINDOW_SECONDS == 8 * 60 * 60
+
+
+# ---------------------------------------------------------------------
+# decide(): окно 8ч (Р-О3, 2026-08-20; было 24ч) -- НА границе и ЗА ней
+# (правило 6а).
 # ---------------------------------------------------------------------
 
 
@@ -1197,3 +1215,237 @@ def test_owns_gate_source_has_no_local_owns_word_re_compile():
 
     assert needle in dispatch_gate_src  # позитивный контроль формы поиска
     assert needle not in owns_gate_src  # owns_gate больше не несёт своей копии
+
+
+# =======================================================================
+# УЗЕЛ D ремедиации калибровки #8 (2026-08-20) -- Р4 (QUOTED_OWNS
+# независимый write-признак), Р5 (окно 8ч), Р7 форма 2 (маркер/слэш),
+# "owns-парсер слепа" (test #3, три варианта из фактических промптов).
+# Красные тесты ДО фикса / зелёные ПОСЛЕ, копилка узла D носителя хода.
+# =======================================================================
+
+
+_NOW = datetime(2026, 7, 28, 12, 0, 0)  # тот же литерал, что остальная батарея файла
+
+
+def _full_prompt_payload(prompt: str, session_id="s-1", cwd="D:\\repo", description="sonnet: write") -> dict:
+    return {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "builder", "prompt": prompt, "description": description},
+        "session_id": session_id,
+        "cwd": cwd,
+    }
+
+
+# --- test #3: owns markdown-списком абсолютных путей -- ФАКТИЧЕСКИЕ
+# промпты из транскрипта сессии (t-550, t-553, копилка узла D п.3;
+# восстановлены через ~/.claude/projects/.../f7bd02f0-...jsonl). ------
+
+
+def test_d3_variant1_heading_marker_blank_line_bulleted_list_real_prompt():
+    # ФАКТИЧЕСКИЙ фрагмент промпта t-550 (2026-08-20T12:52:51Z, узел F0
+    # прогон 2) -- заголовок "## OWNS (...)", ПУСТАЯ строка, буллетный
+    # список backtick-путей. ДО фикса -- [] (owns-парсер слеп).
+    prompt = (
+        "СПЕКА. Узел F0 (прогон 2).\n\n"
+        "## OWNS (абсолютные пути, писать только сюда)\n\n"
+        "- `D:\\Improving_AI\\Operating-System-for-LLMs\\docs\\tasks\\"
+        "2026-08-14_calibration-7-batch2-spec.md`\n"
+        "- `D:\\Improving_AI\\Operating-System-for-LLMs\\docs\\tasks\\"
+        "2026-08-14_calibration-7-batch3-spec.md`\n"
+    )
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "D:\\Improving_AI\\Operating-System-for-LLMs\\docs\\tasks\\"
+        "2026-08-14_calibration-7-batch2-spec.md",
+        "D:\\Improving_AI\\Operating-System-for-LLMs\\docs\\tasks\\"
+        "2026-08-14_calibration-7-batch3-spec.md",
+    ]
+
+
+def test_d3_variant1_existing_pin_plain_marker_blank_line_still_empty():
+    # Позитивный контроль/пин (правило 6 гигиены): PLAIN-маркер ("owns:",
+    # не заголовок) с пустой строкой сразу после -- ОСТАЁТСЯ пустым
+    # блоком байт-в-байт (test_extract_owns_paths_empty_line_immediately_
+    # after_marker_ends_block выше) -- поблажка ТОЛЬКО для markdown-
+    # заголовков.
+    prompt = "owns:\n\n- D:/repo/tools/a.py\n"
+    assert owns_gate.extract_owns_paths(prompt) == []
+
+
+def test_d3_variant2_heading_marker_with_tail_no_blank_list_immediately():
+    # Вариант "хвост на строке маркера" -- заголовок несёт СКОБОЧНЫЙ
+    # хвост (форма ИЗ РЕАЛЬНОГО промпта t-553: "## OWNS (§1 спеки,
+    # абсолютные пути)"), список -- СЛЕДУЮЩЕЙ строкой БЕЗ пустой строки
+    # между ними (отличает этот вариант от variant1, где пустая строка
+    # ЕСТЬ). Пути здесь -- НАСТОЯЩИЕ абсолютные (backtick-обёрнутые), в
+    # отличие от t-553's дословных путей БЕЗ буквы диска (там путь --
+    # репо-относительный текст с ОТДЕЛЬНО прозой заявленным общим корнем
+    # "все от корня D:\\..." -- комбинирование относительного пути с
+    # прозаически заявленным корнем НЕ входит в scope Р1-Р7 узла D, это
+    # отдельный класс, задокументирован в отчёте, не фикс этого узла).
+    prompt = (
+        "## OWNS (§1 спеки, абсолютные пути)\n"
+        "- `D:/repo/tools/a.py`\n"
+        "- `D:/repo/tools/b.py`\n"
+    )
+    assert owns_gate.extract_owns_paths(prompt) == ["D:/repo/tools/a.py", "D:/repo/tools/b.py"]
+
+
+def test_d3_variant3_no_bullet_backtick_first_line_of_list():
+    # Третий вариант DoD (не из транскрипта -- намеренно сконструирован,
+    # спека явно допускает "покрой вариант", не требует транскрипта для
+    # ВСЕХ трёх): бэктик-путь ПЕРВОЙ строкой списка БЕЗ буллета --
+    # md_regions относит открывающий backtick к inline_code РОВНО в
+    # offset 0 строки -- ДО фикса 4-го стоп-условия читалось как "не
+    # проза", блок обрывался немедленно.
+    prompt = "owns:\n`D:/repo/tools/a.py`\n`D:/repo/tools/b.py`\n"
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "D:/repo/tools/a.py",
+        "D:/repo/tools/b.py",
+    ]
+
+
+# --- И-0: три формы отказа сканера регионов для НОВОЙ ветки
+# _is_continuation_line_start_ok (test #3 вариант 3), по образцу
+# test_owns_gate_md.py::test_i0_scan_*_falls_back_to_live_intercept_bug. -
+
+
+def test_i0_no_bullet_continuation_scan_module_absent_still_finds_paths(monkeypatch):
+    monkeypatch.setattr(owns_gate, "scan", None)
+    prompt = "owns:\n`D:/repo/tools/a.py`\n`D:/repo/tools/b.py`\n"
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "D:/repo/tools/a.py",
+        "D:/repo/tools/b.py",
+    ]
+
+
+def test_i0_no_bullet_continuation_scan_raises_still_finds_paths(monkeypatch):
+    def _broken_scan(text):
+        raise RuntimeError("md_regions exploded")
+
+    monkeypatch.setattr(owns_gate, "scan", _broken_scan)
+    prompt = "owns:\n`D:/repo/tools/a.py`\n`D:/repo/tools/b.py`\n"
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "D:/repo/tools/a.py",
+        "D:/repo/tools/b.py",
+    ]
+
+
+def test_i0_no_bullet_continuation_scan_degraded_still_finds_paths(monkeypatch):
+    class _FakeResult:
+        degraded = True
+        reason = "text_too_large"
+        regions = []
+
+    monkeypatch.setattr(owns_gate, "scan", lambda text: _FakeResult())
+    prompt = "owns:\n`D:/repo/tools/a.py`\n`D:/repo/tools/b.py`\n"
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "D:/repo/tools/a.py",
+        "D:/repo/tools/b.py",
+    ]
+
+
+# --- test #4: QUOTED_OWNS на read-only -- ТОЛЬКО с независимым
+# write-признаком (Р4). ---------------------------------------------------
+
+
+def test_d4_quoted_owns_no_warn_on_read_only_marker_name_in_inline_code(tmp_path):
+    # Копилка п.4 (t-546): read-only диспатч, owns не объявляет вовсе --
+    # единственное вхождение "owns" стоит ИМЕНЕМ ИСКОМОГО МАРКЕРА в
+    # инлайн-коде (обсуждение/цитата механизма owns_gate). БЕЗ write-
+    # глагола нигде в тексте -- ДО фикса печатал QUOTED_OWNS_WARN.
+    registry = tmp_path / "owns_registry.jsonl"
+    prompt = (
+        "DoD: разбери, как работает диагностика `owns` в owns_gate.py.\n"
+        "Дано: tools/owns_gate.py -- прочитай и объясни механизм маркера "
+        "`owns` в инлайн-коде.\n"
+        "Ничего не пиши, только объясни."
+    )
+    payload = _full_prompt_payload(prompt, description="sonnet: read-only разбор")
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=_NOW)
+    assert exit_code == 0
+    assert output is None
+    assert not registry.exists()
+
+
+def test_d4_quoted_owns_warn_still_fires_with_independent_write_signal(tmp_path):
+    # Позитивный контроль (правило 6 гигиены): ТА ЖЕ форма (owns целиком
+    # в цитате), но с независимым write-глаголом ("создай файл") --
+    # QUOTED_OWNS_WARN держится как раньше.
+    registry = tmp_path / "owns_registry.jsonl"
+    prompt = (
+        "DoD: тест зелёный, witness приложен.\nДано: репо целиком.\n"
+        "> owns (ABSOLUTE write paths): D:/repo/tools/real_target.py\n"
+        "создай файл по инструкции выше."
+    )
+    payload = _full_prompt_payload(prompt)
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=_NOW)
+    assert exit_code == 0
+    assert output is not None
+    assert "цитаты/фенса/инлайн-кода" in output["hookSpecificOutput"]["additionalContext"]
+    assert not registry.exists()
+
+
+# --- test #5: фантом /non-goals/handoff из канонической прозы. ---------
+
+
+def test_d5_phantom_non_goals_handoff_from_canonical_prose_extract_empty(tmp_path):
+    # Копилка/Р7 форма 2: секции манифеста, дословно из правила 11
+    # CLAUDE.md кита -- "given/owns/non-goals/handoff" -- прозой, БЕЗ
+    # реальной owns-декларации нигде. extract_owns_paths -> [], sidecar
+    # НЕ растёт.
+    registry = tmp_path / "owns_registry.jsonl"
+    prompt = (
+        "DoD: приложи вывод прогона.\nДано: репо целиком.\n"
+        "Манифест диспатча несёт четыре секции: given/owns/non-goals/"
+        "handoff -- правило 11 CLAUDE.md кита. Прочитай и объясни."
+    )
+    assert owns_gate.extract_owns_paths(prompt) == []
+    payload = _full_prompt_payload(prompt, description="sonnet: read-only объяснение")
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=_NOW)
+    assert exit_code == 0
+    assert output is None  # НЕТ write-глагола нигде -- полная тишина (не только сайдкар)
+    assert not registry.exists()
+
+
+def test_d5_real_owns_declaration_below_canonical_prose_still_found():
+    # Позитивный контроль (правило 6 гигиены): каноническая проза "given/
+    # owns/non-goals/handoff" НЕ хайджекает настоящую декларацию НИЖЕ --
+    # тот же класс, что "ПЕРЕСДАЧА" уже чинила для другой формы прозы.
+    prompt = (
+        "Манифест несёт секции given/owns/non-goals/handoff.\n\n"
+        "owns: D:/repo/tools/real_target.py\n"
+    )
+    assert owns_gate.extract_owns_paths(prompt) == ["D:/repo/tools/real_target.py"]
+
+
+# --- Пин-набор: сохраняемые истинные срабатывания (СВЕЖЕЕ окно 8ч). ----
+
+
+def test_pin_owns_overlap_within_8h_window_still_fires(tmp_path):
+    registry = tmp_path / "owns_registry.jsonl"
+    now = _NOW
+    fresh_ts = (now - timedelta(hours=7, minutes=59)).strftime(owns_gate._TS_FORMAT)
+    _write_registry_line(
+        registry, fresh_ts, "s-other", "D:\\repo", "sonnet: prior write",
+        ["D:\\repo\\tools\\shared_target.py"],
+    )
+    payload = _writing_payload("D:/repo/tools/shared_target.py", session_id="s-me", cwd="D:\\repo")
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=now)
+    assert exit_code == 0
+    assert output is not None
+    assert "OWNS OVERLAP" in output["hookSpecificOutput"]["additionalContext"]
+
+
+def test_pin_quoted_owns_manifest_wholly_in_fence_still_warns_with_write_verb(tmp_path):
+    registry = tmp_path / "owns_registry.jsonl"
+    prompt = (
+        "DoD: тест зелёный.\nДано: репо целиком.\n"
+        "```\nowns (ABSOLUTE write paths): D:/repo/tools/fenced_target.py\n```\n"
+        "запиши файл по инструкции в примере."
+    )
+    payload = _full_prompt_payload(prompt)
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=_NOW)
+    assert exit_code == 0
+    assert output is not None
+    assert "цитаты/фенса/инлайн-кода" in output["hookSpecificOutput"]["additionalContext"]

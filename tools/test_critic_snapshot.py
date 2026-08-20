@@ -31,8 +31,14 @@ dispatch_gate.py/hygiene_gate.py + parity_manifest.json, 0 тестовых
 or ".")`): каждый пишущий тест ниже ЯВНО передаёт payload["cwd"] =
 str(tmp_path); отдельный тест
 (`test_real_repo_snapshot_untouched_by_tmp_path_dispatch`) утверждает
-это отдельно -- снимает байты РЕАЛЬНОГО .claude/critic_snapshot.json ДО
-и ПОСЛЕ прогона хука с cwd=tmp_path и сверяет их побайтово равными.
+это отдельно -- REWRITTEN 2026-08-20 (узел C, ремедиация калибровки
+№8, F1/F14, direction "НЕ КАСАТЬСЯ ЖИВОГО"): больше НЕ читает
+РЕАЛЬНЫЙ .claude/critic_snapshot.json вовсе (старая форма читала его
+байты до/после и флакала от ЛЮБОГО конкурентного критик-диспатча
+другой живой сессии в том же окне) -- вместо этого позитивно
+доказывает край (ii) двумя РАЗЛИЧНЫМИ tmp-каталогами: payload["cwd"]
+= tmp_a, реальный cwd процесса = tmp_b; снимок обязан появиться в
+tmp_a и НЕ появиться в tmp_b. См. докстринг самого теста.
 
 Run from the repo root: python -m pytest tools/test_critic_snapshot.py
 """
@@ -48,8 +54,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import critic_snapshot as cs  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parent / "critic_snapshot.py"
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-_REAL_SNAPSHOT = _REPO_ROOT / ".claude" / "critic_snapshot.json"
+# узел C (ремедиация калибровки №8): _REPO_ROOT/_REAL_SNAPSHOT (pointing at
+# the LIVE .claude/critic_snapshot.json) were removed here -- no test in
+# this file reads the real snapshot any more, see
+# test_real_repo_snapshot_untouched_by_tmp_path_dispatch's own docstring
+# for why ("НЕ КАСАТЬСЯ ЖИВОГО").
 
 
 def _run_hook(payload, cwd=None) -> subprocess.CompletedProcess:
@@ -142,15 +151,105 @@ def test_agent_tool_name_recognized_writes_snapshot_with_expected_fields(tmp_pat
 
 
 def test_real_repo_snapshot_untouched_by_tmp_path_dispatch(tmp_path):
-    # Край (ii): снимок пишется в cwd ИЗ PAYLOAD -- прогон хука с
-    # cwd=tmp_path не должен трогать реальный .claude/critic_snapshot.json
-    # этого репозитория НИ ПРИ КАКИХ условиях.
-    before = _REAL_SNAPSHOT.read_bytes() if _REAL_SNAPSHOT.exists() else None
-    (tmp_path / "x.txt").write_text("x", encoding="utf-8")
-    result = _run_hook(_critic_payload(tmp_path), cwd=tmp_path)
+    """Узел C (ремедиация калибровки №8), A3 -- REWRITTEN, direction
+    'НЕ КАСАТЬСЯ ЖИВОГО' (docs/tasks/2026-08-20_calibration-8-
+    remediation.md, узел C decision). The ORIGINAL form snapshotted the
+    bytes of the REAL .claude/critic_snapshot.json before/after a hook
+    run and asserted equality -- any CONCURRENT session's own real
+    critic dispatch (a legitimate PreToolUse effect of THAT session,
+    entirely unrelated to this test's own subprocess call) landing in
+    that same before/after window flips the real file's bytes and
+    turns this test red on a canonical `python -m pytest tools/
+    gateway/ -q` run for a reason that has nothing to do with this
+    hook's own cwd-from-payload behavior (F1/F14 class).
+
+    NEW FORM: the live file is not read AT ALL, before or after. Край
+    (ii) -- "the snapshot path comes from payload['cwd'], never from
+    the real process cwd" -- is now proven POSITIVELY, with the two
+    cwds made to DIFFER: the subprocess's actual OS working directory
+    is tmp_b, while payload['cwd'] names a DIFFERENT directory, tmp_a.
+    The snapshot MUST appear under tmp_a (payload wins) and MUST NOT
+    appear under tmp_b (the real process cwd is never consulted) --
+    both fully inside tmp_path, no read of anything outside it."""
+    tmp_a = tmp_path / "cwd-from-payload"
+    tmp_b = tmp_path / "real-process-cwd"
+    tmp_a.mkdir()
+    tmp_b.mkdir()
+    (tmp_a / "x.txt").write_text("x", encoding="utf-8")
+
+    result = _run_hook(_critic_payload(tmp_a), cwd=tmp_b)
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
-    after = _REAL_SNAPSHOT.read_bytes() if _REAL_SNAPSHOT.exists() else None
-    assert before == after, "реальный .claude/critic_snapshot.json изменился -- нарушение края (ii)"
+
+    assert (tmp_a / ".claude" / "critic_snapshot.json").exists(), (
+        "payload['cwd'] did not win -- snapshot missing where it should have "
+        "been written"
+    )
+    assert not (tmp_b / ".claude" / "critic_snapshot.json").exists(), (
+        "the real subprocess cwd was consulted despite payload['cwd'] naming "
+        "a different directory -- край (ii) violated"
+    )
+
+
+# ---------------------------------------------------------------------
+# узел C, W-D red half for A3 (DoD point 4): "в tmp-копии запись
+# переводится на cwd процесса -- обязан упасть". Mutates a TMP-ONLY
+# copy of critic_snapshot.py (command hygiene p.7(г) -- never the live
+# artifact) so its main() ignores payload['cwd'] and falls back to the
+# real process cwd instead -- proving the rewritten A3 test's own
+# observable checks actually discriminate this defect, not merely that
+# a clean gate passes.
+# ---------------------------------------------------------------------
+
+
+def _write_broken_copy_cwd_from_process(tmp_path):
+    src = SCRIPT.read_text(encoding="utf-8")
+    marker = 'cwd = Path(payload.get("cwd") or ".")'
+    assert marker in src, (
+        "live critic_snapshot.py source shape changed -- update this "
+        "mutation probe's marker text"
+    )
+    broken_src = src.replace(
+        marker, 'cwd = Path(".")  # MUTATED (W-D probe): ignores payload, uses process cwd'
+    )
+    repo_root = tmp_path / "repo_copy_broken_cwd"
+    tools_dir = repo_root / "tools"
+    tools_dir.mkdir(parents=True)
+    broken_path = tools_dir / "critic_snapshot.py"
+    broken_path.write_text(broken_src, encoding="utf-8")
+    return broken_path
+
+
+def test_wd_red_half_cwd_from_process_breaks_a3_shape(tmp_path):
+    """W-D red half for A3: a copy whose main() ignores payload['cwd']
+    and falls back to the REAL subprocess working directory must make
+    A3's own observable checks FALSE -- the snapshot lands under
+    tmp_b (the real process cwd) instead of tmp_a (payload['cwd'])."""
+    broken_script = _write_broken_copy_cwd_from_process(tmp_path)
+    tmp_a = tmp_path / "cwd-from-payload-wd"
+    tmp_b = tmp_path / "real-process-cwd-wd"
+    tmp_a.mkdir()
+    tmp_b.mkdir()
+    (tmp_a / "x.txt").write_text("x", encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(broken_script)],
+        input=json.dumps(_critic_payload(tmp_a), ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(tmp_b),
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+    # THE regression this probe exists to catch: with the mutation
+    # applied, payload['cwd'] must NOT win (A3's own positive assertion
+    # would fail against this mutant).
+    assert not (tmp_a / ".claude" / "critic_snapshot.json").exists(), (
+        "mutation probe is broken: the mutated copy still honoured "
+        "payload['cwd'] -- update the marker/replacement text above"
+    )
+    # And confirms the mutation actually ran: the snapshot landed at the
+    # real process cwd instead.
+    assert (tmp_b / ".claude" / "critic_snapshot.json").exists()
 
 
 # ---------------------------------------------------------------------

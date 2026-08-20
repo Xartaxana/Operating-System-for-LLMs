@@ -32,15 +32,19 @@ CLI:
         [--protocol PATH] [--rule-coverage PATH]
 
 Коды выхода: 0 -- прогон состоялся; 1 -- ТОЛЬКО у --check-form
-(дефекты формы найдены); 2 -- IO/аргументы (файл не найден, не
-парсится, протокол без единого чека и т.п.). Скрипт-измеритель:
-window-прогон возвращает 0 даже когда чеки ПУСТЫ/ЖИВЫ -- вердикты не
-гейт (тот же принцип, что и calibration_counts.py).
+(дефекты формы найдены И/ИЛИ храповик гейта (а) не монотонен --
+run_check_form зовёт check_gate_a_history_monotonic и добавляет её
+провал строкой "ХРАПОВИК ГЕЙТА (а): ..." в тот же список дефектов,
+см. run_check_form); 2 -- IO/аргументы (файл не найден, не парсится,
+протокол без единого чека и т.п.). Скрипт-измеритель: window-прогон
+возвращает 0 даже когда чеки ПУСТЫ/ЖИВЫ -- вердикты не гейт (тот же
+принцип, что и calibration_counts.py).
 """
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import subprocess
@@ -96,6 +100,20 @@ DEFAULT_REGISTRY = REPO_ROOT / "logs" / "calibration_prepass.jsonl"
 # measured = "к чтению" типового окна БЕЗ принудительных тел (N-F, A14а),
 # окно закреплено ts 2026-08-14T12:12:34 (A11), window_end -- явный
 # момент замера; порог = ceil(measured*K/100)*100, K=1.05 (Р9(A)).
+#
+# ПЕРЕВЫВОД Р-D (СЛОВО ОПЕРАТОРА 2026-08-20, не молчаливый подъём):
+# ремедиация калибровки №8 (узел B) внесла в протокол ПЯТЬ правок по
+# находкам и исполнила диету до легального предела -- ни одна норма не
+# снята; замер после диеты 146664 Б пробил порог 146000 (+664).
+# Легальный выход из "не взят" -- либо снять байты (исчерпано), либо
+# поднять храповик СЛОВОМ ОПЕРАТОРА: выбрано второе. Та же формула
+# W4-3 от нового замера: ceil(146664*1.05/100)*100 = 154000.
+# Дисциплина храповика НЕ ослаблена -- она СУЖЕНА до четырёх условий,
+# машинно проверяемых блоком "raised" (check_gate_a_history_monotonic):
+# слово оператора, замер ПРОБИВШИЙ прежний порог (подъём про запас
+# запрещён), та же формула, названная причина. Прежняя запись остаётся
+# в истории нетронутой: подъём -- пристройка, не переписывание, и он
+# объявляет себя в КАЖДОЙ строке ИТОГ (ПОДЪЁМ №N).
 GATE_A_HISTORY: List[Dict[str, Any]] = [
     {
         "date": "2026-08-18",
@@ -120,6 +138,35 @@ GATE_A_HISTORY: List[Dict[str, Any]] = [
             "W4-3 замер, слово Архитектора 2026-08-20 "
             "(недобор К3 принят, храповик от факта)"
         ),
+    },
+    {
+        "date": "2026-08-20",
+        "threshold": 154_000,
+        "measured": 146_664,
+        "window_start": "2026-08-14T12:12:34",
+        "window_end": "2026-08-20T12:51:07",
+        "window_kind": "типовое",
+        "K": 1.05,
+        "basis": (
+            "остаток диеты узла B ремедиации калибровки №8 (t-565), "
+            "слово оператора 2026-08-20 (решение Р-D): храповик "
+            "перевыведен ОТ ФАКТА по той же формуле W4-3"
+        ),
+        "raised": {
+            "from": 146_000,
+            "word": (
+                "слово оператора 2026-08-20, решение Р-D — "
+                "docs/tasks/2026-08-20_calibration-8-remediation.md, "
+                "раздел «СТАТУС 08-20T20:27»; журнальное событие t-568"
+            ),
+            "measured_breach": 146_664,
+            "reason": (
+                "пять правок протокола по находкам F5/F9/F15 (нужный "
+                "рост нормы) + диета одиннадцатью пунктами до легального "
+                "предела; ни одна норма не снята, байты сверх пунктов не "
+                "добирались — снимать больше нечего"
+            ),
+        },
     },
 ]
 
@@ -151,19 +198,182 @@ def check_gate_a_history_monotonic(
     """§4.8/7.1: неаннулированная цепочка порогов НЕ растёт молча --
     аннулированные записи (A2) исключены, монотонность действует от
     первого пост-W4 замеренного элемента. Возврат (ok, message); message
-    провала называет легальный выход дословно (§4.8(iv)): снизить --
-    легально всегда; поднять -- только явным словом Архитектора."""
+    провала называет легальный выход дословно (§4.8(iv), формулировка
+    перевыведена решением Р-D 2026-08-20: Архитектор -> оператор): снизить
+    -- легально всегда; поднять -- только явным словом оператора, записанным
+    полным блоком raised (from/word/measured_breach/reason)."""
     hist = history if history is not None else GATE_A_HISTORY
+
+    def _is_valid_number(v: Any) -> bool:
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    # Ф4 (критик-гейт t-569, ремедиация Р-D): аннулирование НЕ может
+    # служить обнулением цепочки -- атака СБРОС аннулирует ВСЮ реальную
+    # историю и пристраивает две фиктивные записи-плато, для которых
+    # raised не требуется вовсе (плато легально молча) -- активная
+    # цепочка ниже тогда состоит только из выдумки и проходит. Выбранная
+    # форма инварианта (из двух предложенных в спеке): аннулированию НЕ
+    # подлежит запись с РЕАЛЬНЫМ замером (measured -- истинное значение)
+    # -- такая запись когда-либо была evidence-backed активным порогом,
+    # а не голой "ставкой" вроде первого до-M2 элемента (measured=None,
+    # А2) -- та легально аннулируема, реальный прецедент. Проверяется по
+    # ВСЕЙ истории (не только active) ДО вычисления активной цепочки --
+    # проверка снимаема одной константой из снапшота, git-история не
+    # нужна.
+    for _e in hist:
+        if _e.get("annulled") and _e.get("measured"):
+            return False, (
+                f"GATE_A_HISTORY: запись {_e.get('threshold')} Б несёт annulled, но "
+                f"измерена (measured={_e.get('measured')} Б) -- аннулирование "
+                f"реальной, когда-либо активной записи запрещено (Ф4 t-569): "
+                f"аннулировать можно только запись-ставку без measured"
+            )
+
     active = [e for e in hist if not e.get("annulled")]
+    RAISED_FIELDS = ("from", "word", "measured_breach", "reason")
+    # Р6(б) -- смежные абсурдные состояния, закрыты красным вердиктом сверх
+    # дословного §2.3 (там не поименованы): (1) вся история annulled --
+    # активной цепочки нет вовсе, вердикт по умолчанию не выносится молча
+    # зелёным; (2) raised на записи, для которой в активной цепочке нет
+    # предыдущего порога (единственная активная запись) -- заявленный
+    # подъём не от чего подтвердить.
+    if not active:
+        return False, (
+            "GATE_A_HISTORY: активной цепочки нет (вся история annulled или "
+            "история пуста) -- вердикт храповика не выносится (fail-closed)"
+        )
+    if len(active) == 1 and active[0].get("raised"):
+        return False, (
+            f"GATE_A_HISTORY: запись {active[0].get('threshold')} Б несёт raised, "
+            f"но в активной цепочке нет предыдущего порога, от которого мог быть "
+            f"подъём -- raised на нерастущей записи запрещён"
+        )
     for prev, cur in zip(active, active[1:]):
-        if cur["threshold"] > prev["threshold"]:
+        # Р8: битые данные -- fail-closed. Не только ОТСУТСТВИЕ threshold,
+        # но и НЕЧИСЛОВОЙ threshold (строка/None/т.п., адверсариальная
+        # батарея §4) -- сравнение <= на смешанных типах кидало бы
+        # необработанный TypeError вместо вердикта; здесь -- явный красный.
+        cur_t, prev_t = cur.get("threshold"), prev.get("threshold")
+        cur_t_ok = isinstance(cur_t, (int, float)) and not isinstance(cur_t, bool)
+        prev_t_ok = isinstance(prev_t, (int, float)) and not isinstance(prev_t, bool)
+        if not cur_t_ok or not prev_t_ok:
+            return False, (
+                "GATE_A_HISTORY: запись без поля threshold (или threshold не "
+                "число) — история битая (fail-closed, вердикт храповика не "
+                "выносится)"
+            )
+        if cur["threshold"] <= prev["threshold"]:
+            # Р6(б): плато/снижение легальны всегда и молча -- НО raised на
+            # такой записи заявляет подъём, которого не было; нерастущая
+            # запись с raised закрывается красным, а не тихим continue.
+            if cur.get("raised"):
+                return False, (
+                    f"GATE_A_HISTORY: запись {cur['threshold']} Б несёт raised, но "
+                    f"порог не вырос относительно предыдущего {prev['threshold']} Б "
+                    f"-- raised на нерастущей записи запрещён"
+                )
+            continue
+        raised = cur.get("raised")
+        if not isinstance(raised, dict):
             return False, (
                 f"GATE_A_HISTORY НЕ МОНОТОННА: порог вырос {prev['threshold']} Б -> "
-                f"{cur['threshold']} Б -- снизить порог легально всегда; "
-                f"поднять -- только явным словом Архитектора в поле basis "
+                f"{cur['threshold']} Б БЕЗ ОБЪЯВЛЕННОГО ПОДЪЁМА -- снизить порог "
+                f"легально всегда; поднять -- только явным словом оператора, "
+                f"записанным блоком raised (from/word/measured_breach/reason) "
                 f"новой записи"
             )
-    return True, "GATE_A_HISTORY монотонна (неаннулированная цепочка не возрастает)"
+        # НАХОДКА исполнителя (t-568): дословный not raised.get(k) НЕ ловит
+        # строку из одних пробелов -- bool("   ") is True в Python, а §7 DoD
+        # требует "пробел-строка в word -> красный" (проверка на ЛОЖНОСТЬ
+        # значения). Минимальный фикс: строковые значения считаются пустыми
+        # после strip(), прочие типы -- обычной питоновской ложностью.
+        def _raised_field_is_empty(v: Any) -> bool:
+            return not v.strip() if isinstance(v, str) else not v
+        missing = [k for k in RAISED_FIELDS if _raised_field_is_empty(raised.get(k))]
+        if missing:
+            return False, (
+                f"GATE_A_HISTORY: подъём {prev['threshold']} Б -> {cur['threshold']} Б "
+                f"с БИТЫМ ПРОВЕНАНСОМ -- в raised нет полей: {', '.join(missing)}"
+            )
+        # Ф5: raised['from']/raised['measured_breach'] обязаны быть числами
+        # -- нечисловой тип (строка и т.п.) до этой проверки крашил
+        # сравнение "<=" TypeError'ом (боевое: run_check_form зовёт эту
+        # функцию, трейсбек вместо ДЕФЕКТ+exit1 -- отказ fail-closed) И
+        # маскировал себя визуально: raised['from']='100' (строка) против
+        # prev['threshold']=100 (число) даёт != True, но сообщение печатает
+        # ДВА ОДИНАКОВЫХ НА ВИД числа как разные без объяснения почему --
+        # здесь тип назван явно, до сравнения.
+        for _fld in ("from", "measured_breach"):
+            _val = raised.get(_fld)
+            if not _is_valid_number(_val):
+                return False, (
+                    f"GATE_A_HISTORY: подъём {prev['threshold']} Б -> {cur['threshold']} Б "
+                    f"-- raised['{_fld}']={_val!r} (тип {type(_val).__name__}) не число "
+                    f"-- провенанс битый (fail-closed)"
+                )
+        if raised["from"] != prev["threshold"]:
+            return False, (
+                f"GATE_A_HISTORY: подъём объявлен с raised['from']={raised['from']} Б, "
+                f"а предыдущий активный порог {prev['threshold']} Б -- провенанс "
+                f"указывает не на ту запись"
+            )
+        if raised["measured_breach"] <= raised["from"]:
+            return False, (
+                f"GATE_A_HISTORY: подъём {raised['from']} Б -> {cur['threshold']} Б "
+                f"БЕЗ ПРОБИТОГО ЗАМЕРА (measured_breach={raised['measured_breach']} Б "
+                f"не превышает прежний порог) -- подъём про запас запрещён: сторож, "
+                f"поднятый до своего отказа, не сторож"
+            )
+        # Ф3 (критик-гейт t-569): проверка формулы НЕотключаема на записи,
+        # несущей raised -- отсутствующие/ложные/нечисловые cur['measured']/
+        # cur['K'] красят, а НЕ пропускают ветку формулы. Разрешение "запись
+        # без measured/K -- формула пропускается" писано для ОБЫЧНЫХ
+        # (нерастущих) записей (см. continue-ветку плато/снижения выше,
+        # formula там вовсе не достигается) -- на растущей RAISED-записи оно
+        # противоречит норме "все четыре условия в одной записи, ни одно не
+        # подразумевается" (§7 DoD); конфликт разрешён в пользу нормы.
+        # Атака 5/5б: запись без measured/K либо measured=0 -- красная здесь,
+        # а не "формула пропущена, порог принят на слово".
+        for _fld in ("measured", "K"):
+            _val = cur.get(_fld)
+            if not _is_valid_number(_val) or not _val:
+                return False, (
+                    f"GATE_A_HISTORY: подъём {raised['from']} Б -> {cur['threshold']} Б "
+                    f"несёт raised, но cur['{_fld}']={_val!r} отсутствует/не число/ложно "
+                    f"-- формула подъёма НЕотключаема (Ф3 t-569, fail-closed)"
+                )
+        # Ф1 (критик-гейт t-569, закрывает атаки 1/2): доказательство пробоя
+        # (raised['measured_breach']) обязано быть ТЕМ ЖЕ числом, что вошло
+        # в формулу (cur['measured']) -- иначе провенанс подъёма и
+        # арифметика порога говорят о РАЗНЫХ замерах (порог считается от
+        # одного числа, легальность пробоя доказывается другим).
+        if raised["measured_breach"] != cur["measured"]:
+            return False, (
+                f"GATE_A_HISTORY: подъём {raised['from']} Б -> {cur['threshold']} Б -- "
+                f"raised['measured_breach']={raised['measured_breach']} Б не совпадает "
+                f"с cur['measured']={cur['measured']} Б -- провенанс пробоя и замер "
+                f"формулы должны быть ОДНИМ числом"
+            )
+        # Ф2 (критик-гейт t-569, закрывает атаку 4): K подъёма обязан быть
+        # 1.05 -- другой K -- смена правила вывода, отдельное решение
+        # оператора, не тихая подмена внутри подъёма.
+        if cur["K"] != 1.05:
+            return False, (
+                f"GATE_A_HISTORY: подъём {raised['from']} Б -> {cur['threshold']} Б с "
+                f"K={cur['K']} -- другой K — смена правила вывода, отдельное решение "
+                f"оператора"
+            )
+        expect = math.ceil(cur["measured"] * cur["K"] / 100) * 100
+        if expect != cur["threshold"]:
+            return False, (
+                f"GATE_A_HISTORY: подъём не по формуле -- "
+                f"ceil({cur['measured']}*{cur['K']}/100)*100 = {expect} Б, "
+                f"а записано {cur['threshold']} Б"
+            )
+    return True, (
+        "GATE_A_HISTORY монотонна (рост только объявленным подъёмом: слово "
+        "оператора + пробивший замер + та же формула)"
+    )
 
 # ---------------------------------------------------------------------------
 # Форма шапки
@@ -1084,6 +1294,15 @@ def run_check_form(
     protocol_path: Path, rule_coverage_path: Path, require_all: bool,
     repo_root: Path = REPO_ROOT,
 ) -> CheckFormResult:
+    """Р5(а) дословно: проверяет ДВЕ вещи, обе попадают в один и тот же
+    result.defects -- (1) форму протокола (шапки/позиции/пары тел/rules-
+    форвард и т.п.) И (2) монотонность храповика гейта (а)
+    (check_gate_a_history_monotonic() на модульной GATE_A_HISTORY, без
+    аргумента). CLI-код выхода 1 у --check-form -- ЛЮБОЙ непустой
+    result.defects, форма это или храповик, значения не различает
+    (см. модульный докстринг "Коды выхода"). check_gate_a_history_monotonic
+    сама fail-closed красная на битых/нечисловых полях -- сюда она НЕ
+    добавляет исключений, только строку дефекта."""
     lines, bounds, titles = load_protocol_structure(protocol_path)
     titles_by_number = {t.number: t for t in titles}
 
@@ -1144,6 +1363,13 @@ def run_check_form(
         for n in titles_by_number:
             if n not in headered_numbers:
                 defects.append(f"FORM: --require-all: чек {n} без шапки чека")
+
+    # Р5(а): флаг проверяет ДВЕ вещи -- форму протокола (выше) И монотонность
+    # храповика гейта (а) (находка Н3: check_gate_a_history_monotonic сегодня
+    # не вызывается нигде, кроме тестов -- ставим боевой вызов сюда).
+    ok_ratchet, msg_ratchet = check_gate_a_history_monotonic()
+    if not ok_ratchet:
+        defects.append(f"ХРАПОВИК ГЕЙТА (а): {msg_ratchet}")
 
     return CheckFormResult(defects=defects, titles=titles, headers=parsed_headers)
 
@@ -2481,13 +2707,28 @@ def render_window_report(
     # атрибутом (монки-патчится существующими тестами напрямую) -- строка
     # печатает его же значение, провенанс -- отдельно из истории.
     gate_entry = gate_a_active_entry()
+    # Р-D: подъём храповика НИКОГДА не молчит. Активная запись, полученная
+    # подъёмом, объявляет его в КАЖДОЙ строке ИТОГ -- с порядковым номером
+    # по всей неаннулированной цепочке и с прежним порогом. Мир БЕЗ подъёма
+    # (все записи -- замеры/снижения) печатает строку БАЙТ В БАЙТ как до
+    # этой правки: суффикс пуст (К2-инвариант W4-3 не тронут).
+    gate_raised = gate_entry.get("raised") or {}
+    raise_suffix = ""
+    if gate_raised:
+        raise_no = sum(1 for e in GATE_A_HISTORY
+                       if not e.get("annulled") and e.get("raised"))
+        raise_suffix = (
+            f"; ПОДЪЁМ №{raise_no} словом оператора {gate_entry.get('date')} "
+            f"с {gate_raised.get('from')} Б от замера "
+            f"{gate_raised.get('measured_breach')} Б"
+        )
     out.append(
         f"\nИТОГ: живых {report['alive_count']}/{report['total_checks']} · "
         f"к чтению {to_read} Б из {total} Б ({pct:.1f}%) · "
         f"из них тела {bodies_bytes} Б · принудительно {forced_bytes} Б · "
         f"гейт (а) ≤{GATE_A_THRESHOLD_BYTES} Б (храповик от замера "
         f"{gate_entry.get('date')}, окно {gate_entry.get('window_kind')}, "
-        f"K={gate_entry.get('K')}): {gate_verdict} ({sign}{gate_diff} Б)"
+        f"K={gate_entry.get('K')}{raise_suffix}): {gate_verdict} ({sign}{gate_diff} Б)"
     )
     # Р9 справочно: число пустого окна печатается рядом с гейтом, В
     # ФОРМУЛУ ПОРОГА НЕ ВХОДИТ (база -- только типовое окно).

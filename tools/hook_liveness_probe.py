@@ -91,10 +91,21 @@ flake, PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md chek 26(д)) -- reported
 as the separate, non-fatal LIVE-STATE-AMBIENT finding instead. A path
 whose content cannot be read at all when checked (e.g. the file was
 deleted between the two snapshots, or a permission error) cannot be
-positively cleared, so it stays on the LIVE-STATE-TOUCHED (fail) side
--- the conservative default, never silently downgraded. A passing case
-whose OWN isolation quietly leaked into the live repo is still a WORSE
-finding than a case that plainly failed.
+positively cleared BY CONTENT, so by default it stays on the
+LIVE-STATE-TOUCHED (fail) side -- the conservative default, never
+silently downgraded. AMENDMENT (2026-08-20, same-day flake class A
+re-opened after A4's own fix): a path that did NOT exist in the
+"before" snapshot either (absent at the run's own START, not merely
+gone at the END) and is unreadable NOW is reclassified AMBIENT
+instead -- it appeared and vanished entirely INSIDE the run's own
+window, the same benign-flake shape as an ordinary content change,
+just caught mid-disappearance instead of mid-edit; this probe's OWN
+isolated writes never produce this exact shape (they leave either a
+marked path name or readable marked content behind). A path that DID
+exist before and is unreadable now, or is unreadable for any other
+reason, is UNCHANGED by this amendment and stays on the fail side.
+A passing case whose OWN isolation quietly leaked into the live repo
+is still a WORSE finding than a case that plainly failed.
 
 VERDICTS (per case): OK, DEAD (a trail was expected -- neither output
 nor artifact appeared), MISMATCH (output/artifact appeared but the
@@ -235,16 +246,36 @@ def _content_contains_marker(path: str):
     return LIVENESS_MARKER.encode("ascii") in data
 
 
-def attribute_live_state_diff(diff: list) -> "tuple[list, list]":
+def attribute_live_state_diff(diff: list, before: dict = None) -> "tuple[list, list]":
     """Splits *diff* (diff_live_state()'s output) into (leaked, ambient)
     per Р6(а)'s marker rule -- see module docstring "ATTRIBUTION". A
     path is attributed to a genuine LEAK (this probe's own isolation
     failing) when LIVENESS_MARKER appears either in the path's own name
     or in the file's CURRENT content; everything else is AMBIENT
-    (informational, non-fatal). A path that cannot be read at all right
-    now (deleted, permission error) is UNDECIDABLE and stays on the
-    leak side -- the conservative default: content attribution can only
-    ever CLEAR a diff to ambient, never silently drop it."""
+    (informational, non-fatal).
+
+    *before* is the pre-run snapshot_live_state() dict, OPTIONAL:
+
+    - *before* omitted (None) -- the ORIGINAL conservative form: a path
+      that cannot be read at all right now (deleted, permission error)
+      is UNDECIDABLE and stays on the leak side, unconditionally. Kept
+      as the DEFAULT for back-compat callers that only have the diff,
+      not the snapshot (tools/test_q503_selfreport.py's own pin of
+      exactly this single-argument shape).
+    - *before* given -- a same-day flake reopens this class (2026-08-20,
+      A4 sibling): a path ABSENT from *before* too (before.get(path) is
+      None -- covers both a directory-walked target never seen at
+      "before" time and a fixed file target whose fingerprint was
+      already None then) that is unreadable NOW is AMBIENT, not leak --
+      it appeared and vanished entirely INSIDE this run's own
+      before/after window (e.g. another session's transient ambient
+      file), never something this probe's own isolation could have
+      produced (its own leaked writes always leave a marked path name
+      or readable marked content behind, never a vanish-before-read). A
+      path that WAS present in *before*, or is unreadable for any OTHER
+      reason, is untouched by this amendment and stays on the leak
+      side -- content attribution can otherwise only ever CLEAR a diff
+      to ambient, never silently drop a genuinely undecidable one."""
     leaked = []
     ambient = []
     for path in diff:
@@ -254,9 +285,19 @@ def attribute_live_state_diff(diff: list) -> "tuple[list, list]":
         has_marker = _content_contains_marker(path)
         if has_marker is False:
             ambient.append(path)
+        elif has_marker is None:
+            # Unreadable right now (deleted, permission error) --
+            # undecidable by content alone. Narrowed to ambient ONLY
+            # when *before* is supplied AND the path did not exist
+            # there either (appeared-and-vanished inside the window);
+            # every other case (before omitted, or path existed
+            # before) keeps the original conservative leak default.
+            if before is not None and before.get(path) is None:
+                ambient.append(path)
+            else:
+                leaked.append(path)
         else:
-            # True (marker found in content) or None (unreadable/
-            # undecidable) both stay on the fail side.
+            # True: marker found in content -> genuine leak.
             leaked.append(path)
     return leaked, ambient
 
@@ -1155,7 +1196,7 @@ def run_all() -> dict:
     results = [run_case(c) for c in CASES]
     after = snapshot_live_state()
     live_state_diff = diff_live_state(before, after)
-    live_state_leaked, live_state_ambient = attribute_live_state_diff(live_state_diff)
+    live_state_leaked, live_state_ambient = attribute_live_state_diff(live_state_diff, before)
 
     return {
         "no_cases": False,

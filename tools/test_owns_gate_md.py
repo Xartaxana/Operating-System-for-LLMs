@@ -253,9 +253,33 @@ def test_word_boundary_seen_stays_orthogonal_to_region_design_choice():
 
 def test_decide_quoted_owns_warn_when_all_markers_are_quoted_sidecar_not_grown(tmp_path):
     """Дискриминация на уровне decide(): сиблинг -- QUOTED_OWNS_WARN,
-    sidecar не создаётся (D3). На живой цели путь регистрируется молча
-    (нет пересечений -> output=None) И sidecar СОЗДАЁТСЯ -- ОБА assert'а
-    ниже красные на MODULE_UNDER_TEST=live (ключ D1/D3 сквозным путём)."""
+    sidecar не создаётся (D3). Р4 (узел D ремедиации калибровки #8,
+    решение Lead 2026-08-20): предупреждение печатается ТОЛЬКО при
+    НЕЗАВИСИМОМ write-признаке (WRITE_INDICATORS_RE) в тексте, отдельном
+    от самого цитируемого owns-маркера -- фикстура поэтому несёт "Правь
+    файлы" отдельной прозаической строкой. На живой цели путь
+    регистрируется молча (нет пересечений -> output=None) И sidecar
+    СОЗДАЁТСЯ -- ОБА assert'а ниже красные на MODULE_UNDER_TEST=live
+    (ключ D1/D3 сквозным путём)."""
+    registry = tmp_path / "owns_registry.jsonl"
+    prompt = (
+        "DoD: тест зелёный, witness приложен.\nДано: репо целиком.\n"
+        "> owns (ABSOLUTE write paths): D:/repo/tools/real_target.py\n"
+        "Правь файлы, как описано выше."
+    )
+    exit_code, output = m.decide(_writing_payload(prompt), registry_path=registry, now=_NOW)
+    assert exit_code == 0
+    assert output is not None
+    assert not registry.exists()
+
+
+def test_decide_quoted_owns_warn_not_printed_when_no_write_indicator_readonly(tmp_path):
+    """Р4, вторая половина новой нормы (read-only): те же закавыченные
+    owns-маркеры, БЕЗ независимого write-признака (WRITE_INDICATORS_RE)
+    нигде в тексте -- QUOTED_OWNS_WARN НЕ печатается, decide() тихо
+    (0, None), sidecar не растёт. Закрывает F10 (t-546): read-only
+    диспатч, где owns-слово стоит именем искомого маркера в цитате/
+    инлайн-коде, без единого write-глагола в тексте."""
     registry = tmp_path / "owns_registry.jsonl"
     prompt = (
         "DoD: тест зелёный, witness приложен.\nДано: репо целиком.\n"
@@ -264,7 +288,7 @@ def test_decide_quoted_owns_warn_when_all_markers_are_quoted_sidecar_not_grown(t
     )
     exit_code, output = m.decide(_writing_payload(prompt), registry_path=registry, now=_NOW)
     assert exit_code == 0
-    assert output is not None
+    assert output is None
     assert not registry.exists()
 
 
@@ -311,10 +335,14 @@ def test_decide_normal_declaration_registers_and_no_warn(tmp_path):
 def test_window_on_boundary_still_live(tmp_path):
     registry = tmp_path / "owns_registry.jsonl"
     now = _NOW
-    # ровно 24:00:00 в прошлом -- граница ВКЛЮЧИТЕЛЬНА (правило 6а).
+    # ровно на границе окна живости в прошлом -- граница ВКЛЮЧИТЕЛЬНА
+    # (правило 6а). Ссылка на m.WINDOW_SECONDS символическая -- окно
+    # сужено узлом D ремедиации калибровки #8 (Р5) с 24ч (86400с) до 8ч
+    # (28800с); тест проверяет РОВНО границу, какой бы она ни была, а не
+    # застывший литерал старой нормы.
     from datetime import timedelta
 
-    old_ts = now - timedelta(seconds=86400)
+    old_ts = now - timedelta(seconds=m.WINDOW_SECONDS)
     with registry.open("a", encoding="utf-8") as f:
         f.write(json.dumps({
             "ts": old_ts.strftime(m._TS_FORMAT), "session_key": "other", "cwd": "D:\\repo",
@@ -330,9 +358,11 @@ def test_window_on_boundary_still_live(tmp_path):
 def test_window_beyond_boundary_is_stale(tmp_path):
     registry = tmp_path / "owns_registry.jsonl"
     now = _NOW
+    # символическая ссылка на m.WINDOW_SECONDS + 1 -- та же причина, что
+    # у test_window_on_boundary_still_live выше (Р5, окно 24ч -> 8ч).
     from datetime import timedelta
 
-    stale_ts = now - timedelta(seconds=86401)
+    stale_ts = now - timedelta(seconds=m.WINDOW_SECONDS + 1)
     with registry.open("a", encoding="utf-8") as f:
         f.write(json.dumps({
             "ts": stale_ts.strftime(m._TS_FORMAT), "session_key": "other", "cwd": "D:\\repo",

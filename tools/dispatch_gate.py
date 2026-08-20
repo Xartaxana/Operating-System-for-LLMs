@@ -1,8 +1,27 @@
-r"""dispatch_gate_md.py -- region-aware sibling of tools/dispatch_gate.py
-(партия 2 сканера регионов, УЗЕЛ C, t-529 / docs/tasks/
-2026-08-19_scanner-party2-spec.md). Живой tools/dispatch_gate.py НЕ
-ТРОГАЕТСЯ (D-0069) -- этот файл нейтральный сосед; посадка (замена
-живого пути + регистрация в MECHANISM_PREFIXES) -- акт Lead.
+r"""tools/dispatch_gate.py -- живой PreToolUse блокирующий хук Claude
+Code на Task/Agent (DoD-маркер / манифест given-owns / лейбл-модель).
+Region-aware с 2026-08-19 (партия 2 сканера регионов, УЗЕЛ C, t-529 /
+docs/tasks/2026-08-19_scanner-party2-spec.md) -- ПОСАЖЕН на этот путь
+байт-копией из сиблинга dispatch_gate_md.py коммитом 44fe06e ("Партия
+2 сканера посажена: dispatch_gate B1/B2/W1 + WRITE-QUOTED WARN,
+owns_gate prose-предикат, mechanism_gate SKIP/TIER-фильтрация").
+
+НАХОДКА (координатор, 2026-08-20, батч t-543 follow-up, ТОТ ЖЕ КЛАСС,
+что t-533 у tools/owns_gate.py, "сторож/докстринг протухает после
+собственной посадки"): до этой правки шапка ЭТОГО файла всё ещё несла
+докстринг сиблинга ДО посадки дословно -- "dispatch_gate_md.py --
+region-aware sibling of tools/dispatch_gate.py... Живой
+tools/dispatch_gate.py НЕ ТРОГАЕТСЯ (D-0069) -- этот файл нейтральный
+сосед; посадка ... акт Lead" -- описывала МИР ДО посадки (сиблинг как
+отдельный, ещё не приземлённый файл, живой путь как нечто ДРУГОЕ,
+нетронутое) и тем самым объявляла файл соседом самого себя (шапка
+несуществующего мира на боевом гейте). ФИКС: абзац переписан на
+ТЕКУЩУЮ реальность (этот файл САМ ЕСТЬ живой гейт, посадка совершена
+коммитом 44fe06e). Ниже -- ДОСЛОВНЫЙ перенос остального докстринга
+сиблинга (класс/решения/позиционные инварианты/16-блочная история
+живого гейта до посадки), НЕ переписан -- он описывает КЛАСС и решения
+партии 2, актуальные и после посадки, только собственная самоидентификация
+файла в первом абзаце была протухшей.
 
 Образец формы: tools/negative_lint.py (партия 1, посажен 89b6142) --
 тройной try/except импорта md_regions, _safe_scan() как единая точка
@@ -628,6 +647,16 @@ except ImportError:
         KIND_FENCED = "fenced"
         KIND_BLOCKQUOTE = "blockquote"
 
+# УЗЕЛ D ремедиации калибровки #8 (2026-08-20, Р1 "GIVEN-PATH и чужие
+# деплои"): читает `deploys` из delegation.config.yaml -- см.
+# _load_deploy_markers() ниже. Фейл-опен на отсутствующий PyYAML (та же
+# форма, что md_regions/scan выше) -- деплой-исключение просто не
+# применяется, поведение как до этой правки.
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
 # ЧАСТЬ B (П3, attempt 2, живой файл): AGENTS_DIR -- фиксированный актив
 # ЭТОГО деплоя, путь от расположения скрипта (см. докстринг МОДУЛЯ выше,
 # раздел "НОСИТЕЛЬ РЕЗОЛЮЦИИ" -- дословный перенос, критик-фикс 4).
@@ -689,17 +718,102 @@ def is_path_like_token(tok) -> bool:
     есть) -- расхождение с заявленным намерением, а не с классом.
 
     (Дословный перенос из докстринга is_path_like_token() живого
-    tools/dispatch_gate.py -- критик-фикс 4, узел C, t-529.)"""
+    tools/dispatch_gate.py -- критик-фикс 4, узел C, t-529.)
+
+    Р7 УЗЛА D РЕМЕДИАЦИИ КАЛИБРОВКИ #8 (2026-08-20, "Фантомный токен",
+    форма 1, решение Lead): ветка POSIX-абсолютного пути ужесточена --
+    ПОМИМО совпадения с _PATH_TOKEN_POSIX_ABS_RE (корень + >=1 символ
+    сегмента) токен обязан НЕ нести пробелов И нести ЛИБО расширение
+    файла (`\\.[A-Za-z0-9]{1,10}` в хвосте) ЛИБО >=2 сегмента после
+    корня (`/a/b` -- два сегмента, `/a` -- один). Мотив: короткие
+    прозаические обрывки с одним слэшем ("смотри /etc системы",
+    единичное упоминание) ложно проходили путём. ГРАНИЦА (правило 6а):
+    "/etc/x" (2 сегмента, без расширения) -- True; "/a" (1 сегмент, без
+    расширения) -- False (см. test_root_with_segment_absolute_token_is_
+    a_path в test_dispatch_gate.py -- ЭТА правка НАРОЧНО СУЖАЕТ прежний
+    пин AK2 для голых 1-сегментных POSIX-путей без расширения; см.
+    докстринг того теста за перенесённые значения). Windows-ветка
+    (_PATH_TOKEN_WIN_ABS_RE) и глоб-ветка (`"*" in tok`) этой формой НЕ
+    затронуты -- решение называет буквально "POSIX-ветка"."""
     if not isinstance(tok, str) or not tok:
         return False
-    if _PATH_TOKEN_WIN_ABS_RE.match(tok) or _PATH_TOKEN_POSIX_ABS_RE.match(tok):
+    if _PATH_TOKEN_WIN_ABS_RE.match(tok):
         return True
+    if _PATH_TOKEN_POSIX_ABS_RE.match(tok):
+        if " " in tok:
+            return False
+        has_ext = bool(re.search(r"\.[A-Za-z0-9]{1,10}$", tok))
+        if has_ext:
+            return True
+        segments = [s for s in tok.lstrip("/\\").split("/") if s]
+        return len(segments) >= 2
     return "*" in tok and ("/" in tok or "\\" in tok)
 
 
+def marker_immediately_followed_by_slash(remainder) -> bool:
+    """Р7 узла D ремедиации калибровки #8 ("Фантомный токен", форма 2,
+    решение Lead, 2026-08-20): remainder -- текст СРАЗУ после конца
+    совпадения owns/given-маркера на строке (typically `line[m.end():]`,
+    ДО любой обрезки мусора). True, если remainder начинается ПРЯМО с
+    "/" -- НИ ОДНОГО символа-разделителя (ни пробела, ни двоеточия, ни
+    тире, ни markdown "**") между концом маркера и слэшем.
+
+    Закрывает класс "owns/non-goals/handoff": каноническое прозаическое
+    перечисление секций манифеста, дословно из правила 11 CLAUDE.md
+    кита ("given/owns/non-goals/handoff"), матчит OWNS_WORD_RE подстрокой
+    "owns", а remainder -- "/non-goals/handoff" -- ошибочно проходил бы
+    как POSIX-абсолютный путь ДАЖЕ ПОСЛЕ формы 1 выше (у него 2 сегмента
+    -- "non-goals", "handoff" -- форма 1 одна эту фразу не останавливает,
+    нужна ИМЕННО эта форма 2). Настоящая owns-декларация ВСЕГДА несёт
+    разделитель между маркером и первым путём ("owns: /d/x.py", "owns
+    (ABSOLUTE write paths): /d/x.py", markdown "**owns**: /d/x.py") --
+    эти формы НЕ отбрасываются (после разделителя remainder не начинается
+    с "/" -- начинается с ":"/пробела/"*").
+
+    ОБЩАЯ точка правды (Р7, решение Lead: "локальный фильтр в owns_gate
+    ОТКЛОНЁН... заводит расхождение двух гейтов", тот же мотив, что
+    батч 07-28 п.(б)/D-0043): используется И
+    dispatch_gate.owns_declaration_has_path_token/_region_aware_owns_
+    declaration_has_path_token (эта же ветка B2-write, ПЕРЕД вызовом
+    _owns_region_has_path_token на прямом остатке строки маркера) И
+    owns_gate._paths_from_line (импорт, применяется ОБОИМ проходам --
+    word-boundary и MANIFEST_OWNS_RE фоллбек, т.к. оба вызывают ОДНУ и
+    ту же _paths_from_line) -- НЕ дублируется локально в owns_gate."""
+    return isinstance(remainder, str) and remainder.startswith("/")
+
+
+# ПОЗИЦИОННЫЙ ИНВАРИАНТ (НЕ ТРОНУТ узлом D, откат замера): симметричная
+# правка (markdown-заголовок в префиксе, см. owns_gate._DECLARATION_
+# PREFIX_RE) была ПРОБОВАНА и ОТКАЧЕНА -- корпус-реплей (DoD п.2, узел D
+# ремедиации калибровки #8) поймал РЕАЛЬНУЮ смену exit_code: заголовочная
+# форма "## owns (...)" с путём НА СЛЕДУЮЩЕЙ строке заставляла проверку 2
+# (БЛОКИРУЮЩУЮ) впервые видеть is_write=True на реальном историческом
+# диспатче без given-маркера -- легальный ДО этой правки диспатч (exit 0)
+# становился БЛОКОМ (exit 2). "Сменивших exit_code: 0" -- обязательное
+# условие Р7 узла D -- эта правка его нарушала, хотя Р7 её не требовал
+# (заголовок owns -- предмет owns_gate.py test #3, WARN-only, туда правка
+# и осталась). БЕЗ ИЗМЕНЕНИЙ (живая форма).
 _OWNS_DECLARATION_PREFIX_RE = re.compile(r"^\s*(?:[-*•]\s+)?(?:\*\*)?$")
+# D-2 (вердикт критика t-554, 2026-08-20, тот же класс, тот же коммит,
+# что _MANIFEST_SECTION_HEADER_RE ниже): markdown-заголовок/буллет
+# добавлены в стоп-условие "строка продолжения -- НОВАЯ секция манифеста"
+# (owns_declaration_has_path_token() и её region-aware версия читают
+# ЭТУ константу, чтобы решить, стоит ли брать путь СО СЛЕДУЮЩЕЙ строки).
+# ЭТА КОНСТАНТА -- на пути decide() (B2-write), В ОТЛИЧИЕ от
+# _MANIFEST_SECTION_HEADER_RE (только W1 given_path_warn, warn-слой);
+# проверено (не угадано), что расширение НЕ может ДОБАВИТЬ блокировку:
+# _OWNS_SECTION_STOP_RE -- УСЛОВИЕ ОСТАНОВКИ поиска пути на строке
+# продолжения (`continue`, путь не засчитан), а не условие признания
+# декларации -- расширение множества строк, которые матчат этот STOP,
+# может только СНЯТЬ найденный ранее путь (is_write True -> False),
+# то есть только УБРАТЬ потенциальную блокировку проверки 2, никогда не
+# добавить новую (в отличие от отменённой симметричной правки
+# _OWNS_DECLARATION_PREFIX_RE выше -- ТА расширяла признание МАРКЕРА,
+# могла добавить True там, где раньше было False, и поэтому осталась
+# ОТКАЧЕННОЙ; это РАЗНЫЕ регексы с противоположной ролью в decide()).
 _OWNS_SECTION_STOP_RE = re.compile(
-    r"^\s*(?:\*\*)?(given|дано|owns|non-goals|handoff)\b", re.IGNORECASE
+    r"^\s*(?:#{1,6}\s+)?(?:[-*•]\s+)?(?:\*\*)?(given|дано|owns|non-goals|handoff)\b",
+    re.IGNORECASE,
 )
 _OWNS_MARKER_JUNK_ONLY_RE = re.compile(
     r"^(?:\s*\([^)]*\))?[\s*:\-—«»\"']*$"
@@ -718,10 +832,18 @@ def _owns_region_has_path_token(text: str) -> bool:
 
 def owns_declaration_has_path_token(prompt: str) -> bool:
     """Дешёвый bare (не региональный) write-предикат проверки 2 -- живая
-    копия live :654-692, БЕЗ ИЗМЕНЕНИЙ (позиционный инвариант). Остаётся
-    как есть -- (а) И-0 фоллбек, когда md_regions недоступен/degraded;
-    (б) "маркерный хит" половина И-1-предфильтра для
-    _region_aware_is_write() ниже; (в) эталон для теста равенства
+    копия live :654-692 НА МОМЕНТ узла C (t-529); с тех пор ИЗМЕНЕНА
+    ДВАЖДЫ (DOC-фикс, вердикт критика t-554, 2026-08-20 -- прежняя
+    формулировка "БЕЗ ИЗМЕНЕНИЙ" протухла и удалена): Р7 форма 2 узла D
+    ремедиации калибровки #8 добавила проверку
+    marker_immediately_followed_by_slash() (см. вызов ниже); D-2 того же
+    узла расширила _OWNS_SECTION_STOP_RE (используется здесь для
+    стоп-условия строки продолжения), которую эта функция читает БЕЗ
+    изменения СОБСТВЕННОГО тела. Тело-как-таковое (порядок веток,
+    вызовы) НЕ менялось ни разу -- изменились ДВЕ константы, которые оно
+    вызывает. Остаётся как есть -- (а) И-0 фоллбек, когда md_regions
+    недоступен/degraded; (б) "маркерный хит" половина И-1-предфильтра
+    для _region_aware_is_write() ниже; (в) эталон для теста равенства
     C5/t-384 (test_owns_declaration_has_path_token_agrees_with_owns_gate_
     extract_on_matrix -- та же матрица, что живая батарея уже несёт)."""
     if not isinstance(prompt, str) or not prompt:
@@ -731,10 +853,12 @@ def owns_declaration_has_path_token(prompt: str) -> bool:
         m = OWNS_WORD_RE.search(line)
         if not m:
             continue
-        if _owns_region_has_path_token(line[m.end():]):
+        remainder = line[m.end():]
+        if marker_immediately_followed_by_slash(remainder):
+            continue  # Р7 форма 2 (узел D): "owns/non-goals/handoff" -- не декларация
+        if _owns_region_has_path_token(remainder):
             return True
         prefix = line[: m.start()]
-        remainder = line[m.end():]
         if not _OWNS_DECLARATION_PREFIX_RE.match(prefix):
             continue
         if not _OWNS_MARKER_JUNK_ONLY_RE.match(remainder):
@@ -871,10 +995,12 @@ def _region_aware_owns_declaration_has_path_token(prompt: str, scan_result) -> b
         marker_offset = offsets[i] + m.start()
         if _is_quoted(_region_at(scan_result, marker_offset)):
             continue  # Ф3а: цитируемая owns-декларация не включает проверку 2
-        if _owns_region_has_path_token(line[m.end():]):
+        remainder = line[m.end():]
+        if marker_immediately_followed_by_slash(remainder):
+            continue  # Р7 форма 2 (узел D): "owns/non-goals/handoff" -- не декларация
+        if _owns_region_has_path_token(remainder):
             return True
         prefix = line[: m.start()]
-        remainder = line[m.end():]
         if not _OWNS_DECLARATION_PREFIX_RE.match(prefix):
             continue
         if not _OWNS_MARKER_JUNK_ONLY_RE.match(remainder):
@@ -1041,11 +1167,331 @@ def _is_under_root(path_str: str, root: str) -> bool:
     return norm_path == norm_root or norm_path.startswith(norm_root + os.sep)
 
 
+# ======================================================================
+# УЗЕЛ D РЕМЕДИАЦИИ КАЛИБРОВКИ #8 (2026-08-20) -- Р1 (чужие деплои,
+# "громкость, не резолюция") и Р2 (owns-секция, диспатч её СОЗДАЁТ).
+# ОБА фильтра -- ЧИСТАЯ ГРОМКОСТЬ: они НИКОГДА не добавляют путь в
+# missing, только ИСКЛЮЧАЮТ кандидатов из проверки существования.
+# ПОЗИЦИОННЫЙ ИНВАРИАНТ (решение Lead, дословно): "освобождающая ветка
+# встаёт ПОСЛЕ извлечения кандидатов и ДО проверки существования" --
+# см. _filter_given_candidates() ниже, вызывается ПОСЛЕ extract_given_
+# candidates()/extract_given_candidates_region_aware(), ДО os.path.exists.
+# D-1 (вердикт критика t-554, 2026-08-20): Р1 СУЖЕНО до ЛОКАЛЬНОСТИ
+# маркера -- см. _tokens_outside_deploy_paragraph() и докстринг
+# _filter_given_candidates() ниже за полный пересмотр. D-2/D-3 того же
+# вердикта живут в _MANIFEST_SECTION_HEADER_RE/_section_map ниже.
+# ======================================================================
+
+_DEPLOYS_CONFIG_PATH = Path(__file__).resolve().parents[1] / "delegation.config.yaml"
+
+
+def _load_deploy_markers() -> dict:
+    """Р1: {имя: путь} из ключа `deploys` delegation.config.yaml (та же
+    карта, что tools/calibration_prepass.py уже читает для deploy.exists
+    -- носитель топологии деплоев этого кита, Phase 5 W2a). ФЕЙЛ-ОПЕН:
+    отсутствующий файл / нечитаемый YAML / отсутствующий PyYAML /
+    нестроковые ключи-значения -> {} (пусто -- деплой-исключение просто
+    не применяется, поведение КАК ДО этой правки)."""
+    if yaml is None:
+        return {}
+    try:
+        text = _DEPLOYS_CONFIG_PATH.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return {}
+    try:
+        data = yaml.safe_load(text) or {}
+    except Exception:
+        return {}
+    deploys = data.get("deploys") if isinstance(data, dict) else None
+    if not isinstance(deploys, dict):
+        return {}
+    return {
+        k: v for k, v in deploys.items() if isinstance(k, str) and isinstance(v, str)
+    }
+
+
+# _prompt_names_external_deploy(prompt, deploys) -- the ORIGINAL,
+# GLOBAL (paragraph-unaware) Р1 predicate -- was REMOVED here (batch
+# 2026-08-20, t-543 follow-up): after D-1 (вердикт критика t-554)
+# narrowed Р1 to paragraph-local scope, this function became DEAD CODE
+# -- confirmed by a positive-controlled repo-wide grep (including
+# tools/test_dispatch_gate.py and every other test file): zero call
+# sites remained, only this now-removed definition and a docstring
+# pointer in _tokens_outside_deploy_paragraph() below (also fixed, see
+# its own docstring) -- a live blocking gate carrying an unreachable
+# function with a dangling live docstring pointer is the same class
+# M3(б) below fixes for the module header, not left uncorrected next
+# to it. Its BODY, for the historical record (never re-added without a
+# call site): a case-insensitive, word-boundary check of whether
+# *prompt* names a configured `deploys` key by NAME or by its PATH
+# (normalized slashes/case, substring match) -- see
+# _tokens_outside_deploy_paragraph() below for the paragraph-local
+# successor that superseded it.
+
+
+def _paragraph_spans(prompt: str) -> list:
+    """D-1 (вердикт критика t-554, 2026-08-20): АБЗАЦ = блок непустых
+    строк между пустыми строками (line.strip() == "" -- разделитель).
+    Возвращает список непересекающихся char-офсетов (start, end) в
+    порядке возрастания -- по одному диапазону на абзац, включает
+    завершающие переводы строк ВНУТРИ абзаца, НЕ включает пустые
+    строки-разделители. КРАЙ (задокументирован явно, спека узла требует
+    закрепить тестом): промпт БЕЗ единой пустой строки даёт РОВНО один
+    span, покрывающий весь текст -- поведение п.1 (маркер освобождает
+    весь промпт) для такого промпта остаётся ТЕМ ЖЕ, что было ДО этой
+    правки; это ПРИНЯТО сознательно, не дефект (см. докстринг
+    _tokens_outside_deploy_paragraph и тест
+    test_d1_prompt_without_blank_line_marker_frees_whole_prompt)."""
+    lines = prompt.splitlines(keepends=True)
+    spans = []
+    pos = 0
+    para_start = None
+    for line in lines:
+        if line.strip() == "":
+            if para_start is not None:
+                spans.append((para_start, pos))
+                para_start = None
+        elif para_start is None:
+            para_start = pos
+        pos += len(line)
+    if para_start is not None:
+        spans.append((para_start, pos))
+    return spans
+
+
+def _paragraph_index(spans: list, offset: int):
+    """Индекс абзаца (из _paragraph_spans), которому принадлежит
+    offset, либо None (offset внутри пустой строки-разделителя, ДО
+    первого абзаца, либо за пределами всех абзацев)."""
+    if not spans:
+        return None
+    starts = [s for s, _ in spans]
+    idx = bisect.bisect_right(starts, offset) - 1
+    if idx < 0:
+        return None
+    start, end = spans[idx]
+    if start <= offset < end:
+        return idx
+    return None
+
+
+def _tokens_outside_deploy_paragraph(prompt: str, deploys: dict, patterns) -> set:
+    """Р1 СУЖЕНО (вердикт критика t-554, 2026-08-20): множество ТОКЕНОВ
+    (текст совпадения given-регексов), у которых ХОТЯ БЫ ОДНО вхождение
+    лежит ВНЕ абзаца, несущего маркер внешнего деплоя (имя ключа
+    `deploys` ИЛИ его путь -- те же два условия, что прежний ГЛОБАЛЬНЫЙ
+    (без учёта абзаца) предикат Р1 проверял целиком по всему промпту --
+    удалён батчем 2026-08-20 (t-543 follow-up) как мёртвый код после
+    того, как D-1 сузил Р1 до этой, ЛОКАЛИЗОВАННОЙ по позиции, формы;
+    см. комментарий на месте удалённого определения выше за историю).
+    Форма -- та же, что
+    _tokens_outside_owns_section() выше несёт для owns-секции ("одно
+    вхождение решает"), инвертированная по смыслу: там "вне owns"
+    сохраняет кандидата в проверке, здесь "вне маркерного абзаца"
+    ЛИШАЕТ кандидата освобождения (_filter_given_candidates ниже читает
+    эту разницу через отдельное условие, не общий предикат).
+
+    ПОЧЕМУ НЕ ранний возврат при "маркеров вообще нет": deploys пуст ИЛИ
+    ни имя, ни путь ни разу не встретились в тексте -- marker_paragraphs
+    остаётся пустым множеством, и цикл по patterns ниже добавит В outside
+    КАЖДЫЙ найденный токен (idx not in set() -- всегда True) -- то есть
+    "нет маркера вообще" и "маркер есть, но кандидат вне его абзаца" дают
+    ОДИН и тот же итог (кандидат не освобождается) через ОДИН и тот же
+    путь кода, без развилки-дублёра."""
+    outside = set()
+    if not isinstance(prompt, str) or not prompt:
+        return outside
+    spans = _paragraph_spans(prompt)
+    if not spans:
+        return outside
+    marker_paragraphs = set()
+    if deploys:
+        norm_prompt = prompt.replace("\\", "/").lower()
+        for name, path in deploys.items():
+            for m in re.finditer(r"\b" + re.escape(name) + r"\b", prompt, re.IGNORECASE):
+                idx = _paragraph_index(spans, m.start())
+                if idx is not None:
+                    marker_paragraphs.add(idx)
+            norm_path = path.replace("\\", "/").lower().rstrip("/")
+            if not norm_path:
+                continue
+            start = 0
+            while True:
+                pos = norm_prompt.find(norm_path, start)
+                if pos == -1:
+                    break
+                idx = _paragraph_index(spans, pos)
+                if idx is not None:
+                    marker_paragraphs.add(idx)
+                start = pos + 1
+    for pattern in patterns:
+        for m in pattern.finditer(prompt):
+            idx = _paragraph_index(spans, m.start())
+            if idx not in marker_paragraphs:
+                outside.add(m.group(0))
+    return outside
+
+
+# Закрытый список секций манифеста, R11 CLAUDE.md кита -- given/дано,
+# owns, non-goals, handoff (та же форма, что owns_gate._SECTION_HEADER_
+# STOP_RE уже несёт для стоп-условия многострочного owns-блока).
+# D-2 (вердикт критика t-554, 2026-08-20): опциональный markdown-
+# заголовок ("#{1,6}\s+") и буллет ("[-*•]\s+") добавлены ПЕРЕД "**" --
+# ТА ЖЕ форма, что owns_gate._DECLARATION_PREFIX_RE уже несёт (D-0043,
+# один класс, не изобретается заново). ДО этой правки owns-секция,
+# объявленная заголовком ("## OWNS (...)") или буллетом ("- owns:") --
+# 14 и 15 из 237 owns-несущих боевых промптов -- НЕ распознавалась ни
+# здесь, ни в _OWNS_SECTION_STOP_RE ниже (WARN-слой given_path_warn
+# молчал о секции; см. также _OWNS_SECTION_STOP_RE выше, тот же класс,
+# тот же коммит).
+_MANIFEST_SECTION_HEADER_RE = re.compile(
+    r"^\s*(?:#{1,6}\s+)?(?:[-*•]\s+)?(?:\*\*)?(given|дано|owns|non-goals|handoff)\b",
+    re.IGNORECASE,
+)
+
+
+_SECTION_BULLET_PREFIX_RE = re.compile(r"^\s*[-*•]\s+")
+_SECTION_NUMBERED_PREFIX_RE = re.compile(r"^\s*\d+[.)]\s+")
+
+
+def _is_owns_continuation_line(line: str) -> bool:
+    """D-3 (вердикт критика t-554, 2026-08-20): предикат "строка -- ЕЩЁ
+    owns-секция, а не сорвавшаяся в прозу" для _section_map() ниже --
+    ТА ЖЕ форма, что owns_gate._first_token_path()/_paths_from_
+    continuation() уже несут для многострочного owns-блока (буллет/
+    номер списка снимается, ПЕРВЫЙ оставшийся токен обязан быть похож
+    на путь) -- НЕ импорт: owns_gate ИМПОРТИРУЕТ ИЗ dispatch_gate (не
+    наоборот, см. докстринг модуля "НОСИТЕЛЬ..."), обратное направление
+    завело бы цикл, поэтому здесь -- локальная копия формы, тем же
+    приёмом, каким _OWNS_SECTION_STOP_RE/_MANIFEST_SECTION_HEADER_RE
+    уже копируют owns_gate._SECTION_HEADER_STOP_RE/_DECLARATION_PREFIX_
+    RE (не новая семантика -- перенос существующей формы, D-0043).
+    НОВЫЙ ЛОКАЛЬНЫЙ ХЕЛПЕР этого диспатча (носитель -- этот же модуль,
+    tools/dispatch_gate.py; не механизменный путь -- часть WARN-слоя
+    given_path_warn, _section_map её вызывает ТОЛЬКО из
+    _filter_given_candidates, вне decide())."""
+    body = _SECTION_BULLET_PREFIX_RE.sub("", line, count=1)
+    body = _SECTION_NUMBERED_PREFIX_RE.sub("", body, count=1)
+    body = body.strip()
+    if not body:
+        return False
+    first = body.split(None, 1)[0]
+    first = first.strip(_OWNS_TOKEN_EDGE_STRIP)
+    return is_path_like_token(first)
+
+
+def _section_map(prompt: str):
+    """Р2: (line_start_offsets, sections) -- sections[i] -- секция
+    манифеста, действующая на СТРОКЕ i ("owns"/"given"/"other"/"none",
+    "none" -- ДО первого заголовка манифеста). Заголовок распознаётся в
+    начале строки (после опционального markdown "**"), как и owns_gate.
+    _SECTION_HEADER_STOP_RE.
+
+    D-3 (вердикт критика t-554, 2026-08-20): у owns-секции появилась
+    ВЕРХНЯЯ ГРАНИЦА -- ДО этой правки секция, открытая строкой-маркером
+    "owns", тянулась до конца промпта целиком; одна прозаическая строка
+    ("owns не нужен -- read-only", сама матчащая заголовок) гасила
+    проверку given-путей на ВСЁМ, что ниже. Теперь, пока current ==
+    "owns", КАЖДАЯ следующая строка, которая САМА не заголовок другой
+    секции, обязана быть ПУСТОЙ (blank -- просто конец секции без
+    смены) ЛИБО валидной строкой продолжения (_is_owns_continuation_line
+    -- буллет/номер + path-подобный первый токен, форма owns_gate) --
+    иначе секция закрывается ЭТОЙ ЖЕ строкой (current становится
+    "other", путь на строке, гасящей секцию, снова проверяется).
+    ФОРМА -- дословно owns_gate._paths_from_continuation()'s
+    стоп-условия (пустая строка / секционный заголовок / не-continuation
+    строка), см. докстринг _is_owns_continuation_line за обоснование
+    "не импорт, а копия"."""
+    lines = prompt.splitlines(keepends=True)
+    offsets = []
+    sections = []
+    pos = 0
+    current = "none"
+    for line in lines:
+        m = _MANIFEST_SECTION_HEADER_RE.match(line)
+        if m:
+            word = m.group(1).lower()
+            if word == "owns":
+                current = "owns"
+            elif word in ("given", "дано"):
+                current = "given"
+            else:
+                current = "other"
+        elif current == "owns" and (line.strip() == "" or not _is_owns_continuation_line(line)):
+            current = "other"  # D-3: пустая строка ЛИБО строка не продолжает owns-блок
+        offsets.append(pos)
+        sections.append(current)
+        pos += len(line)
+    return offsets, sections
+
+
+def _tokens_outside_owns_section(prompt: str, patterns) -> set:
+    """Р2: множество ТОКЕНОВ (текст совпадения), у которых ХОТЯ БЫ ОДНО
+    вхождение лежит ВНЕ owns-секции манифеста ("given"/"other"/"none" --
+    всё, кроме "owns", считается "вне", симметрично C2 "любое вне цитаты
+    -> проверяем" региональной версии W1). Путь, названный ТОЛЬКО внутри
+    owns-секции (диспатч его СОЗДАЁТ -- R11(c), TEMPORAL-край) не входит
+    в это множество -- _filter_given_candidates() ниже его исключает.
+    Путь, поимённо повторённый И в given, И в owns (читаем, затем
+    пишем) остаётся в этом множестве -- given-вхождение его "выкупает"."""
+    offsets, sections = _section_map(prompt)
+    outside = set()
+    if not offsets:
+        return outside
+    for pattern in patterns:
+        for m in pattern.finditer(prompt):
+            idx = bisect.bisect_right(offsets, m.start()) - 1
+            sec = sections[idx] if idx >= 0 else "none"
+            if sec != "owns":
+                outside.add(m.group(0))
+    return outside
+
+
+def _filter_given_candidates(prompt: str, candidates: list) -> list:
+    """ЕДИНАЯ точка фильтрации Р1+Р2 -- вызывается ПОСЛЕ извлечения
+    кандидатов (bare ИЛИ регионально-осведомлённого), ДО проверки
+    существования (позиционный инвариант решения Lead, см. заголовок
+    секции выше). Р2 (owns-секция) применяется ВСЕГДА; Р1 (чужой деплой)
+    -- только к ОТНОСИТЕЛЬНЫМ кандидатам (`is_abs=False`) -- абсолютные
+    кандидаты вне payload["cwd"] уже полностью исключены выше по стеку
+    (_is_under_root), Р1 закрывает ИМЕННО класс "репо-относительный путь
+    чужого дерева", у которого своего root-чека нет вовсе.
+
+    Р1 СУЖЕНО ДО ЛОКАЛЬНОСТИ (вердикт критика t-554, 2026-08-20,
+    пересмотр Lead'ом собственной развилки): исходная редакция
+    освобождала кандидата, если маркер деплоя встречался ГДЕ УГОДНО в
+    промпте -- замер критика на 432 боевых промптах показал, что это
+    гасило 73% всего снятого шума Р1+Р2 (19 из 26 срабатываний), включая
+    пути СВОЕГО корня (`tools/journal_echo_staged.py` и др.), потому что
+    маркер деплоя и путь СВОЕГО репо стояли в одном промпте, но в РАЗНЫХ
+    абзацах. Теперь кандидат освобождается, ТОЛЬКО если КАЖДОЕ его
+    вхождение лежит в _tokens_outside_deploy_paragraph()'s дополнении --
+    т.е. НИ ОДНОГО вхождения ВНЕ абзаца, несущего маркер (см. докстринг
+    той функции за форму и обоснование)."""
+    outside_owns = _tokens_outside_owns_section(
+        prompt, (GIVEN_ABS_WIN_PATH_RE, GIVEN_REPO_REL_PATH_RE)
+    )
+    deploy_outside_paragraph = _tokens_outside_deploy_paragraph(
+        prompt, _load_deploy_markers(), (GIVEN_ABS_WIN_PATH_RE, GIVEN_REPO_REL_PATH_RE)
+    )
+    result = []
+    for tok, is_abs in candidates:
+        if tok not in outside_owns:
+            continue  # Р2: путь только в owns-секции -- диспатч его создаёт
+        if not is_abs and tok not in deploy_outside_paragraph:
+            continue  # Р1 (сужено t-554): каждое вхождение -- в абзаце маркера деплоя
+        result.append((tok, is_abs))
+    return result
+
+
 def find_missing_given_paths(prompt: str, repo_root: str) -> list:
-    """Bare (не региональная) версия -- живая копия live :824-839 БЕЗ
-    ИЗМЕНЕНИЙ, И-0 фоллбек given_path_warn()."""
+    """Bare (не региональная) версия -- живая копия live :824-839, с
+    ОДНИМ добавлением узла D: кандидаты фильтруются _filter_given_
+    candidates() (Р1+Р2) ПЕРЕД проверкой существования. И-0 фоллбек
+    given_path_warn()."""
     missing = []
-    for tok, is_abs in extract_given_candidates(prompt):
+    candidates = _filter_given_candidates(prompt, extract_given_candidates(prompt))
+    for tok, is_abs in candidates:
         if is_abs:
             if not _is_under_root(tok, repo_root):
                 continue
@@ -1113,6 +1559,7 @@ def given_path_warn(payload: dict) -> str:
         return format_given_path_warn(missing)
 
     candidates = extract_given_candidates_region_aware(prompt, scan_result)
+    candidates = _filter_given_candidates(prompt, candidates)  # узел D: Р1+Р2
     missing = []
     for tok, is_abs in candidates:
         if is_abs:

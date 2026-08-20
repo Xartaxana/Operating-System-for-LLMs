@@ -1709,19 +1709,29 @@ def test_root_with_segment_absolute_token_is_a_path():
     # AK2: реальный путь с >=1 символом сегмента СРАЗУ после корневого
     # слэша остаётся True -- позиционный инвариант (регексы всё ещё
     # проверяются первыми, до глоб-ветки) сохранён.
+    #
+    # УЗЕЛ D ремедиации калибровки #8 (Р7, "Фантомный токен", форма 1,
+    # 2026-08-20): POSIX-ветка сузилась -- см.
+    # test_p7_posix_bare_single_segment_no_extension_now_false ниже за
+    # ЯВНОЕ сужение прежнего покрытия ("/a" и другие голые 1-сегментные
+    # POSIX-токены БЕЗ расширения были True здесь ДО этой правки, теперь
+    # False). Windows-ветка (_PATH_TOKEN_WIN_ABS_RE) этой формой НЕ
+    # затронута -- решение называет буквально "POSIX-ветка".
     for tok in [
-        "/etc/x",
-        "/a",
+        "/etc/x",  # POSIX, 2 сегмента -- проходит по форме 1 без расширения
         "D:\\x",
         "D:/x",
         "D:\\AI CRM\\x\\AGENTS.md",
         "logs/*.jsonl",
-        "/*.py",
+        "/*.py",  # POSIX, 1 сегмент, но несёт расширение ".py" -- форма 1 пропускает
     ]:
         assert dispatch_gate.is_path_like_token(tok) is True, tok
-    # Один длинный сегмент (5000 символов) после корня -- граница
-    # длины, тоже True (правило 6а: тест на длинной границе).
-    assert dispatch_gate.is_path_like_token("/" + ("a" * 5000)) is True
+    # Длинный СЕГМЕНТ (5000 символов) без расширения -- граница длины
+    # (правило 6а), но теперь ОДИН POSIX-сегмент без расширения -- см.
+    # test_p7_posix_bare_single_segment_no_extension_now_false за перенос
+    # ЭТОГО конкретного значения; здесь -- эквивалент С расширением,
+    # остающийся True.
+    assert dispatch_gate.is_path_like_token("/" + ("a" * 5000) + ".py") is True
 
 
 def test_doubled_root_with_segment_is_a_path():
@@ -1729,7 +1739,12 @@ def test_doubled_root_with_segment_is_a_path():
     # "ровно один слэш". Удвоенный корень С сегментом -- это путь
     # (сегмент есть); `/+`/`[\\/]+` их принимает. Прежняя форма
     # `^/[^/\\s]` ошибочно роняла "//foo".
-    for tok in ["//foo", "//server/share", "D://x", "///a"]:
+    #
+    # УЗЕЛ D (Р7, форма 1): "//foo"/"///a" -- ОДИН сегмент без расширения
+    # -- см. test_p7_posix_bare_single_segment_no_extension_now_false за
+    # перенос (ДО этой правки были True здесь). "//server/share" -- ДВА
+    # сегмента -- остаётся True без изменений.
+    for tok in ["//server/share", "D://x"]:
         assert dispatch_gate.is_path_like_token(tok) is True, tok
     # Но голый удвоенный/утроенный корень БЕЗ сегмента остаётся False
     # (граница класса не сдвинута) -- дублирует контроль в
@@ -1737,6 +1752,46 @@ def test_doubled_root_with_segment_is_a_path():
     # с позитивами как парная граница.
     for tok in ["//", "///", "D://"]:
         assert dispatch_gate.is_path_like_token(tok) is False, tok
+
+
+# ---------------------------------------------------------------------
+# УЗЕЛ D ремедиации калибровки #8 (2026-08-20), Р7 "Фантомный токен",
+# форма 1 (решение Lead): POSIX-ветка is_path_like_token сузилась --
+# токен обязан НЕ нести пробелов И нести расширение ЛИБО >=2 сегмента
+# после корня. Мотив: короткие прозаические обрывки с одним слэшем
+# ложно проходили путём (см. Р7 форму 2 отдельно за класс
+# "owns/non-goals/handoff" -- ТА форма ловится границей маркер/слэш,
+# НЕ этой). Правило 6а: граница тестирована ОБЕИМИ сторонами.
+# ---------------------------------------------------------------------
+
+
+def test_p7_posix_bare_single_segment_no_extension_now_false():
+    # СУЖЕНИЕ прежнего покрытия (было True в test_root_with_segment_
+    # absolute_token_is_a_path/test_doubled_root_with_segment_is_a_path
+    # ДО этой правки, задокументировано явно, не молчаливая правка пина):
+    # один POSIX-сегмент БЕЗ расширения -- теперь False.
+    for tok in ["/a", "//foo", "///a", "/" + ("a" * 5000)]:
+        assert dispatch_gate.is_path_like_token(tok) is False, tok
+
+
+def test_p7_posix_two_segments_no_extension_still_true():
+    # Граница "ЗА" п.6а (парная к предыдущему тесту): >=2 сегмента без
+    # расширения -- остаётся True (не тронуто формой 1).
+    for tok in ["/etc/x", "/a/b"]:
+        assert dispatch_gate.is_path_like_token(tok) is True, tok
+
+
+def test_p7_posix_single_segment_with_extension_still_true():
+    # Граница "ЗА": 1 сегмент, но С расширением -- остаётся True.
+    for tok in ["/a.py", "/x.md"]:
+        assert dispatch_gate.is_path_like_token(tok) is True, tok
+
+
+def test_p7_posix_token_with_space_now_false_even_with_extension():
+    # Форма 1 требует ОТСУТСТВИЯ пробелов -- даже с расширением/>=2
+    # сегментами пробел внутри токена теперь блокирует POSIX-ветку.
+    assert dispatch_gate.is_path_like_token("/a b/c.py") is False
+    assert dispatch_gate.is_path_like_token("/a b") is False
 
 
 def test_t384_owns_declaration_has_path_token_canonical_forms():
@@ -1829,3 +1884,233 @@ def test_t384_dispatch_gate_check2_recognizes_owns_with_path_without_verb():
         _builder_payload(prompt_with_given, description="sonnet: write x")
     )
     assert exit_code2 == 0, message2
+
+
+# =======================================================================
+# УЗЕЛ D ремедиации калибровки #8 (2026-08-20) -- Р1 (чужие деплои),
+# Р2 (owns-секция), Р7 (фантомный токен, обе формы). Красные тесты ДО
+# фикса / зелёные ПОСЛЕ, копилка узла D носителя хода.
+# =======================================================================
+
+
+# --- Р1: GIVEN-PATH и чужие деплои = ГРОМКОСТЬ, не резолюция ----------
+
+
+def test_r1_deploy_marker_by_name_exempts_relative_candidate_from_check():
+    # Копилка п.1/5 (t-544/t-551): относительный путь чужого деплоя,
+    # упомянутый РЯДОМ с явным маркером деплоя (имя ключа `deploys`
+    # конфига, "ao3" из delegation.config.yaml) -- не проверяется вовсе,
+    # даже если он не существует в ЭТОМ репо (PROCESS/ -- один из шести
+    # репо-относительных префиксов GIVEN_REPO_REL_PATH_RE).
+    prompt = (
+        "Речь о репо AO3. Дано: PROCESS/некий_чужой_чек.md -- сверь его "
+        "форму на том дереве."
+    )
+    warn = dispatch_gate.given_path_warn(_task_payload(prompt, cwd=_REPO_ROOT))
+    assert warn == ""
+
+
+def test_r1_no_deploy_marker_same_relative_candidate_still_warns():
+    # Позитивный контроль той же формы (правило 6 гигиены): БЕЗ маркера
+    # деплоя -- тот же путь (не существует в этом репо) продолжает
+    # предупреждать, как раньше.
+    prompt = "Дано: PROCESS/некий_чужой_чек.md -- сверь его форму."
+    warn = dispatch_gate.given_path_warn(_task_payload(prompt, cwd=_REPO_ROOT))
+    assert "GIVEN-PATH WARN" in warn
+    assert "PROCESS/некий_чужой_чек.md" in warn
+
+
+def test_r1_deploy_marker_by_path_text_also_exempts():
+    # "маркер = имя ключа ИЛИ его путь" -- деплой-путь `D:\AO3_tests`,
+    # процитированный в тексте, тоже считается явным маркером.
+    prompt = (
+        r"Смотри дерево D:\AO3_tests и его PROCESS/некий_чужой_чек.md."
+    )
+    warn = dispatch_gate.given_path_warn(_task_payload(prompt, cwd=_REPO_ROOT))
+    assert warn == ""
+
+
+# --- Р2: GIVEN-PATH и создаваемые пути (owns-секция) -------------------
+
+
+def test_r2_owns_section_only_path_not_checked_given_basket_stays_warn():
+    # DoD п.2 узла D: путь, названный ТОЛЬКО в owns-секции (диспатч его
+    # СОЗДАЁТ), не проверяется; протухший путь в корзине "дано" ОБЯЗАН
+    # остаться в WARN -- "тише, но не слепее".
+    prompt = (
+        "Дано: tools/фейк_дано.py -- прочитай перед началом.\n\n"
+        "owns:\n"
+        "- D:/repo/tools/новый_создаваемый_файл.py\n"
+    )
+    warn = dispatch_gate.given_path_warn(_task_payload(prompt, cwd=_REPO_ROOT))
+    assert "GIVEN-PATH WARN" in warn
+    assert "tools/фейк_дано.py" in warn  # given-корзина -- ПРОТУХШИЙ путь, WARN держится
+    assert "новый_создаваемый_файл.py" not in warn  # owns-секция -- диспатч его создаёт
+
+
+def test_r2_same_path_named_in_given_and_owns_still_checked():
+    # Путь, повторённый И в given, И в owns -- given-вхождение "выкупает"
+    # его из молчания (позиционный инвариант не расширяет зону молчания
+    # шире, чем owns-секция буквально).
+    prompt = (
+        "Дано: tools/фейк_дважды.py -- прочитай, затем перепиши его.\n\n"
+        "owns:\n"
+        "- D:/repo/tools/фейк_дважды.py\n"
+    )
+    warn = dispatch_gate.given_path_warn(_task_payload(prompt, cwd=_REPO_ROOT))
+    assert "GIVEN-PATH WARN" in warn
+    assert "tools/фейк_дважды.py" in warn
+
+
+# --- Р7 форма 1: is_path_like_token POSIX-ветка -- уже пинована выше
+# (test_p7_posix_*). Форма 2: marker_immediately_followed_by_slash. ----
+
+
+def test_r7_form2_marker_immediately_followed_by_slash_direct():
+    assert dispatch_gate.marker_immediately_followed_by_slash("/non-goals/handoff") is True
+    assert dispatch_gate.marker_immediately_followed_by_slash(": /d/x.py") is False
+    assert dispatch_gate.marker_immediately_followed_by_slash(" /d/x.py") is False
+    assert dispatch_gate.marker_immediately_followed_by_slash("") is False
+    assert dispatch_gate.marker_immediately_followed_by_slash(None) is False
+
+
+def test_r7_form2_owns_declaration_has_path_token_ignores_canonical_prose():
+    # "given/owns/non-goals/handoff" -- каноническое перечисление секций
+    # манифеста (правило 11 CLAUDE.md кита) -- owns СРАЗУ за которым "/"
+    # без разделителя -- НЕ декларация, is_write НЕ должен ловить это.
+    prompt = "Секции манифеста: given/owns/non-goals/handoff -- см. правило 11."
+    assert dispatch_gate.owns_declaration_has_path_token(prompt) is False
+
+
+def test_r7_form2_real_owns_declaration_with_colon_unaffected():
+    # Позитивный контроль (правило 6 гигиены): настоящая декларация с
+    # разделителем ДО ЭТОГО как была True, так и осталась.
+    prompt = "owns: /d/repo/tools/real.py"
+    assert dispatch_gate.owns_declaration_has_path_token(prompt) is True
+
+
+# --- Пин-набор: сохраняемые истинные срабатывания ----------------------
+
+
+def test_pin_stale_given_path_in_own_root_still_warns_after_node_d():
+    # "Протухший путь в корзине «дано» своего корня -> WARN" -- держится
+    # после Р1/Р2 (без owns-секции, без маркера деплоя -- ни один фильтр
+    # не применяется).
+    warn = dispatch_gate.given_path_warn(
+        _task_payload("Дано: tools/фейк_совсем.py. Прочитай его.", cwd=_REPO_ROOT)
+    )
+    assert "GIVEN-PATH WARN" in warn
+    assert "tools/фейк_совсем.py" in warn
+
+
+# =======================================================================
+# ВЕРДИКТ КРИТИК-ГЕЙТА t-554 (2026-08-20) -- обязательные фиксы партии
+# узлов C+D: D-1 (локальность маркера деплоя), D-2 (markdown-заголовок/
+# буллет манифест-секции), D-3 (верхняя граница owns-секции).
+# =======================================================================
+
+
+# --- D-1: маркер деплоя освобождает кандидата ТОЛЬКО в СВОЁМ абзаце ----
+
+
+def test_d1_marker_in_different_paragraph_from_path_still_warns():
+    # Критик t-554: 73% всего снятого шума Р1+Р2 давал именно Р1 в
+    # прежней (глобальной) редакции -- маркер деплоя в ОДНОМ абзаце,
+    # кандидат в ДРУГОМ (пустая строка между ними) -- освобождение
+    # больше НЕ действует, WARN держится.
+    prompt = (
+        "Речь о репо AO3.\n\n"
+        "Дано: PROCESS/некий_чужой_чек.md -- сверь его форму."
+    )
+    warn = dispatch_gate.given_path_warn(_task_payload(prompt, cwd=_REPO_ROOT))
+    assert "GIVEN-PATH WARN" in warn
+    assert "PROCESS/некий_чужой_чек.md" in warn
+
+
+def test_d1_token_occurs_twice_one_outside_marker_paragraph_still_warns():
+    # "Одно вхождение вне маркерного абзаца -- кандидат ПРОВЕРЯЕТСЯ как
+    # свой" -- даже если ДРУГОЕ вхождение того же токена стоит рядом с
+    # маркером.
+    prompt = (
+        "Речь о репо AO3. Дано: PROCESS/некий_чужой_чек.md -- сверь.\n\n"
+        "Ещё раз для памяти: PROCESS/некий_чужой_чек.md."
+    )
+    warn = dispatch_gate.given_path_warn(_task_payload(prompt, cwd=_REPO_ROOT))
+    assert "GIVEN-PATH WARN" in warn
+    assert "PROCESS/некий_чужой_чек.md" in warn
+
+
+def test_d1_prompt_without_blank_line_marker_still_frees_whole_prompt():
+    # КРАЯ (спека узла, ПРИНЯТО сознательно, не дефект): промпт БЕЗ
+    # единой пустой строки -- один абзац целиком, п.1 ведёт себя как ДО
+    # этой правки (маркер освобождает весь промпт). Закреплено тестом,
+    # чтобы следующая правка не сочла это багом.
+    prompt = (
+        "Речь о репо AO3, без единой пустой строки во всём тексте. "
+        "Дано: PROCESS/некий_чужой_чек.md -- сверь его форму на том дереве."
+    )
+    assert "\n\n" not in prompt
+    warn = dispatch_gate.given_path_warn(_task_payload(prompt, cwd=_REPO_ROOT))
+    assert warn == ""
+
+
+# --- D-2: owns-секция markdown-заголовком / буллетом -------------------
+
+
+def test_d2_owns_section_recognized_as_markdown_header():
+    # Боевая форма t-550 (копилка узла D п.3): "## OWNS (...)".
+    prompt = (
+        "Дано: tools/фейк_дано2_d2.py -- прочитай перед началом.\n\n"
+        "## OWNS (§1 спеки, абсолютные пути)\n"
+        "- D:/repo/tools/новый_из_заголовка_d2.py\n"
+    )
+    warn = dispatch_gate.given_path_warn(_task_payload(prompt, cwd=_REPO_ROOT))
+    assert "GIVEN-PATH WARN" in warn
+    assert "tools/фейк_дано2_d2.py" in warn  # given -- протухший путь держится
+    assert "новый_из_заголовка_d2.py" not in warn  # owns-секция распознана
+
+
+def test_d2_owns_section_recognized_as_bullet_form():
+    prompt = (
+        "Дано: tools/фейк_дано3_d2.py -- прочитай перед началом.\n\n"
+        "- owns:\n"
+        "- D:/repo/tools/новый_из_буллета_d2.py\n"
+    )
+    warn = dispatch_gate.given_path_warn(_task_payload(prompt, cwd=_REPO_ROOT))
+    assert "GIVEN-PATH WARN" in warn
+    assert "tools/фейк_дано3_d2.py" in warn
+    assert "новый_из_буллета_d2.py" not in warn  # owns-секция распознана
+
+
+# --- D-3: верхняя граница owns-секции -----------------------------------
+
+
+def test_d3_prosaic_owns_line_does_not_silence_paths_below():
+    # ДО фикса: "owns не нужен -- read-only" открывала "owns"-секцию,
+    # которая держалась ДО КОНЦА промпта -- given-путь НИЖЕ гасился
+    # молча. ПОСЛЕ: прозаическая строка продолжения (не буллет/не путь)
+    # закрывает секцию СРАЗУ, given-путь снова проверяется.
+    prompt = (
+        "owns не нужен -- read-only.\n"
+        "Прочитай также tools/фейк_после_прозы_d3.py для контекста.\n"
+    )
+    warn = dispatch_gate.given_path_warn(_task_payload(prompt, cwd=_REPO_ROOT))
+    assert "GIVEN-PATH WARN" in warn
+    assert "tools/фейк_после_прозы_d3.py" in warn
+
+
+def test_d3_genuine_multiline_owns_block_still_silenced():
+    # Позитивный контроль (правило 6 гигиены): настоящий многострочный
+    # owns-список (буллет + path-подобный первый токен на каждой строке)
+    # по-прежнему держит секцию "owns" -- НЕ регрессия D-3.
+    prompt = (
+        "Дано: tools/фейк_дано4_d3.py -- прочитай перед началом.\n\n"
+        "owns:\n"
+        "- D:/repo/tools/a_d3.py\n"
+        "- D:/repo/tools/b_d3.py\n"
+    )
+    warn = dispatch_gate.given_path_warn(_task_payload(prompt, cwd=_REPO_ROOT))
+    assert "GIVEN-PATH WARN" in warn
+    assert "tools/фейк_дано4_d3.py" in warn
+    assert "a_d3.py" not in warn
+    assert "b_d3.py" not in warn
