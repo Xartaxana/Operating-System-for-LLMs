@@ -216,6 +216,49 @@ def test_key6_check_exit0_on_healthy(tmp_path, capsys):
     assert rc == 0
 
 
+def test_key6_check_does_not_write_sidecar(tmp_path, capsys):
+    """O2 (критик t-538, узел найден контрольным прогоном критика --
+    --check дописал строку в боевой сайдкар): --check измеряет форму,
+    НЕ пишет сайдкар вовсе -- пин на tmp-путях, боевой logs/*.jsonl не
+    трогается (командная гигиена п.7г)."""
+    root, registry = _sandbox(tmp_path)
+    assert not registry.exists()
+    _write_file(root, "a.md", _three_records())
+    manifest = _write_manifest(root, [_art("a.md")])
+    rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root), "--check"])
+    capsys.readouterr()
+    assert rc == 0
+    assert not registry.exists(), "--check не должен создавать/писать сайдкар"
+
+
+def test_key6_check_repeated_still_never_writes(tmp_path, capsys):
+    """Позитивная половина пары: несколько --check подряд -- сайдкар
+    по-прежнему не создаётся ни разу (не только на первом прогоне)."""
+    root, registry = _sandbox(tmp_path)
+    _write_file(root, "a.md", _three_records())
+    manifest = _write_manifest(root, [_art("a.md")])
+    for _ in range(3):
+        rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root), "--check"])
+        capsys.readouterr()
+        assert rc == 0
+    assert not registry.exists()
+
+
+def test_key6_plain_run_writes_exactly_one_line_in_tmp(tmp_path, capsys):
+    """Позитивная половина O2: прогон БЕЗ --check по-прежнему пишет
+    ровно одну строку сайдкара (перенос записи не тронул поведение
+    обычного прогона байтом сверх переноса)."""
+    root, registry = _sandbox(tmp_path)
+    assert not registry.exists()
+    _write_file(root, "a.md", _three_records())
+    manifest = _write_manifest(root, [_art("a.md")])
+    rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root)])
+    capsys.readouterr()
+    assert rc == 0
+    assert registry.exists()
+    assert sum(1 for _ in open(registry, encoding="utf-8")) == 1
+
+
 def test_key6_check_exit0_on_breach_edge20(tmp_path, capsys):
     root, registry = _sandbox(tmp_path)
     _write_file(root, "a.md", ("R1 " + "x" * 500 + "\n").encode("utf-8"))  # 1 запись, много байт

@@ -12,10 +12,12 @@ scope ceiling = keys + battery + boundaries, no full regress).
 Run: python -m pytest tools/test_critic_verdict_check.py -q
 """
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -85,12 +87,23 @@ def _base_blocker():
 
 
 def _run_cli(args, input_text=None):
+    # П4/Fix 2 (builder t-539, 2026-08-20): critic_verdict_check теперь
+    # decode'ит stdin БАЙТАМИ строго как UTF-8 (canonical helper), не
+    # через sys.stdin.read() локали -- text=True БЕЗ явного encoding=
+    # кодирует input этой строкой ЛОКАЛИ (cp1251 на этой машине, тот же
+    # факт, что t-159 задокументировал для sys.stdin.encoding), что
+    # рассинхронизировалось бы с новым строгим UTF-8-декодом ребёнка на
+    # кириллице. encoding="utf-8" здесь пинует ОБЕ стороны (родитель
+    # пишет вход UTF-8-байтами -- та же форма, что реальный харнесс
+    # использует; вывод декодируется UTF-8 для ассертов str) -- не
+    # меняет ни одну семантику отдельного теста, только транспорт.
     return _run_subprocess_guarded(
         [sys.executable, str(CHECKER_PATH)] + args,
         cwd=str(REPO_ROOT),
         input=input_text,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=WALLCLOCK_HARNESS_TIMEOUT,
     )
 
@@ -402,6 +415,150 @@ def test_cli_stdin_dash_valid():
 def test_cli_missing_argument_exit_one():
     result = _run_cli([])
     assert result.returncode == 1
+
+
+# ---------------------------------------------------------------------------
+# stdin-deadline (B9(в), очередь спеки П4, docs/tasks/2026-08-19_p4-stdin-
+# deadline-spec.md): критик-фикс t-538 нашёл блокирующее sys.stdin.read()
+# без дедлайна как последний не-хуковый читатель этого класса.
+# critic_verdict_check.py НЕ входит в MODULE_NAMES у tools/test_p4_stdin_
+# deadline.py (та батарея явно ограничена 13 хуками) -- пины K1/K2/K5/K6
+# и лимит-границы (правило 6а) для ЭТОГО файла живут здесь.
+# ---------------------------------------------------------------------------
+
+_P4_BEGIN_MARKER = "# --- BEGIN stdin-deadline helper"
+_P4_END_MARKER = "# --- END stdin-deadline helper ---"
+_P4_CANONICAL_REGION_SHA256 = (
+    "2d23f14c7e1db1157e8a9b3c07e30820c02356c63b1da25974d8131748420ca5"
+)
+_P4_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+
+
+def _p4_region_text():
+    text = CHECKER_PATH.read_text(encoding="utf-8")
+    i = text.index(_P4_BEGIN_MARKER)
+    j = text.index(_P4_END_MARKER, i) + len(_P4_END_MARKER)
+    return text[i:j]
+
+
+def test_p4_k1_marker_present_once_before_main():
+    text = CHECKER_PATH.read_text(encoding="utf-8")
+    assert text.count(_P4_BEGIN_MARKER) == 1
+    assert text.count(_P4_END_MARKER) == 1
+    begin_idx = text.index(_P4_BEGIN_MARKER)
+    end_idx = text.index(_P4_END_MARKER)
+    main_idx = text.index("def main(")
+    assert begin_idx < end_idx < main_idx
+
+
+def test_p4_k2_helper_region_matches_canonical_hash():
+    region = _p4_region_text()
+    digest = hashlib.sha256(region.encode("utf-8")).hexdigest()
+    assert digest == _P4_CANONICAL_REGION_SHA256, (
+        f"helper region drifted from the spec-pinned canonical text (sha256={digest})"
+    )
+
+
+@pytest.mark.parametrize("raw_value,expected", [
+    ("", 10.0),
+    ("abc", 10.0),
+    ("0", 10.0),
+    ("-1", 10.0),
+    ("1e9", 10.0),
+    ("600.1", 10.0),  # ЗА границей MAX -> дефолт (правило 6а)
+    ("600", 600.0),  # РОВНО на границе MAX -> проходит (правило 6а)
+    ("5", 5.0),
+])
+def test_p4_k6_env_deadline_parsing_branches(raw_value, expected, monkeypatch):
+    monkeypatch.setenv(cvc._STDIN_DEADLINE_ENV, raw_value)
+    assert cvc._stdin_deadline_seconds() == expected
+
+
+def test_p4_k6_env_absent_uses_default(monkeypatch):
+    monkeypatch.delenv(cvc._STDIN_DEADLINE_ENV, raising=False)
+    assert cvc._stdin_deadline_seconds() == cvc._STDIN_DEADLINE_DEFAULT == 10.0
+
+
+def _run_holding_stdin_open(deadline, extra_wait=5.0):
+    """Держит stdin процесса открытым, не закрывая и не записывая ничего --
+    реальный "writer, который не закрылся" (та же форма, что tools/
+    test_p4_stdin_deadline.py._run_holding_stdin_open, НЕ Popen.communicate(),
+    которое само закрывает stdin и снимает симуляцию)."""
+    env = os.environ.copy()
+    env["OSLLM_STDIN_TIMEOUT"] = str(deadline)
+    proc = subprocess.Popen(
+        [sys.executable, str(CHECKER_PATH), "-"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=env,
+    )
+    try:
+        proc.wait(timeout=deadline + extra_wait)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise
+    out = proc.stdout.read()
+    err = proc.stderr.read()
+    proc.stdin.close()
+    proc.stdout.close()
+    proc.stderr.close()
+    return proc.returncode, out, err
+
+
+def test_p4_k5_timeout_rc_matches_empty_input_stdout_empty_one_stderr_line():
+    """K5-форма: на таймауте rc == "прежний код выхода пустого входа" (1,
+    не 0 -- этот файл не хук), stdout ПУСТ, stderr -- ровно одна строка с
+    префиксом имени файла. Также доказывает, что __main__-эскалация
+    (os._exit) не роняет процесс "Fatal Python error" (эмпирика builder'а,
+    см. отчёт) -- rc==1 чистый, не код краша."""
+    rc, out, err = _run_holding_stdin_open(1.0)
+    assert rc == 1
+    assert out == b""
+    expected_err = f"{CHECKER_PATH.name}: {_P4_STDIN_DEADLINE_MSG}\n".encode("utf-8")
+    assert err.replace(b"\r\n", b"\n") == expected_err
+    assert b"Fatal Python error" not in err
+
+
+def test_p4_k7_timeout_lands_within_deadline_plus_margin_boundary():
+    """Лимит на границе и за ней (правило 6а): короткий дедлайн 0.3s --
+    реальное истёкшее время укладывается в дедлайн+запас, не зависает
+    навсегда (нижняя граница ~0.25s -- join(timeout) иногда возвращается
+    чуть раньше номинала, тот же допуск, что test_p4_stdin_deadline.py
+    использует для тех же 13 хуков)."""
+    t0 = time.monotonic()
+    rc, out, err = _run_holding_stdin_open(0.3)
+    elapsed = time.monotonic() - t0
+    assert rc == 1
+    assert out == b""
+    assert 0.25 <= elapsed < 1.3, f"timeout should land within deadline+margin, took {elapsed:.3f}s"
+
+
+def test_p4_named_deviation_quick_close_before_deadline_still_valid():
+    """Позитивный контроль (не таймаутный путь БЕЗ правки в этом же
+    коде): writer закрывает канал ДО дедлайна -- обычная валидная
+    проверка, существующий test_cli_stdin_dash_valid уже покрывает это
+    через subprocess.run(input=...), здесь -- явная форма через Popen с
+    коротким дедлайном и немедленным закрытием stdin, чтобы доказать,
+    что штатный (не-таймаутный) путь НЕ регрессировал ПОСЛЕ перехода на
+    byte-дедлайн-хелпер (K4-класс)."""
+    env = os.environ.copy()
+    env["OSLLM_STDIN_TIMEOUT"] = "5.0"
+    payload = _wrap(_base_fit()).encode("utf-8")
+    proc = subprocess.Popen(
+        [sys.executable, str(CHECKER_PATH), "-"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=env,
+    )
+    proc.stdin.write(payload)
+    proc.stdin.close()
+    proc.wait(timeout=5.0)
+    out = proc.stdout.read()
+    err = proc.stderr.read()
+    proc.stdout.close()
+    proc.stderr.close()
+    assert proc.returncode == 0
+    assert out.decode("utf-8").strip().startswith("VERDICT OK:")
+    assert err == b""
 
 
 # ---------------------------------------------------------------------------

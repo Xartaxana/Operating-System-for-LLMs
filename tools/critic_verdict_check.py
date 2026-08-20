@@ -34,8 +34,11 @@ of the "no generic parser" design:
 """
 
 import json
+import os
 import re
 import sys
+import threading
+from pathlib import Path
 
 VERDICT_ENUM = ("fit", "fit_with_fixes", "blocker")
 
@@ -180,6 +183,73 @@ def check_text(text):
     return True, [], obj
 
 
+# --- BEGIN stdin-deadline helper (П4; ЛОКАЛЬНАЯ копия, общий модуль запрещён) ---
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Секунды дедлайна: env-переопределение, иначе дефолт. Невалидное,
+    нечисловое, <=0 и > _STDIN_DEADLINE_MAX -> дефолт; режима
+    "0 = ждать вечно" НЕТ намеренно (он воскрешает саму дыру)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """(bytes, timed_out). Читает stdin до EOF, но не дольше дедлайна.
+    Форма кроссплатформенная: select/poll на Windows не работает с
+    пайпами, поэтому читает поток-демон, а дедлайн держит join(timeout).
+    TTY -> b"" без чтения (прежний guard трёх файлов, теперь у всех).
+    Любая ошибка чтения -> b"" (fail-open, как везде в этих хуках)."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+# --- END stdin-deadline helper ---
+
+# P4/В3.1 (K7-эмпирика builder t-539, В9(в) очередь спеки П4, 2026-08-20):
+# та же угроза, что у 12+1 хуков -- фоновый reader-поток, оставленный
+# заблокированным на РЕАЛЬНОМ stdin-буфере при обычном завершении
+# интерпретатора, может уронить процесс "Fatal Python error:
+# _enter_buffered_busy" вместо чистого exit. Эмпирика этой правки
+# (subprocess с реально удержанным открытым stdin, см. отчёт builder'а,
+# witness) ПОДТВЕРДИЛА тот же класс здесь -- поэтому __main__-эскалация
+# ниже (os._exit на таймауте) добавлена той же формой, что у хуков.
+_STDIN_DEADLINE_STATE = {"hit": False}
+
+
 def main(argv):
     if len(argv) != 2:
         sys.stderr.write("usage: critic_verdict_check.py <path-or-->\n")
@@ -187,8 +257,13 @@ def main(argv):
 
     source = argv[1]
     if source == "-":
+        raw_bytes, timed_out = _read_stdin_bytes_deadline()
+        if timed_out:
+            _STDIN_DEADLINE_STATE["hit"] = True
+            sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
+            return 1  # прежний код выхода пустого входа (тот же класс отказа)
         try:
-            text = sys.stdin.read()
+            text = raw_bytes.decode("utf-8")
         except (UnicodeDecodeError, ValueError):
             sys.stderr.write("INVALID VERDICT: input is not valid UTF-8\n")
             return 1
@@ -220,4 +295,15 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    _rc = main(sys.argv)
+    if _STDIN_DEADLINE_STATE["hit"]:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

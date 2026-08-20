@@ -696,8 +696,17 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     report = build_report(manifest_path, registry_path, root)
 
-    sidecar_entry = build_sidecar_entry(report)
-    sidecar_warn = write_registry_entry(registry_path, sidecar_entry)
+    # O2 (критик t-538): --check -- ТОЛЬКО измерение формы, оно не пишет
+    # боевой сайдкар (образец contract calibration_prepass --check-form:
+    # проверка формы не окно, см. её main()/write_registry_entry). Запись
+    # сайдкара происходит ИСКЛЮЧИТЕЛЬНО в обычном (не --check) прогоне;
+    # sidecar_warn=None на --check -- предупреждать нечего без попытки
+    # записи (это не регресс: --check и раньше не проверял факт записи).
+    if args.check:
+        sidecar_warn = None
+    else:
+        sidecar_entry = build_sidecar_entry(report)
+        sidecar_warn = write_registry_entry(registry_path, sidecar_entry)
 
     if args.json:
         print(render_json(report, sidecar_warn))
