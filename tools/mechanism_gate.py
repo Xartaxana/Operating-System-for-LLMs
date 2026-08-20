@@ -271,6 +271,11 @@ MECHANISM_PREFIXES = (
     # сторожей; протухшая строка там = F-41.
     "docs/FINDINGS.md",
     "docs/RULE_COVERAGE.md",
+    # 2026-08-20 (спека docs/tasks/2026-08-20_rule-coverage-bodies-spec.md,
+    # решение Р7): тела карты docs/rule_coverage/*.md несут ту же
+    # обязанность будущих сессий, что и сама карта -- правка тела без
+    # осевого блока проходила бы commit-msg молча, ровно класс F-56.
+    "docs/rule_coverage/",
     # tools/wiring_check.py -- найдено аудитом (T1): subprocess-вызывается
     # tools/enforcement_probe.py на pre-commit, ПЛЮС импортируется
     # tools/session_context.py внутри wiring_lines() для SessionStart --

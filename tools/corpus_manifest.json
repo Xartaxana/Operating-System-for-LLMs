@@ -105,6 +105,34 @@
       "record_re": "^R\\d+[a-z]?\\.",
       "owner": "boot-mirror",
       "bpr_max": null
+    },
+    {
+      "path": "docs/rule_coverage/RC-01.md",
+      "unit": "развёртка строки",
+      "record_re": "^## rc\\d+-",
+      "owner": "corpus",
+      "bpr_max": 3521
+    },
+    {
+      "path": "docs/rule_coverage/RC-04.md",
+      "unit": "развёртка строки",
+      "record_re": "^## rc\\d+-",
+      "owner": "corpus",
+      "bpr_max": 5016
+    },
+    {
+      "path": "docs/rule_coverage/RC-06.md",
+      "unit": "развёртка строки",
+      "record_re": "^## rc\\d+-",
+      "owner": "corpus",
+      "bpr_max": 5016
+    },
+    {
+      "path": "docs/rule_coverage/RC-07.md",
+      "unit": "развёртка строки",
+      "record_re": "^## rc\\d+-",
+      "owner": "corpus",
+      "bpr_max": 6880
     }
   ]
 }

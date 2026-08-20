@@ -70,8 +70,9 @@ def _sandbox(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Ключ 1: манифест 15 артефактов, record_re дословно из таблицы S1-S2
-# (12 исходных + 3 тела чеков 26/18/13 -- Phase 5 W4-2, 2026-08-19)
+# Ключ 1: манифест 19 артефактов, record_re дословно из таблицы S1-S2
+# (12 исходных + 3 тела чеков 26/18/13 -- Phase 5 W4-2, 2026-08-19;
+#  + 4 тела карты «правило -> сторож» RC-01/04/06/07 -- 2026-08-20)
 # ---------------------------------------------------------------------------
 
 EXPECTED_TABLE = {
@@ -90,14 +91,18 @@ EXPECTED_TABLE = {
     "docs/DECISIONS_ARCHIVE.md": (r"^## D-\d{4}\b", "corpus-archive"),
     "docs/FINDINGS_ARCHIVE.md": (r"^## F-\d+\b", "corpus-archive"),
     "CLAUDE.md": (r"^R\d+[a-z]?\.", "boot-mirror"),
+    "docs/rule_coverage/RC-01.md": (r"^## rc\d+-", "corpus"),
+    "docs/rule_coverage/RC-04.md": (r"^## rc\d+-", "corpus"),
+    "docs/rule_coverage/RC-06.md": (r"^## rc\d+-", "corpus"),
+    "docs/rule_coverage/RC-07.md": (r"^## rc\d+-", "corpus"),
 }
 
 
-def test_key1_manifest_has_15_artifacts_verbatim_record_re():
+def test_key1_manifest_has_19_artifacts_verbatim_record_re():
     thresholds_version, raw_artifacts, _ = cg.read_manifest(
         REPO_ROOT / "tools" / "corpus_manifest.json")
     assert thresholds_version == 2
-    assert len(raw_artifacts) == 15
+    assert len(raw_artifacts) == 19
     seen = {a["path"] for a in raw_artifacts}
     assert seen == set(EXPECTED_TABLE.keys())
     for a in raw_artifacts:
@@ -119,7 +124,7 @@ def test_key1_delivered_manifest_passes_form_validation_cleanly():
     _, raw_artifacts, _ = cg.read_manifest(REPO_ROOT / "tools" / "corpus_manifest.json")
     valid, defects = cg.validate_entries(raw_artifacts)
     assert defects == []
-    assert len(valid) == 15
+    assert len(valid) == 19
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +148,7 @@ def test_key2_report_sections_and_fixture_control(tmp_path, capsys):
     assert "WARN=0 BREACH=0" in out
 
 
-def test_key10_real_tree_measures_all_15_artifacts(tmp_path, capsys):
+def test_key10_real_tree_measures_all_19_artifacts(tmp_path, capsys):
     registry = tmp_path / "sidecar.jsonl"
     rc = _run(["--manifest", str(REPO_ROOT / "tools" / "corpus_manifest.json"),
                "--registry", str(registry), "--root", str(REPO_ROOT)])
