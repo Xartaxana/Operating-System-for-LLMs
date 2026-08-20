@@ -681,8 +681,20 @@ mechanism_gate/exam_runner/lead_replay (encoding есть, путей не
 Закрыты превентивно: `tools/test_spend_model.py`,
 `tools/test_spend_dashboard.py` (autouse-фикстура изоляции
 `RUN_UNITS_PATH` под `tmp_path`, оба докстринга ссылаются на D-0043).
-Пропущенный третий сиблинг: `tools/test_spend_report.py` — тот же
-модуль, та же боевая переменная, изоляции не было.
+`tools/test_spend_report.py` ЗАКРЫТ autouse-фикстурой
+`tools/conftest.py` (:123-131; прежняя строка «изоляции не было»
+протухла — снята замером критика t-538 2026-08-19). НОВЫЙ ЭКЗЕМПЛЯР
+2026-08-19 (вердикт критика t-538): `check_form()`/`run_check_form`
+в `tools/test_calibration_prepass.py` дефолтились на модульный
+`REPO_ROOT` — с рождением каталога PROCESS/checks/ спящая
+orphan-проверка проснулась и читала БОЕВОЙ каталог из синтетических
+тестов (17 красных). ЗАКРЫТ изоляцией `repo_root=tmp_path` +
+`run_cli_isolated` + пин красная/зелёная половина
+(`test_check_form_class_isolation_repo_root_pin`). Смежный след того
+же узла: `tools/corpus_growth.py --check` ПИШЕТ боевой сайдкар
+(write_registry_entry до ветки if args.check — асимметрия с
+`--check-form`, у которого «не пишет» прибито тестом) — ОТКРЫТ,
+очередь.
 
 Ось 2 (Контуры измерения) не покрывает: оба носителя лежат на ОДНОЙ её
 стороне (подписочный контур) — связь формальная, не парная-осевая.

@@ -79,11 +79,18 @@ def default_rc(tmp_path: Path) -> Path:
 
 def check_form(tmp_path: Path, body: str, require_all: bool = False,
                 rc_path: Path = None, repo_root: Path = None) -> prep.CheckFormResult:
+    """Изоляция по умолчанию (класс-фикс 2026-08-19, узел W4-2 доделка):
+    repo_root, если не задан явно, -- ТОТ ЖЕ tmp_path, что несёт
+    протокол, а НЕ библиотечный дефолт REPO_ROOT (реальный корень
+    репо). До фикса дефолт "не передавать repo_root вовсе" тихо
+    протекал на настоящий PROCESS/checks/ -- любой файл, реально
+    лежащий там, ловился как файл-сирота синтетическим протоколом,
+    который его не упоминает (см. test_check_form_class_isolation_
+    repo_root_pin ниже -- красная/зелёная половины класса)."""
     proto = write_protocol(tmp_path, body)
     rc = rc_path or default_rc(tmp_path)
-    if repo_root is not None:
-        return prep.run_check_form(proto, rc, require_all, repo_root=repo_root)
-    return prep.run_check_form(proto, rc, require_all)
+    root = repo_root if repo_root is not None else tmp_path
+    return prep.run_check_form(proto, rc, require_all, repo_root=root)
 
 
 # ---------------------------------------------------------------------------
@@ -840,7 +847,7 @@ def test_protocol_not_utf8_is_protocol_error(tmp_path):
 def test_protocol_crlf_normalized_ok(tmp_path):
     p = tmp_path / "crlf.md"
     p.write_bytes(wrap_protocol(CHK0_VALID).replace("\n", "\r\n").encode("utf-8"))
-    result = prep.run_check_form(p, default_rc(tmp_path), False)
+    result = prep.run_check_form(p, default_rc(tmp_path), False, repo_root=tmp_path)
     assert result.defects == [], defects_str(result)
 
 
@@ -1260,19 +1267,56 @@ def run_cli(args, cwd=None):
     )
 
 
+def run_cli_isolated(args, tmp_path):
+    """Класс-фикс 2026-08-19 (доделка W4-2): CLI-форма REPO_ROOT
+    считает от __file__, не от cwd/env, и --repo-root в CLI нет --
+    calibration_prepass.py вне owns этого узла, правка источника
+    (сигнатуры main()/run_check_form()) нелегальна. Изоляция БЕЗ
+    правки источника: байт-копия calibration_prepass.py + сиблинга
+    calibration_counts.py (его единственный внутренний импорт,
+    добавляемый в sys.path от СВОЕГО __file__) в <tmp>/iso_repo/tools/
+    -- запущенный ОТТУДА процесс резолвит REPO_ROOT = <tmp>/iso_repo,
+    где PROCESS/checks/ не существует вовсе -- орфан-проверка (9)
+    молчит по КОНСТРУКЦИИ (checks_dir.is_dir() -- False), не потому
+    что ослаблена. enforcement_probe.py не копируется: --check-form не
+    вызывает evaluate_predicate, отказ импорта (ep=None) безвреден и
+    предусмотрен кодом (A14ж)."""
+    iso_root = tmp_path / "iso_repo"
+    iso_tools = iso_root / "tools"
+    iso_tools.mkdir(parents=True, exist_ok=True)
+    shutil.copy(REPO_ROOT / "tools" / "calibration_prepass.py",
+                iso_tools / "calibration_prepass.py")
+    shutil.copy(REPO_ROOT / "tools" / "calibration_counts.py",
+                iso_tools / "calibration_counts.py")
+    return subprocess.run(
+        [sys.executable, str(iso_tools / "calibration_prepass.py")] + args,
+        capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+        env={**__import__("os").environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+    )
+
+
 def test_cli_check_form_exit0_on_clean(tmp_path):
     proto = write_protocol(tmp_path, CHK0_VALID)
     rc = default_rc(tmp_path)
-    proc = run_cli(["--check-form", "--protocol", str(proto), "--rule-coverage", str(rc)])
+    proc = run_cli_isolated(["--check-form", "--protocol", str(proto),
+                              "--rule-coverage", str(rc)], tmp_path)
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
 def test_cli_check_form_exit1_on_defect(tmp_path):
+    """Класс-фикс 2026-08-19 (доделка W4-2, D-0100): изолированное
+    дерево -- иначе exit 1 зелен по ЛОЖНОЙ причине (реальный
+    PROCESS/checks/ даёт свои орфан-дефекты независимо от того,
+    сработал ли ЗАДУМАННЫЙ дефект этого теста); проверяем И код, И
+    что в выводе именно ожидаемый дефект (src:неизвестно)."""
     body = "0. **Чек.**\n<!--CHK 0|src:неизвестно|pred:always|rules:RC§1/R6|status:живой-->\n    тело.\n\n"
     proto = write_protocol(tmp_path, body)
     rc = default_rc(tmp_path)
-    proc = run_cli(["--check-form", "--protocol", str(proto), "--rule-coverage", str(rc)])
+    proc = run_cli_isolated(["--check-form", "--protocol", str(proto),
+                              "--rule-coverage", str(rc)], tmp_path)
     assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "src: неизвестное значение" in proc.stdout, proc.stdout + proc.stderr
 
 
 def test_cli_missing_window_start_exit2():
@@ -1834,6 +1878,38 @@ def test_pair_check_09_no_orphan_when_referenced(tmp_path):
     assert not any("файл-сирота" in d for d in result.defects), defects_str(result)
 
 
+def test_check_form_class_isolation_repo_root_pin(tmp_path):
+    """Класс-пин (2026-08-19, узел W4-2 доделка). Орфан-проверка §4.6(9)
+    сканирует ФАЙЛОВУЮ СИСТЕМУ repo_root/PROCESS/checks/, не содержимое
+    протокола -- поэтому изоляция теста держится ИСКЛЮЧИТЕЛЬНО на том,
+    какой repo_root передан вызовом, а не на том, что написано в
+    синтетическом протоколе. КРАСНАЯ половина: repo_root указывает НА
+    каталог с посторонним файлом в PROCESS/checks/ -- он ловится
+    файлом-сиротой (проверка (9) остаётся строгой, класс не ослаблен).
+    ЗЕЛЁНАЯ половина: тот же синтетический протокол (без единого поля
+    body:), но repo_root указывает на ИЗОЛИРОВАННЫЙ каталог без
+    PROCESS/checks/ вовсе -- посторонний файл невидим, дефектов нет
+    (это и есть свойство, которое чинит дефолт check_form() выше)."""
+    other_root = tmp_path / "other_root"
+    isolated_root = tmp_path / "isolated_root"
+    other_checks = other_root / "PROCESS" / "checks"
+    other_checks.mkdir(parents=True)
+    isolated_root.mkdir()
+    (other_checks / "CHK-0.md").write_text(
+        "ВЛАДЕЛЕЦ: Lead.\nПРАВИЛО ВЕДЕНИЯ: тест.\nядро -- в протоколе, чек 0.\n",
+        encoding="utf-8",
+    )
+
+    proto = write_protocol(tmp_path, CHK0_VALID)
+    rc = default_rc(tmp_path)
+
+    red = prep.run_check_form(proto, rc, False, repo_root=other_root)
+    assert any("файл-сирота" in d for d in red.defects), defects_str(red)
+
+    green = prep.run_check_form(proto, rc, False, repo_root=isolated_root)
+    assert not any("файл-сирота" in d for d in green.defects), defects_str(green)
+
+
 # --- проверка (10): запрет строк <!--CHK внутри тела ------------------------
 
 def test_pair_check_10_chk_marker_inside_body_rejected(tmp_path):
@@ -2037,8 +2113,8 @@ def test_check_form_does_not_write_sidecar(tmp_path):
     rc = default_rc(tmp_path)
     reg = tmp_path / "reg.jsonl"
     assert not reg.exists()
-    proc = run_cli(["--check-form", "--protocol", str(proto), "--rule-coverage", str(rc),
-                     "--registry", str(reg)])
+    proc = run_cli_isolated(["--check-form", "--protocol", str(proto), "--rule-coverage", str(rc),
+                              "--registry", str(reg)], tmp_path)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert not reg.exists(), "check-form не должен создавать/писать сайдкар"
 

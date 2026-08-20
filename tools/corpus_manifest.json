@@ -1,6 +1,27 @@
 {
-  "thresholds_version": 1,
+  "thresholds_version": 2,
   "artifacts": [
+    {
+      "path": "PROCESS/checks/CHK-26.md",
+      "unit": "чек",
+      "record_re": "^# Тело чека 26\\b",
+      "owner": "corpus",
+      "bpr_max": 18875
+    },
+    {
+      "path": "PROCESS/checks/CHK-18.md",
+      "unit": "чек",
+      "record_re": "^# Тело чека 18\\b",
+      "owner": "corpus",
+      "bpr_max": 6773
+    },
+    {
+      "path": "PROCESS/checks/CHK-13.md",
+      "unit": "подпункт",
+      "record_re": "^## 13\\(",
+      "owner": "corpus",
+      "bpr_max": 1731
+    },
     {
       "path": "docs/DECISIONS_FULL.md",
       "unit": "решение",
