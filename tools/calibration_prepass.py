@@ -85,10 +85,85 @@ DEFAULT_RULE_COVERAGE = REPO_ROOT / "docs" / "RULE_COVERAGE.md"
 DEFAULT_CONFIG = REPO_ROOT / "delegation.config.yaml"
 DEFAULT_REGISTRY = REPO_ROOT / "logs" / "calibration_prepass.jsonl"
 
-# Абсолют гейта (а) Phase 5 (docs/tasks/2026-08-18_phase5-norm-corpus.md,
-# AM-6(5)) -- НЕ путь к деплою, поэтому пункт AM-3.6 (запрет
-# захардкоженного деплой-пути) его не касается.
-GATE_A_THRESHOLD_BYTES = 57_500
+# Храповик гейта (а), Phase 5 W4-3 (docs/tasks/2026-08-19_w4-structural-
+# spec.md, §4.8/A2/Р9). GATE_A_HISTORY -- носитель истории порогов В КОДЕ
+# (не-цель узла: файл-носитель не заводить). Первый элемент -- ставка
+# до-M2-мира (t-513), АННУЛИРОВАНА словом Архитектора 08-19 (Р1(B')):
+# исключена из монотонности (check_gate_a_history_monotonic) и из
+# провенанса ИТОГ (gate_a_active_entry читает ПОСЛЕДНИЙ элемент истории,
+# которым аннулированный не является, пока цепочка не пуста). Второй
+# элемент -- замер W4-3 на посаженном дереве (после W4-2, тела вынесены):
+# measured = "к чтению" типового окна БЕЗ принудительных тел (N-F, A14а),
+# окно закреплено ts 2026-08-14T12:12:34 (A11), window_end -- явный
+# момент замера; порог = ceil(measured*K/100)*100, K=1.05 (Р9(A)).
+GATE_A_HISTORY: List[Dict[str, Any]] = [
+    {
+        "date": "2026-08-18",
+        "threshold": 57_500,
+        "measured": None,
+        "window_start": None,
+        "window_end": None,
+        "window_kind": None,
+        "K": None,
+        "basis": "ставка до-M2-мира, снята замером t-513",
+        "annulled": "слово Архитектора 08-19, Р1(B') — ставка до-M2-мира",
+    },
+    {
+        "date": "2026-08-20",
+        "threshold": 146_000,
+        "measured": 139_042,
+        "window_start": "2026-08-14T12:12:34",
+        "window_end": "2026-08-20T12:51:07",
+        "window_kind": "типовое",
+        "K": 1.05,
+        "basis": (
+            "W4-3 замер, слово Архитектора 2026-08-20 "
+            "(недобор К3 принят, храповик от факта)"
+        ),
+    },
+]
+
+# Р9 "число пустого окна печатается справочно": НЕ входит в GATE_A_HISTORY
+# (формула базируется только на типовом окне) -- отдельная информационная
+# константа того же замера (истинно пустое окно = ISO момента запуска,
+# А15б/Р9), печатается строкой рядом с ИТОГ, в формулу порога не участвует.
+GATE_A_EMPTY_WINDOW_REFERENCE_BYTES = 67_258
+GATE_A_EMPTY_WINDOW_REFERENCE_DATE = "2026-08-20"
+
+# Активный порог -- ПОСЛЕДНИЙ элемент истории (аннулированный НЕ последний,
+# пока за ним есть хотя бы один пост-W4 замер). Тесты монки-патчат этот
+# плоский атрибут напрямую (как и раньше) -- вердикт/±d читают его как
+# было; провенанс (дата/окно/K) читается ОТДЕЛЬНО из gate_a_active_entry().
+GATE_A_THRESHOLD_BYTES = GATE_A_HISTORY[-1]["threshold"]
+
+
+def gate_a_active_entry(history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Активная запись храповика для провенанса ИТОГ (§4.3): последний
+    элемент GATE_A_HISTORY. Принимает history для тестов на синтетических
+    списках; без аргумента читает модульную константу."""
+    hist = history if history is not None else GATE_A_HISTORY
+    return hist[-1]
+
+
+def check_gate_a_history_monotonic(
+    history: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[bool, str]:
+    """§4.8/7.1: неаннулированная цепочка порогов НЕ растёт молча --
+    аннулированные записи (A2) исключены, монотонность действует от
+    первого пост-W4 замеренного элемента. Возврат (ok, message); message
+    провала называет легальный выход дословно (§4.8(iv)): снизить --
+    легально всегда; поднять -- только явным словом Архитектора."""
+    hist = history if history is not None else GATE_A_HISTORY
+    active = [e for e in hist if not e.get("annulled")]
+    for prev, cur in zip(active, active[1:]):
+        if cur["threshold"] > prev["threshold"]:
+            return False, (
+                f"GATE_A_HISTORY НЕ МОНОТОННА: порог вырос {prev['threshold']} Б -> "
+                f"{cur['threshold']} Б -- снизить порог легально всегда; "
+                f"поднять -- только явным словом Архитектора в поле basis "
+                f"новой записи"
+            )
+    return True, "GATE_A_HISTORY монотонна (неаннулированная цепочка не возрастает)"
 
 # ---------------------------------------------------------------------------
 # Форма шапки
@@ -2399,11 +2474,27 @@ def render_window_report(
     # Решение Lead (фикс 8а критика): оба слагаемых печатаются ВСЕГДА
     # симметрично (включая нули) -- стабильная каноническая форма для
     # витнесов К1/К2/К4 и W4-1b.
+    # W4-3 §4.8/§4.3: провенанс храповика читается из АКТИВНОЙ (последней)
+    # записи GATE_A_HISTORY -- независимо от параметров ТЕКУЩЕГО прогона
+    # (mode/mode_reason описывают ЭТОТ вызов, а провенанс -- когда/на каком
+    # окне БЫЛ ВЫВЕДЕН порог). GATE_A_THRESHOLD_BYTES остаётся плоским
+    # атрибутом (монки-патчится существующими тестами напрямую) -- строка
+    # печатает его же значение, провенанс -- отдельно из истории.
+    gate_entry = gate_a_active_entry()
     out.append(
         f"\nИТОГ: живых {report['alive_count']}/{report['total_checks']} · "
         f"к чтению {to_read} Б из {total} Б ({pct:.1f}%) · "
         f"из них тела {bodies_bytes} Б · принудительно {forced_bytes} Б · "
-        f"гейт (а) ≤{GATE_A_THRESHOLD_BYTES} Б: {gate_verdict} ({sign}{gate_diff} Б)"
+        f"гейт (а) ≤{GATE_A_THRESHOLD_BYTES} Б (храповик от замера "
+        f"{gate_entry.get('date')}, окно {gate_entry.get('window_kind')}, "
+        f"K={gate_entry.get('K')}): {gate_verdict} ({sign}{gate_diff} Б)"
+    )
+    # Р9 справочно: число пустого окна печатается рядом с гейтом, В
+    # ФОРМУЛУ ПОРОГА НЕ ВХОДИТ (база -- только типовое окно).
+    out.append(
+        f"  (справочно, Р9: пустое окно на дату замера "
+        f"{GATE_A_EMPTY_WINDOW_REFERENCE_DATE} = "
+        f"{GATE_A_EMPTY_WINDOW_REFERENCE_BYTES} Б -- не входит в формулу порога)"
     )
     return "\n".join(out)
 

@@ -11,6 +11,7 @@ AM-2, --check-form AM-7), адверсариальная батарея A10+AM-7
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -3105,7 +3106,12 @@ def test_gate_verdict_base_is_n_minus_f_not_n(tmp_path, monkeypatch):
         report2, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
         [str(j)], proto,
     )
-    assert f"гейт (а) ≤{threshold} Б: ВЗЯТ (+0 Б)" in rendered, rendered
+    # W4-3: провенанс храповика ("храповик от замера ...") теперь ВСЕГДА
+    # печатается между порогом и вердиктом -- порог сам монки-патчен, но
+    # провенанс читается из GATE_A_HISTORY (не патчен здесь) -- проверяем
+    # обе части раздельно, не одной жёсткой строкой.
+    assert f"гейт (а) ≤{threshold} Б (храповик от замера" in rendered, rendered
+    assert "): ВЗЯТ (+0 Б)" in rendered, rendered
     # N печатается КАК ЕСТЬ (не N-F) -- строка ИТОГ не меняется формой (§4.3).
     assert f"к чтению {n} Б из" in rendered
 
@@ -3587,4 +3593,190 @@ def test_k2_window_gate_line_unchanged_when_no_forced_bytes(tmp_path):
     gate_diff = to_read - prep.GATE_A_THRESHOLD_BYTES
     sign = "+" if gate_diff >= 0 else ""
     verdict = "ВЗЯТ" if to_read <= prep.GATE_A_THRESHOLD_BYTES else "НЕ ВЗЯТ"
-    assert f"гейт (а) ≤{prep.GATE_A_THRESHOLD_BYTES} Б: {verdict} ({sign}{gate_diff} Б)" in rendered
+    entry = prep.gate_a_active_entry()
+    assert (
+        f"гейт (а) ≤{prep.GATE_A_THRESHOLD_BYTES} Б (храповик от замера "
+        f"{entry['date']}, окно {entry['window_kind']}, K={entry['K']}): "
+        f"{verdict} ({sign}{gate_diff} Б)"
+    ) in rendered
+
+
+# =============================================================================
+# W4-3 (§4.8/A2/Р9): ХРАПОВИК ГЕЙТА (а) -- GATE_A_HISTORY, провенанс ИТОГ,
+# монотонность, границы порога. Арифметика witness: measured=139042 (N-F
+# типового окна на посаженном дереве после W4-2, окно закреплено ts
+# 2026-08-14T12:12:34, A11) -> ceil(139042*1.05/100)*100 == 146000.
+# =============================================================================
+
+
+def test_gate_a_history_first_entry_is_annulled_pre_m2_bet():
+    """A2: элемент 57500 (ставка до-M2-мира) несёт annulled со словом
+    Архитектора Р1(B') и является ПЕРВЫМ, но не активным, элементом
+    истории."""
+    first = prep.GATE_A_HISTORY[0]
+    assert first["threshold"] == 57_500
+    assert first.get("annulled"), "первый элемент обязан нести annulled (A2)"
+    assert "Р1(B" in first["annulled"]
+    assert "08-19" in first["annulled"]
+
+
+def test_gate_a_threshold_bytes_equals_last_history_entry():
+    """§4.8(ii): GATE_A_THRESHOLD_BYTES == GATE_A_HISTORY[-1]["threshold"]."""
+    assert prep.GATE_A_THRESHOLD_BYTES == prep.GATE_A_HISTORY[-1]["threshold"]
+    assert prep.GATE_A_THRESHOLD_BYTES == 146_000
+
+
+def test_gate_a_active_entry_arithmetic_w4_3_measured_to_threshold():
+    """Арифметика порога W4-3 (отчёт п.«вывод порога»): measured=139042,
+    K=1.05 -> ceil(measured*K/100)*100 == 146000 == GATE_A_HISTORY[-1]."""
+    entry = prep.gate_a_active_entry()
+    assert entry["measured"] == 139_042
+    assert entry["K"] == 1.05
+    assert entry["window_start"] == "2026-08-14T12:12:34"
+    assert entry["window_kind"] == "типовое"
+    p = math.ceil(entry["measured"] * entry["K"] / 100) * 100
+    assert p == entry["threshold"] == 146_000
+
+
+def test_gate_a_history_monotonic_real_history_ok():
+    """Реальная константа GATE_A_HISTORY проходит собственный храповик --
+    не только синтетика."""
+    ok, msg = prep.check_gate_a_history_monotonic()
+    assert ok, msg
+
+
+def test_gate_a_history_annulled_entry_excluded_from_monotonicity():
+    """A2: аннулированная запись НЕ участвует в монотонности -- синтетика,
+    где аннулированный порог ВЫШЕ активного, не красит тест (аннулированный
+    элемент попросту не рассматривается цепочкой)."""
+    synthetic = [
+        {"threshold": 999_999, "annulled": "тест: старая ставка"},
+        {"threshold": 146_000, "date": "x", "measured": 1, "window_start": "x",
+         "window_end": "x", "window_kind": "типовое", "K": 1.05, "basis": "x"},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(synthetic)
+    assert ok, msg
+
+
+def test_gate_a_history_monotonic_red_half_growth_without_basis_flags():
+    """Красная половина храповика: активная цепочка РАСТЁТ (100 -> 150) без
+    маркера слова Архитектора -- check_gate_a_history_monotonic ОБЯЗАНА
+    вернуть False с сообщением, называющим легальный выход дословно (§4.8(iv)):
+    снизить -- легально всегда; поднять -- только явным словом Архитектора."""
+    synthetic = [
+        {"threshold": 100, "date": "d1", "measured": 90, "window_start": "s1",
+         "window_end": "e1", "window_kind": "типовое", "K": 1.05, "basis": "b1"},
+        {"threshold": 150, "date": "d2", "measured": 140, "window_start": "s2",
+         "window_end": "e2", "window_kind": "типовое", "K": 1.05, "basis": "b2"},
+    ]
+    ok, msg = prep.check_gate_a_history_monotonic(synthetic)
+    assert not ok
+    assert "легально всегда" in msg
+    assert "словом Архитектора" in msg
+
+
+def test_gate_a_history_monotonic_plateau_and_decrease_are_legal():
+    """§7.1: новое==прежнему -> плато легально; снижение -- тоже легально
+    (граница и обе стороны -- одним тестом, правило 6а)."""
+    plateau = [{"threshold": 100, "date": "d1"}, {"threshold": 100, "date": "d2"}]
+    ok, msg = prep.check_gate_a_history_monotonic(plateau)
+    assert ok, msg
+
+    decrease = [{"threshold": 200, "date": "d1"}, {"threshold": 100, "date": "d2"}]
+    ok, msg = prep.check_gate_a_history_monotonic(decrease)
+    assert ok, msg
+
+
+def test_gate_a_itog_provenance_verbatim_form(tmp_path):
+    """§4.3 дословно: «гейт (а) ≤P Б (храповик от замера <дата>, окно <тип>,
+    K=<K>): ВЗЯТ/НЕ ВЗЯТ (±d)» -- провенанс читается из активной записи
+    истории, НЕ из параметров текущего прогона (mode/mode_reason здесь
+    заведомо другие -- "обычный"/"test")."""
+    j = write_journal(tmp_path, [])
+    proto = write_protocol(tmp_path, _pilot_body())
+    report = prep.build_window_report(proto, _run_ctx_for(
+        tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00"))
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    entry = prep.gate_a_active_entry()
+    assert (
+        f"(храповик от замера {entry['date']}, окно {entry['window_kind']}, "
+        f"K={entry['K']}):"
+    ) in rendered
+
+
+def test_gate_a_empty_window_reference_line_printed(tmp_path):
+    """Р9 "число пустого окна печатается справочно": строка присутствует
+    рядом с ИТОГ, помечена как НЕ входящая в формулу порога -- на ЛЮБОМ
+    окне (даже типовом), т.к. это фиксированная справочная константа
+    замера, а не пересчёт текущего окна."""
+    j = write_journal(tmp_path, [])
+    proto = write_protocol(tmp_path, _pilot_body())
+    report = prep.build_window_report(proto, _run_ctx_for(
+        tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00"))
+    rendered = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert f"{prep.GATE_A_EMPTY_WINDOW_REFERENCE_BYTES} Б" in rendered
+    assert "не входит в формулу порога" in rendered
+
+
+def test_gate_a_threshold_boundary_at_p_taken_and_p_plus_1_not_taken(tmp_path, monkeypatch):
+    """§7.1 порог P: измерено == P -> ВЗЯТ (+0); измерено == P+1 -> НЕ ВЗЯТ
+    (+1 Б) -- граница и её пересечение одним тестом (правило 6а)."""
+    j = write_journal(tmp_path, [])
+    proto = write_protocol(tmp_path, _pilot_body())
+    report = prep.build_window_report(proto, _run_ctx_for(
+        tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00"))
+    measured = report["to_read_bytes"] - report.get("bodies_forced_bytes", 0)
+
+    monkeypatch.setattr(prep, "GATE_A_THRESHOLD_BYTES", measured)
+    rendered_at = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "): ВЗЯТ (+0 Б)" in rendered_at, rendered_at
+
+    monkeypatch.setattr(prep, "GATE_A_THRESHOLD_BYTES", measured - 1)
+    rendered_over = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    assert "): НЕ ВЗЯТ (+1 Б)" in rendered_over, rendered_over
+
+
+def test_gate_a_k2_invariant_numbers_unchanged_across_threshold_bump(tmp_path, monkeypatch):
+    """К2-инвариант W4-3: смена активного порога (57500 аннулированный ->
+    146000 W4-3) НЕ имеет права двигать to_read/total/alive -- один и тот
+    же report рендерится при ОБОИХ значениях, ОБЕ строки ИТОГ показаны
+    ниже в тексте теста (assert message): совпадает всё до "· гейт (а)",
+    расходится только гейт-подстрока."""
+    j = write_journal(tmp_path, [])
+    proto = write_protocol(tmp_path, _pilot_body())
+    report = prep.build_window_report(proto, _run_ctx_for(
+        tmp_path, [str(j)], "2026-08-14T00:00:00", "2026-08-16T00:00:00"))
+
+    monkeypatch.setattr(prep, "GATE_A_THRESHOLD_BYTES", 57_500)
+    rendered_old = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    monkeypatch.setattr(prep, "GATE_A_THRESHOLD_BYTES", 146_000)
+    rendered_new = prep.render_window_report(
+        report, "2026-08-14T00:00:00", "2026-08-16T00:00:00", "обычный", "test",
+        [str(j)], proto,
+    )
+    prefix_old = rendered_old.split("· гейт (а)")[0]
+    prefix_new = rendered_new.split("· гейт (а)")[0]
+    assert prefix_old == prefix_new, (
+        "К2-инвариант нарушен -- числа to_read/total/alive/тела/принудительно "
+        f"разошлись:\nСТАРЫЙ: {prefix_old!r}\nНОВЫЙ: {prefix_new!r}"
+    )
+    itog_old = [ln for ln in rendered_old.splitlines() if ln.startswith("ИТОГ:")][0]
+    itog_new = [ln for ln in rendered_new.splitlines() if ln.startswith("ИТОГ:")][0]
+    assert "≤57500 Б" in itog_old, itog_old
+    assert "≤146000 Б" in itog_new, itog_new
+    assert itog_old != itog_new  # гейт-подстрока обязана отличаться -- обе строки выше
