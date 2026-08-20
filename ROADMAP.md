@@ -74,7 +74,7 @@ Architect, in session 2026-07-30: «подтверждаю закрытие фа
 Full narrative and gate report:
 docs/task_reports/2026-07-15_roadmap-closed-phases.md.
 
-## Phase 5 — Norm Corpus (Нормативный корпус) — OPEN 2026-08-18
+## Phase 5 — Norm Corpus (Нормативный корпус) — CLOSED 2026-08-20
 
 Opened by the Architect's word in session 2026-08-18. The predecessor
 section here («After Phase 4», 2026-08-16) recorded the basis as a
@@ -106,6 +106,18 @@ our expectations. Node statuses, baseline numbers, gate criteria
 (reading cost down at equal norm coverage; no norm lost — every
 retired full text leaves an index line) and the Architect's forks:
 docs/tasks/2026-08-18_phase5-norm-corpus.md. Standing operation
-(weekly calibration — seven runs: 07-11, 07-18, 07-19, 07-23, 07-29,
-08-05, 08-14 — the kit port queue behind the D-0074 moratorium, the
-finding→remediation loop) continues alongside, unchanged.
+(weekly calibration — eight runs: 07-11, 07-18, 07-19, 07-23, 07-29,
+08-05, 08-14, 08-20 — the kit port queue behind the D-0074 moratorium,
+the finding→remediation loop) continues alongside, unchanged.
+
+CLOSED 2026-08-20, both gates green: W0-W4 landed, gate (а) (reading
+cost down at equal coverage) taken for the first time by actual
+measurement (P=146000, K=1.05, ratchet from the 08-20 measurement),
+gate (б) (no norm lost) verified by two git-audits — W4-V 0/0/0 and
+W2c-V zero losses across six slices. Closure recorded by the
+Architect's word in session 2026-08-20; the phase carrier keeps node
+statuses and the K3 shortfall accepted by word:
+docs/tasks/2026-08-18_phase5-norm-corpus.md. Closure was written to
+CURRENT_CONTEXT only and reached this owner document with calibration
+#8 (finding F8 of docs/task_reports/2026-08-20_calibration-8.md — an
+F-41 instance against ROADMAP itself).
