@@ -197,8 +197,16 @@ _ALWAYS_INCLUDE_BOOT_FILE = "CLAUDE.md"
 # leaves no real growth margin. That is a recorded FINDING ("ratchet
 # exhausted, W2c"), not a silent renumbering; see docs/tasks/
 # 2026-08-18_w2b-transfer-maps.md for the measured inputs.
-CLAUDE_BREACH = 36115
-CLAUDE_WARN = 35815
+# W2c-4 re-derivation (WORD OF THE ARCHITECT 2026-08-20, not a silent
+# raise): after the W2c diet the file grew by LEGITIMATE norms (node C
+# F-58 branches, +535 B) to a measured 36102 B -- the old thresholds
+# produced a permanent OVER on every SessionStart (the registered
+# "guard trained to be ignored" class). Same W2b formula on the new
+# measured size: WARN = ceil(36102*1.015/100)*100 = 36700; BREACH =
+# WARN + 300. Ratchet discipline holds: raises happen only by
+# operator word, recorded here and in the journal (t-538 window).
+CLAUDE_BREACH = 37000
+CLAUDE_WARN = 36700
 
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 

@@ -908,7 +908,7 @@ def test_boot_budget_normal_under_warn_threshold(tmp_path):
     root = tmp_path
     _seed_boot_files(root, {"README.md": 100, "CLAUDE.md": 200})
     lines = sc.boot_budget_lines(root)
-    assert lines == ["BOOT BUDGET: 300 bytes / 100000 (2 files) | CLAUDE.md: 200/35815"]
+    assert lines == ["BOOT BUDGET: 300 bytes / 100000 (2 files) | CLAUDE.md: 200/36700"]
 
 
 def test_boot_budget_warn_includes_top3(tmp_path):
@@ -927,7 +927,7 @@ def test_boot_budget_warn_includes_top3(tmp_path):
     assert total > sc.BOOT_WARN_THRESHOLD
     assert total <= sc.BOOT_BREACH_THRESHOLD
     assert lines[0] == (
-        f"BOOT BUDGET: {total} bytes / 100000 (4 files) WARN | CLAUDE.md: 100/35815"
+        f"BOOT BUDGET: {total} bytes / 100000 (4 files) WARN | CLAUDE.md: 100/36700"
     )
     assert lines[1] == "  40000  README.md"
     assert lines[2] == "  30000  PROJECT_CHARTER.md"
@@ -951,7 +951,7 @@ def test_boot_budget_breach_includes_hint_and_top3(tmp_path):
     assert total > sc.BOOT_BREACH_THRESHOLD
     assert lines[0] == (
         f"BOOT BUDGET: {total} bytes / 100000 (4 files) BREACH -> boot-diet due "
-        "(D-0068; report first, operator word starts it) | CLAUDE.md: 100/35815"
+        "(D-0068; report first, operator word starts it) | CLAUDE.md: 100/36700"
     )
     assert lines[1] == "  60000  README.md"
     assert lines[2] == "  30000  PROJECT_CHARTER.md"
@@ -966,7 +966,7 @@ def test_boot_budget_missing_file_counts_zero_and_is_flagged(tmp_path):
     lines = sc.boot_budget_lines(root)
     assert lines[0] == (
         "BOOT BUDGET: 50 bytes / 100000 (2 files) [missing: GHOST_FILE.md]"
-        " | CLAUDE.md: 50/35815"
+        " | CLAUDE.md: 50/36700"
     )
 
 
