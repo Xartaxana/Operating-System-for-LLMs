@@ -38,6 +38,7 @@ attempt 1) -- квотирование-осознанный редирект: `>
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -830,6 +831,157 @@ def test_p5_grep_with_context_flags_journal_path_no_warn():
     )
     assert exit_code == 0
     assert output is None
+
+
+# ---------------------------------------------------------------------
+# F.3 (ремедиация калибровки №8, узел F.3, 2026-08-20) -- живой ложный
+# БЛОК: чтение журнала read-only инструментом + НЕСВЯЗАННЫЙ редирект
+# (`2>/dev/null`, `2>&1`, `> /tmp/out.txt`) в ТОМ ЖЕ statement денилось
+# как класс (г) (журнал мимо Edit/Write), хотя редирект целится НЕ в
+# журнал. См. _redirect_targets_journal/_READ_ONLY_HEAD_RE в
+# hygiene_gate.py за полный разбор фикса.
+# ---------------------------------------------------------------------
+
+
+def test_f3_reported_bug_grep_dev_null_piped_no_block():
+    # Живой репро координатора, ДОСЛОВНО.
+    command = (
+        'grep -c "reserve_engaged" logs/routing-log.jsonl tools/*.py '
+        '2>/dev/null | grep -v ":0"'
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_f3_grep_dev_null_no_pipe_no_block():
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload('grep -c "reserve_engaged" logs/routing-log.jsonl 2>/dev/null')
+    )
+    assert exit_code == 0
+    assert output is None
+
+
+def test_f3_rg_dev_null_no_block():
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload('rg "reserve_engaged" logs/routing-log.jsonl 2>/dev/null')
+    )
+    assert exit_code == 0
+    assert output is None
+
+
+def test_f3_cat_dev_null_no_block():
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("cat logs/routing-log.jsonl 2>/dev/null")
+    )
+    assert exit_code == 0
+    assert output is None
+
+
+def test_f3_head_dev_null_no_block():
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("head -n 5 logs/routing-log.jsonl 2>/dev/null")
+    )
+    assert exit_code == 0
+    assert output is None
+
+
+def test_f3_tail_dev_null_no_block():
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("tail -n 5 logs/routing-log.jsonl 2>/dev/null")
+    )
+    assert exit_code == 0
+    assert output is None
+
+
+def test_f3_wc_dev_null_no_block():
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("wc -l logs/routing-log.jsonl 2>/dev/null")
+    )
+    assert exit_code == 0
+    assert output is None
+
+
+def test_f3_sed_dash_n_dev_null_no_block():
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("sed -n '1,5p' logs/routing-log.jsonl 2>/dev/null")
+    )
+    assert exit_code == 0
+    assert output is None
+
+
+def test_f3_grep_redirect_to_unrelated_file_no_block():
+    # Редирект СТДАУТ (не только stderr) в файл, не связанный с журналом.
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload('grep -c "x" logs/routing-log.jsonl > /tmp/out.txt')
+    )
+    assert exit_code == 0
+    assert output is None
+
+
+def test_f3_read_only_redirect_that_actually_targets_journal_still_blocks():
+    # Контроль: read-only голова, но редирект РЕАЛЬНО целится в журнал --
+    # остаётся блоком (heredoc-форма уже покрыта test_vg5_block_heredoc_
+    # redirect ниже -- это простой grep-эквивалент того же принципа).
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload('cat notes.txt > logs/routing-log.jsonl')
+    )
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert output["hookSpecificOutput"]["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+
+
+def test_f3_true_positive_echo_append_still_blocks_after_fix():
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("echo x >> logs/routing-log.jsonl")
+    )
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_f3_true_positive_printf_append_still_blocks_after_fix():
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("printf '%s\\n' '{}' >> logs/routing-log.jsonl")
+    )
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_f3_true_positive_tee_still_blocks_after_fix():
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("echo hi | tee logs/routing-log.jsonl")
+    )
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_f3_true_positive_heredoc_redirect_still_blocks_after_fix():
+    command = 'cat <<EOF >> logs/routing-log.jsonl\n{"event":"x"}\nEOF'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_f3_git_rm_not_in_read_only_heads_unrelated_redirect_still_blocks():
+    # Регресс-контроль ГРАНИЦЫ фикса (D-0043 -- не сиблинг этого дефекта,
+    # "git" НЕ входит в _READ_ONLY_HEAD_RE): не трогать существующее
+    # поведение неперечисленных git-подкоманд -- см. пины
+    # test_v2_git_rm_not_in_whitelist_still_triggers_if_it_would_otherwise/
+    # test_v2_git_reset_not_in_whitelist_still_triggers выше в этом файле
+    # (тела которых этой правкой НЕ меняются).
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("git rm logs/routing-log.jsonl > /tmp/log.txt")
+    )
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_f3_redirect_targets_journal_unit_fd_dup_not_a_target():
+    # Юнит на саму функцию: `2>&1` -- fd-дублирование, не файловый
+    # таргет -- не засчитывается как редирект В журнал.
+    assert hygiene_gate._redirect_targets_journal(
+        'grep -c "x" logs/routing-log.jsonl 2>&1'
+    ) is False
 
 
 def test_v2_git_commit_message_mentions_routing_log_and_arrow_no_warn():
@@ -2314,3 +2466,487 @@ def test_v5_blocker2_tee_object_already_covered_by_existing_tee_re_both_states(m
         hso = output["hookSpecificOutput"]
         assert hso["permissionDecision"] == "deny", v5
         assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK, v5
+
+
+# =========================================================================
+# v6 (F.3, ремедиация калибровки №8, узел F.3, 2026-08-20) -- класс
+# `python -c`/heredoc: WARN -> БЛОК, за выключателем PYC_DENY_ENABLED
+# (D-0069, default False -- билдер НЕ переключает). Все тесты этого
+# раздела monkeypatch'ат И V5_ENABLED, И PYC_DENY_ENABLED явно.
+# =========================================================================
+
+
+def test_p6_pyc_deny_enabled_default_is_false():
+    # К3.2: значение НА СДАЧЕ -- билдер не переключает.
+    assert hygiene_gate.PYC_DENY_ENABLED is False
+
+
+def test_p6_existing_suite_byte_identical_with_switch_off():
+    # К3.2 witness (дополнительно к полному прогону файла): значение
+    # выключателя на диске -- False, что и проверяет ВЕСЬ остальной
+    # существующий набор данного файла без правки тел (сам этот факт --
+    # весь файл зелёный с дефолтным значением константы).
+    assert hygiene_gate.PYC_DENY_ENABLED is False
+    assert hygiene_gate.V5_ENABLED is True
+
+
+def test_p6_dash_c_deny_basic(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1)"'))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_PYTHON_DASH_C_BLOCK
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
+
+
+def test_p6_heredoc_opener_deny(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "python - <<'PY'\nprint(1)\nPY"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_PYTHON_DASH_C_BLOCK
+
+
+def test_p6_switch_off_stays_warn_even_under_v5(monkeypatch):
+    # К3.2 регресс: V5 включён, выключатель НЕТ -- прежнее поведение
+    # (WARN, MSG_PYTHON_DASH_C, без permissionDecision).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", False)
+    exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1)"'))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+def test_p6_v4_path_unaffected_by_switch(monkeypatch):
+    # V5_ENABLED=False (V4 путь) -- _decide_v4 вообще не читает
+    # PYC_DENY_ENABLED -- класс (в) остаётся WARN независимо.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", False)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1)"'))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+# --- Р17: неоднозначные формы остаются WARN с прежним текстом ----------
+
+
+def test_p6_mention_inside_git_commit_message_stays_warn(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = 'git commit -m "run python -c to test this"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+def test_p6_mention_inside_unrelated_heredoc_body_stays_warn(monkeypatch):
+    # Живой корпусный FP (K3.3, 2026-08-20): "python -c" КАК ПРОЗА внутри
+    # тела heredoc'а НЕ-python команды (напр. `cat <<EOF`) -- реальный
+    # ВЫЗОВ здесь -- `cat`, не python. См. _mask_heredoc_bodies.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = 'cat <<EOF\nrun python -c "x" here\nEOF'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+def test_p6_mention_inside_git_commit_heredoc_body_stays_warn_not_deny(monkeypatch):
+    # ДОСЛОВНЫЙ живой репро координатора (K3.3): git commit -F -
+    # <<'EOF' с телом сообщения, упоминающим "класс python -c/heredoc" --
+    # РЕАЛЬНЫЙ, легальный git commit; до фикса _mask_heredoc_bodies
+    # денался (см. отчёт).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = (
+        "git add docs/x.md && git commit -F - <<'EOF'\n"
+        "класс python -c/heredoc переводится в deny по слову оператора\n"
+        "EOF"
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+def test_p6_real_python_heredoc_own_body_mentioning_dash_c_still_denies(monkeypatch):
+    # Контроль: РЕАЛЬНЫЙ python-heredoc-опенер, чьё СОБСТВЕННОЕ тело
+    # упоминает "python -c" как данные (тестовый код) -- маска тела НЕ
+    # трогает опенер-строку, денается по ОПЕНЕРУ.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "python - <<'PY'\ncmd = 'python -c \"print(1)\"'\nPY"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_PYTHON_DASH_C_BLOCK
+
+
+# --- К3.5: адверсариальная мини-батарея ---------------------------------
+
+
+def test_p6_adversarial_mypython_dash_c_boundary_not_covered(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload('mypython -c "print(1)"'))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_p6_adversarial_python3_dash_c_not_covered_known_limitation(monkeypatch):
+    # Р16 (закрыто): токен-набор НЕ расширяется -- "python3"/"py"/
+    # "pwsh -Command"/"node -e" остаются вне класса целиком.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload('python3 -c "print(1)"'))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_p6_adversarial_py_dash_c_not_covered_known_limitation(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload('py -c "print(1)"'))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_p6_adversarial_pwsh_command_not_covered_known_limitation(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload('pwsh -Command "1+1"'))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_p6_adversarial_absolute_path_python_still_denies(monkeypatch):
+    # "/usr/bin/python -c" -- литерал "python" виден через \b на "/" ->
+    # реальный, определённый вызов -- денает (НЕ про Р16 -- тот же
+    # токен "python", просто с путём перед ним).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload('/usr/bin/python -c "print(1)"'))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_p6_adversarial_case_insensitive_denies(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload('PYTHON -C "print(1)"'))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_p6_adversarial_double_space_denies(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload('python  -c "print(1)"'))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_p6_adversarial_crlf_heredoc_still_denies(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "python - <<'PY'\r\nprint(1)\r\nPY"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_p6_adversarial_unclosed_quote_fail_safe_toward_detect_denies(monkeypatch):
+    # Незакрытая кавычка НЕ матчится _mask_quoted_segments -- остаётся
+    # как есть -- "python -c" (ПЕРЕД кавычкой) остаётся видимым --
+    # fail-safe В СТОРОНУ детекта (тот же принцип, что везде в файле).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = 'python -c "print(unterminated'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_p6_adversarial_heredoc_continuation_after_delimiter_still_denies(monkeypatch):
+    # `python - <<'PY'` с продолжением ПОСЛЕ разделителя на опенер-строке.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "python - <<'PY' # trailing comment\nprint(1)\nPY"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_p6_adversarial_emoji_non_ascii_payload_still_denies(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "python -c \"print('\U0001F600 βήτα')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_p6_adversarial_bare_python_dash_c_no_payload_denies(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload("python -c"))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_p6_adversarial_empty_command_silent(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload(""))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_p6_adversarial_missing_tool_input_silent(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide({"tool_name": "Bash"})
+    assert exit_code == 0
+    assert output is None
+
+
+def test_p6_adversarial_non_dict_payload_silent(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(["not", "a", "dict"])
+    assert exit_code == 0
+    assert output is None
+
+
+def test_p6_adversarial_non_bash_tool_silent(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    payload = {"tool_name": "Edit", "tool_input": {"command": 'python -c "print(1)"'}}
+    exit_code, output = hygiene_gate.decide(payload)
+    assert exit_code == 0
+    assert output is None
+
+
+def test_p6_adversarial_corrupted_stdin_bytes_subprocess_no_crash():
+    # Битые байты stdin -- субпроцесс-уровень, читает ДИСКОВЫЙ дефолт
+    # (PYC_DENY_ENABLED=False, monkeypatch не долетает до subprocess) --
+    # переиспользует существующую адверсариальную инфраструктуру
+    # (test_adversarial_malformed_json/test_adversarial_null_bytes_in_
+    # json_string_no_crash выше), НЕ дублирует: тот же класс входа, тот
+    # же гарантированный exit 0 без трейсбека для класса (в) в частности.
+    result = _run_hook(b"\xff\xfe not json \x00")
+    assert result.returncode == 0
+    assert result.stdout.strip() == b""
+
+
+# --- позиционный инвариант (К3, "ПОРЯДОК НЕСКОЛЬКИХ БЛОКОВ") ------------
+
+
+def test_p6_positional_journal_deny_reason_unchanged_by_pyc_addition(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = 'echo x >> logs/routing-log.jsonl; python -c "print(1)"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
+
+
+def test_p6_positional_cd_root_deny_reason_unchanged_by_pyc_addition(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = f'cd {hygiene_gate._REPO_ROOT_NAME} && python -c "print(1)"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_CD_PREFIX
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
+
+
+def test_p6_positional_redirect_certain_deny_reason_unchanged_by_pyc_addition(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = 'ls x.py 2>&1; python -c "print(1)"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
+
+
+# --- К3, "Лимиты -- тест НА границе и ЗА ней" ---------------------------
+
+
+def test_p6_limit_100kb_command_on_boundary(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    payload_body = "a" * 100_000
+    command = f'python -c "print(\'{payload_body}\')"'
+    t0 = time.perf_counter()
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    elapsed = time.perf_counter() - t0
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert elapsed < 2.0, f"decide() took {elapsed:.3f}s at 100KB -- linearity claim violated"
+
+
+def test_p6_limit_1mb_command_beyond_boundary(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    payload_body = "a" * 1_000_000
+    command = f'python -c "print(\'{payload_body}\')"'
+    t0 = time.perf_counter()
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    elapsed = time.perf_counter() - t0
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    # ~10x рост длины входа -- утверждение линейности в докстринге
+    # проверяется тем, что время растёт НЕ катастрофически (не более
+    # чем на порядок величины сверх 100КБ-замера, щедрый потолок).
+    assert elapsed < 5.0, f"decide() took {elapsed:.3f}s at 1MB -- linearity claim violated"
+
+
+def test_p6_limit_500_statements_on_boundary(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "; ".join(["echo hi"] * 500) + '; python -c "print(1)"'
+    t0 = time.perf_counter()
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    elapsed = time.perf_counter() - t0
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert elapsed < 2.0, f"decide() took {elapsed:.3f}s at 500 statements"
+
+
+def test_p6_limit_5000_statements_beyond_boundary(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "; ".join(["echo hi"] * 5000) + '; python -c "print(1)"'
+    t0 = time.perf_counter()
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    elapsed = time.perf_counter() - t0
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert elapsed < 5.0, f"decide() took {elapsed:.3f}s at 5000 statements"
+
+
+def test_p6_limit_100_nested_quote_pairs_beyond_boundary(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    quotes = "".join(f'"{i}"' for i in range(100))
+    command = f'python -c "print(1)" {quotes}'
+    t0 = time.perf_counter()
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    elapsed = time.perf_counter() - t0
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert elapsed < 2.0, f"decide() took {elapsed:.3f}s at 100 quote pairs"
+
+
+# --- ПЕРЕСДАЧА, п.5: "ОБЁРТОЧНАЯ ДЫРА" -- запинена как ИЗВЕСТНОЕ
+# ОГРАНИЧЕНИЕ (очередь, решение оператора зафиксировано в докстринге
+# `_mask_heredoc_bodies` выше -- НЕ чинится этой задачей: блок и без
+# того нодж, Р16 уже оставил вне охвата python3/py/pwsh -c, закрывать
+# ОДНУ из четырёх дыр интерпретаторным гардом непропорционально дорого
+# относительно выгоды, Rule #1; вопрос "нодж или enforcement" возвращён
+# оператору целиком вместе с Р16). Каждый тест пинует ОБА факта разом:
+# (1) реальный, ИСПОЛНЯЮЩИЙ вызов НЕ денается (дыра реальна -- DENY
+# отсутствует), (2) широкий сигнал `pyc` всё равно даёт WARN, НЕ тишину
+# -- смягчение "деградация до warn, а не слепота" (см. её докстринг).
+
+
+def _assert_wrapper_hole_warn_not_deny(command):
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is not None, "обёрточная дыра: ожидается WARN, не тишина"
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso, "обёрточная дыра: НЕ должна денать"
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+def test_p6_wrapper_bash_heredoc_python_dash_c_not_covered_known_limitation(monkeypatch):
+    # Замер критика: `bash <<EOF ... python -c "..." ... EOF` реально
+    # ИСПОЛНЯЕТ тело -- `_mask_heredoc_bodies` маскирует его наравне с
+    # прозой, deny не срабатывает.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "bash <<'EOF'\necho start\npython -c \"print(1)\"\necho end\nEOF"
+    _assert_wrapper_hole_warn_not_deny(command)
+
+
+def test_p6_wrapper_sh_heredoc_python_dash_c_not_covered_known_limitation(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "sh <<EOF\npython -c \"print(1)\"\nEOF"
+    _assert_wrapper_hole_warn_not_deny(command)
+
+
+def test_p6_wrapper_cat_pipe_bash_heredoc_not_covered_known_limitation(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "cat <<'EOF' | bash\npython -c \"print(1)\"\nEOF"
+    _assert_wrapper_hole_warn_not_deny(command)
+
+
+def test_p6_wrapper_ssh_heredoc_not_covered_known_limitation(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "ssh host <<'EOF'\npython -c \"print(1)\"\nEOF"
+    _assert_wrapper_hole_warn_not_deny(command)
+
+
+def test_p6_wrapper_docker_exec_heredoc_not_covered_known_limitation(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "docker exec -i c bash <<'EOF'\npython -c \"print(1)\"\nEOF"
+    _assert_wrapper_hole_warn_not_deny(command)
+
+
+def test_p6_wrapper_bash_dash_c_quoted_not_covered_known_limitation(monkeypatch):
+    # Кавычковая маска (не heredoc): "python -c" стоит ВНУТРИ кавычек
+    # аргумента `bash -c` -- `_mask_quoted_segments` маскирует его как
+    # данные, хотя `bash -c` реально исполняет содержимое.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = 'bash -c \'python -c "print(1)"\''
+    _assert_wrapper_hole_warn_not_deny(command)
+
+
+def test_p6_wrapper_sh_dash_c_quoted_not_covered_known_limitation(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "sh -c 'python -c \"print(1)\"'"
+    _assert_wrapper_hole_warn_not_deny(command)
+
+
+def test_p6_wrapper_eval_quoted_not_covered_known_limitation(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = 'eval "python -c \'print(1)\'"'
+    _assert_wrapper_hole_warn_not_deny(command)
+
+
+def test_p6_wrapper_control_real_dash_c_still_denies(monkeypatch):
+    # Контроль: НЕобёрнутый прямой вызов по-прежнему денается -- дыра
+    # именно в обёртках, не общая деградация класса.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1)"'))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
