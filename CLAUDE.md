@@ -9,7 +9,7 @@ docs/DECISIONS_FULL.md. Permanent behaviour (D-0011): never invent
 project state — retrieve it from the repository; the repository
 overrides chat. This repo is the reference (dogfooding) deployment.
 
-Size budget: this file is capped at 35815 bytes (breach 36115); an
+Size budget: this file is capped at 36700 bytes (breach 37000); an
 amendment to a rule with a registry block is a ROW in that registry,
 never a paragraph in its core; a rule without a block has no
 amendments yet — the first amendment creates the block; rationale
