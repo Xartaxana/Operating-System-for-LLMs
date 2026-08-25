@@ -547,7 +547,7 @@ builder (`model: sonnet` ↔ `claude-sonnet-5`), critic (`model: opus`
 
 | экземпляр | код слоя | реестр/измеритель | сторож |
 |---|---|---|---|
-| GIVEN_PATH | `tools/dispatch_gate.py` `_filter_given_candidates` | `warn_layers.json` / `layer_denominator_value` | замер снятого (узел A DAG) + переразметка З2 |
+| GIVEN_PATH | `tools/dispatch_gate.py` `_filter_given_candidates` | `warn_layers.json` / `layer_matcher_total (быв. layer_denominator_value, узел B 2026-08-25)` | замер снятого (узел A DAG) + переразметка З2 |
 | шесть журнальных слоёв | `tools/journal_echo.py` `main` ранний выход | то же | `ДЕФЕКТ ПРЕДИКАТА` прогона (узел B DAG) |
 | три QUOTED-слоя, три OWNS-слоя, NEGATIVE_LINT, NEGATIVE_CLAIM, SEARCH_RETURNED_NOTHING | `dispatch_gate.py` / `owns_gate.py` / `negative_lint.py` / `claim_control_gate.py` / `search_control_gate.py` | то же | то же |
 | замерочные скрипты задач (`docs/tasks/*.py`) | линкер/классификатор скрипта | собственный знаменатель | вердикт критика; своего сторожа НЕТ — открытый пробел |
@@ -986,7 +986,7 @@ I чинится сужением на стороне сторожа, II — п�
 Носители-экземпляры: `tools/dispatch_gate.py` (GIVEN_PATH, подкласс I),
 `tools/owns_gate.py` (пересдача — подкласс I, ЗАКРЫТ 2026-08-25 УЗЛОМ I,
 t-593), `tools/journal_echo.py` (шесть слоёв, подкласс II),
-`tools/warn_density.py` (`layer_denominator_value`),
+`tools/warn_density.py` (`layer_matcher_total (быв. layer_denominator_value, узел B 2026-08-25)`),
 `docs/tasks/2026-08-25_manifest-form-probe.py` (З3: класс воспроизведён
 ВНУТРИ инструмента, которым его же и мерили).
 

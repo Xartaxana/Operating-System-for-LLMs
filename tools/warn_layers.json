@@ -1,5 +1,5 @@
 {
-  "registry_version": 1,
+  "registry_version": 2,
   "layers": [
     {
       "id": "GIVEN_PATH",
@@ -11,7 +11,9 @@
       "hook_event": "PreToolUse",
       "matcher": "Task|Agent",
       "denominator": "Z1",
-      "listed_in_check_11v": true
+      "listed_in_check_11v": true,
+      "reachable": "unmeasured",
+      "reason": "подкласс I (ложное срабатывание), не подкласс II -- знаменатель вне задачи узла B, чинится узлом A (docs/tasks/2026-08-25_warn-class-fix-dag.md)"
     },
     {
       "id": "ROLE_TYPE",
@@ -23,7 +25,9 @@
       "hook_event": "PreToolUse",
       "matcher": "Task|Agent",
       "denominator": "Z1",
-      "listed_in_check_11v": true
+      "listed_in_check_11v": true,
+      "reachable": "unmeasured",
+      "reason": "не экземпляр класса (слой прав, см. docs/tasks/2026-08-25_warn-population-class.md) -- пункт наблюдения населённости, не подкласс II, вне задачи узла B"
     },
     {
       "id": "WRITE_QUOTED",
@@ -35,7 +39,8 @@
       "hook_event": "PreToolUse",
       "matcher": "Task|Agent",
       "denominator": "Z1",
-      "listed_in_check_11v": true
+      "listed_in_check_11v": true,
+      "reachable": "subagent_type_builder"
     },
     {
       "id": "DOD_QUOTED",
@@ -47,7 +52,8 @@
       "hook_event": "PreToolUse",
       "matcher": "Task|Agent",
       "denominator": "Z1",
-      "listed_in_check_11v": false
+      "listed_in_check_11v": false,
+      "reachable": "subagent_type_builder"
     },
     {
       "id": "MANIFEST_QUOTED",
@@ -59,7 +65,8 @@
       "hook_event": "PreToolUse",
       "matcher": "Task|Agent",
       "denominator": "Z1",
-      "listed_in_check_11v": false
+      "listed_in_check_11v": false,
+      "reachable": "subagent_type_builder"
     },
     {
       "id": "OWNS_OVERLAP",
@@ -71,7 +78,9 @@
       "hook_event": "PreToolUse",
       "matcher": "Task|Agent",
       "denominator": "Z1",
-      "listed_in_check_11v": true
+      "listed_in_check_11v": true,
+      "reachable": "unmeasured",
+      "reason": "барьер требует парсера гейта (_extract_owns_full/_find_overlaps, owns_gate.py) -- не выражается закрытым словарём дёшево"
     },
     {
       "id": "BLIND_OWNS",
@@ -83,7 +92,9 @@
       "hook_event": "PreToolUse",
       "matcher": "Task|Agent",
       "denominator": "Z1",
-      "listed_in_check_11v": true
+      "listed_in_check_11v": true,
+      "reachable": "unmeasured",
+      "reason": "барьер требует парсера гейта (MANIFEST_OWNS_RE/WRITE_INDICATORS_RE, owns_gate.py) -- не выражается закрытым словарём дёшево"
     },
     {
       "id": "QUOTED_OWNS",
@@ -95,7 +106,9 @@
       "hook_event": "PreToolUse",
       "matcher": "Task|Agent",
       "denominator": "Z1",
-      "listed_in_check_11v": true
+      "listed_in_check_11v": true,
+      "reachable": "unmeasured",
+      "reason": "барьер требует парсера гейта (региональной сверки diag=='quoted', owns_gate.py) -- не выражается закрытым словарём дёшево"
     },
     {
       "id": "NOTES_LEN",
@@ -107,7 +120,8 @@
       "hook_event": "PostToolUse",
       "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
       "denominator": "Z1",
-      "listed_in_check_11v": true
+      "listed_in_check_11v": true,
+      "reachable": "journal_path"
     },
     {
       "id": "TIER_ECHO",
@@ -119,7 +133,8 @@
       "hook_event": "PostToolUse",
       "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
       "denominator": "Z1",
-      "listed_in_check_11v": true
+      "listed_in_check_11v": true,
+      "reachable": "journal_path"
     },
     {
       "id": "WITNESS_ECHO",
@@ -131,7 +146,8 @@
       "hook_event": "PostToolUse",
       "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
       "denominator": "Z1",
-      "listed_in_check_11v": true
+      "listed_in_check_11v": true,
+      "reachable": "journal_path"
     },
     {
       "id": "TS_DRIFT",
@@ -143,7 +159,8 @@
       "hook_event": "PostToolUse",
       "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
       "denominator": "Z1",
-      "listed_in_check_11v": true
+      "listed_in_check_11v": true,
+      "reachable": "journal_path"
     },
     {
       "id": "R6_ZERKALO",
@@ -155,7 +172,8 @@
       "hook_event": "PostToolUse",
       "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
       "denominator": "Z1",
-      "listed_in_check_11v": true
+      "listed_in_check_11v": true,
+      "reachable": "journal_path"
     },
     {
       "id": "JOURNAL_ECHO_BASE",
@@ -167,7 +185,8 @@
       "hook_event": "PostToolUse",
       "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
       "denominator": "Z1",
-      "listed_in_check_11v": false
+      "listed_in_check_11v": false,
+      "reachable": "journal_path"
     },
     {
       "id": "NEGATIVE_LINT",
@@ -179,7 +198,9 @@
       "hook_event": "PostToolUse",
       "matcher": "Task|Agent",
       "denominator": "Z1",
-      "listed_in_check_11v": true
+      "listed_in_check_11v": true,
+      "reachable": "unmeasured",
+      "reason": "барьер -- свойство tool_response (isAsync/status==async_launched, negative_lint.py :503-508), не свойство запроса"
     },
     {
       "id": "NEGATIVE_CLAIM",
@@ -191,7 +212,9 @@
       "hook_event": "PreToolUse",
       "matcher": "Edit|Write",
       "denominator": "Z1",
-      "listed_in_check_11v": true
+      "listed_in_check_11v": true,
+      "reachable": "unmeasured",
+      "reason": "барьер требует парсера пути (_in_scope/_normalize_repo_relative, claim_control_gate.py :468-484) -- не выражается закрытым словарём дёшево"
     },
     {
       "id": "SEARCH_RETURNED_NOTHING",
@@ -203,7 +226,8 @@
       "hook_event": "PostToolUse",
       "matcher": "Bash|PowerShell|Grep|Glob|Read",
       "denominator": "Z1",
-      "listed_in_check_11v": true
+      "listed_in_check_11v": true,
+      "reachable": "search_tool_or_pattern"
     },
     {
       "id": "HYGIENE",
@@ -215,7 +239,9 @@
       "hook_event": "PreToolUse",
       "matcher": "Bash|PowerShell",
       "denominator": "Z1",
-      "listed_in_check_11v": false
+      "listed_in_check_11v": false,
+      "reachable": "unmeasured",
+      "reason": "развилка вырожденного края не решена (Р6/п.6 очереди фикса класса), реальная населённость не измерена"
     }
   ]
 }

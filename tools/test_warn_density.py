@@ -32,11 +32,19 @@ def _layer(
     id="L1", name="L1", carrier=None, symbol=None, literal="LIT WARN:",
     aliases=None, hook_event="PreToolUse", matcher="Task|Agent",
     denominator="Z1", listed=True,
+    reachable="unmeasured", reachable_reason="reachable не объявлен в реестре",
 ) -> wd.LayerDef:
+    # Узел B: reachable по умолчанию -- "unmeasured" с тем же синтетическим
+    # reason, что validate_layers подставляет при ОТСУТСТВИИ поля в
+    # реестре (см. warn_density.validate_layers) -- слои, СКОНСТРУИРОВАННЫЕ
+    # напрямую (минуя validate_layers), ведут себя идентично реестровым.
+    if reachable != "unmeasured":
+        reachable_reason = None
     return wd.LayerDef(
         id=id, name=name, carrier=carrier or ["carrier.py"], symbol=symbol,
         literal=literal, aliases=aliases or [], hook_event=hook_event,
         matcher=matcher, denominator=denominator, listed_in_check_11v=listed,
+        reachable=reachable, reachable_reason=reachable_reason,
     )
 
 
@@ -62,10 +70,13 @@ def _hook_success_line(
     return json.dumps(rec, ensure_ascii=False)
 
 
-def _tool_use_line(ts="2026-01-01T00:00:00.500Z", name="Agent", uuid="tu-line") -> str:
+def _tool_use_line(ts="2026-01-01T00:00:00.500Z", name="Agent", uuid="tu-line", input_=None, tool_use_id="tuX") -> str:
+    item = {"type": "tool_use", "id": tool_use_id, "name": name}
+    if input_ is not None:
+        item["input"] = input_
     rec = {
         "uuid": uuid, "timestamp": ts, "type": "assistant",
-        "message": {"content": [{"type": "tool_use", "id": "tuX", "name": name}]},
+        "message": {"content": [item]},
     }
     return json.dumps(rec, ensure_ascii=False)
 
@@ -673,26 +684,69 @@ def test_limit_window_just_before_end_included(tmp_path):
     assert c.calls == 1
 
 
-def test_limit_denominator_one_calls_one_is_100_percent(tmp_path):
+def test_limit_matcher_one_calls_one_via_matcher_total(tmp_path):
+    """МАТЧЕР-число (старый Z1, layer_matcher_total -- переименованный
+    layer_denominator_value, Б-К2) сохраняется НЕЗАВИСИМО от достижимо."""
     layer = _layer(matcher="Agent")
     f = _write_lines(tmp_path / "one.jsonl", [
         _hook_success_line(),
         _tool_use_line(name="Agent"),
     ])
     rep = wd.process_corpus([f], [layer], None, None, {}, compute_fixture=False)
-    denom = wd.layer_denominator_value(layer, rep.tool_use_counts)
+    matcher_total = wd.layer_matcher_total(layer, rep.tool_use_counts)
     c = rep.counts["L1"]
-    assert denom == 1 and c.calls == 1
+    assert matcher_total == 1 and c.calls == 1
+
+
+def test_bk1_achievable_one_calls_one_is_100_percent(tmp_path):
+    """Б-К1: доля теперь считается от ДОСТИЖИМО (не от матчера).
+    Граница на достижимо==1, calls==1 -> 100.0% (Края спеки узла B)."""
+    layer = _layer(matcher="Agent", reachable="subagent_type_builder")
+    f = _write_lines(tmp_path / "one.jsonl", [
+        _hook_success_line(),
+        _tool_use_line(name="Agent", input_={"subagent_type": "builder"}),
+    ])
+    rep = wd.process_corpus([f], [layer], None, None, {}, compute_fixture=False)
+    achievable, unreachable, matcher_total = wd.layer_population(layer, rep)
+    assert (achievable, unreachable, matcher_total) == (1, 0, 1)
     text = wd.render_text(rep, tmp_path, None, "БАЗЫ НЕТ", None, source_empty=False)
+    assert "достижимо=1 недостижимо=0 матчер=1" in text
     assert "доля=100.0%" in text
 
 
-def test_limit_denominator_zero_is_na_never_zero_percent(tmp_path):
-    layer = _layer(matcher="NoSuchTool")
-    f = _write_lines(tmp_path / "zero.jsonl", [_hook_success_line()])
+def test_bk3_unmeasured_layer_prints_reason_no_percent(tmp_path):
+    """Б-К3: слой без объявленной популяции (reachable=unmeasured)
+    печатает н-д с reason и НЕ печатает процент -- НЕ тихий откат к
+    матчер-Z1 (это же слой раньше давал доля=100.0% при матчере==вызовам)."""
+    layer = _layer(matcher="Agent", reachable="unmeasured", reachable_reason="тестовая причина")
+    f = _write_lines(tmp_path / "unmeasured.jsonl", [
+        _hook_success_line(),
+        _tool_use_line(name="Agent"),
+    ])
     rep = wd.process_corpus([f], [layer], None, None, {}, compute_fixture=False)
+    achievable, unreachable, matcher_total = wd.layer_population(layer, rep)
+    assert (achievable, unreachable, matcher_total) == (None, None, 1)
     text = wd.render_text(rep, tmp_path, None, "БАЗЫ НЕТ", None, source_empty=False)
-    assert "доля=н-д (знаменатель 0)" in text
+    assert "достижимо=н-д недостижимо=н-д матчер=1" in text
+    assert "доля=н-д (популяция не объявлена: тестовая причина)" in text
+    assert "доля=100.0%" not in text
+    assert "доля=0.0%" not in text
+
+
+def test_edge_achievable_zero_matcher_positive_is_na_never_zero_percent(tmp_path):
+    """Край спеки узла B: достижимо==0 при матчер>0 -- «н-д (достижимо 0
+    из N)», НЕ 0.0%, НЕ деление на ноль (измеримый reachable, просто в
+    этом окне ни один matcher-вызов не удовлетворил предикат)."""
+    layer = _layer(matcher="Agent", reachable="subagent_type_builder")
+    f = _write_lines(tmp_path / "zero.jsonl", [
+        _hook_success_line(),
+        _tool_use_line(name="Agent", input_={"subagent_type": "scout"}),
+    ])
+    rep = wd.process_corpus([f], [layer], None, None, {}, compute_fixture=False)
+    achievable, unreachable, matcher_total = wd.layer_population(layer, rep)
+    assert (achievable, unreachable, matcher_total) == (0, 1, 1)
+    text = wd.render_text(rep, tmp_path, None, "БАЗЫ НЕТ", None, source_empty=False)
+    assert "доля=н-д (достижимо 0 из 1)" in text
     assert "доля=0.0%" not in text
 
 
@@ -902,6 +956,8 @@ def test_proxy_false_when_matcher_exclusive(tmp_path):
 
 
 def test_denominator_sums_matching_tool_names(tmp_path):
+    """МАТЧЕР (не достижимо) -- layer_matcher_total, переименованный
+    layer_denominator_value, семантика Z1 не изменилась."""
     layer = _layer(matcher="Task|Agent")
     f = _write_lines(tmp_path / "denom.jsonl", [
         _tool_use_line(name="Task", ts="2026-01-01T00:00:00.100Z", uuid="t1"),
@@ -909,8 +965,8 @@ def test_denominator_sums_matching_tool_names(tmp_path):
         _tool_use_line(name="Bash", ts="2026-01-01T00:00:00.300Z", uuid="t3"),
     ])
     rep = wd.process_corpus([f], [layer], None, None, {}, compute_fixture=False)
-    denom = wd.layer_denominator_value(layer, rep.tool_use_counts)
-    assert denom == 2
+    matcher_total = wd.layer_matcher_total(layer, rep.tool_use_counts)
+    assert matcher_total == 2
     assert rep.total_tool_use_in_window == 3
 
 
@@ -968,8 +1024,8 @@ def test_f1_denominator_excludes_sidechain_tool_use(tmp_path):
         _tool_use_line(name="Agent", uuid="sub-tu"),
     ])
     rep = wd.process_corpus([main_file, sub_file], [layer], None, None, {}, compute_fixture=False)
-    denom = wd.layer_denominator_value(layer, rep.tool_use_counts)
-    assert denom == 1
+    matcher_total = wd.layer_matcher_total(layer, rep.tool_use_counts)
+    assert matcher_total == 1
     assert rep.total_tool_use_in_window == 1
     assert rep.sidechain_tool_use_in_window == 1
 
@@ -1170,6 +1226,300 @@ def test_f4_duplicate_tool_use_id_line_and_counter(tmp_path):
     text = wd.render_text(rep, tmp_path, None, "БАЗЫ НЕТ", None, source_empty=False)
     assert "дедуп асимметричен" in text
     assert "дублей id в окне: 1 из 2" in text
+
+
+# ---------------------------------------------------------------------------
+# Узел B -- пер-слойные знаменатели (Б-К1..Б-К8, спека docs/tasks/
+# 2026-08-25_warn-class-fix-dag.md)
+# ---------------------------------------------------------------------------
+
+# --- предикаты reachable (B-К6: барьеры импортируются из гейтов) --------
+
+def test_pop_journal_path_matches_routing_log(tmp_path):
+    assert wd._population_journal_path("Edit", {"file_path": "logs/routing-log.jsonl"}) is True
+    assert wd._population_journal_path("Edit", {"file_path": "logs\\routing-log.jsonl"}) is True
+
+
+def test_pop_journal_path_rejects_other_file(tmp_path):
+    assert wd._population_journal_path("Edit", {"file_path": "tools/warn_density.py"}) is False
+    assert wd._population_journal_path("Edit", {}) is False
+
+
+def test_pop_journal_path_rejects_wrong_tool_name(tmp_path):
+    # барьер сам не фильтрует по tool_name (journal_echo._extract_file_path
+    # без доп. фильтра), но предикат здесь ограничен матчер-группой слоя --
+    # Task/Agent никогда не несёт достижимой journal_path-популяции.
+    assert wd._population_journal_path("Task", {"file_path": "logs/routing-log.jsonl"}) is False
+
+
+def test_pop_subagent_type_builder_matches_builder():
+    assert wd._population_subagent_type_builder("Task", {"subagent_type": "builder"}) is True
+    assert wd._population_subagent_type_builder("Agent", {"subagent_type": "builder"}) is True
+
+
+def test_pop_subagent_type_builder_rejects_other_roles():
+    assert wd._population_subagent_type_builder("Task", {"subagent_type": "scout"}) is False
+    assert wd._population_subagent_type_builder("Task", {}) is False
+    assert wd._population_subagent_type_builder("Bash", {"subagent_type": "builder"}) is False
+
+
+def test_pop_search_tool_or_pattern_grep_glob_always_true():
+    assert wd._population_search_tool_or_pattern("Grep", {}) is True
+    assert wd._population_search_tool_or_pattern("Glob", {"command": "irrelevant"}) is True
+
+
+def test_pop_search_tool_or_pattern_bash_needs_search_token():
+    assert wd._population_search_tool_or_pattern("Bash", {"command": "grep -r foo ."}) is True
+    assert wd._population_search_tool_or_pattern("Bash", {"command": "git status --short"}) is False
+
+
+def test_pop_search_tool_or_pattern_read_never_reachable():
+    """Барьер (а) §1 класса: Read -- в matcher'е SEARCH_RETURNED_NOTHING,
+    но НЕ член SEARCH_TOOLS и не несёт `command` -- никогда достижим."""
+    assert wd._population_search_tool_or_pattern("Read", {}) is False
+    assert wd._population_search_tool_or_pattern("Read", {"command": "grep foo"}) is False
+
+
+# --- layer_population / доля (Б-К1..Б-К3) -- см. также test_bk1_/test_bk3_/
+# test_edge_achievable_zero_matcher_positive_ выше (раздел "Лимиты") -------
+
+def test_two_layers_same_matcher_different_population_different_denominators(tmp_path):
+    """Адверсариальная батарея узла B: два слоя с ОДИНАКОВЫМ matcher, но
+    РАЗНОЙ reachable-популяцией -- знаменатели (достижимо) РАЗНЫЕ. Прямая
+    проверка, что фикс сделал то, ради чего затеян (докстринг узла B)."""
+    layer_a = _layer(id="A", matcher="Agent", reachable="subagent_type_builder")
+    layer_b = _layer(id="B", matcher="Agent", reachable="unmeasured")
+    f = _write_lines(tmp_path / "two.jsonl", [
+        _tool_use_line(name="Agent", uuid="t1", ts="2026-01-01T00:00:00.100Z",
+                        input_={"subagent_type": "builder"}),
+        _tool_use_line(name="Agent", uuid="t2", ts="2026-01-01T00:00:00.200Z",
+                        input_={"subagent_type": "scout"}),
+    ])
+    rep = wd.process_corpus([f], [layer_a, layer_b], None, None, {}, compute_fixture=False)
+    achievable_a, _, matcher_a = wd.layer_population(layer_a, rep)
+    achievable_b, _, matcher_b = wd.layer_population(layer_b, rep)
+    assert matcher_a == matcher_b == 2  # тот же матчер
+    assert achievable_a == 1            # только один builder-вызов
+    assert achievable_b is None         # unmeasured -- н-д, не число
+
+
+# --- Б-К4: ДЕТЕКТОР МЕХАНИЗМА -- calls > достижимо, границы обеих сторон -
+
+def test_bk4_calls_equal_achievable_is_not_a_defect(tmp_path):
+    layer = _layer(matcher="Agent", reachable="subagent_type_builder")
+    f = _write_lines(tmp_path / "eq.jsonl", [
+        _hook_success_line(),  # даёт c.calls == 1
+        _tool_use_line(name="Agent", input_={"subagent_type": "builder"}),  # достижимо == 1
+    ])
+    rep = wd.process_corpus([f], [layer], None, None, {}, compute_fixture=False)
+    defects = wd.compute_run_defects(rep)
+    assert not any("ДЕФЕКТ ПРЕДИКАТА" in d for d in defects)
+
+
+def test_bk4_calls_exceeds_achievable_by_one_is_defect(tmp_path):
+    """Б-К4, ГЛАВНЫЙ детектор узла B: calls == достижимо+1 -- ДЕФЕКТ
+    ПРЕДИКАТА (предикат населённости, ставший уже реальности)."""
+    layer = _layer(matcher="Agent", reachable="subagent_type_builder")
+    f = _write_lines(tmp_path / "exceed.jsonl", [
+        _hook_success_line(uuid="u1", tool_use_id="tu1"),
+        _hook_success_line(uuid="u2", tool_use_id="tu2", ts="2026-01-01T00:00:01.000Z"),
+        # calls == 2, но НИ ОДНОГО builder-вызова -- достижимо == 0
+    ])
+    rep = wd.process_corpus([f], [layer], None, None, {}, compute_fixture=False)
+    assert rep.counts["L1"].calls == 2
+    achievable, _, _ = wd.layer_population(layer, rep)
+    assert achievable == 0
+    defects = wd.compute_run_defects(rep)
+    assert any("ДЕФЕКТ ПРЕДИКАТА: L1: calls=2 > достижимо=0" in d for d in defects)
+
+
+def test_bk4_main_returns_exit1_on_predicate_defect(tmp_path, capsys):
+    """Сквозной прогон через main(): ДЕФЕКТ ПРЕДИКАТА -- exit 1, строка в
+    выводе (не только внутренний compute_run_defects()). GIVEN_PATH-слой
+    ОБЯЗАН быть в реестре -- иначе fixture_control() сам даёт (0, 0) и
+    exit=1 по НЕСВЯЗАННОЙ причине (ДЕФЕКТ ИНСТРУМЕНТА), тест перестал бы
+    различать свою и чужую причину провала."""
+    reg = _reg_with_fixture_layer(matcher="Agent", reachable="subagent_type_builder")
+    (tmp_path / "reg.json").write_text(json.dumps(reg), encoding="utf-8")
+    (tmp_path / "c.py").write_text('X = "A WARN: text GIVEN-PATH WARN: text"\n', encoding="utf-8")
+    corpus_dir = tmp_path / "corpus"
+    _write_lines(corpus_dir / "hit.jsonl", [_hook_success_line(additional_context="A WARN: x")])
+    code = wd.main([
+        "--registry-file", str(tmp_path / "reg.json"),
+        "--transcripts", str(corpus_dir),
+        "--sidecar", str(tmp_path / "sidecar.jsonl"),
+    ])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "ДЕФЕКТ ПРЕДИКАТА: A: calls=1 > достижимо=0" in out
+
+
+# --- реестр: валидация 'reachable'/'reason' (Б-К8, "тем же способом, что
+# validate_layers для carrier/literal") -----------------------------------
+
+def test_registry_reachable_absent_is_not_a_defect_and_defaults_unmeasured():
+    a = _raw_layer(id="A")
+    a.pop("reachable", None)
+    layers, defects = wd.validate_layers([a])
+    assert defects == []
+    assert len(layers) == 1
+    assert layers[0].reachable == "unmeasured"
+    assert layers[0].reachable_reason == "reachable не объявлен в реестре"
+
+
+def test_registry_reachable_known_kind_no_reason_needed():
+    a = _raw_layer(id="A", reachable="journal_path")
+    layers, defects = wd.validate_layers([a])
+    assert defects == []
+    assert layers[0].reachable == "journal_path"
+    assert layers[0].reachable_reason is None
+
+
+def test_registry_reachable_unmeasured_requires_reason():
+    a = _raw_layer(id="A", reachable="unmeasured")  # 'reason' отсутствует
+    layers, defects = wd.validate_layers([a])
+    assert any("reachable=unmeasured требует непустой 'reason'" in d for d in defects)
+    assert layers == []
+
+
+def test_registry_reachable_unmeasured_with_reason_ok():
+    a = _raw_layer(id="A", reachable="unmeasured", reason="тестовая причина")
+    layers, defects = wd.validate_layers([a])
+    assert defects == []
+    assert layers[0].reachable_reason == "тестовая причина"
+
+
+@pytest.mark.parametrize("bad_value", [
+    "{template}",   # `{`-шаблон
+    "",             # пустая строка
+    0,              # число
+    {"kind": "x"},  # вложенный объект
+    ["journal_path"],  # список
+])
+def test_registry_reachable_malformed_is_defect_not_traceback(bad_value):
+    """Адверсариальная батарея узла B: поле с {-шаблоном / пустой строкой
+    / числом / вложенным объектом -- ДЕФЕКТ ФОРМЫ, не трейсбек."""
+    a = _raw_layer(id="A", reachable=bad_value)
+    layers, defects = wd.validate_layers([a])
+    assert layers == []
+    assert any("reachable" in d for d in defects)
+
+
+def test_registry_reachable_unknown_kind_is_defect():
+    a = _raw_layer(id="A", reachable="totally-unknown-kind")
+    layers, defects = wd.validate_layers([a])
+    assert layers == []
+    assert any("неизвестного вида" in d for d in defects)
+
+
+def test_registry_reachable_unknown_kind_check_exit1(tmp_path):
+    reg = {"registry_version": 2, "layers": [_raw_layer(
+        id="A", carrier=["c.py"], literal="A WARN:", reachable="bogus-kind",
+    )]}
+    (tmp_path / "reg.json").write_text(json.dumps(reg), encoding="utf-8")
+    (tmp_path / "c.py").write_text('X = "A WARN: text"\n', encoding="utf-8")
+    text, code = wd.run_check(tmp_path / "reg.json", tmp_path)
+    assert code == 1
+    assert "неизвестного вида" in text
+
+
+def test_registry_version_1_no_reachable_field_all_unmeasured_exit0(tmp_path):
+    """Край спеки узла B: версия 1 (поле reachable нигде не объявлено) --
+    читается, ВСЕ слои н-д, exit 0 (НЕ дефект -- обратная совместимость)."""
+    reg = {"registry_version": 1, "layers": [_raw_layer(id="A", carrier=["c.py"], literal="A WARN:")]}
+    (tmp_path / "reg.json").write_text(json.dumps(reg), encoding="utf-8")
+    (tmp_path / "c.py").write_text('X = "A WARN: text"\n', encoding="utf-8")
+    text, code = wd.run_check(tmp_path / "reg.json", tmp_path)
+    assert code == 0
+    assert "дефектов нет" in text
+    _, raw_layers, _ = wd.read_registry_raw(tmp_path / "reg.json")
+    layers, defects = wd.validate_layers(raw_layers)
+    assert defects == []
+    assert layers[0].reachable == "unmeasured"
+
+
+# --- сайдкар: population_rule_version (Б-К7 / Р3(в)) ----------------------
+
+def test_sidecar_entry_carries_population_rule_version(tmp_path):
+    layer = _layer()
+    f = _write_lines(tmp_path / "any.jsonl", [_tool_use_line()])
+    rep = wd.process_corpus([f], [layer], None, None, {}, compute_fixture=False)
+    entry = wd.build_sidecar_entry(rep, "deadbeef")
+    assert entry["population_rule_version"] == wd.POPULATION_RULE_VERSION
+
+
+def _reg_with_fixture_layer(**extra_a_kw):
+    """Реестр с ДВУМЯ слоями -- кастомным 'A' и обязательным GIVEN_PATH
+    (иначе fixture_control() вернёт (0, 0) -- 'A' не совпадает с
+    _FIXTURE_LAYER_ID -- и main() упадёт в ДЕФЕКТ ИНСТРУМЕНТА/exit 1 по
+    ПРИЧИНЕ, не связанной с тестом; см. warn_density.fixture_control)."""
+    a = _raw_layer(id="A", carrier=["c.py"], literal="A WARN:", **extra_a_kw)
+    given = _raw_layer(id="GIVEN_PATH", carrier=["c.py"], literal="GIVEN-PATH WARN:")
+    return {"registry_version": 2, "layers": [a, given]}
+
+
+def test_main_warns_base_from_before_population_rule(tmp_path, capsys):
+    """Р3(в): render_text печатает предупреждение при чтении сайдкар-базы,
+    записанной ДО пер-слойного знаменателя -- даже если registry_sha
+    ВЫДУМАННО совпал бы (population_rule_version отсутствует)."""
+    reg = _reg_with_fixture_layer(reachable="subagent_type_builder")
+    reg_path = tmp_path / "reg.json"
+    reg_path.write_text(json.dumps(reg), encoding="utf-8")
+    (tmp_path / "c.py").write_text('X = "A WARN: text GIVEN-PATH WARN: text"\n', encoding="utf-8")
+    raw_bytes = reg_path.read_bytes()
+    reg_hash = wd.registry_sha(raw_bytes)
+    sidecar_path = tmp_path / "sidecar.jsonl"
+    # старая запись -- registry_sha ТОТ ЖЕ (совпадение), но БЕЗ
+    # population_rule_version (записана ДО этого узла).
+    sidecar_path.write_text(json.dumps({"registry_sha": reg_hash, "ts": "x"}) + "\n", encoding="utf-8")
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    code = wd.main([
+        "--registry-file", str(reg_path), "--transcripts", str(corpus_dir),
+        "--sidecar", str(sidecar_path),
+    ])
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert "БАЗА ДО ПЕР-СЛОЙНОГО ЗНАМЕНАТЕЛЯ" in out
+
+
+def test_no_sidecar_flag_skips_read_and_write(tmp_path, capsys):
+    """Р-В1: --no-sidecar -- ни читает, ни пишет сайдкар."""
+    reg = _reg_with_fixture_layer(reachable="subagent_type_builder")
+    reg_path = tmp_path / "reg.json"
+    reg_path.write_text(json.dumps(reg), encoding="utf-8")
+    (tmp_path / "c.py").write_text('X = "A WARN: text GIVEN-PATH WARN: text"\n', encoding="utf-8")
+    sidecar_path = tmp_path / "sidecar.jsonl"
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    code = wd.main([
+        "--registry-file", str(reg_path), "--transcripts", str(corpus_dir),
+        "--sidecar", str(sidecar_path), "--no-sidecar",
+    ])
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert not sidecar_path.exists()
+    assert "СВЕРКА ПРОПУЩЕНА (--no-sidecar)" in out
+
+
+# --- layer_is_proxy: тег текста называет "матчер" (конфликтная пара 4) ---
+
+def test_render_text_proxy_tag_says_matcher_not_bare_proxy(tmp_path):
+    settings = {
+        "hooks": {"PreToolUse": [
+            {"matcher": "Task|Agent", "hooks": [{"type": "command", "command": "a"},
+                                                  {"type": "command", "command": "b"}]},
+        ]}
+    }
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps(settings), encoding="utf-8")
+    pm = wd.load_hook_multiplicity(p)
+    layer = _layer(hook_event="PreToolUse", matcher="Task|Agent")
+    f = _write_lines(tmp_path / "any.jsonl", [_tool_use_line(name="Agent")])
+    rep = wd.process_corpus([f], [layer], None, None, pm, compute_fixture=False)
+    text = wd.render_text(rep, tmp_path, None, "БАЗЫ НЕТ", None, source_empty=False)
+    assert "матчер-proxy" in text
+    assert " proxy " not in text and not text.rstrip().endswith(" proxy")
 
 
 # ---------------------------------------------------------------------------

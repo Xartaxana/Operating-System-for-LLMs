@@ -106,14 +106,57 @@ type=="assistant", message.content[].type=="tool_use") с именем
 реестра, И у ОБЫЧНОГО прогона при дефекте ИНСТРУМЕНТА (Ф3-правка
 блокера): 100% битых строк источника ИЛИ встроенная фикстура не
 сошлась с ожиданием (`compute_run_defects()` -- «никогда голый ноль
-без вердикта»); 2 -- источник/аргументы не позволяют измерить вообще
-ничего (--transcripts не каталог/отсутствует, --window-start/end не
-ISO, start>=end, реестр не читается структурно).
+без вердикта») ИЛИ найден ДЕФЕКТ ПРЕДИКАТА (Б-К4 ниже, calls > достижимо);
+2 -- источник/аргументы не позволяют измерить вообще ничего
+(--transcripts не каталог/отсутствует, --window-start/end не ISO,
+start>=end, реестр не читается структурно).
+
+УЗЕЛ B (t-589-bis, docs/tasks/2026-08-25_warn-class-fix-dag.md,
+докстринг класса docs/tasks/2026-08-25_warn-population-class.md):
+ПЕР-СЛОЙНЫЕ ЗНАМЕНАТЕЛИ. `layer_denominator_value()` (старое имя, ДО
+этого узла) считал матчер-Z1 -- сумму tool_use ЛЮБОГО инструмента из
+`matcher`, включая случаи, СТРУКТУРНО неспособные дать числитель слоя
+(non-builder Task/Agent для трёх QUOTED-слоёв, любая правка не-журнала
+для шести журнальных слоёв и т.д. -- полный список barrier'ов §1
+класса). Реестр (registry_version 2) несёт декларативное поле
+`reachable` -- ЗАКРЫТЫЙ словарь видов (`POPULATION_KINDS_ALL` ниже);
+там, где барьер выражается дёшево -- `journal_path` (шесть журнальных
+слоёв, барьер == `journal_echo._is_journal_path` БУКВАЛЬНО, импорт, не
+копия), `subagent_type_builder` (три QUOTED-слоя, `tool_input.
+subagent_type == "builder"`, dispatch_gate.py :1743/:1779/:1846),
+`search_tool_or_pattern` (SEARCH_RETURNED_NOTHING, `search_control_
+gate._looks_like_search` БУКВАЛЬНО, импорт); везде, где барьер --
+свойство ОТВЕТА инструмента (NEGATIVE_LINT) или требует парсера гейта
+(OWNS_OVERLAP/BLIND_OWNS/QUOTED_OWNS/NEGATIVE_CLAIM), либо развилка не
+решена (HYGIENE) или слой не подкласса II (GIVEN_PATH/ROLE_TYPE,
+подкласс I -- чинится узлом A) -- `reachable: "unmeasured"` с
+обязательным `reason`. Барьеры импортируются из СОБСТВЕННЫХ модулей
+гейтов (journal_echo/search_control_gate), а не копируются строкой --
+единственная защита от рецидива того самого класса, который узел
+чинит (константа гейта изменится -- изменится и предикат здесь, без
+второй правки).
+
+Три числа на слой (Б-К2): ДОСТИЖИМО (по declared `reachable`) /
+НЕДОСТИЖИМО (= матчер - достижимо) / МАТЧЕР (старый Z1, сохранён --
+Б-К5, ставка "calls/100 tool_use" остаётся на ЕДИНОЙ базе
+total_tool_use_in_window, per-layer МАТЧЕР или ДОСТИЖИМО её не
+заменяют). Доля (Б-К1) считается ТОЛЬКО от ДОСТИЖИМО. Слой без
+declared reachable (`unmeasured`) печатает «н-д (популяция не
+объявлена: <reason>)» и не печатает процент (Б-К3) -- НЕ тихий откат к
+матчеру. `calls > достижимо` -- ДЕФЕКТ ПРЕДИКАТА, exit 1 (Б-К4,
+`compute_run_defects()`).
+
+Сайдкар несёт `population_rule_version` (Б-К7) -- машинно отличает
+окна ДО и ПОСЛЕ этого узла (semантика ДОЛИ несравнима: `registry_sha`
+УЖЕ меняется автоматически, потому что реестр правится байтово, но
+явная версия -- страховка на случай совпадения sha при независимой
+правке предиката). `--no-sidecar` (Р-В1) отключает и чтение, и запись
+сайдкара для проверочных прогонов, не растящих `logs/warn_density.jsonl`.
 
 CLI:
     python tools/warn_density.py [--window-start ISO] [--window-end ISO]
         [--registry-file PATH] [--transcripts DIR] [--journal PATH]
-        [--sidecar PATH] [--json]
+        [--sidecar PATH] [--json] [--no-sidecar]
     python tools/warn_density.py --check [--registry-file PATH]
 """
 from __future__ import annotations
@@ -133,6 +176,17 @@ try:  # безопасность вывода на Windows-консолях с �
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except AttributeError:
     pass
+
+# Узел B: барьеры импортируются ИЗ ГЕЙТОВ, а не копируются строкой --
+# см. докстринг модуля выше. Оба модуля лежат в tools/ рядом с этим
+# файлом -- либо тем же sys.path[0], что Python выставляет при `python
+# tools/warn_density.py`, либо явной вставкой sys.path в тестах
+# (test_warn_density.py); оба уже импортируются как модули их
+# собственными test_journal_echo.py/test_search_control_gate.py --
+# import-safe (проверено чтением: ни один не исполняет код верхнего
+# уровня вне `if __name__ == "__main__":`).
+import journal_echo as _journal_echo_gate
+import search_control_gate as _search_control_gate
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REGISTRY = REPO_ROOT / "tools" / "warn_layers.json"
@@ -157,6 +211,82 @@ FIXTURE_EXPECTED_CALLS = 2
 FIXTURE_EXPECTED_LINES = 3
 _FIXTURE_LAYER_ID = "GIVEN_PATH"
 _FIXTURE_LITERAL = "GIVEN-PATH WARN:"
+
+# ---------------------------------------------------------------------------
+# Узел B -- пер-слойная популяция (реестр registry_version 2, поле
+# `reachable`). Закрытый словарь видов -- см. докстринг модуля. Порядок
+# в POPULATION_KINDS_MEASURED не значим (используется как множество
+# членства); "unmeasured" -- отдельно, требует 'reason' (validate_layers).
+# ---------------------------------------------------------------------------
+
+POPULATION_KINDS_MEASURED = ("journal_path", "subagent_type_builder", "search_tool_or_pattern")
+POPULATION_KINDS_ALL = POPULATION_KINDS_MEASURED + ("unmeasured",)
+
+# Б-К7: версия ПРАВИЛА подсчёта популяции (не путать с registry_version
+# самого реестра) -- пишется в КАЖДУЮ новую запись сайдкара, чтобы окна
+# ДО и ПОСЛЕ этого узла были МАШИННО отличимы (а не только по памяти
+# людей) -- даже если registry_sha по случайному совпадению не изменится.
+POPULATION_RULE_VERSION = 1
+
+# Наборы имён инструментов -- та же матчер-группа, что у соответствующих
+# слоёв реестра (tools/warn_layers.json); ограничивают предикаты ниже,
+# чтобы достижимость не считалась для инструмента, которого барьер
+# структурно не касается (напр. subagent_type_builder -- только Task/Agent).
+_JOURNAL_LAYER_TOOL_NAMES = {"Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShell"}
+_QUOTED_LAYER_TOOL_NAMES = {"Task", "Agent"}
+_SEARCH_LAYER_TOOL_NAMES = {"Bash", "PowerShell", "Grep", "Glob", "Read"}
+
+
+def _population_journal_path(tool_name: str, tool_input: Dict[str, Any]) -> bool:
+    """Барьер шести журнальных слоёв (NOTES_LEN, TIER_ECHO, WITNESS_ECHO,
+    TS_DRIFT, R6_ЗЕРКАЛО, JOURNAL_ECHO_BASE) -- журнал_эхо срабатывает
+    ТОЛЬКО когда правится logs/routing-log.jsonl (journal_echo.py
+    :2046-2048, :532-546, проверено чтением, B-К6). Импорт функции
+    (не копия строки) -- изменится JOURNAL_TAIL/логика в journal_echo.py,
+    изменится и этот предикат без второй правки."""
+    if tool_name not in _JOURNAL_LAYER_TOOL_NAMES:
+        return False
+    file_path = tool_input.get("file_path")
+    if not isinstance(file_path, str) or not file_path:
+        return False
+    return _journal_echo_gate._is_journal_path(file_path)
+
+
+def _population_subagent_type_builder(tool_name: str, tool_input: Dict[str, Any]) -> bool:
+    """Барьер трёх QUOTED-слоёв (WRITE_QUOTED, DOD_QUOTED, MANIFEST_QUOTED)
+    -- ранний возврот "" при tool_input.subagent_type != "builder"
+    (dispatch_gate.py :1743, :1779, :1846, все три идентичны, проверено
+    чтением, B-К6)."""
+    if tool_name not in _QUOTED_LAYER_TOOL_NAMES:
+        return False
+    return tool_input.get("subagent_type") == "builder"
+
+
+def _population_search_tool_or_pattern(tool_name: str, tool_input: Dict[str, Any]) -> bool:
+    """Барьер SEARCH_RETURNED_NOTHING -- Grep/Glob всегда, Bash/PowerShell
+    только при поисковом виде команды (search_control_gate.py :190,
+    :271-277, :561-568, проверено чтением, B-К6). НАХОДКА билдера при
+    первом прогоне (B-К6 в деле): `_looks_like_search(tool_name,
+    command_text)` САМА не гейтит command_text по tool_name -- строка
+    "grep foo" в `command_text` дала бы True даже для tool_name="Read",
+    если вызвать её напрямую с сырым `tool_input.get("command")`. Реальный
+    барьер -- ДВЕ функции вместе: `_command_text_for_classification`
+    (:251-268) отдаёт command_text ТОЛЬКО для Bash/PowerShell, None для
+    всех прочих (в т.ч. Read) -- она гейтит ИМЕННО этот случай. Импорт
+    ОБЕИХ функций гейта (не одной) -- иначе предикат здесь был бы
+    ошибочно ШИРЕ настоящего барьера, ровно рецидив чинимого класса,
+    только наоборот (переоценка, не недооценка)."""
+    if tool_name not in _SEARCH_LAYER_TOOL_NAMES:
+        return False
+    command_text = _search_control_gate._command_text_for_classification(tool_name, tool_input)
+    return _search_control_gate._looks_like_search(tool_name, command_text)
+
+
+POPULATION_PREDICATES = {
+    "journal_path": _population_journal_path,
+    "subagent_type_builder": _population_subagent_type_builder,
+    "search_tool_or_pattern": _population_search_tool_or_pattern,
+}
 
 
 class SourceError(Exception):
@@ -189,6 +319,8 @@ class LayerDef:
     denominator: str
     listed_in_check_11v: bool
     index: int = 0
+    reachable: str = "unmeasured"
+    reachable_reason: Optional[str] = None
 
     def all_strings(self) -> List[str]:
         return [self.literal] + list(self.aliases)
@@ -280,6 +412,37 @@ def validate_layers(raw_layers: List[Dict[str, Any]]) -> Tuple[List[LayerDef], L
                 if isinstance(a, str) and "{" in a:
                     defects.append(f"ДЕФЕКТ формы: {label}: '{{' в алиасе -- требуется статический префикс")
                     ok = False
+        # Узел B (Б-К8, "тем же способом, что validate_layers для
+        # carrier/literal"): 'reachable' -- ОПЦИОНАЛЬНОЕ поле (registry_
+        # version 1 не несёт его вовсе -- край спеки "версия 1 без поля
+        # читается, все слои н-д, exit 0", НЕ дефект). ПРИСУТСТВУЮЩЕЕ, но
+        # синтаксически негодное значение ("{" -шаблон / пустая строка /
+        # число / вложенный объект / вид вне закрытого словаря) -- ДЕФЕКТ
+        # формы, вся запись исключается (та же дисциплина, что и carrier/
+        # literal выше -- НЕ трейсбек, D-0043).
+        reachable = "unmeasured"
+        reachable_reason: Optional[str] = "reachable не объявлен в реестре"
+        if "reachable" in item:
+            reachable_raw = item.get("reachable")
+            if not isinstance(reachable_raw, str) or not reachable_raw or "{" in reachable_raw:
+                defects.append(f"ДЕФЕКТ формы: {label}: 'reachable' синтаксически негодно")
+                ok = False
+            elif reachable_raw not in POPULATION_KINDS_ALL:
+                defects.append(f"ДЕФЕКТ формы: {label}: 'reachable' неизвестного вида: {reachable_raw!r}")
+                ok = False
+            else:
+                reachable = reachable_raw
+                if reachable == "unmeasured":
+                    reason_raw = item.get("reason")
+                    if not isinstance(reason_raw, str) or not reason_raw.strip():
+                        defects.append(
+                            f"ДЕФЕКТ формы: {label}: reachable=unmeasured требует непустой 'reason'"
+                        )
+                        ok = False
+                    else:
+                        reachable_reason = reason_raw
+                else:
+                    reachable_reason = None
         if not ok:
             continue
         valid.append(LayerDef(
@@ -288,7 +451,7 @@ def validate_layers(raw_layers: List[Dict[str, Any]]) -> Tuple[List[LayerDef], L
             hook_event=item.get("hook_event", ""), matcher=item.get("matcher", ""),
             denominator=item.get("denominator", "Z1"),
             listed_in_check_11v=bool(item.get("listed_in_check_11v", False)),
-            index=idx,
+            index=idx, reachable=reachable, reachable_reason=reachable_reason,
         ))
 
     # Перекрытие литералов ЗАПРЕЩЕНО формой реестра (§3.4): проверяем ВСЕ
@@ -559,6 +722,7 @@ class Report:
     sidechain_tool_use_in_window: int
     orphan_hac_count: int
     duplicate_tool_use_id_count: int
+    population_achievable_counts: Dict[str, int]
 
 
 def process_corpus(
@@ -586,6 +750,12 @@ def process_corpus(
     total_bytes = 0
     in_window_records = 0
     duplicate_tool_use_id_count = 0
+    # Узел B: сумма ДОСТИЖИМОЙ популяции по каждому виду `reachable`
+    # (не по слою -- несколько слоёв делят один вид, напр. шесть
+    # журнальных слоёв все читают ключ "journal_path"). Позиция --
+    # РЯДОМ с is_sidechain_file, ПОСЛЕ проверки окна, ПЕРЕД
+    # tool_use_counts[name] += 1 (B-К6, позиционный край спеки узла B).
+    population_achievable_counts: Dict[str, int] = {k: 0 for k in POPULATION_KINDS_MEASURED}
     # Ф4: числитель дедуплицируется (`seen`), tool_use-знаменатель --
     # НЕ дедуплицируется (не подгонка под старое число из отчёта критика
     # -- измеряется ЖИВЬЁМ этим прогоном); дублирующийся id НЕ
@@ -668,6 +838,22 @@ def process_corpus(
                                                     duplicate_tool_use_id_count += 1
                                                 else:
                                                     tool_use_ids_seen.add(item_id)
+                                            # Узел B: ДОСТИЖИМАЯ популяция --
+                                            # тот же tool_use item, ДО
+                                            # tool_use_counts[name] += 1
+                                            # (позиционный край B-К6, см.
+                                            # выше). НЕ дедуплицируется --
+                                            # тот же (сырой) режим счёта,
+                                            # что и tool_use_counts/
+                                            # total_tool_use_in_window,
+                                            # иначе "недостижимо = матчер -
+                                            # достижимо" разъедется по базе.
+                                            tool_input = item.get("input")
+                                            if not isinstance(tool_input, dict):
+                                                tool_input = {}
+                                            for kind, pred in POPULATION_PREDICATES.items():
+                                                if pred(name, tool_input):
+                                                    population_achievable_counts[kind] += 1
                                             tool_use_counts[name] = tool_use_counts.get(name, 0) + 1
                                             total_tool_use_in_window += 1
 
@@ -805,6 +991,7 @@ def process_corpus(
         sidechain_tool_use_in_window=sidechain_tool_use_in_window,
         orphan_hac_count=orphan_hac_count,
         duplicate_tool_use_id_count=duplicate_tool_use_id_count,
+        population_achievable_counts=population_achievable_counts,
     )
 
 
@@ -960,18 +1147,59 @@ def _fmt_dt_both(dt: Optional[datetime]) -> str:
     return f"локально {local_naive} / UTC {utc}"
 
 
-def layer_denominator_value(layer: LayerDef, tool_use_counts: Dict[str, int]) -> int:
+def layer_matcher_total(layer: LayerDef, tool_use_counts: Dict[str, int]) -> int:
+    """Старый Z1 (ДО узла B) -- сумма tool_use ЛЮБОГО инструмента из
+    matcher слоя, БЕЗ учёта достижимости. Узел B (Б-К2) печатает это как
+    отдельное число «матчер» РЯДОМ с достижимо/недостижимо -- НЕ как
+    знаменатель доли (Б-К1: доля теперь считается от достижимо, см.
+    layer_population() ниже); Б-К5: «ставка на 100 вызовов» ТОЖЕ не
+    использует это число -- она на total_tool_use_in_window, ЕДИНОЙ базе.
+    Имя переименовано с layer_denominator_value -- старое имя больше не
+    описывает роль числа честно (спека узла B, "Что ломается": смена
+    сигнатуры/имени ожидаемо ломает пины трёх тестов, они в owns)."""
     names = [n for n in layer.matcher.split("|") if n]
     return sum(tool_use_counts.get(n, 0) for n in names)
 
 
+def layer_population(layer: LayerDef, report: "Report") -> Tuple[Optional[int], Optional[int], int]:
+    """Б-К1/Б-К2: возвращает (достижимо, недостижимо, матчер).
+    достижимо/недостижимо -- None, когда layer.reachable == "unmeasured"
+    (Б-К3: «н-д (популяция не объявлена: <reason>)», НЕ тихий откат к
+    матчеру). Когда reachable -- измеримый вид: достижимо = сумма
+    population_achievable_counts по этому виду за окно (та же основа,
+    что и матчер -- сырой, не дедуплицированный счёт, см. process_corpus);
+    недостижимо = матчер - достижимо (клип к 0 -- защитно, достижимо ⊆
+    матчер по построению предикатов -- см. _JOURNAL_LAYER_TOOL_NAMES и
+    сиблингов, ограничивающих предикат ТЕМИ ЖЕ именами инструментов, что
+    у matcher слоя)."""
+    matcher_total = layer_matcher_total(layer, report.tool_use_counts)
+    if layer.reachable not in POPULATION_KINDS_MEASURED:
+        return None, None, matcher_total
+    achievable = report.population_achievable_counts.get(layer.reachable, 0)
+    unreachable = max(matcher_total - achievable, 0)
+    return achievable, unreachable, matcher_total
+
+
 def layer_is_proxy(layer: LayerDef, proxy_map: Dict[Tuple[str, str], int]) -> bool:
+    """proxy=true -- НЕСКОЛЬКО хук-скриптов зарегистрированы на ОДНОМ
+    (hook_event, matcher) в .claude/settings.json -- МАТЧЕР этого слоя
+    (Task|Agent и т.п.) есть трафик, делимый с ДРУГИМ носителем, не
+    только этим. Узел B (конфликтная пара 4 спеки): это утверждение
+    ПРО МАТЧЕР (layer_matcher_total выше), а не про ДОСТИЖИМУЮ
+    популяцию (layer_population) -- пер-слойный знаменатель НЕ меняет
+    эту логику (proxy остаётся свойством регистрации хука в settings.json,
+    измеряется независимо от reachable), но текст обязан НАЗЫВАТЬ, что
+    он про матчер, а не про достижимо -- иначе рецидив того же класса
+    внутри той же функции (см. render_text: тег теперь «матчер-proxy»,
+    не голое «proxy»)."""
     return proxy_map.get((layer.hook_event, layer.matcher), 0) > 1
 
 
 def compute_run_defects(report: Report) -> List[str]:
     """Дефекты, печатаемые ОБОИМИ рендерами (text/json) и решающие exit
-    code ОБЫЧНОГО прогона (Ф3) -- никогда голый ноль без вердикта."""
+    code ОБЫЧНОГО прогона (Ф3) -- никогда голый ноль без вердикта.
+    Узел B (Б-К4, ДЕТЕКТОР МЕХАНИЗМА): calls > достижимо -- предикат
+    населённости, ставший уже реальности, ловится собственным замером."""
     defects: List[str] = []
     if report.total_lines_seen > 0 and report.broken_lines == report.total_lines_seen:
         defects.append(f"ДЕФЕКТ ИСТОЧНИКА: 100% строк биты ({report.broken_lines}/{report.total_lines_seen})")
@@ -980,6 +1208,17 @@ def compute_run_defects(report: Report) -> List[str]:
             f"ДЕФЕКТ ИНСТРУМЕНТА: фикстура {report.fixture_calls}/{FIXTURE_EXPECTED_CALLS} calls, "
             f"{report.fixture_lines}/{FIXTURE_EXPECTED_LINES} lines не сходится"
         )
+    for layer in report.layers:
+        achievable, _unreachable, _matcher = layer_population(layer, report)
+        if achievable is None:
+            continue
+        c = report.counts.get(layer.id)
+        if c is None:
+            continue
+        if c.calls > achievable:
+            defects.append(
+                f"ДЕФЕКТ ПРЕДИКАТА: {layer.id}: calls={c.calls} > достижимо={achievable}"
+            )
     return defects
 
 
@@ -1028,24 +1267,36 @@ def render_text(
         out.append("ОКНО ПУСТО: 0 записей")
 
     out.append("\n=== СЛОИ ===")
+    out.append(
+        "  (доля: calls / ДОСТИЖИМО -- база РАЗНАЯ у каждого слоя, между слоями НЕ сравнима, Б-К1)"
+    )
+    out.append(
+        "  (ставка: calls / total_tool_use_in_window*100 -- ЕДИНАЯ база для всех слоёв, "
+        "сравнима МЕЖДУ слоями, Б-К5)"
+    )
     not_fired: List[str] = []
     for layer in report.layers:
         c = report.counts[layer.id]
-        denom = layer_denominator_value(layer, report.tool_use_counts)
+        achievable, unreachable, matcher_total = layer_population(layer, report)
         proxy = layer_is_proxy(layer, report.proxy_map)
-        if denom == 0:
-            share_str = "н-д (знаменатель 0)"
+        if achievable is None:
+            pop_str = f"достижимо=н-д недостижимо=н-д матчер={matcher_total}"
+            share_str = f"н-д (популяция не объявлена: {layer.reachable_reason})"
         else:
-            share_str = f"{c.calls / denom * 100:.1f}%"
+            pop_str = f"достижимо={achievable} недостижимо={unreachable} матчер={matcher_total}"
+            if achievable == 0:
+                share_str = f"н-д (достижимо 0 из {matcher_total})"
+            else:
+                share_str = f"{c.calls / achievable * 100:.1f}%"
         if report.total_tool_use_in_window == 0:
             rate_str = "н-д (знаменатель 0)"
         else:
             rate_str = f"{c.calls / report.total_tool_use_in_window * 100:.2f}/100"
-        proxy_tag = " proxy" if proxy else ""
+        proxy_tag = " матчер-proxy" if proxy else ""
         out.append(
             f"  {layer.id} [{layer.name}]: calls={c.calls} lines={c.lines} "
             f"(+raw calls={c.raw_calls} lines={c.raw_lines}) "
-            f"знаменатель={denom}{proxy_tag} доля={share_str} ставка={rate_str} "
+            f"{pop_str}{proxy_tag} доля={share_str} ставка={rate_str} "
             f"11в={'да' if layer.listed_in_check_11v else 'нет'}"
         )
         if c.calls == 0 and report.in_window_records > 0:
@@ -1092,15 +1343,20 @@ def build_sidecar_entry(report: Report, registry_hash: str) -> Dict[str, Any]:
     layers_map = {}
     for layer in report.layers:
         c = report.counts[layer.id]
-        denom = layer_denominator_value(layer, report.tool_use_counts)
+        achievable, unreachable, matcher_total = layer_population(layer, report)
         layers_map[layer.id] = {
             "calls": c.calls, "lines": c.lines,
             "raw_calls": c.raw_calls, "raw_lines": c.raw_lines,
-            "denominator": denom,
+            "denominator": matcher_total,  # старое имя поля -- совместимость со старыми 7 записями (тот же матчер-Z1)
+            "reachable": layer.reachable,
+            "achievable": achievable,
+            "unreachable": unreachable,
+            "matcher": matcher_total,
         }
     return {
         "ts": datetime.now().isoformat(timespec="seconds"),
         "registry_sha": registry_hash,
+        "population_rule_version": POPULATION_RULE_VERSION,
         "window_start": report.window_start.isoformat() if report.window_start else None,
         "window_end": report.window_end.isoformat() if report.window_end else None,
         "layers": layers_map,
@@ -1112,11 +1368,13 @@ def render_json(report: Report, root: Path, check_names: Optional[List[str]]) ->
     layers_out = []
     for layer in report.layers:
         c = report.counts[layer.id]
-        denom = layer_denominator_value(layer, report.tool_use_counts)
+        achievable, unreachable, matcher_total = layer_population(layer, report)
         layers_out.append({
             "id": layer.id, "name": layer.name, "calls": c.calls, "lines": c.lines,
             "raw_calls": c.raw_calls, "raw_lines": c.raw_lines,
-            "denominator": denom, "proxy": layer_is_proxy(layer, report.proxy_map),
+            "denominator": matcher_total, "proxy": layer_is_proxy(layer, report.proxy_map),
+            "reachable": layer.reachable, "reachable_reason": layer.reachable_reason,
+            "achievable": achievable, "unreachable": unreachable, "matcher": matcher_total,
             "listed_in_check_11v": layer.listed_in_check_11v,
         })
     in_check_not_reg, in_reg_not_check = diff_check_11v(report.layers, check_names)
@@ -1230,6 +1488,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--settings", default=str(DEFAULT_SETTINGS))
     p.add_argument("--json", action="store_true")
     p.add_argument("--check", action="store_true")
+    p.add_argument(
+        "--no-sidecar", action="store_true",
+        help="Р-В1 (спека узла B): не читать и не писать logs/warn_density.jsonl -- "
+             "для проверочных прогонов, не растящих сайдкар.",
+    )
     return p.parse_args(argv)
 
 
@@ -1281,19 +1544,31 @@ def main(argv: Optional[List[str]] = None) -> int:
             check_names = None
 
     reg_hash = registry_sha(raw_bytes)
-    sidecar_path = Path(args.sidecar)
-    last_entry, sidecar_read_warnings = read_sidecar_last(sidecar_path)
-    if last_entry is None:
-        base_status = "БАЗЫ НЕТ"
-    elif last_entry.get("registry_sha") != reg_hash:
-        base_status = "БАЗА ОТ ДРУГОГО РЕЕСТРА"
+    if args.no_sidecar:
+        # Р-В1: проверочный прогон -- НЕ читает и НЕ пишет сайдкар (файл
+        # логов не растёт при DoD/адверсариальных прогонах).
+        base_status = "СВЕРКА ПРОПУЩЕНА (--no-sidecar)"
+        sidecar_warn: Optional[str] = None
     else:
-        base_status = "OK"
+        sidecar_path = Path(args.sidecar)
+        last_entry, sidecar_read_warnings = read_sidecar_last(sidecar_path)
+        if last_entry is None:
+            base_status = "БАЗЫ НЕТ"
+        elif last_entry.get("registry_sha") != reg_hash:
+            base_status = "БАЗА ОТ ДРУГОГО РЕЕСТРА"
+        elif last_entry.get("population_rule_version") != POPULATION_RULE_VERSION:
+            # Р3(в): база записана ДО пер-слойного знаменателя (узел B) --
+            # доли несравнимы с текущим прогоном, даже если registry_sha
+            # случайно совпал бы (Б-К7: явная версия правила -- страховка
+            # сверх авто-защиты по registry_sha, см. докстринг модуля).
+            base_status = "БАЗА ДО ПЕР-СЛОЙНОГО ЗНАМЕНАТЕЛЯ (population_rule_version отсутствует/устарела)"
+        else:
+            base_status = "OK"
 
-    sidecar_entry = build_sidecar_entry(report, reg_hash)
-    sidecar_warn = write_sidecar_entry(sidecar_path, sidecar_entry)
-    for w in sidecar_read_warnings:
-        sidecar_warn = (sidecar_warn + "; " + w) if sidecar_warn else w
+        sidecar_entry = build_sidecar_entry(report, reg_hash)
+        sidecar_warn = write_sidecar_entry(sidecar_path, sidecar_entry)
+        for w in sidecar_read_warnings:
+            sidecar_warn = (sidecar_warn + "; " + w) if sidecar_warn else w
 
     if args.json:
         print(render_json(report, root, check_names))
