@@ -37,6 +37,64 @@ correlating the claim against the search/read trail that already
 exists in the tool log (half A's ledger), rather than trusting the
 claim on its face.
 
+REGION-AWARE (ported from the reference deployment's tools/
+claim_control_gate.py, same class as docs/SIBLING_MAP.md's "a guard
+does not distinguish the author's own claim from quoted/nested
+content"): a negative-claim marker OR a token claim can physically sit
+inside a quote/fence (someone else's/nested text), not in the author's
+own prose -- the five existing boundary regexes cut text into
+"sentences" WITHIN one physical line/paragraph but know nothing about
+markdown quotes/fences spanning several lines, so they used to flag a
+quote's content as if it were the author's own claim (a false
+positive -- see the discrimination test).
+
+POLICY (B2, literal): fenced/blockquote do NOT create a window (a
+marker whose OWN position falls in a fenced/blockquote region never
+even reaches `_sentence_window` -- skipped entirely, no token from its
+neighborhood is extracted at all) AND do not count tokens (even when
+the marker itself IS in prose and a window is created normally, a
+token INSIDE that window whose own position falls in fenced/
+blockquote is excluded from the group -- as if it were not there);
+inline_code counts -- neither a marker nor a token in inline_code is
+excluded by the region (the same 1..5 priority rule as
+tools/negative_lint.py's `_classify` -- see `_classify` below,
+identical logic, documented separately in this file rather than
+imported from there: two different guards with two different
+policies, "fix the class not the instance" here is about the shared
+SCANNER, not a shared classification predicate -- each consumer
+decides its own semantics, see md_regions.py's own docstring).
+
+POSITIONAL INVARIANT (literal): the five boundary regexes of the live
+file (_SENTENCE_PUNCT_RE, _PARAGRAPH_BREAK_RE, _LIST_ITEM_BOUNDARY_RE,
+_TABLE_ROW_BOUNDARY_RE, _HEADING_BOUNDARY_RE and their assembly
+_BOUNDARY_RES) are UNCHANGED, not touched by one byte -- the region is
+a SIXTH, ADDITIONAL boundary, applied AFTER (not instead of) the
+existing five: `_find_claim_token_groups` below still computes the
+window via the SAME `_sentence_window` as before, the region only (a)
+decides whether to create a window AT ALL for a given marker
+occurrence, and (b) filters already-extracted token spans BEFORE they
+are grouped by `_group_overlapping_spans` (also untouched). Boundaries
+INSIDE a fence are deliberately NOT suppressed by this port: the five
+regexes match over the whole raw text with no region-awareness
+whatsoever (they do not check whether they sit "inside a fence") --
+this code simply carries no such check, the same choice the reference
+deployment made for the same reason.
+
+I-0 (ANY md_regions failure) -> this guard behaves EXACTLY as before
+region-awareness: `_find_claim_token_groups(text, scan_result=None)`
+runs the EXACT algorithm the pre-region file did (every
+`if scan_result is not None:` below is a dead branch on None, the same
+insertion order into `found`, the same result) -- see `_safe_scan`.
+
+I-1 (Rule #1, laziness) / B2 "call the scanner after path-scoping and a
+marker hit": scan() is called EXACTLY ONCE per decide() call, and ONLY
+AFTER (a) tool_name/tool_input/path/text already passed the existing
+path-scoping (as before -- none of these steps touch the region), (b)
+a cheap check "at least one NEGATIVE_MARKERS pattern matches SOMEWHERE
+in the text" (pattern.search, no window/token computation) returned
+True -- on text carrying no marker at all, scan() is never called
+(count 0).
+
 DELIVERY NOTE (a self-activating hook file is never placed on its live
 path by its own builder -- CLAUDE.md routing rule 2, the
 enforcement-file-review rule): delivered by the builder as content /
@@ -161,9 +219,28 @@ import json
 import os
 import re
 import sys
+import threading
+from pathlib import Path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEFAULT_LEDGER_DIR = os.path.join(REPO, "logs", ".search-ledger")
+
+# region gate (ported from the reference deployment's tools/
+# claim_control_gate.py) -- see the module docstring, "REGION-AWARE",
+# for the full B2 policy this adds. The same try/except pattern
+# tools/owns_gate.py/tools/negative_lint.py already use for md_regions:
+# a missing sibling is not a live error, the region path just stays off
+# (I-0 fallback below).
+_TOOLS_DIR = Path(__file__).resolve().parent
+if str(_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_DIR))
+try:
+    from md_regions import scan, KIND_FENCED, KIND_BLOCKQUOTE, KIND_INLINE_CODE
+except ImportError:
+    scan = None
+    KIND_FENCED = "fenced"
+    KIND_BLOCKQUOTE = "blockquote"
+    KIND_INLINE_CODE = "inline_code"
 
 # --- path scoping ----------------------------------------------------------
 
@@ -310,10 +387,17 @@ TOKEN_RES = (PATH_TOKEN_RE, EXT_TOKEN_RE, UPPER_SNAKE_RE)
 # count as evidence anything specific was checked.
 MIN_TERM_LEN = 3
 
+# RULE-OF-THREE TEXT (synced from HQ's tools/claim_control_gate.py,
+# same class of edit as search_control_gate.py/negative_lint.py's own
+# MSG rewrites): what's wrong (a negative with no matching search/read),
+# what it risks (an absence claim indistinguishable from a miscalled
+# tool's empty output), the action (run a same-form positive control).
 MSG_TEMPLATE = (
     "Negative claim about to be written without a matching search/read this "
-    "session (command hygiene point 6): a positive control is required "
-    "before reporting absence. Unverified token(s): {tokens}"
+    "session - an unverified absence claim may be flat wrong, indistinguishable "
+    "from a miscalled tool's empty output; run a positive control of the SAME "
+    "form before reporting absence. Unverified token(s): {tokens} "
+    "(command hygiene point 6)"
 )
 
 
@@ -623,17 +707,103 @@ def _group_overlapping_spans(spans):
     return [frozenset(tok for _, _, tok in g) for g in groups]
 
 
-def _find_claim_token_groups(text):
-    """Returns {frozenset(tokens): marker} for every unique overlap
-    group extracted from every negative-claim sentence in *text* (D1 +
-    D4b). The first marker found for a given group wins, for the
-    report message. An empty group (should not occur, defensive) is
-    skipped."""
+# --- region gate (B2) -------------------------------------------------
+
+
+def _safe_scan(text: str):
+    """I-0: None on a missing md_regions module / an exception out of
+    scan() / a degraded=True result -- all three collapse to one signal
+    for the caller (the region path is entirely disabled)."""
+    if scan is None:
+        return None
+    try:
+        result = scan(text)
+    except Exception:
+        return None
+    if result.degraded:
+        return None
+    return result
+
+
+def _region_at(scan_result, offset: int):
+    regions = scan_result.regions
+    if not regions:
+        return None
+    starts = [r.start for r in regions]
+    idx = bisect.bisect_right(starts, offset) - 1
+    if idx < 0:
+        return None
+    region = regions[idx]
+    if region.start <= offset < region.end:
+        return region
+    return None
+
+
+def _classify(region) -> str:
+    """The same priority as tools/negative_lint.py's `_classify` (see
+    its docstring for the full rationale of the order) -- DELIBERATELY
+    not imported from there: two guards, two separate region-policy
+    semantics (see the module docstring, "REGION-AWARE")."""
+    if region is None:
+        return "prose"
+    if region.unterminated and KIND_FENCED in region.kinds:
+        return "prose"
+    if KIND_FENCED in region.kinds:
+        return "fenced"
+    if KIND_INLINE_CODE in region.kinds:
+        return "inline_code"
+    if KIND_BLOCKQUOTE in region.kinds:
+        return "blockquote"
+    return "prose"
+
+
+_EXCLUDED_KINDS = ("fenced", "blockquote")
+
+
+def _find_claim_token_groups(text, scan_result=None):
+    """Region-aware version. scan_result=None (the I-0 default) ->
+    FULLY matches the pre-region algorithm: every
+    `if scan_result is not None:` below is a dead branch, the same
+    matcher order (_MARKER_PATTERNS -> finditer), the same insertion
+    order into `found` (the first marker of a group wins) -- see the
+    module docstring, "I-0". scan_result passed (region available) ->
+    B2 policy: a marker whose POSITION falls in fenced/blockquote does
+    not create a window at all (continue before `_sentence_window`); a
+    token whose POSITION (translated from window-relative to absolute
+    coordinates: s + rel_start -- the "\\n"->" " replacement in window
+    does not change length, so absolute indexing stays valid) falls in
+    fenced/blockquote is not counted -- filtered BEFORE
+    `_group_overlapping_spans`, so a group whose tokens were ALL
+    quoted-only disappears entirely (an empty frozenset is falsy ->
+    `if group` below drops it, same as for any empty group before).
+
+    Pre-region docstring (still describes this function's core at
+    scan_result=None): returns {frozenset(tokens): marker} for every
+    unique overlap group extracted from every negative-claim sentence
+    in *text* (D1 + D4b). The first marker found for a given group
+    wins, for the report message. An empty group (should not occur,
+    defensive) is skipped."""
     found = {}
-    for marker, window in _scan_negative_claims(text):
-        for group in _group_overlapping_spans(_extract_token_spans(window)):
-            if group and group not in found:
-                found[group] = marker
+    boundary_edges = _sorted_boundary_edges(_find_boundaries(text))
+    for marker, pattern in _MARKER_PATTERNS:
+        for m in pattern.finditer(text):
+            idx = m.start()
+            marker_end = m.end()
+            if scan_result is not None:
+                mkind = _classify(_region_at(scan_result, idx))
+                if mkind in _EXCLUDED_KINDS:
+                    continue  # B2: fenced/blockquote -- no window created
+            s, e = _sentence_window(text, idx, marker_end, boundary_edges)
+            window = text[s:e].replace("\n", " ")
+            spans = _extract_token_spans(window)
+            if scan_result is not None:
+                spans = [
+                    sp for sp in spans
+                    if _classify(_region_at(scan_result, s + sp[0])) not in _EXCLUDED_KINDS
+                ]
+            for group in _group_overlapping_spans(spans):
+                if group and group not in found:
+                    found[group] = marker
     return found
 
 
@@ -769,7 +939,15 @@ def decide(payload):
     if not text:
         return 0, None
 
-    groups = _find_claim_token_groups(text)
+    # I-1: a cheap pre-filter -- at least one negative marker SOMEWHERE
+    # in the text, with NO window/token computation. On text carrying
+    # no marker, scan() is never called at all (see
+    # test_scan_not_called_when_no_marker_hit).
+    if not any(pattern.search(text) for _marker, pattern in _MARKER_PATTERNS):
+        return 0, None
+
+    scan_result = _safe_scan(text)
+    groups = _find_claim_token_groups(text, scan_result)
     if not groups:
         return 0, None
 
@@ -808,10 +986,81 @@ def _read_stdin_bytes():
     guard and rationale as tools/hygiene_gate.py's `_read_stdin_bytes`):
     a PreToolUse hook receives the harness's JSON on stdin, piped; a
     human running this script by hand from an interactive shell has no
-    piped input, and blocking on a read there would hang forever."""
+    piped input, and blocking on a read there would hang forever.
+    Superseded by `_read_stdin_bytes_deadline()` below -- kept only as
+    a documented predecessor, no longer called from `main()`."""
     if sys.stdin.isatty():
         return b""
     return sys.stdin.buffer.read()
+
+
+# --- stdin deadline (P4 class; a LOCAL copy, no shared module -- the
+# same helper toolkit/tools/owns_gate.py/dispatch_gate.py already carry)
+# ------------------------------------------------------------------
+
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Seconds to wait for stdin: env override, else the default.
+    Invalid, non-numeric, <=0, or > _STDIN_DEADLINE_MAX all fall back to
+    the default -- there is deliberately NO "0 = wait forever" mode (that
+    would resurrect the exact hang this helper exists to close)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """Returns (bytes, timed_out). Reads stdin to EOF, but no longer
+    than the deadline. Cross-platform by construction: select/poll do
+    not work on pipes on Windows, so a background daemon thread does
+    the actual blocking read and the deadline is enforced via
+    thread.join(timeout). A TTY returns b"" without reading anything.
+    Any read error degrades to b"" (fail-open)."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+
+# A background reader thread may still be blocked deep in a platform
+# read syscall at normal interpreter shutdown, which can crash the
+# process ("Fatal Python error: _enter_buffered_busy") instead of
+# exiting cleanly. main() itself is UNCHANGED (still a plain
+# `return 0`, safe in-process); only the actual __main__ script-exit
+# path below escalates to os._exit().
+_STDIN_DEADLINE_STATE = {"hit": False}
 
 
 def main():
@@ -819,10 +1068,17 @@ def main():
     (mirrors tools/hygiene_gate.py's main()): WARN mode is absolute --
     exit 0 on every path, including a TTY with nothing piped in,
     malformed stdin, a non-dict payload, or any unexpected exception.
-    Never raises, never returns non-zero."""
+    Never raises, never returns non-zero. P4: the former private
+    `_read_stdin_bytes()` (its own TTY guard + sys.stdin.buffer.read())
+    is replaced by the deadline helper above -- keeps this file to ONE
+    stdin-read call site."""
     try:
         _reconfigure_stdout_utf8()
-        raw_bytes = _read_stdin_bytes()
+        raw_bytes, timed_out = _read_stdin_bytes_deadline()
+        if timed_out:
+            _STDIN_DEADLINE_STATE["hit"] = True
+            sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
+            return 0
         if not raw_bytes:
             return 0
         raw = raw_bytes.decode("utf-8", errors="replace")
@@ -836,4 +1092,15 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if _STDIN_DEADLINE_STATE["hit"]:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

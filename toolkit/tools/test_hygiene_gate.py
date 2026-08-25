@@ -39,6 +39,7 @@ and _mask_quoted_segments in tools/hygiene_gate.py).
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -142,14 +143,21 @@ def test_decide_redirect_stderr_triggers():
 
 
 def test_decide_python_dash_c_triggers():
-    exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1)"'))
+    # A MUTATING payload (payload_class "M") -- kept on the OLD text by
+    # the pyc-narrowing (see the "pyc payload narrowing" section below);
+    # a pure payload like plain print(1) is now SILENT, see
+    # test_pycnarrow_pure_payload_is_silent below.
+    command = "python -c \"open('x.txt','w').write('x')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     ctx = output["hookSpecificOutput"]["additionalContext"]
     assert hygiene_gate.MSG_PYTHON_DASH_C in ctx
 
 
 def test_decide_python_heredoc_triggers():
-    exit_code, output = hygiene_gate.decide(_bash_payload("python - <<EOF\nprint(1)\nEOF"))
+    # Same reasoning as above -- a mutating heredoc body.
+    command = "python - <<EOF\nopen('x.txt','w').write('x')\nEOF"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     ctx = output["hookSpecificOutput"]["additionalContext"]
     assert hygiene_gate.MSG_PYTHON_DASH_C in ctx
@@ -259,14 +267,26 @@ def test_v3_block_python_open_append_mode():
 def test_v3_python_open_read_mode_does_not_block_via_open_indicator():
     # open(path,'r') is a read, not a write form; the "routing-log"
     # substring is present, but no write indicator (redirect/printf/
-    # echo/sed-i/tee/open-write-mode) in this statement matches.
-    command = "python -c \"print(open('logs/routing-log.jsonl','r').read())\""
+    # echo/sed-i/tee/open-write-mode) in this statement matches -- class
+    # (d) does not fire regardless of the pyc-narrowing below. The
+    # payload is made OPAQUE (subprocess -- see the "pyc payload
+    # narrowing" section further down) rather than a plain print/read,
+    # so class (c) still warns independently of this file's own
+    # pyc-narrowing (a pure read-only payload would go fully silent,
+    # see test_pycnarrow_pure_payload_is_silent -- not what this test is
+    # about).
+    command = (
+        "python -c \"import subprocess; "
+        "subprocess.run(['cat', 'logs/routing-log.jsonl'])\""
+    )
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     # python -c by itself is the independent WARN class (c), not a block.
     assert output is not None
     assert "permissionDecision" not in output["hookSpecificOutput"]
-    assert hygiene_gate.MSG_PYTHON_DASH_C in output["hookSpecificOutput"]["additionalContext"]
+    ctx = output["hookSpecificOutput"]["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE in ctx
+    assert hygiene_gate.MSG_PYTHON_DASH_C not in ctx
 
 
 def test_v3_block_tee():
@@ -398,9 +418,12 @@ def test_belt_block_plus_other_warn_class_both_texts_present_not_overwritten():
 def test_belt_pure_warn_call_has_no_deny_fields_regression():
     # A call that triggers ONLY WARN classes (a)/(c) -- non-root cd and
     # python -c, no certain redirect, no journal bypass -- carries
-    # neither permissionDecision nor permissionDecisionReason.
+    # neither permissionDecision nor permissionDecisionReason. A
+    # MUTATING -c payload (see the "pyc payload narrowing" section
+    # further down) is used so class (c) still warns under the
+    # narrowing -- a pure payload like plain print(1) goes silent.
     exit_code, output = hygiene_gate.decide(
-        _bash_payload('cd gateway && python -c "print(1)"')
+        _bash_payload("cd gateway && python -c \"open('x.txt','w').write('x')\"")
     )
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
@@ -845,8 +868,11 @@ def test_echo_json_v2_regress_evidence_exit0_no_stdout():
 def test_decide_multiple_classes_all_listed():
     # The trailing " 2>&1" sits OUTSIDE the quoted -c argument -- it is
     # a certain (unquoted, non-heredoc) redirect and denies on its own;
-    # cd (non-root) and python -c stay WARN reasons alongside it.
-    command = 'cd gateway && python -c "print(1)" 2>&1'
+    # cd (non-root) and python -c stay WARN reasons alongside it. A
+    # MUTATING -c payload (see the "pyc payload narrowing" section
+    # further down) keeps class (c) on the old warn text; a pure
+    # payload would go silent instead.
+    command = "cd gateway && python -c \"open('x.txt','w').write('x')\" 2>&1"
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
@@ -976,7 +1002,12 @@ def test_adversarial_very_long_command_no_crash():
 
 
 def test_adversarial_nested_quotes_no_crash():
-    command = """python -c "print('he said \\"hi\\" 2>&1')" """
+    # A MUTATING payload (see the "pyc payload narrowing" section
+    # further down) -- keeps class (c) on the old warn text under the
+    # narrowing; a pure payload (e.g. plain print(...)) would go
+    # silent, and this test's crash-safety check needs a non-empty
+    # stdout to JSON-parse.
+    command = """python -c "open('x.txt','w').write('he said \\"hi\\" 2>&1')" """
     payload = _bash_payload(command)
     result = _run_hook(json.dumps(payload), text=True, encoding="utf-8")
     assert result.returncode == 0
@@ -1156,8 +1187,10 @@ def test_redirect_fully_silent_when_quoted():
     # " 2>&1" sits ENTIRELY inside the -c argument's quotes --
     # _mask_quoted_segments hides it before the check; class (b) does
     # not fire at all (class (c) python -c/heredoc is a separate,
-    # independent WARN -- it still fires).
-    command = "python -c \"print('ran 2>&1 here')\""
+    # independent WARN -- it still fires). A MUTATING payload (see the
+    # "pyc payload narrowing" section further down) keeps class (c) on
+    # the old warn text; a pure payload would go silent instead.
+    command = "python -c \"open('x.txt','w').write('ran 2>&1 here')\""
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
@@ -1167,7 +1200,13 @@ def test_redirect_fully_silent_when_quoted():
 
 
 def test_redirect_fully_silent_when_quoted_chain():
-    command = 'python -c "a" ; python -c "b 2>&1"'
+    # Two -c invocations, chained; the second's payload is mutating so
+    # the OVERALL payload_class stays "M" (strictest class wins) and
+    # class (c) keeps the old warn text under the narrowing -- see the
+    # "pyc payload narrowing" section further down.
+    command = (
+        'python -c "a" ; python -c "open(\'x.txt\',\'w\').write(\'b 2>&1\')"'
+    )
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
@@ -1200,10 +1239,18 @@ def test_redirect_denies_when_shift_operator_quoted_real_redirect_outside():
 
 
 def test_redirect_warn_uses_verbatim_message_text():
+    # Rule-of-three port (2026-08-25): the literal text changed shape
+    # (what's wrong / what breaks / what to do instead), the pin below
+    # tracks it verbatim rather than re-deriving it from the constant --
+    # a silent text drift here would defeat the point of this test.
     command = "python - <<'PY'\nbody\nPY\nx 2>&1"
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
-    assert hygiene_gate.MSG_REDIRECT_STDERR == "don't append 2>&1 (command hygiene point 3)"
+    assert hygiene_gate.MSG_REDIRECT_STDERR == (
+        "a trailing \" 2>&1\" does not match the allowlist -- an extra "
+        "permission prompt, or the command gets refused outright; drop "
+        "\" 2>&1\" from the command (command hygiene point 3)"
+    )
     assert hygiene_gate.MSG_REDIRECT_STDERR in output["hookSpecificOutput"]["additionalContext"]
 
 
@@ -1500,3 +1547,554 @@ def test_tee_object_already_covered_by_existing_tee_re():
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
     assert hso["permissionDecision"] == "deny"
+
+
+# =========================================================================
+# pyc payload narrowing (PYC_DENY_ENABLED, _is_python_dash_c_certain,
+# _classify_pyc_payload) -- M/P/O/U class battery, ported from HQ's
+# 2026-08-25 predicate-narrowing work. PYC_DENY_ENABLED stays False by
+# default in every test below unless a test explicitly monkeypatches it.
+# =========================================================================
+
+
+def _payload_class(command: str) -> str:
+    return hygiene_gate._classify_pyc_payload(command)
+
+
+# --- acceptance: silent / old-text / new-text ----------------------------
+
+
+def test_pycnarrow_pure_arithmetic_expression_silent():
+    exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1+1)"'))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_pycnarrow_pure_json_read_silent():
+    command = 'python -c "import json; print(json.load(open(\'x.json\')))"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_pycnarrow_mutation_warns_old_text():
+    command = "python -c \"open('x.txt','w').write('x')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE not in hso["additionalContext"]
+
+
+def test_pycnarrow_opaque_subprocess_warns_new_text_only():
+    command = 'python -c "import subprocess; subprocess.run([\'ls\'])"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    ctx = hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE in ctx
+    # The M/U text is not a substring of the opaque text -- a
+    # replacement, not an addition.
+    assert hygiene_gate.MSG_PYTHON_DASH_C not in ctx
+
+
+def test_pycnarrow_asymmetry_pure_payload_still_denies_when_switch_on(monkeypatch):
+    # I2 invariant: the deny path reads ONLY `pyc_certain`, never
+    # `pyc_payload` -- a proven-clean payload still BLOCKS when
+    # PYC_DENY_ENABLED is (hypothetically) on, exactly like any other
+    # certain match. This is the switch's OWN behavior, independent of
+    # whether it is actually live (it is not, by default).
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = 'python -c "print(1+1)"'
+    assert _payload_class(command) == "P"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_PYTHON_DASH_C_BLOCK
+
+
+# --- empty / unextractable payload -> O -----------------------------------
+
+
+def test_pycnarrow_bare_dash_c_no_argument_opaque():
+    assert _payload_class("python -c") == "O"
+
+
+def test_pycnarrow_empty_quoted_argument_opaque():
+    assert _payload_class('python -c ""') == "O"
+
+
+def test_pycnarrow_empty_heredoc_opaque():
+    assert _payload_class("python - <<EOF\nEOF") == "O"
+
+
+def test_pycnarrow_heredoc_without_closer_opaque():
+    # No closing delimiter -- extraction finds no payload at all (the
+    # regex requires a closing delimiter line), even though the opener
+    # itself is still a certain match.
+    command = "python - <<EOF\nprint(1)\n"
+    assert hygiene_gate._is_python_dash_c_certain(command) is True
+    assert _payload_class(command) == "O"
+
+
+def test_pycnarrow_whitespace_only_payload_opaque():
+    assert _payload_class('python -c "   "') == "O"
+
+
+# --- string literal / comment mention -- not code -> P --------------------
+
+
+def test_pycnarrow_w_inside_string_literal_pure():
+    assert _payload_class("python -c \"x = 'w'\"") == "P"
+
+
+def test_pycnarrow_comment_only_pure():
+    assert _payload_class('python -c "# just a comment"') == "P"
+
+
+def test_pycnarrow_mutation_mentioned_in_string_literal_pure():
+    # "open(f,'w')" is TEXT (a print argument), not a REAL open() call.
+    command = "python -c \"print('mentions open(f, mode w) as text')\""
+    assert _payload_class(command) == "P"
+
+
+# --- case sensitivity (legal: NameError at actual runtime) ----------------
+
+
+def test_pycnarrow_uppercase_open_not_recognized_pure():
+    assert _payload_class("python -c \"OPEN('x','w')\"") == "P"
+
+
+def test_pycnarrow_pyc_key_survives_uppercase_python_dash_c():
+    # The BROAD `pyc` key (unchanged) is case-insensitive; classifying
+    # the payload's CONTENT is a separate, case-sensitive question (see
+    # the test above).
+    signals = hygiene_gate._collect_signals('PYTHON -C "OPEN(\'x\',\'w\')"')
+    assert signals["pyc"] is True
+
+
+# --- open() -- the full mode matrix ---------------------------------------
+
+
+def test_pycnarrow_open_no_mode_pure():
+    assert _payload_class("python -c \"open('x').read()\"") == "P"
+
+
+def test_pycnarrow_open_r_mode_pure():
+    assert _payload_class("python -c \"open('x','r').read()\"") == "P"
+
+
+def test_pycnarrow_open_w_mode_mutation():
+    assert _payload_class("python -c \"open('x','w')\"") == "M"
+
+
+def test_pycnarrow_open_a_mode_mutation():
+    assert _payload_class("python -c \"open('x','a')\"") == "M"
+
+
+def test_pycnarrow_open_x_mode_mutation():
+    assert _payload_class("python -c \"open('x','x')\"") == "M"
+
+
+def test_pycnarrow_open_rplus_mode_mutation():
+    assert _payload_class("python -c \"open('x','r+')\"") == "M"
+
+
+def test_pycnarrow_open_mode_variable_opaque():
+    assert _payload_class("python -c \"m='w'; open('x', m)\"") == "O"
+
+
+def test_pycnarrow_open_kwargs_unpack_opaque():
+    assert _payload_class("python -c \"d={'mode':'w'}; open('x', **d)\"") == "O"
+
+
+def test_pycnarrow_open_mode_kwarg_w_mutation():
+    assert _payload_class("python -c \"open('x', mode='w')\"") == "M"
+
+
+def test_pycnarrow_method_open_no_mode_pure():
+    command = "python -c \"import pathlib; pathlib.Path('x').open()\""
+    assert _payload_class(command) == "P"
+
+
+def test_pycnarrow_method_open_r_mode_pure():
+    command = "python -c \"import pathlib; pathlib.Path('x').open('r')\""
+    assert _payload_class(command) == "P"
+
+
+# --- non-Python content / unclosed quote -- parse failure -> O ------------
+
+
+def test_pycnarrow_non_python_content_opaque():
+    assert _payload_class('python -c "this is not { python : code"') == "O"
+
+
+def test_pycnarrow_unclosed_quote_opaque():
+    assert _payload_class('python -c "print(\'unclosed') == "O"
+
+
+# --- multiple calls / contributions -- strictest class wins ---------------
+
+
+def test_pycnarrow_two_calls_different_classes_strictest_wins():
+    command = 'python -c "print(1)" ; python -c "open(\'x\',\'w\')"'
+    assert _payload_class(command) == "M"
+
+
+def test_pycnarrow_two_mutating_calls_one_warn_line():
+    command = "python -c \"open('a','w').write('x'); open('b','w').write('y')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    ctx = output["hookSpecificOutput"]["additionalContext"]
+    assert ctx.count(hygiene_gate.MSG_PYTHON_DASH_C) == 1
+
+
+def test_pycnarrow_dunder_import_os_remove_opaque():
+    # __import__('os').remove -- the base of `.remove` is a CALL, not a
+    # Name -- no dotted name is built; only __import__(...) itself
+    # contributes the opaque class.
+    assert _payload_class("python -c \"__import__('os').remove('f')\"") == "O"
+
+
+def test_pycnarrow_mutation_plus_opaque_together_mutation_wins():
+    command = "python -c \"import subprocess; open('x','w').write('y')\""
+    assert _payload_class(command) == "M"
+
+
+# --- import aliases (import X as Y / from X import Y [as Z]) --------------
+
+
+def _assert_never_silent(command: str, expected_class: str) -> None:
+    assert _payload_class(command) == expected_class
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is not None, f"attack passed SILENTLY (regression): {command}"
+    assert "permissionDecision" not in output["hookSpecificOutput"]
+
+
+def test_pycnarrow_alias_import_as_qualified_os_remove_mutation():
+    command = "python -c \"import os as o; o.remove('f.txt')\""
+    _assert_never_silent(command, "M")
+
+
+def test_pycnarrow_alias_import_as_qualified_shutil_rmtree_mutation():
+    command = "python -c \"import shutil as sh; sh.rmtree('d')\""
+    _assert_never_silent(command, "M")
+
+
+def test_pycnarrow_alias_import_as_qualified_subprocess_opaque():
+    command = "python -c \"import subprocess as sp; sp.run(['ls'])\""
+    _assert_never_silent(command, "O")
+
+
+def test_pycnarrow_alias_from_import_bare_name_mutation():
+    command = "python -c \"from os import remove; remove('f.txt')\""
+    _assert_never_silent(command, "M")
+
+
+def test_pycnarrow_alias_from_import_asname_mutation():
+    command = "python -c \"from os import remove as rm; rm('f.txt')\""
+    _assert_never_silent(command, "M")
+
+
+def test_pycnarrow_alias_from_import_opaque_name_opaque():
+    command = "python -c \"from subprocess import run; run(['ls'])\""
+    _assert_never_silent(command, "O")
+
+
+# --- chained receivers (the call's base is itself a CALL) -----------------
+
+
+def test_pycnarrow_chained_receiver_path_write_text_mutation():
+    command = "python -c \"from pathlib import Path; Path('x.txt').write_text('x')\""
+    _assert_never_silent(command, "M")
+
+
+def test_pycnarrow_chained_receiver_journal_path_write_text_mutation():
+    command = (
+        "python -c \"from pathlib import Path; "
+        "Path('logs/routing-log.jsonl').write_text('')\""
+    )
+    _assert_never_silent(command, "M")
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert hygiene_gate.MSG_PYTHON_DASH_C in output["hookSpecificOutput"]["additionalContext"]
+
+
+def test_pycnarrow_chained_receiver_pathlib_path_open_w_mutation():
+    # Method-form open(mode) -- the mode is the FIRST (not second)
+    # argument, self is implicit.
+    command = "python -c \"import pathlib; pathlib.Path('x').open('w')\""
+    _assert_never_silent(command, "M")
+
+
+def test_pycnarrow_chained_receiver_io_open_write_mutation():
+    command = "python -c \"import io; io.open('x','w').write('y')\""
+    _assert_never_silent(command, "M")
+
+
+# --- reassigned callable (w = open; w(p, 'w')) -----------------------------
+
+
+def test_pycnarrow_reassign_open_then_call_opaque():
+    command = "python -c \"w = open; w('p', 'w')\""
+    _assert_never_silent(command, "O")
+
+
+def test_pycnarrow_reassign_os_remove_then_call_opaque():
+    command = "python -c \"import os; r = os.remove; r('f')\""
+    _assert_never_silent(command, "O")
+
+
+def test_pycnarrow_reassign_control_non_mo_name_not_flagged_pure():
+    # `x = 5` does not reference open/an M/O name -- must NOT flag O.
+    command = 'python -c "x = 5; print(x)"'
+    assert _payload_class(command) == "P"
+
+
+# --- "U": certain=False -- classification not attempted, old text stays --
+
+
+def test_pycnarrow_uncertain_form_not_classified():
+    command = 'git commit -m "run python -c to test this"'
+    assert hygiene_gate._is_python_dash_c_certain(command) is False
+    assert _payload_class(command) == "U"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+# --- PYC_PAYLOAD_LIMIT -- AT and BEYOND the boundary (rule 6a) ------------
+
+
+def test_pycnarrow_payload_exactly_at_limit_parses():
+    body = "x = 1" + " " * (hygiene_gate.PYC_PAYLOAD_LIMIT - len("x = 1"))
+    assert len(body) == hygiene_gate.PYC_PAYLOAD_LIMIT
+    command = f'python -c "{body}"'
+    assert _payload_class(command) == "P"
+
+
+def test_pycnarrow_payload_one_past_limit_opaque_no_parse():
+    body = "x" * (hygiene_gate.PYC_PAYLOAD_LIMIT + 1)
+    command = f'python -c "{body}"'
+    assert _payload_class(command) == "O"
+
+
+def test_pycnarrow_nesting_depth_50_pure():
+    payload = "(" * 50 + "1" + ")" * 50
+    assert _payload_class(f'python -c "{payload}"') == "P"
+
+
+def test_pycnarrow_nesting_depth_5000_no_traceback_opaque():
+    payload = "(" * 5000 + "1" + ")" * 5000
+    result = _payload_class(f'python -c "{payload}"')
+    assert result == "O"
+
+
+def test_pycnarrow_1mb_command_exit0():
+    command = 'python -c "print(\'' + ("a" * 1_000_000) + "')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["additionalContext"].count(
+        hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE
+    ) == 1
+
+
+def test_pycnarrow_perf_100kb_1mb_number_not_gated():
+    # A generous ceiling, not a strict perf gate -- a regression trap
+    # against a catastrophic blowup; the actual measured numbers go
+    # into the builder's report verbatim.
+    cmd_100kb = 'python -c "print(\'' + ("a" * 100_000) + "')\""
+    t0 = time.perf_counter()
+    hygiene_gate.decide(_bash_payload(cmd_100kb))
+    elapsed_100kb = time.perf_counter() - t0
+
+    cmd_1mb = 'python -c "print(\'' + ("a" * 1_000_000) + "')\""
+    t0 = time.perf_counter()
+    hygiene_gate.decide(_bash_payload(cmd_1mb))
+    elapsed_1mb = time.perf_counter() - t0
+
+    print(f"pyc_payload classify 100KB: {elapsed_100kb:.4f}s, 1MB: {elapsed_1mb:.4f}s")
+    assert elapsed_100kb < 2.0, f"pyc_payload classify 100KB: {elapsed_100kb:.4f}s"
+    assert elapsed_1mb < 2.0, f"pyc_payload classify 1MB: {elapsed_1mb:.4f}s"
+
+
+def test_pycnarrow_emoji_and_greek_pure():
+    command = "python -c \"print('αβ\U0001F600')\""
+    assert _payload_class(command) == "P"
+
+
+def test_pycnarrow_null_bytes_stdin_no_crash():
+    result = _run_hook(b"\xff\xfe not json \x00")
+    assert result.returncode == 0
+    assert result.stdout.strip() == b""
+
+
+def test_pycnarrow_journal_block_plus_clean_pyc_payload_no_pyc_line():
+    command = "echo x >> logs/routing-log.jsonl; python -c \"print(1+1)\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+    ctx = hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C not in ctx
+    assert hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE not in ctx
+
+
+def test_pycnarrow_certain_computed_once_signal_matches_direct_call():
+    command = "python -c \"open('x.txt','w').write('x')\""
+    signals = hygiene_gate._collect_signals(command)
+    assert signals["pyc_payload"] == hygiene_gate._classify_pyc_payload(command)
+
+
+def test_pycnarrow_measurer_reads_pyc_not_pyc_payload():
+    import permission_audit
+
+    command = 'python -c "print(1+1)"'
+    assert permission_audit.classify_hygiene(command) == ["python -c/heredoc"]
+
+
+# =========================================================================
+# MAX_HEREDOC_OPENERS -- quadratic-backtracking prefilter, on BOTH paths
+# that share COMMIT_HEREDOC_RE.sub (`_is_python_dash_c_certain` via
+# `_mask_heredoc_bodies`, and `_is_journal_bypass` via
+# `_strip_commit_messages`) -- AT and BEYOND the boundary (rule 6a).
+# =========================================================================
+
+
+def _unterminated_heredoc_openers(n: int, filler_len: int = 200) -> str:
+    """n DISTINCT (a unique delimiter per opener) `python - <<DELIM_i`
+    openers with NO closer at all -- no regex pass finds a closing line
+    for any of them (the live catastrophic-backtracking shape)."""
+    filler = "x" * filler_len
+    parts = [f"python - <<DELIM_{i}\n{filler}" for i in range(n)]
+    return "\n".join(parts)
+
+
+def test_heredoc_cap_boundary_at_64_openers_is_certain_and_fast():
+    # AT the boundary (n == MAX_HEREDOC_OPENERS == 64): the prefilter
+    # does NOT fire (`count("<<") > 64` is false at exactly 64) -- the
+    # expensive path runs as before, and stays fast at this size.
+    assert hygiene_gate.MAX_HEREDOC_OPENERS == 64
+    command = _unterminated_heredoc_openers(64)
+    t0 = time.perf_counter()
+    certain = hygiene_gate._is_python_dash_c_certain(command)
+    elapsed = time.perf_counter() - t0
+    print(f"heredoc cap perf: n=64 openers ({len(command)} bytes) -> {elapsed:.4f}s")
+    assert certain is True  # these are REAL python-heredoc openers
+    assert elapsed < 2.0, f"n=64 (at boundary) took {elapsed:.4f}s -- unexpectedly slow"
+
+
+def test_heredoc_cap_65_openers_one_past_boundary_forces_early_exit():
+    # BOUNDARY+1 (n=65): one opener past the cap -- the prefilter now
+    # fires (`65 > 64`), certain=False -- discriminates from n=64 above.
+    command = _unterminated_heredoc_openers(65)
+    assert hygiene_gate._is_python_dash_c_certain(command) is False
+
+
+def test_heredoc_cap_beyond_boundary_4000_openers_early_exit_linear():
+    # WELL beyond the boundary (n=4000): early exit -- certain is
+    # ALWAYS False (conservative, deny never widens), and the time is
+    # NOT quadratic -- the cheap count("<<") is linear in command
+    # length, not quadratic in opener count.
+    command = _unterminated_heredoc_openers(4000)
+    t0 = time.perf_counter()
+    certain = hygiene_gate._is_python_dash_c_certain(command)
+    elapsed = time.perf_counter() - t0
+    print(f"heredoc cap perf: n=4000 openers ({len(command)} bytes) -> {elapsed:.4f}s")
+    assert certain is False
+    assert elapsed < 1.0, (
+        f"n=4000 (beyond boundary) took {elapsed:.4f}s -- early exit did not fire"
+    )
+
+
+def test_heredoc_cap_over_limit_classification_falls_back_to_u_not_deny(monkeypatch):
+    # Beyond the cap, classification is "U" (not M/P) -- decide() keeps
+    # the OLD unconditional WARN behavior, never deny, even with
+    # PYC_DENY_ENABLED=True (the I2 invariant: deny never widens from a
+    # pathological input -- the form degrades to WARN, not silence and
+    # not a block).
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = _unterminated_heredoc_openers(65)
+    assert _payload_class(command) == "U"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso, (
+        "a giant form past MAX_HEREDOC_OPENERS denied -- the conservative "
+        "direction is broken"
+    )
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+def test_heredoc_cap_i2_invariant_existing_deny_tests_green_without_body_changes():
+    # A narrow, standalone pin (alongside the boundary battery above)
+    # that the prefilter left an ordinary `python -c` payload alone.
+    command = 'python -c "print(1+1)"'
+    assert hygiene_gate._is_python_dash_c_certain(command) is True
+    assert _payload_class(command) == "P"
+
+
+# --- the SAME cap, on the journal-bypass path (`_is_journal_bypass`) -----
+
+
+def _git_commit_with_unterminated_heredocs(n: int) -> str:
+    return 'git commit -m "msg" && ' + _unterminated_heredoc_openers(n)
+
+
+def test_heredoc_cap_journal_path_boundary_at_64_openers_runs_real_check():
+    # AT the boundary (n == 64, WITH "git commit"): the prefilter does
+    # NOT fire -- the expensive scrub runs as before, and stays fast at
+    # this size (the quadratic blowup only becomes visible at n=500+).
+    command = _git_commit_with_unterminated_heredocs(64)
+    t0 = time.perf_counter()
+    result = hygiene_gate._is_journal_bypass(command)
+    elapsed = time.perf_counter() - t0
+    print(f"heredoc cap perf (journal path): n=64 + git commit ({len(command)} bytes) -> {elapsed:.4f}s")
+    assert result is False  # no actual journal write in this synthetic form
+    assert elapsed < 2.0, f"n=64 (at boundary) took {elapsed:.4f}s -- unexpectedly slow"
+
+
+def test_heredoc_cap_journal_path_65_openers_one_past_boundary_forces_early_exit():
+    command = _git_commit_with_unterminated_heredocs(65)
+    assert hygiene_gate._is_journal_bypass(command) is False
+
+
+def test_heredoc_cap_journal_path_beyond_boundary_2000_openers_not_quadratic():
+    command = _git_commit_with_unterminated_heredocs(2000)
+    t0 = time.perf_counter()
+    result = hygiene_gate._is_journal_bypass(command)
+    elapsed = time.perf_counter() - t0
+    print(f"heredoc cap perf (journal path): n=2000 + git commit ({len(command)} bytes) -> {elapsed:.4f}s")
+    assert result is False
+    assert elapsed < 1.0, (
+        f"n=2000 (beyond boundary, past the size HQ's own critic measured) took "
+        f"{elapsed:.4f}s -- early exit did not fire"
+    )
+
+
+def test_heredoc_cap_journal_path_negative_control_no_git_commit_stays_cheap():
+    # Negative control (command hygiene point 6, paired with the
+    # positive above): the SAME form WITHOUT "git commit" was already
+    # cheap before this cap (the GIT_COMMIT_RE guard short-circuits
+    # `_strip_commit_messages` first) -- fast regardless of opener
+    # count, proving the cheapness is not solely this new cap's doing.
+    command = _unterminated_heredoc_openers(4000)  # no "git commit" at all
+    t0 = time.perf_counter()
+    result = hygiene_gate._is_journal_bypass(command)
+    elapsed = time.perf_counter() - t0
+    assert result is False
+    assert elapsed < 1.0, f"no-git-commit form took {elapsed:.4f}s -- unexpectedly slow"
+
+
+def test_heredoc_cap_journal_path_real_bypass_still_detected_below_limit():
+    # Regression pin: a genuine journal bypass (an echo redirect into
+    # logs/routing-log.jsonl, below the opener cap) is still detected --
+    # the prefilter does not blind ordinary detection.
+    command = 'echo "x" >> logs/routing-log.jsonl'
+    assert hygiene_gate._is_journal_bypass(command) is True

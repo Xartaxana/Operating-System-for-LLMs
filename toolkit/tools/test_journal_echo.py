@@ -493,7 +493,7 @@ def test_echo_git_mode_missing_category_defect(tmp_path):
     ctx = hook_output["additionalContext"]
     assert "JOURNAL ECHO: 1 defect(s) in new lines:" in ctx
     assert "'category'" in ctx
-    assert "missing/invalid required field" in ctx
+    assert "is missing/invalid" in ctx
     # stdout wire bytes are pure ASCII themselves (ensure_ascii=True
     # escapes non-ASCII into \uXXXX on the wire; JSON parsing recovers
     # the readable text).
@@ -860,15 +860,23 @@ def test_build_tier_segment_empty_list():
 
 
 def test_build_tier_segment_mismatch_exact_format():
+    # Rule-of-three text (imperative verb "check"/"fix"/"relaunch").
     ev = (2, "mismatch", "fable", {"claude-opus-4-8": 1})
     seg = journal_echo.build_tier_segment([ev])
-    assert seg == "TIER ECHO: line 2 model='fable' vs measured claude-opus-4-8=1 MISMATCH"
+    assert seg == ("TIER ECHO: line 2 declared tier 'fable' MISMATCH measured "
+                    "claude-opus-4-8=1 never confirm the declared tier - the worker may "
+                    "actually have run on a different model; check the tier and fix the "
+                    "record, or relaunch on the declared tier")
 
 
 def test_build_tier_segment_info_exact_format_no_mismatch_word():
+    # Rule-of-three text (imperative verb "check").
     ev = (2, "info", "fable", {"claude-fable-1": 1, "claude-sonnet-5": 1})
     seg = journal_echo.build_tier_segment([ev])
-    assert seg == "TIER ECHO: line 2 measured claude-fable-1=1, claude-sonnet-5=1"
+    assert seg == ("TIER ECHO: line 2 declared tier 'fable' measured "
+                    "claude-fable-1=1, claude-sonnet-5=1 confirms it only partially - "
+                    "part of the transcript may have run on a different model; check "
+                    "the tier manually")
     assert "MISMATCH" not in seg
 
 
@@ -909,8 +917,8 @@ def test_build_tier_segment_static_literal_stays_intact_in_both_modes():
     ev = (2, "mismatch", "fable", {"claude-opus-4-8": 1})
     seg_raw = journal_echo.build_tier_segment([ev], ascii_only=False)
     seg_ascii = journal_echo.build_tier_segment([ev], ascii_only=True)
-    assert seg_raw.startswith("TIER ECHO: line 2 model=")
-    assert seg_ascii.startswith("TIER ECHO: line 2 model=")
+    assert seg_raw.startswith("TIER ECHO: line 2 declared tier '")
+    assert seg_ascii.startswith("TIER ECHO: line 2 declared tier '")
 
 
 # ---------------------------------------------------------------------
@@ -977,7 +985,10 @@ def test_echo_tier_dod_b_mismatch_fable_declared_opus_measured(tmp_path):
     assert result.returncode == 0
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
-    assert ctx == "TIER ECHO: line 2 model='fable' vs measured claude-opus-4-8=1 MISMATCH"
+    assert ctx == ("TIER ECHO: line 2 declared tier 'fable' MISMATCH measured "
+                    "claude-opus-4-8=1 never confirm the declared tier - the worker may "
+                    "actually have run on a different model; check the tier and fix the "
+                    "record, or relaunch on the declared tier")
     assert ctx in result.stderr
 
 
@@ -1000,16 +1011,23 @@ def test_echo_tier_dod_c_mid_worker_informational_no_mismatch(tmp_path):
     assert result.returncode == 0
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
-    assert ctx == "TIER ECHO: line 2 measured claude-fable-1=1, claude-sonnet-5=1"
+    assert ctx == ("TIER ECHO: line 2 declared tier 'fable' measured "
+                    "claude-fable-1=1, claude-sonnet-5=1 confirms it only partially - "
+                    "part of the transcript may have run on a different model; check "
+                    "the tier manually")
     assert "MISMATCH" not in ctx
 
 
 def test_echo_tier_dod_d_worker_ref_cli_skipped_silent(tmp_path):
     # DoD (d), part 1: worker_ref cli:xxx -> skipped without a warning (silence).
+    # notes carries a critic-skip concession so the (unrelated) R3 MIRROR
+    # layer this task adds stays silent too -- this test is about
+    # worker_ref handling, not about R3.
     journal_path = _seed_committed_journal(tmp_path)
     new_line = _line(event="accepted", ts=_fresh_ts(), task_id="t-001",
                       agent="builder", by="opus", witness="tests pass", model="sonnet",
-                      worker_ref="cli:2026-07-10T08:10:00", notes="accepted via cli ref")
+                      worker_ref="cli:2026-07-10T08:10:00",
+                      notes="accepted via cli ref; critic: skipped, sibling-layer e2e fixture")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path))
     assert result.returncode == 0
@@ -1022,7 +1040,8 @@ def test_echo_tier_dod_d_worker_ref_retro_skipped_silent(tmp_path):
     journal_path = _seed_committed_journal(tmp_path)
     new_line = _line(event="accepted", ts=_fresh_ts(), task_id="t-001",
                       agent="builder", by="opus", witness="tests pass", model="sonnet",
-                      worker_ref="retro:2026-07-10T08:10:00", notes="accepted via retro ref")
+                      worker_ref="retro:2026-07-10T08:10:00",
+                      notes="accepted via retro ref; critic: skipped, sibling-layer e2e fixture")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path))
     assert result.returncode == 0
@@ -1034,7 +1053,8 @@ def test_echo_tier_dod_d_worker_ref_absent_skipped_silent(tmp_path):
     # DoD (d), part 3: worker_ref absent entirely -> skipped without a warning.
     journal_path = _seed_committed_journal(tmp_path)
     obj = {"ts": _fresh_ts(), "event": "accepted", "agent": "builder",
-           "category": "implementation", "notes": "accepted, no worker_ref field",
+           "category": "implementation",
+           "notes": "accepted, no worker_ref field; critic: skipped, sibling-layer e2e fixture",
            "task_id": "t-001", "by": "opus", "witness": "tests pass", "model": "sonnet"}
     new_line = json.dumps(obj, ensure_ascii=False)
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
@@ -1072,7 +1092,8 @@ def test_echo_tier_dod_f_form_defect_and_mismatch_together(tmp_path):
     ctx = hook_output["additionalContext"]
     assert "JOURNAL ECHO: 1 defect(s)" in ctx
     assert "'category'" in ctx
-    assert "TIER ECHO: line 2 model='fable' vs measured claude-opus-4-8=1 MISMATCH" in ctx
+    assert ("TIER ECHO: line 2 declared tier 'fable' MISMATCH measured "
+            "claude-opus-4-8=1") in ctx
     # Both segments are joined with "; ".
     assert "; TIER ECHO" in ctx
 

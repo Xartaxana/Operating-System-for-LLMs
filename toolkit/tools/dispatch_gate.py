@@ -207,13 +207,65 @@ Fail-open: given_path_warn() returns "" on any unrecognized payload/
 tool_input/prompt; main() additionally wraps the call in try/except
 (belt-and-suspenders) -- an adversarial input must not crash the
 BLOCKING hook over a WARN-layer failure.
+
+--- Region-aware filtering (md_regions integration) -------------------
+A guard cannot tell an author's own claim from quoted/nested content:
+a bare regex match on DoD/given/owns/write markers does not know
+whether it landed in the dispatcher's own prose or inside a fenced/
+quoted EXAMPLE of someone else's manifest. toolkit/tools/md_regions.py
+(imported below, try/except -- ImportError degrades this whole layer
+to bare-regex behavior, see I-0 below) splits the prompt into regions
+(prose / fenced / blockquote / inline_code); `_is_quoted(region)` is
+the single polarity used by every layer in this file: fenced OR
+blockquote -> quoted (excluded/flagged), prose and inline code are NOT
+quoted (a manifest written in backticks, e.g. "owns: `D:/x.py`", still
+counts) -- the same polarity given_path_warn already uses for its own
+candidates. An UNTERMINATED fence is read as prose, not a quote (before
+any other branch): treating it as a quote would only ever WIDEN the
+silent zone, which is the wrong default for an ambiguous case.
+
+I-0 (any md_regions failure -- ImportError, an exception inside
+scan(), or a degraded=True result): every region-aware function below
+falls back to the exact bare-regex behavior this file had before this
+layer existed -- byte for byte. decide()'s check 2 (B2-write) is the
+one branch where this file's exit code can legitimately change from
+its pre-region-aware behavior: a write verb / owns-declaration whose
+ONLY occurrence sits inside a quote no longer counts as a write
+signal (`_region_aware_is_write`) -- this can only LOOSEN the block,
+never tighten it (checks 1/3 and the given/owns manifest test itself
+are untouched). Three new WARN-only layers make that direction
+visible instead of silent: dod_quoted_warn/manifest_quoted_warn (the
+ONLY marker match found is inside a quote -- decide() still counted
+it, by design, this just flags it for a manual look) and
+write_quoted_warn (the one case where a write signal WAS quoted-out of
+check 2 with no given/owns marker present at all -- the quiet flip
+gets a WARN so it is never a silent pass).
+
+freshness_warn() (below) reuses the SAME scan()/_is_quoted() pair for
+its own line-anchor check but does NOT get the bare-regex I-0
+fallback: with no region info at all, the whole layer stays silent
+(a dispatch text with no anchor/check-token candidate never touches
+the filesystem or the scanner in the first place -- a cheap
+"any candidate at all" prefilter runs before scan() is called).
 """
 
+import bisect
 import json
 import os
 import re
 import sys
+import threading
 from pathlib import Path
+
+try:
+    from tools.md_regions import scan, KIND_FENCED, KIND_BLOCKQUOTE  # package-style
+except ImportError:
+    try:
+        from md_regions import scan, KIND_FENCED, KIND_BLOCKQUOTE  # sibling-module fallback
+    except ImportError:
+        scan = None
+        KIND_FENCED = "fenced"
+        KIND_BLOCKQUOTE = "blockquote"
 
 # Fixed asset of this deployment -- see the module docstring,
 # "Role-type WARN layer": the path is relative to this script's own
@@ -254,14 +306,32 @@ LABEL_MODEL_PREFIX_RE = re.compile(r"^\S+[ :-]")
 # --- Write-indicator discriminator: a shared "is this a path token"
 # predicate -- see the module docstring, "Write-indicator
 # discriminator", for the full contract and rationale.
-_PATH_TOKEN_WIN_ABS_RE = re.compile(r"^[A-Za-z]:[\\/]")
-_PATH_TOKEN_POSIX_ABS_RE = re.compile(r"^/")
+#
+# ROOT-ONLY GUARD (route port, node D1, staff twin tools/dispatch_gate.py
+# ~:863-884): both absolute regexes require >=1 SEGMENT character
+# (not a slash, not whitespace) right after the root slash -- a bare
+# root with no segment ("/", "//", "D:\\", "D:/") is not itself a path
+# token. Before this guard, "/" and "D:\\" matched as valid path
+# tokens: normalize_path("/") self-intersects with any other stray
+# "/" in a prompt (a false owns-overlap-shaped positive on nearly any
+# text carrying a bare slash), and "D:\\"/"D:/" normalize to "d:" --
+# an intersection with the ENTIRE D: drive. A rootless phantom root is
+# not an owned path in any practical sense. Only the ROOT-WITHOUT-A-
+# SEGMENT class is excluded here -- a doubled root WITH a segment
+# ("//foo", "//server/share", "D://x") still counts (the segment is
+# present); "/etc" (one segment, no extension) is a token, "/" alone
+# is not -- both edges are tested (rule 6a). The glob branch below
+# ("*" + a slash) is unaffected -- this guard only narrows the two
+# absolute-path regexes, checked first, same order as before.
+_PATH_TOKEN_WIN_ABS_RE = re.compile(r"^[A-Za-z]:[\\/]+[^\\/\s]")
+_PATH_TOKEN_POSIX_ABS_RE = re.compile(r"^/+[^/\s]")
 
 
 def is_path_like_token(tok) -> bool:
     """The single, shared predicate for "does this token look like a
-    path": a Windows absolute path (drive letter + ":" + slash), a
-    POSIX absolute path (leading "/"), or a glob carrying BOTH "*" and
+    path": a Windows absolute path (drive letter + ":" + slash + a
+    segment), a POSIX absolute path (leading "/" + a segment -- see
+    "ROOT-ONLY GUARD" above), or a glob carrying BOTH "*" and
     a slash ("/" or "\\"). A bare "*" with no slash (e.g. markdown
     "**bold**") is NOT a path -- see the module docstring for the
     false-positive this excludes."""
@@ -332,6 +402,156 @@ def owns_declaration_has_path_token(prompt: str) -> bool:
     return False
 
 
+# =======================================================================
+# Region-aware helpers (md_regions integration) -- see the module
+# docstring, "Region-aware filtering", for the full design rationale.
+# =======================================================================
+
+
+def _safe_scan(text: str):
+    """I-0: None on a missing module / an exception inside scan() /
+    degraded=True -- three failure shapes collapse to one "no region
+    info" signal, so every caller below has exactly one fallback
+    branch to write."""
+    if scan is None:
+        return None
+    try:
+        result = scan(text)
+    except Exception:
+        return None
+    if result.degraded:
+        return None
+    return result
+
+
+def _region_at(scan_result, offset: int):
+    """bisect over scan_result.regions -- mirrors md_regions.kind_at(),
+    but returns the WHOLE Region (needed for .unterminated, see
+    _is_quoted)."""
+    regions = scan_result.regions
+    if not regions:
+        return None
+    starts = [r.start for r in regions]
+    idx = bisect.bisect_right(starts, offset) - 1
+    if idx < 0:
+        return None
+    region = regions[idx]
+    if region.start <= offset < region.end:
+        return region
+    return None
+
+
+def _is_quoted(region) -> bool:
+    """The single "quoted" polarity used by every region-aware layer in
+    this file -- see the module docstring, "Region-aware filtering".
+    region is None (end of text / outside coverage) -> NOT quoted (the
+    prose default). An unterminated fence -> NOT quoted (checked
+    BEFORE any other branch -- ambiguity must not widen the silent
+    zone). Otherwise: fenced OR blockquote in kinds -> quoted; inline
+    code and prose are NOT quoted (backticks don't silence a real
+    manifest declaration)."""
+    if region is None:
+        return False
+    if KIND_FENCED in region.kinds and region.unterminated:
+        return False
+    if KIND_FENCED in region.kinds or KIND_BLOCKQUOTE in region.kinds:
+        return True
+    return False
+
+
+_QUOTE_TRIGGER_CHARS = "`>~"
+
+
+def _prompt_has_quote_trigger(prompt: str) -> bool:
+    """Cheap prefilter: without one of these characters anywhere in the
+    text, no region can possibly be fenced/blockquote -- the same fact
+    md_regions._no_markers_whole_text() uses internally."""
+    return any(ch in prompt for ch in _QUOTE_TRIGGER_CHARS)
+
+
+def _line_start_offsets(text: str) -> list:
+    """Character offset of the start of each text.splitlines() line."""
+    offsets = []
+    pos = 0
+    for wt in text.splitlines(keepends=True):
+        offsets.append(pos)
+        pos += len(wt)
+    return offsets
+
+
+def _region_aware_write_indicator_present(prompt: str, scan_result) -> bool:
+    """True when at least one WRITE_INDICATORS_RE match sits OUTSIDE a
+    quote. scan_result is None -> I-0 fallback, bare bool(search())."""
+    if scan_result is None:
+        return bool(WRITE_INDICATORS_RE.search(prompt))
+    for m in WRITE_INDICATORS_RE.finditer(prompt):
+        if not _is_quoted(_region_at(scan_result, m.start())):
+            return True
+    return False
+
+
+def _region_aware_owns_declaration_has_path_token(prompt: str, scan_result) -> bool:
+    """Region-aware twin of owns_declaration_has_path_token() above --
+    the SAME line-scanning algorithm (marker -> same-line path OR the
+    next continuation line), with ONE addition: an owns-marker match
+    that sits INSIDE a quote is skipped entirely (a quoted owns
+    declaration does not feed check 2). scan_result is None -> I-0
+    fallback to the bare function above, byte for byte."""
+    if scan_result is None:
+        return owns_declaration_has_path_token(prompt)
+    if not isinstance(prompt, str) or not prompt:
+        return False
+    lines = prompt.splitlines()
+    offsets = _line_start_offsets(prompt)
+    for i, line in enumerate(lines):
+        m = MANIFEST_OWNS_RE.search(line)
+        if not m:
+            continue
+        marker_offset = offsets[i] + m.start()
+        if _is_quoted(_region_at(scan_result, marker_offset)):
+            continue  # a quoted owns-declaration does not feed check 2
+        if _owns_region_has_path_token(line[m.end():]):
+            return True
+        prefix = line[: m.start()]
+        remainder = line[m.end():]
+        if not _OWNS_DECLARATION_PREFIX_RE.match(prefix):
+            continue
+        if not _OWNS_MARKER_JUNK_ONLY_RE.match(remainder):
+            continue
+        if i + 1 >= len(lines):
+            continue
+        cont = lines[i + 1]
+        if cont.strip() == "" or _OWNS_SECTION_STOP_RE.match(cont):
+            continue
+        if _owns_region_has_path_token(cont):
+            return True
+    return False
+
+
+def _region_aware_is_write(prompt: str) -> bool:
+    """decide()'s check-2 write signal -- replaces the bare
+    `bool(WRITE_INDICATORS_RE.search(prompt)) or
+    owns_declaration_has_path_token(prompt)` computation. Two-part cheap
+    prefilter before scan() is ever called: (a) a bare marker hit (the
+    same pair of predicates decide() already computed) -- nothing found
+    -> False, scan() not called; (b) no quote-trigger character
+    anywhere in the text -- nothing to filter, the bare True result is
+    returned directly. Only when BOTH conditions hold does scan() run,
+    exactly once."""
+    bare_write = bool(WRITE_INDICATORS_RE.search(prompt))
+    bare_owns = owns_declaration_has_path_token(prompt)
+    if not (bare_write or bare_owns):
+        return False
+    if not _prompt_has_quote_trigger(prompt):
+        return True
+    scan_result = _safe_scan(prompt)
+    if scan_result is None:
+        return True  # I-0: same bare result that gave True above
+    return _region_aware_write_indicator_present(
+        prompt, scan_result
+    ) or _region_aware_owns_declaration_has_path_token(prompt, scan_result)
+
+
 BLOCK_MESSAGE_NO_DOD = (
     "A builder dispatch with no DoD does not go out (rule 11): add "
     "acceptance criteria and a verification run whose output becomes "
@@ -366,10 +586,12 @@ def decide(payload: dict) -> tuple[int, str]:
         # The write signal is EITHER one of the four write verbs OR an
         # owns: declaration that actually carries a path-like token --
         # see the module docstring, "Write-indicator discriminator":
-        # the bare word "owns" alone is no longer sufficient.
-        is_write = bool(WRITE_INDICATORS_RE.search(prompt)) or owns_declaration_has_path_token(
-            prompt
-        )
+        # the bare word "owns" alone is no longer sufficient. Region-
+        # aware (see "Region-aware filtering" in the module docstring):
+        # a signal whose ONLY occurrence sits inside a quote no longer
+        # counts -- the ONLY line in decide() this port's md_regions
+        # integration changes.
+        is_write = _region_aware_is_write(prompt)
         if is_write:
             has_manifest = bool(MANIFEST_GIVEN_RE.search(prompt)) and bool(
                 MANIFEST_OWNS_RE.search(prompt)
@@ -413,7 +635,12 @@ GIVEN_ABS_WIN_PATH_RE = re.compile(
     r"(?<!\w)[A-Za-z]:[\\/]" + _GIVEN_PATH_BODY_CHAR + r"{0,300}\.[A-Za-z0-9]{1,10}\b"
 )
 
-_GIVEN_REPO_REL_PREFIX = r"(?:tools|gateway|PROCESS|docs|\.claude|\.githooks)"
+# "logs" added (route port t-batch 2026-08-25, node D1) -- the staff
+# twin's own prefix set carries it (docs/tasks/2026-08-25_kit-
+# v0.9.0-batch-specs.md, node C3 delta 1): a given-basket entry naming
+# a repo-relative logs/ path (e.g. "owns: logs/routing-log.jsonl")
+# extracts and checks like any other known top-level directory.
+_GIVEN_REPO_REL_PREFIX = r"(?:tools|gateway|PROCESS|docs|logs|\.claude|\.githooks)"
 GIVEN_REPO_REL_PATH_RE = re.compile(
     r"(?<![\w/\\])"
     + _GIVEN_REPO_REL_PREFIX
@@ -445,6 +672,33 @@ def extract_given_candidates(prompt: str) -> list:
     return candidates
 
 
+def extract_given_candidates_region_aware(prompt: str, scan_result) -> list:
+    """Region-aware twin of extract_given_candidates() -- the SAME two
+    regexes (unchanged), but each match is checked against its own
+    position's quotedness. A token QUALIFIES (is included in the
+    result) when AT LEAST ONE of its occurrences is NOT quoted -- even
+    if OTHER occurrences of the same token sit inside a quote. Dedup
+    preserved -- result order is the order of the first appearance of a
+    qualifying token. scan_result is None -> I-0 fallback to the bare
+    function above."""
+    if scan_result is None:
+        return extract_given_candidates(prompt)
+    if not isinstance(prompt, str) or not prompt:
+        return []
+    order = []
+    seen = {}
+    for pattern, is_abs in ((GIVEN_ABS_WIN_PATH_RE, True), (GIVEN_REPO_REL_PATH_RE, False)):
+        for m in pattern.finditer(prompt):
+            tok = m.group(0)
+            quoted = _is_quoted(_region_at(scan_result, m.start()))
+            if tok not in seen:
+                seen[tok] = {"is_abs": is_abs, "any_unquoted": not quoted}
+                order.append(tok)
+            elif not quoted:
+                seen[tok]["any_unquoted"] = True
+    return [(tok, seen[tok]["is_abs"]) for tok in order if seen[tok]["any_unquoted"]]
+
+
 def _is_under_root(path_str: str, root: str) -> bool:
     """True when path_str lies inside root (root itself included) --
     compared via normcase(normpath(...)) (case-insensitive on Windows,
@@ -458,13 +712,14 @@ def _is_under_root(path_str: str, root: str) -> bool:
     return norm_path == norm_root or norm_path.startswith(norm_root + os.sep)
 
 
-def find_missing_given_paths(prompt: str, repo_root: str) -> list:
-    """Returns the paths (as written) from extract_given_candidates(prompt)
-    that do NOT exist -- an absolute path OUTSIDE repo_root (a foreign
-    tree) is skipped entirely, never counted as "missing" (see the
-    module docstring, "Known root and foreign trees")."""
+def _missing_given_paths_from_candidates(candidates: list, repo_root: str) -> list:
+    """Shared existence-check body -- takes an already-extracted
+    candidate list (bare or region-aware) instead of a prompt, so both
+    given_path_warn() below (region-aware) and find_missing_given_paths()
+    (bare, kept for its existing callers/tests) share one
+    implementation."""
     missing = []
-    for tok, is_abs in extract_given_candidates(prompt):
+    for tok, is_abs in candidates:
         if is_abs:
             if not _is_under_root(tok, repo_root):
                 continue
@@ -474,6 +729,16 @@ def find_missing_given_paths(prompt: str, repo_root: str) -> list:
         if not exists:
             missing.append(tok)
     return missing
+
+
+def find_missing_given_paths(prompt: str, repo_root: str) -> list:
+    """Returns the paths (as written) from extract_given_candidates(prompt)
+    that do NOT exist -- an absolute path OUTSIDE repo_root (a foreign
+    tree) is skipped entirely, never counted as "missing" (see the
+    module docstring, "Known root and foreign trees"). Bare (not
+    region-aware) -- kept as-is for its existing callers; given_path_warn()
+    below calls the region-aware extraction directly."""
+    return _missing_given_paths_from_candidates(extract_given_candidates(prompt), repo_root)
 
 
 def format_given_path_warn(missing: list) -> str:
@@ -497,7 +762,11 @@ def format_given_path_warn(missing: list) -> str:
 def given_path_warn(payload: dict) -> str:
     """"" -- nothing to warn about (payload isn't Task/Agent, no
     prompt, every candidate exists/is foreign/there are none). Otherwise
-    the ready-made WARN text (see format_given_path_warn)."""
+    the ready-made WARN text (see format_given_path_warn). Region-aware
+    (see the module docstring, "Region-aware filtering"): a given-path
+    candidate whose ONLY occurrence sits inside a quote is not checked
+    for existence at all -- I-0 fallback to the bare
+    find_missing_given_paths() when no region info is available."""
     if not isinstance(payload, dict):
         return ""
     tool_name = payload.get("tool_name")
@@ -514,7 +783,12 @@ def given_path_warn(payload: dict) -> str:
     if not isinstance(repo_root, str) or not repo_root:
         repo_root = os.getcwd()
 
-    missing = find_missing_given_paths(prompt, repo_root)
+    scan_result = _safe_scan(prompt)
+    if scan_result is None:
+        missing = find_missing_given_paths(prompt, repo_root)
+    else:
+        candidates = extract_given_candidates_region_aware(prompt, scan_result)
+        missing = _missing_given_paths_from_candidates(candidates, repo_root)
     return format_given_path_warn(missing)
 
 
@@ -531,10 +805,43 @@ ROLE_TYPE_WARN_MISMATCH = (
     "declares model: {bound_model} (family '{bound_family}') -- "
     "a type<->tier mismatch."
 )
-ROLE_TYPE_WARN_UNKNOWN_ROLE = (
+
+# Route port, node D1 (staff twin ~:1934/:1943): the single UNKNOWN-ROLE
+# message split into two cases with OPPOSITE actions for the reader --
+# a project role missing a file is a gap to CLOSE (add the role file),
+# a harness built-in type missing a file is EXPECTED (nothing to add;
+# just verify the tier separately if it matters). Both share the
+# "no role file" substring byte for byte -- same rule-of-three prefix,
+# one registry line covers either case, and any test pinning that
+# phrase stays green regardless of which branch fires.
+ROLE_TYPE_WARN_PROJECT = (
     "ROLE-TYPE WARN: no role file in .claude/agents/ for type "
     "'{subagent_type}' -- the declared tier '{declared_family}' is not "
-    "backed by any loaded role."
+    "backed by any loaded role, and the worker's actual model can "
+    "silently diverge from what's declared -- add a role file with a "
+    "model: field for this project role; or, if this is a harness "
+    "built-in type not yet in the known list, verify the tier by a "
+    "transcript measurement and add the type to the list."
+)
+ROLE_TYPE_WARN_BUILTIN_TYPE = (
+    "ROLE-TYPE WARN: the harness built-in type '{subagent_type}' has no "
+    "role file in .claude/agents/ -- expected, not a defect of this "
+    "layer, but the declared tier '{declared_family}' stays unconfirmed "
+    "and the worker's actual model can diverge from it unnoticed -- "
+    "verify the tier by a transcript measurement if the dispatch "
+    "decision depends on it."
+)
+
+# A CLOSED list of harness built-in subagent types that carry no
+# project role file by design (route port, node D1, staff twin's
+# _ROLE_TYPE_BUILTIN_HARNESS_TYPES): matched case-insensitively against
+# the already-normalized subagent_type_norm. This list can go stale as
+# the harness adds types -- that is a finding, not a silent failure:
+# a miss falls through to ROLE_TYPE_WARN_PROJECT, whose text literally
+# says "or, if this is a harness built-in type not yet in the known
+# list ... add the type to the list", not a silent pass.
+_ROLE_TYPE_BUILTIN_HARNESS_TYPES = frozenset(
+    {"general-purpose", "claude-code-guide", "explore", "plan", "statusline-setup"}
 )
 
 _FAMILY_NAMES = ("fable", "opus", "sonnet", "haiku")
@@ -675,7 +982,14 @@ def role_type_warn(payload: dict) -> str:
         subagent_type_norm = subagent_type.strip().lower()
         role_known, bound_model = _find_agent_role_model(subagent_type_norm)
         if not role_known:
-            return ROLE_TYPE_WARN_UNKNOWN_ROLE.format(
+            # PROJECT/BUILTIN_TYPE split (route port, node D1): the
+            # branching LOGIC (what counts as an unknown role) is
+            # untouched -- only the choice of TEXT differs.
+            if subagent_type_norm in _ROLE_TYPE_BUILTIN_HARNESS_TYPES:
+                return ROLE_TYPE_WARN_BUILTIN_TYPE.format(
+                    subagent_type=subagent_type, declared_family=declared_family
+                )
+            return ROLE_TYPE_WARN_PROJECT.format(
                 subagent_type=subagent_type, declared_family=declared_family
             )
         if not bound_model:
@@ -693,6 +1007,367 @@ def role_type_warn(payload: dict) -> str:
         return ""
 
 
+# =======================================================================
+# "Stricter, WARN-only" layers (route port, node D1): B1 (DoD-marker)
+# and B2-manifest (given/owns) checks inside decide() are NOT touched --
+# a quoted marker still counts exactly as it does today. These layers
+# only INFORM: the sole marker match found sits inside a quote, so
+# decide() may have counted a marker that isn't the author's own claim
+# -- sanity-check it by hand.
+# =======================================================================
+
+_QUOTED_SNIPPET_MAX_LEN = 80
+
+DOD_QUOTED_WARN_MESSAGE = (
+    "DOD-QUOTED WARN: the only DoD marker found in this dispatch sits "
+    "inside a quote/fence (\"{preview}\") -- check 1 counts it literally "
+    "(decide() is untouched), but a quoted marker may be someone else's "
+    "text, not the author's own DoD -- verify by hand (rule 11)."
+)
+MANIFEST_QUOTED_WARN_MESSAGE = (
+    "MANIFEST-QUOTED WARN: every occurrence of the manifest marker "
+    "'{marker}' found in this dispatch sits inside a quote/fence -- the "
+    "declaration may be someone else's example, not the author's own "
+    "manifest -- verify by hand (dispatch-context-manifest rule)."
+)
+
+
+def _truncate_snippet(s: str, max_len: int = _QUOTED_SNIPPET_MAX_LEN) -> str:
+    s = s.strip()
+    if len(s) > max_len:
+        return s[:max_len] + "..."
+    return s
+
+
+def dod_quoted_warn(payload: dict) -> str:
+    """"" -- nothing to warn about (not Task/Agent, not builder, prompt
+    absent/empty, no DoD match at all, no quote-trigger character in
+    the text at all, the module is unavailable/degraded, every match
+    has at least one UNquoted occurrence). Otherwise -- EVERY
+    DOD_MARKERS_RE match sits inside a fenced/blockquote region. Purely
+    informational, symmetric with given_path_warn/role_type_warn --
+    does not participate in the exit code, called ONLY from main(),
+    ONLY when decide() has already returned (0, "")."""
+    try:
+        if not isinstance(payload, dict):
+            return ""
+        if payload.get("tool_name") not in ("Task", "Agent"):
+            return ""
+        tool_input = payload.get("tool_input") or {}
+        if not isinstance(tool_input, dict):
+            return ""
+        if tool_input.get("subagent_type") != "builder":
+            return ""
+        prompt = tool_input.get("prompt")
+        if not isinstance(prompt, str) or not prompt:
+            return ""
+        matches = list(DOD_MARKERS_RE.finditer(prompt))
+        if not matches:
+            return ""  # nothing to scan
+        if not _prompt_has_quote_trigger(prompt):
+            return ""  # no quote-capable character -- nothing can be quoted
+        scan_result = _safe_scan(prompt)
+        if scan_result is None:
+            return ""  # I-0: no region info -- nothing to warn about
+        if not all(_is_quoted(_region_at(scan_result, mm.start())) for mm in matches):
+            return ""
+        preview = _truncate_snippet(matches[0].group(0))
+        return DOD_QUOTED_WARN_MESSAGE.format(preview=preview)
+    except Exception:
+        return ""
+
+
+def manifest_quoted_warn(payload: dict) -> str:
+    """"" -- nothing to warn about (symmetric with dod_quoted_warn
+    above). Otherwise -- EVERY MANIFEST_GIVEN_RE match sits inside a
+    quote, OR EVERY MANIFEST_OWNS_RE match sits inside a quote (given
+    is checked first -- matches decide()'s has_manifest = given AND
+    owns order). scan() is called AT MOST once -- computed once, reused
+    for both checks."""
+    try:
+        if not isinstance(payload, dict):
+            return ""
+        if payload.get("tool_name") not in ("Task", "Agent"):
+            return ""
+        tool_input = payload.get("tool_input") or {}
+        if not isinstance(tool_input, dict):
+            return ""
+        if tool_input.get("subagent_type") != "builder":
+            return ""
+        prompt = tool_input.get("prompt")
+        if not isinstance(prompt, str) or not prompt:
+            return ""
+        given_matches = list(MANIFEST_GIVEN_RE.finditer(prompt))
+        owns_matches = list(MANIFEST_OWNS_RE.finditer(prompt))
+        if not given_matches and not owns_matches:
+            return ""  # neither given nor owns -- nothing to scan
+        if not _prompt_has_quote_trigger(prompt):
+            return ""  # no quote-capable character
+        scan_result = _safe_scan(prompt)
+        if scan_result is None:
+            return ""  # I-0: no region info -- nothing to warn about
+        if given_matches and all(
+            _is_quoted(_region_at(scan_result, mm.start())) for mm in given_matches
+        ):
+            return MANIFEST_QUOTED_WARN_MESSAGE.format(marker="given")
+        if owns_matches and all(
+            _is_quoted(_region_at(scan_result, mm.start())) for mm in owns_matches
+        ):
+            return MANIFEST_QUOTED_WARN_MESSAGE.format(marker="owns")
+        return ""
+    except Exception:
+        return ""
+
+
+# --- The one case where the region filter can flip decide()'s exit
+# code with no manifest marker present at all -- see the module
+# docstring, "Region-aware filtering": a write verb / owns-declaration
+# whose ONLY occurrence is quoted, and neither given nor owns appears
+# ANYWHERE else in the prompt. dod_quoted_warn/manifest_quoted_warn
+# both stay silent in that case (nothing to flag -- no marker match
+# exists at all). This layer signals the flip itself, so it is never a
+# silent pass: the bare (pre-region) file would have blocked this same
+# dispatch.
+WRITE_QUOTED_WARN_MESSAGE = (
+    "WRITE-QUOTED WARN: the only write signal found in this dispatch "
+    "(a write verb / owns-declaration) sits inside a quote/fence -- the "
+    "region filter lifted check 2's block, and no given/owns manifest "
+    "marker appears anywhere in the text either -- this is not a silent "
+    "pass: a bare-regex gate would have blocked this same dispatch -- "
+    "verify by hand (dispatch-context-manifest rule)."
+)
+
+
+def write_quoted_warn(payload: dict) -> str:
+    """"" -- nothing to warn about (not Task/Agent, not builder, prompt
+    absent/empty, the bare write signal was never True -- no flip is
+    even possible, ANY manifest marker (given OR owns) is present
+    somewhere -- that case is already flagged by manifest_quoted_warn,
+    silent here to avoid a duplicate message, the region-aware write
+    signal stayed True -- no flip happened). Otherwise -- the bare
+    write signal was True, the region-aware one became False, and no
+    manifest marker exists at all -- the region filter silently lifted
+    the block; this layer signals the flip itself."""
+    try:
+        if not isinstance(payload, dict):
+            return ""
+        if payload.get("tool_name") not in ("Task", "Agent"):
+            return ""
+        tool_input = payload.get("tool_input") or {}
+        if not isinstance(tool_input, dict):
+            return ""
+        if tool_input.get("subagent_type") != "builder":
+            return ""
+        prompt = tool_input.get("prompt")
+        if not isinstance(prompt, str) or not prompt:
+            return ""
+        bare_is_write = bool(WRITE_INDICATORS_RE.search(prompt)) or owns_declaration_has_path_token(
+            prompt
+        )
+        if not bare_is_write:
+            return ""
+        if MANIFEST_GIVEN_RE.search(prompt) or MANIFEST_OWNS_RE.search(prompt):
+            return ""  # a manifest marker exists -- covered by manifest_quoted_warn
+        if _region_aware_is_write(prompt):
+            return ""  # no flip -- the region-aware signal is also True
+        return WRITE_QUOTED_WARN_MESSAGE
+    except Exception:
+        return ""
+
+
+# =======================================================================
+# FRESHNESS layer (route port; staff twin's own FRESHNESS node):
+# one of the staff twin's two anchor classes is ported -- class (v),
+# "a <path>.<ext>:N[-M] anchor points past the end of the real file".
+# The staff twin's OTHER class, "check NN(x) references a nonexistent
+# calibration-protocol subpoint", is NOT ported this increment: it
+# depends on a `<!--CHK NN|-->` machine-anchor convention inside
+# WEEKLY_CALIBRATION_PROTOCOL.md that the kit's OWN copy does not carry
+# yet (measured: 0 occurrences of "CHK" in
+# toolkit/PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md vs. 64 in the staff
+# twin) -- adopting that anchor convention is a decision for node C4
+# (which owns that file), not this node; porting the check-number class
+# now would be machinery for a convention the kit has not adopted. This
+# is an honest population narrowing (see the module docstring, "Region-
+# aware filtering"), not a silent invention: the layer still degrades
+# correctly on a tree with no staff-shaped carriers (class (v) itself
+# needs nothing but a path and a line count).
+#
+# decide() is NOT touched by this layer at all. Region-aware via the
+# SAME _safe_scan()/_is_quoted() pair as the layers above -- but with
+# NO bare-regex I-0 fallback: with no region info at all, the whole
+# layer stays silent (a cheap "any candidate at all" prefilter runs
+# BEFORE the filesystem or the scanner are ever touched).
+# =======================================================================
+
+FRESHNESS_WARN_PREFIX = "FRESHNESS WARN:"
+
+_FRESHNESS_PATH_BODY_CHAR = r'[^\s"\'<>|?*{}$,;\n]'
+
+FRESHNESS_LINE_ANCHOR_RE = re.compile(
+    r"(?<![\w/\\])(?P<path>"
+    + _GIVEN_REPO_REL_PREFIX
+    + r"/"
+    + _FRESHNESS_PATH_BODY_CHAR
+    + r"{0,300}\.[A-Za-z0-9]{1,10})"
+    + r":(?P<n>\d{1,7})(?:-(?P<m>\d{1,7}))?\b"
+)
+
+FRESHNESS_LINE_ANCHOR_ABS_RE = re.compile(
+    r"(?<!\w)(?P<path>[A-Za-z]:[\\/]"
+    + _FRESHNESS_PATH_BODY_CHAR
+    + r"{0,300}\.[A-Za-z0-9]{1,10})"
+    + r":(?P<n>\d{1,7})(?:-(?P<m>\d{1,7}))?\b"
+)
+
+_FRESHNESS_SUMMARY_THRESHOLD = 20
+_FRESHNESS_MAX_FILE_BYTES = 2 * 1024 * 1024
+_FRESHNESS_MAX_FILES_PER_CALL = 8
+_FRESHNESS_MAX_PROMPT_CHARS = 300_000
+
+
+def _freshness_m3_message(token_display: str, line_count: int, bound: int) -> str:
+    return (
+        f"{FRESHNESS_WARN_PREFIX} anchor {token_display} points past the "
+        f"end of the file (it has {line_count} lines) -- the line moved "
+        f"or was removed, acceptance will open the wrong place and sign "
+        f"off on the wrong content -- re-read the carrier, update the "
+        f"line number, or drop it and keep the path."
+    )
+
+
+def _freshness_line_anchor_candidates_region_aware(prompt: str, scan_result) -> list:
+    """(path, is_abs, n, m) for anchors with >=1 occurrence OUTSIDE a
+    quote -- dedup by (normcase(path), n, m), same polarity/shape as
+    extract_given_candidates_region_aware."""
+    order = []
+    seen = {}
+    for pattern, is_abs in (
+        (FRESHNESS_LINE_ANCHOR_ABS_RE, True),
+        (FRESHNESS_LINE_ANCHOR_RE, False),
+    ):
+        for m in pattern.finditer(prompt):
+            path = m.group("path")
+            n = int(m.group("n"))
+            m_raw = m.group("m")
+            mm = int(m_raw) if m_raw is not None else None
+            key = (os.path.normcase(path), n, mm)
+            quoted = _is_quoted(_region_at(scan_result, m.start()))
+            if key not in seen:
+                seen[key] = {
+                    "path": path, "is_abs": is_abs, "n": n, "m": mm,
+                    "any_unquoted": not quoted,
+                }
+                order.append(key)
+            elif not quoted:
+                seen[key]["any_unquoted"] = True
+    return [seen[k] for k in order if seen[k]["any_unquoted"]]
+
+
+def _freshness_class_v_hits(prompt: str, scan_result, repo_root: str) -> list:
+    """WARN only when the file exists, is readable, and its line count
+    is below max(N, M). _FRESHNESS_MAX_FILE_BYTES / _FRESHNESS_MAX_FILES_
+    PER_CALL bound per-call cost; files over the per-call budget are
+    silently skipped (never mentioned as "unchecked"). line_count is
+    computed EXACTLY once per file within a call -- repeat anchors on
+    the same file (different N/M) reuse the cached line count."""
+    candidates = _freshness_line_anchor_candidates_region_aware(prompt, scan_result)
+    if not candidates:
+        return []
+    checked_files: set = set()
+    line_count_cache: dict = {}
+    hits = []
+    for cand in candidates:
+        path, is_abs, n, m = cand["path"], cand["is_abs"], cand["n"], cand["m"]
+        if is_abs:
+            if not _is_under_root(path, repo_root):
+                continue
+            full_path = path
+        else:
+            full_path = os.path.join(repo_root, path)
+        file_key = os.path.normcase(os.path.normpath(full_path))
+
+        if file_key in line_count_cache:
+            line_count = line_count_cache[file_key]
+        else:
+            if not os.path.isfile(full_path):
+                continue  # silent: does not exist / is a directory
+            if file_key not in checked_files:
+                if len(checked_files) >= _FRESHNESS_MAX_FILES_PER_CALL:
+                    continue  # per-call file budget
+                checked_files.add(file_key)
+            try:
+                if os.path.getsize(full_path) > _FRESHNESS_MAX_FILE_BYTES:
+                    continue  # per-file size budget
+                with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+            except OSError:
+                continue
+            line_count = len(text.splitlines())
+            line_count_cache[file_key] = line_count
+
+        bound = max(n, m) if m is not None else n
+        if line_count < bound:
+            token_display = f"{path}:{n}" + (f"-{m}" if m is not None else "")
+            hits.append((token_display, line_count, bound))
+    return hits
+
+
+def _freshness_format_class_v(hits: list) -> str:
+    if not hits:
+        return ""
+    if len(hits) <= _FRESHNESS_SUMMARY_THRESHOLD:
+        return "\n\n".join(_freshness_m3_message(*h) for h in hits)
+    head = ", ".join(h[0] for h in hits[:3])
+    return (
+        f"{FRESHNESS_WARN_PREFIX} {len(hits)} file:line anchors point past "
+        f"the end of their carrier -- lines moved or were removed, "
+        f"acceptance will open the wrong place; first 3: {head} -- "
+        f"re-read the carriers, update the line numbers, or drop them "
+        f"and keep the paths."
+    )
+
+
+def freshness_warn(payload: dict) -> str:
+    """"" -- nothing to warn about; pure, never raises outward. Not
+    Task/Agent -- silent without touching the filesystem. No anchor
+    candidate at all -> "" BEFORE the filesystem/scanner. Region
+    scanner unavailable -> the layer stays silent ENTIRELY (no bare-
+    regex I-0 fallback here, unlike given_path_warn -- see the module
+    docstring)."""
+    if not isinstance(payload, dict):
+        return ""
+    tool_name = payload.get("tool_name")
+    if tool_name not in ("Task", "Agent"):
+        return ""
+    tool_input = payload.get("tool_input") or {}
+    if not isinstance(tool_input, dict):
+        return ""
+    prompt = tool_input.get("prompt")
+    if not isinstance(prompt, str) or not prompt:
+        return ""
+    if len(prompt) > _FRESHNESS_MAX_PROMPT_CHARS:
+        return ""  # stays silent without reading the disk
+
+    has_v = bool(FRESHNESS_LINE_ANCHOR_ABS_RE.search(prompt)) or bool(
+        FRESHNESS_LINE_ANCHOR_RE.search(prompt)
+    )
+    if not has_v:
+        return ""
+
+    scan_result = _safe_scan(prompt)
+    if scan_result is None:
+        return ""  # no region info -- the whole layer stays silent
+
+    repo_root = payload.get("cwd")
+    if not isinstance(repo_root, str) or not repo_root:
+        repo_root = os.getcwd()
+
+    return _freshness_format_class_v(
+        _freshness_class_v_hits(prompt, scan_result, repo_root)
+    )
+
+
 def _reconfigure_stderr_utf8():
     try:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -707,16 +1382,88 @@ def _reconfigure_stdout_utf8():
         pass
 
 
+# --- stdin deadline (P4 class; a LOCAL copy, no shared module -- the
+# same helper toolkit/tools/owns_gate.py/session_context.py already
+# carry)
+# --------------------------------------------------------------------
+
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Seconds to wait for stdin: env override, else the default.
+    Invalid, non-numeric, <=0, or > _STDIN_DEADLINE_MAX all fall back to
+    the default -- there is deliberately NO "0 = wait forever" mode (that
+    would resurrect the exact hang this helper exists to close)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """Returns (bytes, timed_out). Reads stdin to EOF, but no longer
+    than the deadline. Cross-platform by construction: select/poll do
+    not work on pipes on Windows, so a background daemon thread does
+    the actual blocking read and the deadline is enforced via
+    thread.join(timeout). A TTY returns b"" without reading anything.
+    Any read error degrades to b"" (fail-open)."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+
+# A background reader thread may still be blocked deep in a platform
+# read syscall at normal interpreter shutdown, which can crash the
+# process ("Fatal Python error: _enter_buffered_busy") instead of
+# exiting cleanly. main() itself is UNCHANGED (still a plain
+# `return 0`/`return 2`, safe in-process); only the actual __main__
+# script-exit path below escalates to os._exit().
+_STDIN_DEADLINE_STATE = {"hit": False}
+
+
 def main() -> int:
     _reconfigure_stderr_utf8()
 
-    # Read stdin as raw bytes and decode explicitly as UTF-8 rather
-    # than through the text-mode sys.stdin.read(): the latter decodes
-    # with the platform's locale encoding, which on some systems (e.g.
-    # Windows with a non-UTF-8 code page) is NOT UTF-8 and would
-    # mangle any non-ASCII payload before the regexes above ever see
-    # it. errors="replace" keeps this fail-open on malformed bytes.
-    raw_bytes = sys.stdin.buffer.read()
+    # Byte-safe read via the stdin-deadline helper (replaces a former
+    # direct, unbounded sys.stdin.buffer.read()) -- same decode utf-8/
+    # errors="replace" fail-open contract, now bounded by
+    # OSLLM_STDIN_TIMEOUT instead of blocking forever with no EOF.
+    raw_bytes, timed_out = _read_stdin_bytes_deadline()
+    if timed_out:
+        _STDIN_DEADLINE_STATE["hit"] = True
+        sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
+        return 0
     raw = raw_bytes.decode("utf-8", errors="replace")
     try:
         payload = json.loads(raw)
@@ -730,12 +1477,14 @@ def main() -> int:
         sys.stderr.write(message + "\n")
         return 2
 
-    # Both WARN layers are considered only when the gate itself did NOT
-    # block (see the module docstrings, "Given-path WARN layer" /
-    # "Role-type WARN layer"); try/except on EACH is belt-and-
-    # suspenders -- neither layer must ever crash the blocking hook
-    # with a traceback. Given-path first, role-type second (fixed
-    # order, see "Role-type WARN layer" -- two WARNs in one call").
+    # Every WARN layer below is considered only when the gate itself did
+    # NOT block (see the module docstrings, "Given-path WARN layer" /
+    # "Role-type WARN layer" / "Region-aware filtering" / "FRESHNESS
+    # layer"); try/except on EACH is belt-and-suspenders -- no layer
+    # must ever crash the blocking hook with a traceback. Fixed order:
+    # given-path, role-type (unchanged), then the new region-aware
+    # layers in the tail, write-quoted last among those (the newest),
+    # freshness at the very end.
     try:
         warn_given = given_path_warn(payload)
     except Exception:
@@ -744,8 +1493,35 @@ def main() -> int:
         warn_role = role_type_warn(payload)
     except Exception:
         warn_role = ""
+    try:
+        warn_dod_quoted = dod_quoted_warn(payload)
+    except Exception:
+        warn_dod_quoted = ""
+    try:
+        warn_manifest_quoted = manifest_quoted_warn(payload)
+    except Exception:
+        warn_manifest_quoted = ""
+    try:
+        warn_write_quoted = write_quoted_warn(payload)
+    except Exception:
+        warn_write_quoted = ""
+    try:
+        warn_freshness = freshness_warn(payload)
+    except Exception:
+        warn_freshness = ""
 
-    warn_parts = [w for w in (warn_given, warn_role) if w]
+    warn_parts = [
+        w
+        for w in (
+            warn_given,
+            warn_role,
+            warn_dod_quoted,
+            warn_manifest_quoted,
+            warn_write_quoted,
+            warn_freshness,
+        )
+        if w
+    ]
     if warn_parts:
         _reconfigure_stdout_utf8()
         output = {
@@ -760,4 +1536,15 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if _STDIN_DEADLINE_STATE["hit"]:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

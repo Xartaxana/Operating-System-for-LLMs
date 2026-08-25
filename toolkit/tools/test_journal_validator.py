@@ -406,7 +406,7 @@ def test_9g_delegated_after_accepted_fails_reopen_forbidden():
                                        model="opus", task_id="t-001", notes="reopen attempt") + "\n"
     code, violations = jv.decide(staged, head_with_accept, NOW)
     assert code == 1
-    assert any("reopen forbidden" in v for v in violations)
+    assert any("CLOSED task" in v and "reopening" in v for v in violations)
 
 
 # ---- 10. ts monotonicity / no narrative future ----
@@ -436,7 +436,7 @@ def test_ts_narrative_future_beyond_now_plus_10min_fails():
                             task_id="t-002", notes="far future (narrative-future timestamp)"))
     code, violations = jv.decide(staged, HEAD_TEXT, NOW)
     assert code == 1
-    assert any("narrative-future" in v for v in violations)
+    assert any("later than now+10min" in v and "narrated" in v for v in violations)
 
 
 def test_ts_within_10min_future_grace_passes():

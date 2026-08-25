@@ -118,3 +118,17 @@ Your job is to find what's wrong and prove it.
    verdict line. "See above" is forbidden; an empty or truncated final
    message counts as review not delivered, no matter how much was
    actually checked.
+17. Your final message MUST end with a fenced ```json block carrying the
+   verdict per tools/critic_verdict.schema.json: fields verdict (fit /
+   fit_with_fixes / blocker), blockers, class_completeness, trail (read
+   + reruns); fixes is mandatory and non-empty when verdict is
+   fit_with_fixes. The prose part of the verdict (rules 1-16) comes
+   BEFORE the block; the block itself is the LAST element of the
+   message. The coordinator checks the block against the schema before
+   acceptance; a verdict with no valid block is returned without
+   acceptance — fail-closed, not read as accepted from the prose alone.
+   The fence tag is strictly lowercase ```json (```JSON or a bare ```
+   are not recognized). Verdict field values (blockers, fixes,
+   class_completeness, trail.*) must not contain the literal ``` -- the
+   block parser is non-greedy and stops at the first ``` after the tag,
+   so an otherwise-valid verdict would fail closed on it.

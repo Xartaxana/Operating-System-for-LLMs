@@ -31,8 +31,20 @@ DETECTION CLASSES:
      body's contents unknowable; silent when the ` 2>&1` itself sits
      inside quotes (argument data, not a real redirect).
  (c) `python -c` or `python - <<` (literally "python", not "python3" --
-     command hygiene names this exact form) -- always WARN, never
-     BLOCK; \\b-bounded so "mypython -c" is not a substring match.
+     command hygiene names this exact form) -- \\b-bounded so
+     "mypython -c" is not a substring match. WARN by default; BLOCK
+     only when BOTH `PYC_DENY_ENABLED` is on (off by default -- see its
+     own docstring below) AND the match is CERTAIN (unquoted, not
+     inside a foreign heredoc body -- `_is_python_dash_c_certain`).
+     Independently of BLOCK/WARN, the WARN TEXT is narrowed by the
+     PAYLOAD'S CONTENT (`_classify_pyc_payload`, see its docstring): a
+     certain payload proven to do nothing but read/compute stays
+     completely silent; one that is opaque to static analysis
+     (exec/eval/subprocess/dynamic dispatch/an unresolved mode) gets a
+     dedicated `MSG_PYTHON_DASH_C_OPAQUE` text; a payload the gate
+     cannot classify at all (quoted, embedded in a foreign heredoc/
+     wrapper, or with no certain match) falls back to the OLD
+     unconditional `MSG_PYTHON_DASH_C` text.
  (d) a journal write bypassing Edit/Write -- always BLOCK, unaffected
      by the determinism principle below (see "Class (d) is the
      exception" further down for why).
@@ -137,8 +149,41 @@ class entirely: quoting already handles a commit message's `-m` value
 other heredoc (ambiguous -> WARN, not silence).
 
 --- Class (c): python -c / python - <<heredoc -------------------------
-Unchanged in shape from the original design: always WARN, `\\b`-bounded
-`python\\s+-c` or `python\\s+-\\s*<<`, evaluated on the raw command.
+The RAW-command signal (`_is_python_dash_c`, `\\b`-bounded
+`python\\s+-c` or `python\\s+-\\s*<<`) is unchanged in shape from the
+original design and always fires the same as before. On top of it,
+TWO independent narrowings decide BLOCK vs WARN and the WARN TEXT:
+
+ - CERTAINTY (`_is_python_dash_c_certain`): the same determinism
+   principle as classes (a)/(b) -- quotes and a FOREIGN heredoc body
+   make the "python -c"/"python - <<" token ambiguous (data, not a
+   real invocation: `git commit -m "run python -c to test"`, or a
+   `bash <<EOF ... python -c ... EOF` wrapper whose OWN heredoc body
+   is not this command's own payload). `_mask_heredoc_bodies` blanks
+   every heredoc BODY in the command (any opener, not just a
+   git-commit one -- a broader mask than `_strip_commit_messages`
+   below), THEN `_mask_quoted_segments` blanks quoted segments; the
+   token must survive BOTH masks to count as certain. `PYC_DENY_ENABLED`
+   (off by default, see its own docstring) gates whether "certain"
+   promotes class (c) to BLOCK at all -- with the switch off, class (c)
+   never blocks, matching the original design exactly.
+ - PAYLOAD CONTENT (`_classify_pyc_payload`, only evaluated when
+   certain -- see its own docstring for the full "M"/"P"/"O"/"U"
+   contract): a certain payload that AST-parses clean with no
+   mutating or opaque call is silenced entirely (no WARN at all); one
+   that is opaque to static analysis gets `MSG_PYTHON_DASH_C_OPAQUE`
+   instead of the old text; a mutating or unclassifiable ("U", i.e.
+   NOT certain, or certain but parsed with nothing conclusive) payload
+   keeps the OLD unconditional `MSG_PYTHON_DASH_C` text -- so an
+   uncertain match (a wrapper, a proze mention) is exactly as before
+   this narrowing: always WARN, never silent.
+
+A REPEATED-OPENER GUARD (`MAX_HEREDOC_OPENERS`, see its own docstring)
+protects BOTH heredoc-body-masking paths in this file (this one, and
+the pre-existing git-commit-message heredoc scrub below) from the same
+catastrophic-backtracking shape: a command carrying more `<<` tokens
+than the cap takes the cheap, CONSERVATIVE branch (certainty -> False,
+journal-bypass -> False) instead of ever reaching the expensive regex.
 
 --- Class (d) is the exception: the determinism principle does NOT
 apply to it ------------------------------------------------------
@@ -200,11 +245,28 @@ Bash/PowerShell call of every session, including the ones fixing the
 gate itself -- a stuck deployment with no way out; a silent fail-open
 was rejected too, since a broken classifier would then be
 indistinguishable from a genuinely clean command.
+
+--- Reading stdin on a deadline ------------------------------------------
+main() reads its harness-supplied JSON payload through a bounded
+background-thread read (see the stdin-deadline helper near the bottom
+of this file, the same shape as tools/session_context.py's own
+stdin-deadline helper -- a LOCAL copy per hook, not a shared import, by
+design). A harness that opens the pipe but never writes/closes it would
+otherwise hang the PreToolUse check, and by extension the tool call
+itself, forever; past the deadline the read degrades to "no payload"
+(silent pass, exit 0) instead of blocking. `OSLLM_STDIN_TIMEOUT`
+overrides the default; a background reader thread left blocked deep in
+a platform read syscall can crash normal interpreter shutdown, so the
+`if __name__ == "__main__"` guard escalates to `os._exit()` on a
+timeout instead of falling through to the ordinary shutdown path.
 """
 
+import ast
 import json
+import os
 import re
 import sys
+import threading
 from pathlib import Path
 
 CD_PREFIX_START_RE = re.compile(r"^\s*(?:cd|Set-Location)\s+\S", re.IGNORECASE)
@@ -327,20 +389,42 @@ GIT_STATEMENT_RE = re.compile(
     re.IGNORECASE,
 )
 
-MSG_CD_PREFIX = "don't cd into this repo's own root, invoke from there directly (command hygiene point 3)"
-MSG_REDIRECT_STDERR = "don't append 2>&1 (command hygiene point 3)"
-MSG_PYTHON_DASH_C = "edits/scripts go through the Edit/Write tool or a named script (command hygiene point 4)"
+# Rule-of-three shape (what's wrong / what breaks / what to do instead)
+# for every WARN/BLOCK text below, kept consistent across all classes.
+MSG_CD_PREFIX = (
+    "a cd/Set-Location prefix ahead of a compound command does not match "
+    "the allowlist -- an extra permission prompt, or the command gets "
+    "refused outright; invoke from the root directly, with no cd "
+    "(command hygiene point 3)"
+)
+MSG_REDIRECT_STDERR = (
+    "a trailing \" 2>&1\" does not match the allowlist -- an extra "
+    "permission prompt, or the command gets refused outright; drop "
+    "\" 2>&1\" from the command (command hygiene point 3)"
+)
+MSG_PYTHON_DASH_C = (
+    "the command edits a file inline via python -c/heredoc, bypassing "
+    "Edit/Write -- such an edit skips ordinary diff review and risks "
+    "silently corrupting the file; use the Edit/Write tool or a named "
+    "script instead (command hygiene point 4)"
+)
 MSG_JOURNAL_BLOCK = (
     "the journal is written only via Edit/Write (command hygiene point 5); "
     "shell write to the journal blocked"
 )
+# Rule of three -- a short action clause with an imperative verb
+# ("invoke") appended, KEPT SHORT to stay inside the WARN_TEXT_BUDGET_
+# CHARS=550 ratchet once wrapped by "Command hygiene (WARN, does not
+# block): " (see tools/test_warn_messages.py); the existing text is
+# otherwise unchanged.
 MSG_CD_NON_ROOT_WARN = (
     "cd/Set-Location -- a warning, not a block: the target does not look like "
     "this repository's own root (the working directory is load-bearing there -- "
     "e.g. a different tree/an exam kit/a nested kit install/scratchpad, or an "
     "authorized subdirectory such as gateway, command hygiene point 2 -- there "
     "is no 'invoke from the root' alternative for those); only an explicit cd "
-    "INTO THIS repository's own root is blocked (command hygiene point 3)"
+    "INTO THIS repository's own root is blocked (command hygiene point 3). "
+    "Not justified by the working tree? Invoke from the root, no cd."
 )
 
 
@@ -442,7 +526,20 @@ def _is_journal_bypass(command: str) -> bool:
     carries both the target (_has_journal_target) and a write form
     (_has_write_form) -- see the module docstring's "STATEMENT
     SCOPING" (e.g. `cat logs/routing-log.jsonl; echo done` does NOT
-    trigger -- echo there writes nothing to the journal)."""
+    trigger -- echo there writes nothing to the journal).
+
+    Guarded by `MAX_HEREDOC_OPENERS` (see its own docstring, defined
+    further down this file with the class (c) narrowing -- the SAME
+    constant, not a second copy, D-0043-style): `_strip_commit_messages`
+    below uses the SAME COMMIT_HEREDOC_RE.sub pattern that backtracks
+    quadratically on a command carrying many unclosed heredoc openers
+    together with `git commit`. Past the cap, this returns False
+    directly, without ever reaching the scrub -- the CONSERVATIVE
+    direction (journal BLOCK never widens from a pathological input
+    the un-narrowed gate would have paid an expensive, but not
+    necessarily bypass-detecting, price to evaluate)."""
+    if command.count("<<") > MAX_HEREDOC_OPENERS:
+        return False
     scrubbed = _mask_git_statements(_strip_commit_messages(command))
     return any(
         _has_journal_target(stmt) and _has_write_form(stmt)
@@ -565,6 +662,434 @@ def _is_python_dash_c(command: str) -> bool:
     return bool(PY_DASH_C_RE.search(command) or PY_HEREDOC_RE.search(command))
 
 
+# =========================================================================
+# Class (c) narrowing: certainty (BLOCK gate) + payload classification
+# (WARN-text gate). See the module docstring's "Class (c)" section for
+# the full design; the pieces below implement it.
+# =========================================================================
+
+# Off by default: with the switch off, class (c) NEVER promotes to
+# BLOCK, regardless of `_is_python_dash_c_certain` -- byte-identical to
+# the pre-narrowing behavior (always WARN, never BLOCK) on every
+# existing command. Flipping it on is a deliberate, separate decision
+# (owned by whoever operates this gate, not by this port) -- it is
+# wired through so the machinery exists and is tested, without being
+# live.
+PYC_DENY_ENABLED = False
+
+MSG_PYTHON_DASH_C_BLOCK = (
+    "python -c/heredoc is blocked (command hygiene point 4) -- such an "
+    "edit bypasses the normal diff-review path entirely; use the "
+    "Edit/Write tool for file edits, or a named script for a one-off "
+    "calculation/diagnostic (python <path>, including under scratchpad)"
+)
+
+# Every heredoc BODY in the command is blanked (any opener, not just a
+# git-commit one -- broader than `_strip_commit_messages` above, which
+# is git-commit-guarded). The opener line itself (groups 1+4 of
+# COMMIT_HEREDOC_RE) is kept verbatim -- a real `python - <<DELIM`
+# opener stays visible to PY_HEREDOC_RE even after this mask; only the
+# BODY (group 5) is replaced with same-length whitespace, so a
+# same-line chained command after the opener (`<<EOF && rm -rf x`)
+# also stays visible.
+def _mask_heredoc_bodies(text: str) -> str:
+    """Masks the body of every heredoc in `text` (not git-commit
+    specific): a `python -c`/`python - <<` token INSIDE a foreign
+    heredoc's body (e.g. `bash <<EOF\\npython -c "print(1)"\\nEOF`) is
+    prose to THIS command, not this command's own invocation -- the
+    outer wrapper is what actually runs, the inner text merely rides
+    along as its stdin. Masking it before the certainty check keeps
+    such wrapper forms from being treated as a certain match, the same
+    way a quoted mention already is."""
+    return COMMIT_HEREDOC_RE.sub(
+        lambda m: m.group(1) + m.group(4) + " " * len(m.group(5)), text
+    )
+
+
+# A cap on repeated, UNCLOSED heredoc openers in one command: without
+# it, `_mask_heredoc_bodies`'s regex (COMMIT_HEREDOC_RE.sub, the same
+# pattern `_strip_commit_messages` above uses) backtracks to the end of
+# the text on EVERY opener that never finds its closing delimiter --
+# quadratic in the number of such openers. The cheap prefilter below
+# (`command.count("<<")`, a plain substring count, no backtracking) is
+# checked FIRST; past the cap, the expensive regex path is skipped
+# entirely and the caller takes its CONSERVATIVE branch (certainty ->
+# False for class (c); not-a-bypass -> False for the journal-bypass
+# scrub above) -- deny/block never WIDENS from this cap, it can only
+# lose a possible (not guaranteed) block on a pathological input,
+# degrading to the same WARN/silent outcome the un-narrowed gate always
+# gave such a command. 64 is comfortably above any normal command's
+# heredoc count (0-2 is typical); a false hit on an unrelated `<<`
+# (e.g. a bit-shift literal inside a string) only makes the prefilter
+# MORE conservative, never less.
+MAX_HEREDOC_OPENERS = 64
+
+
+def _is_python_dash_c_certain(command: str) -> bool:
+    """A NARROWER signal than `_is_python_dash_c` above (which keeps its
+    existing meaning unchanged -- `permission_audit.classify_hygiene`
+    reads that key by name and must not see it redefined): True only
+    when the "python -c"/"python - <<" token survives BOTH
+    `_mask_heredoc_bodies` (a foreign heredoc's body is prose, not this
+    command's own invocation) AND `_mask_quoted_segments` (the token is
+    not sitting inside quotes as a data string, e.g. a git commit
+    message). An ordinary `python -c "code"` call stays certain: the
+    quotes there wrap the -c ARGUMENT, not the "python -c" token itself,
+    which sits before the quote and is untouched by masking it. A real
+    `python - <<DELIM` heredoc opener stays certain the same way -- the
+    mask keeps the opener line, only the body is blanked.
+
+    Guarded by `MAX_HEREDOC_OPENERS` (see its own docstring): past the
+    cap, this returns False without ever calling the expensive mask."""
+    if command.count("<<") > MAX_HEREDOC_OPENERS:
+        return False
+    masked = _mask_quoted_segments(_mask_heredoc_bodies(command))
+    return bool(PY_DASH_C_RE.search(masked) or PY_HEREDOC_RE.search(masked))
+
+
+# --- payload content classification: "M" (mutates) / "P" (proven pure) /
+# "O" (opaque to static analysis) / "U" (not classified at all) --------
+#
+# Extraction (from the RAW command, before any masking -- the argument
+# text itself is what gets parsed, quoting is just how the shell
+# delimited it): the -c argument (quoted literal or a bare token up to
+# whitespace) and/or a `python -...<<DELIM ... DELIM` heredoc body.
+# Several matches in one command are each classified separately; the
+# STRICTEST class wins (M > O > P) -- one mutating payload among several
+# is enough to keep the old WARN text, one opaque payload among
+# otherwise-pure ones is enough to switch to the opaque text.
+_PY_DASH_C_ARG_RE = re.compile(
+    r"\bpython\s+-c\s+"
+    r"(?:"
+    r'"(?P<dq>(?:[^"\\]|\\.)*)"'
+    r"|'(?P<sq>[^']*)'"
+    r"|(?P<bare>\S+)"
+    r")",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_PY_HEREDOC_EXTRACT_RE = re.compile(
+    r"\bpython\s+-\s*<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*"
+    r"\n(?P<body>.*?)^\2\s*$",
+    re.IGNORECASE | re.DOTALL | re.MULTILINE,
+)
+
+# A single extracted payload over this many characters is classified
+# "O" directly, with no attempt to `ast.parse` it at all -- a size cap
+# independent of, and much smaller than, the whole-command length this
+# file otherwise stays linear against; keeps a single classification
+# call bounded regardless of how large one -c argument or heredoc body
+# gets. Measured separately from whether decide() is gated by it (it
+# is not -- see the perf test in the test suite for the actual numbers
+# on 100KB/1MB commands).
+PYC_PAYLOAD_LIMIT = 20_000
+
+MSG_PYTHON_DASH_C_OPAQUE = (
+    "the python -c/heredoc payload is opaque to static analysis "
+    "(exec/eval/subprocess/dynamic dispatch, command hygiene point 4) "
+    "-- the gate cannot prove it writes nothing; move the code into a "
+    "named script instead (python <path>, including under scratchpad)"
+)
+
+# --- closed M/O lists ----------------------------------------------------
+_PATH_MUTATING_METHOD_NAMES = {
+    "write_text", "write_bytes", "unlink", "rename", "replace",
+    "mkdir", "touch", "rmdir",
+}
+_OS_MUTATING_QUALIFIED = {
+    "os.remove", "os.unlink", "os.rename", "os.replace", "os.rmdir",
+    "os.mkdir", "os.makedirs", "os.truncate", "os.chmod",
+}
+_DUMP_QUALIFIED = {"json.dump", "pickle.dump", "csv.writer"}
+_PANDAS_LIKE_METHOD_NAMES = {"to_csv", "to_excel"}
+_WRITE_METHOD_NAMES = {"write", "writelines"}
+_STDIO_DOTTED = {"sys.stdout", "sys.stderr"}
+
+_OPAQUE_BARE_NAMES = {
+    "exec", "eval", "compile", "__import__",
+    "getattr", "setattr", "globals", "locals", "vars",
+}
+_OPAQUE_ROOT_MODULES = {
+    "importlib", "subprocess", "ctypes", "marshal", "socket",
+    "urllib", "requests", "multiprocessing", "pty", "builtins",
+}
+
+
+def _dotted_call_name(node):
+    """Rebuilds a dotted name from an ast.Attribute/ast.Name chain
+    (e.g. `os.path.remove` -> "os.path.remove"). None when the base is
+    NOT a plain Name/Attribute chain (e.g. `__import__('os').remove`:
+    the base of `.remove` is the CALL `__import__('os')`, not a Name --
+    no dotted name is built, `.remove` is not credited as `os.remove`;
+    only `__import__` itself contributes to the opaque class there)."""
+    parts = []
+    cur = node
+    while isinstance(cur, ast.Attribute):
+        parts.append(cur.attr)
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        parts.append(cur.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+# The free function `open(path, mode)`/`io.open(path, mode)` carries
+# its mode as the 2nd positional argument (index 1, path is index 0);
+# the METHOD form `X.open(mode)` (`Path(...).open('w')`,
+# `pathlib.Path.open`, any file-like object) carries mode as the 1ST
+# argument (index 0) -- self is implicit, there is no separate "path"
+# argument at all. Distinguished ONLY by the RESOLVED dotted name
+# (after the alias map): "open"/"io.open" is the free function; ANYTHING
+# else (including None -- an unresolvable base, the common case for
+# `Path(...).open(...)` where the base is itself a call) is the method
+# form.
+_FREE_OPEN_DOTTED_NAMES = {"open", "io.open"}
+
+
+def _classify_open_call(node, dotted):
+    """Classifies ONE `open(...)`/`X.open(...)` call: mode comes from
+    the positional index above, OR the `mode` keyword (shared by both
+    forms). A `**kwargs` spread hides the mode -> "O"; a literal mode
+    string containing w/a/x/+ -> "M"; a literal mode string without
+    those characters (e.g. "r", "rb") -> None (neutral, contributes to
+    "P"); a non-literal mode (a variable, an f-string) -> "O"; no mode
+    argument at all -> None (P)."""
+    if any(kw.arg is None for kw in node.keywords):
+        return "O"
+    mode_index = 1 if dotted in _FREE_OPEN_DOTTED_NAMES else 0
+    mode_node = node.args[mode_index] if len(node.args) > mode_index else next(
+        (kw.value for kw in node.keywords if kw.arg == "mode"), None
+    )
+    if mode_node is None:
+        return None
+    if isinstance(mode_node, ast.Constant) and isinstance(mode_node.value, str):
+        return "M" if any(ch in mode_node.value for ch in "wax+") else None
+    return "O"
+
+
+def _build_import_alias_map(tree) -> dict:
+    """Walks top-level `ast.Import`/`ast.ImportFrom` nodes (a full
+    `ast.walk`, so it also catches imports nested inside `if`/`try`/a
+    function body) and builds a flat "local name -> canonical path"
+    map. `import os as o` -> {"o": "os"}; `import os` (no asname) ->
+    {"os": "os"} (identity, harmless); `from os import remove` ->
+    {"remove": "os.remove"}; `from os import remove as rm` ->
+    {"rm": "os.remove"}. A relative `from . import x` (module is None)
+    is skipped -- there is no canonical path to resolve it to (an
+    honest boundary, not a crash)."""
+    alias_map = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    alias_map[alias.asname] = alias.name
+                else:
+                    top = alias.name.split(".")[0]
+                    alias_map[top] = top
+        elif isinstance(node, ast.ImportFrom):
+            if not node.module:
+                continue
+            for alias in node.names:
+                local = alias.asname or alias.name
+                alias_map[local] = f"{node.module}.{alias.name}"
+    return alias_map
+
+
+def _resolve_dotted(raw_dotted, alias_map):
+    """Substitutes the ROOT of a dotted chain through the alias map
+    before matching against the M/O lists -- `o.remove` (map
+    {"o":"os"}) -> "os.remove"; a bare `remove` (map
+    {"remove":"os.remove"}) -> "os.remove" whole (ImportFrom maps the
+    NAME to the FULL path, not just the root). No entry in the map ->
+    the string is unchanged (ordinary names/builtin types)."""
+    if raw_dotted is None:
+        return None
+    parts = raw_dotted.split(".")
+    root = parts[0]
+    if root in alias_map:
+        parts[0] = alias_map[root]
+        return ".".join(parts)
+    return raw_dotted
+
+
+def _is_known_mutating_or_opaque_name(dotted) -> bool:
+    """True when the RESOLVED (post-alias-map) dotted name `dotted`
+    itself refers to `open`, OR to any M/O name in the closed lists --
+    used ONLY to detect a reassigned callable (`w = open`, `r =
+    os.remove`) -- the assignment itself is not a call, but it makes a
+    LATER call through `w`/`r` UNTRACKABLE by this classifier ->
+    opaque, REGARDLESS of whether the original target class was M or O
+    (a reassigned callable is opaque by definition here)."""
+    if dotted is None:
+        return False
+    if dotted == "open":
+        return True
+    if dotted in _OPAQUE_BARE_NAMES or dotted in _OS_MUTATING_QUALIFIED or dotted in _DUMP_QUALIFIED:
+        return True
+    root = dotted.split(".", 1)[0]
+    attr_last = dotted.rsplit(".", 1)[-1]
+    if root in _OPAQUE_ROOT_MODULES or root == "shutil":
+        return True
+    if root == "os" and (attr_last in ("system", "popen") or attr_last.startswith("exec") or attr_last.startswith("spawn")):
+        return True
+    if attr_last in _PATH_MUTATING_METHOD_NAMES or attr_last in _PANDAS_LIKE_METHOD_NAMES or attr_last in _WRITE_METHOD_NAMES:
+        return True
+    return False
+
+
+def _classify_single_payload(text: str) -> str:
+    """Classifies ONE extracted payload -> "M"/"P"/"O": `ast.parse` +
+    a tree walk; any parse failure -> "O"; over `PYC_PAYLOAD_LIMIT` or
+    empty/whitespace-only -> "O" without attempting to parse at all.
+    Both M and O can fire inside the SAME payload -- M wins (M > O > P).
+
+    `attr` is read from `node.func.attr`/`node.func.id` INDEPENDENTLY
+    of whether `dotted` resolves -- this is what lets a CHAINED
+    receiver (`Path('x').write_text(...)` -- the base of `.write_text`
+    is the CALL `Path('x')`, not a Name/Attribute chain, so
+    `_dotted_call_name` returns None for it) still get caught by the
+    attribute-based M checks (Path methods/`.to_csv`/`.to_excel`/
+    `.write`/`.writelines`/`open`-as-an-attribute). The
+    `sys.stdout`/`sys.stderr` exclusion for `.write`/`.writelines`
+    applies ONLY when the base resolves; an unresolvable base (e.g.
+    `io.open().write(...)` -- the base of `.write` is itself the CALL
+    `io.open()`) is NOT excluded -> "M" (the conservative default). The
+    import alias map (`_build_import_alias_map`) resolves `import os as
+    o`/`from os import remove` before matching the qualified (non-
+    attribute) M/O lists; a separate pass over `ast.Assign`/
+    `ast.AnnAssign`/`ast.NamedExpr` catches a reassigned callable
+    (`w = open`) -> "O"."""
+    if len(text) > PYC_PAYLOAD_LIMIT:
+        return "O"
+    if not text.strip():
+        return "O"
+    try:
+        tree = ast.parse(text)
+        alias_map = _build_import_alias_map(tree)
+        has_m = False
+        has_o = False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
+                value = node.value
+                if isinstance(value, (ast.Name, ast.Attribute)):
+                    resolved_value = _resolve_dotted(_dotted_call_name(value), alias_map)
+                    if _is_known_mutating_or_opaque_name(resolved_value):
+                        has_o = True
+                continue
+            if not isinstance(node, ast.Call):
+                continue
+
+            if isinstance(node.func, ast.Attribute):
+                attr = node.func.attr
+            elif isinstance(node.func, ast.Name):
+                attr = node.func.id
+            else:
+                attr = None
+            dotted = _resolve_dotted(_dotted_call_name(node.func), alias_map)
+            root = dotted.split(".", 1)[0] if dotted else None
+
+            if dotted in _OPAQUE_BARE_NAMES or root in _OPAQUE_ROOT_MODULES:
+                has_o = True
+                continue
+            if root == "os" and attr in ("system", "popen"):
+                has_o = True
+                continue
+            if root == "os" and attr and (attr.startswith("exec") or attr.startswith("spawn")):
+                has_o = True
+                continue
+            if dotted == "fileinput.input" and any(kw.arg == "inplace" for kw in node.keywords):
+                has_o = True
+                continue
+
+            if attr == "open":
+                verdict = _classify_open_call(node, dotted)
+                if verdict == "M":
+                    has_m = True
+                elif verdict == "O":
+                    has_o = True
+                continue
+            if attr in _PATH_MUTATING_METHOD_NAMES:
+                has_m = True
+                continue
+            if root == "os" and dotted in _OS_MUTATING_QUALIFIED:
+                has_m = True
+                continue
+            if root == "shutil":
+                has_m = True
+                continue
+            if dotted in _DUMP_QUALIFIED:
+                has_m = True
+                continue
+            if attr in _PANDAS_LIKE_METHOD_NAMES:
+                has_m = True
+                continue
+            if attr in _WRITE_METHOD_NAMES:
+                base_dotted = (
+                    _resolve_dotted(_dotted_call_name(node.func.value), alias_map)
+                    if isinstance(node.func, ast.Attribute) else None
+                )
+                if base_dotted not in _STDIO_DOTTED:
+                    has_m = True
+                continue
+            if dotted == "print" or attr == "print":
+                file_kw = next((kw for kw in node.keywords if kw.arg == "file"), None)
+                if file_kw is not None and _resolve_dotted(
+                    _dotted_call_name(file_kw.value), alias_map
+                ) not in _STDIO_DOTTED:
+                    has_m = True
+                continue
+    except Exception:
+        return "O"
+    if has_m:
+        return "M"
+    if has_o:
+        return "O"
+    return "P"
+
+
+def _classify_pyc_payload(command: str, certain: bool | None = None) -> str:
+    """"M"|"P"|"O"|"U": "U" when `_is_python_dash_c_certain` is false --
+    the classification is not attempted at all, and the caller stays on
+    the OLD unconditional WARN text (see `_classify` below) -- an
+    obfuscated/wrapped/quoted-as-data match is exactly the class this
+    gate was already unable to prove anything about, so it keeps
+    warning rather than going silent or picking a text implying more
+    confidence than the gate actually has. Any exception inside is a
+    fail-safe toward "O" (opaque), not toward crashing `_classify`
+    entirely.
+
+    `certain` is an OPTIONAL precomputed result of
+    `_is_python_dash_c_certain` (`_collect_signals` below computes it
+    once and passes it in, rather than computing it twice); the public
+    one-argument call (`_classify_pyc_payload(command)`) still works,
+    computing it itself by default."""
+    if certain is None:
+        certain = _is_python_dash_c_certain(command)
+    if not certain:
+        return "U"
+    try:
+        payloads = []
+        for m in _PY_DASH_C_ARG_RE.finditer(command):
+            if m.group("dq") is not None:
+                payloads.append(m.group("dq"))
+            elif m.group("sq") is not None:
+                payloads.append(m.group("sq"))
+            else:
+                payloads.append(m.group("bare"))
+        for m in _PY_HEREDOC_EXTRACT_RE.finditer(command):
+            payloads.append(m.group("body"))
+        if not payloads:
+            return "O"
+        classes = [_classify_single_payload(p) for p in payloads]
+    except Exception:
+        return "O"
+    if "M" in classes:
+        return "M"
+    if "O" in classes:
+        return "O"
+    return "P"
+
+
 def _collect_signals(command: str) -> dict:
     """The single point of computation for ALL signals -- used both by
     decide() (assembling the JSON response below) and by
@@ -589,10 +1114,21 @@ def _collect_signals(command: str) -> dict:
         presence, for measurement.
       - `redirect_certain` -- `redirect` AND no `<<` on that same
         masked text -- THIS ONE decides BLOCK vs WARN for class (b).
-      - `pyc` -- class (c), on the RAW command -- always WARN, never
-        promoted to BLOCK."""
+      - `pyc` -- class (c), on the RAW command -- the BROAD signal,
+        UNCHANGED (`permission_audit.classify_hygiene` reads this key
+        by name; its meaning does not move).
+      - `pyc_certain` -- a NARROWER signal (`_is_python_dash_c_certain`
+        -- the same quote/heredoc-body masking principle as
+        `redirect_certain`) -- decides BLOCK vs WARN for class (c),
+        and ONLY when `PYC_DENY_ENABLED` is also on (off by default,
+        see its own docstring).
+      - `pyc_payload` -- "M"/"P"/"O"/"U" (`_classify_pyc_payload`, see
+        its own docstring) -- decides the WARN TEXT for class (c) when
+        it does not block; computed from the ALREADY-computed
+        `pyc_certain` value (not recomputed a second time)."""
     cd_hit = _is_cd_prefix(command)
     redirect_signal = _collect_redirect_signal(command)
+    pyc_certain_value = _is_python_dash_c_certain(command)
     return {
         "journal": _is_journal_bypass(command),
         "cd": cd_hit,
@@ -600,6 +1136,8 @@ def _collect_signals(command: str) -> dict:
         "redirect": redirect_signal["present"],
         "redirect_certain": redirect_signal["certain"],
         "pyc": _is_python_dash_c(command),
+        "pyc_certain": pyc_certain_value,
+        "pyc_payload": _classify_pyc_payload(command, certain=pyc_certain_value),
     }
 
 
@@ -609,10 +1147,14 @@ def _classify(command: str) -> tuple[int, dict | None]:
     the full per-class BLOCK/WARN/silent rules.
 
     Fixed ORDER when several classes fire at once: journal -> cd ->
-    2>&1. `permissionDecisionReason` is the FIRST BLOCK reason in that
-    order; `additionalContext` (belt-and-suspenders) lists ALL BLOCK
-    reasons in that order, then all remaining WARN reasons, as one
-    string."""
+    2>&1 -> python -c/heredoc. `permissionDecisionReason` is the FIRST
+    BLOCK reason in that order; `additionalContext` (belt-and-
+    suspenders) lists ALL BLOCK reasons in that order, then all
+    remaining WARN reasons, as one string. The python -c/heredoc BLOCK
+    is placed STRICTLY LAST: for every command that already denies
+    today (journal/cd/2>&1), adding this class never changes
+    `permissionDecisionReason` (it always takes the FIRST element of
+    `deny_reasons`)."""
     signals = _collect_signals(command)
     journal_hit = signals["journal"]
     cd_hit = signals["cd"]
@@ -620,6 +1162,9 @@ def _classify(command: str) -> tuple[int, dict | None]:
     redirect_present = signals["redirect"]
     redirect_certain = signals["redirect_certain"]
     pyc_hit = signals["pyc"]
+    pyc_certain = signals["pyc_certain"]
+    payload_class = signals["pyc_payload"]
+    pyc_deny = PYC_DENY_ENABLED and pyc_certain
 
     deny_reasons = []
     if journal_hit:
@@ -628,14 +1173,22 @@ def _classify(command: str) -> tuple[int, dict | None]:
         deny_reasons.append(MSG_CD_PREFIX)
     if redirect_certain:
         deny_reasons.append(MSG_REDIRECT_STDERR)
+    if pyc_deny:
+        deny_reasons.append(MSG_PYTHON_DASH_C_BLOCK)
 
     warn_reasons = []
     if cd_hit and not cd_to_repo_root:
         warn_reasons.append(MSG_CD_NON_ROOT_WARN)
     if redirect_present and not redirect_certain:
         warn_reasons.append(MSG_REDIRECT_STDERR)
-    if pyc_hit:
-        warn_reasons.append(MSG_PYTHON_DASH_C)
+    # payload_class == "P" (certain AND provably clean) -> silence;
+    # "O" -> the dedicated opaque text; "M"/"U" -> the old unconditional
+    # text, verbatim (an uncertain match warns exactly as before this
+    # narrowing).
+    if pyc_hit and not pyc_deny and payload_class != "P":
+        warn_reasons.append(
+            MSG_PYTHON_DASH_C_OPAQUE if payload_class == "O" else MSG_PYTHON_DASH_C
+        )
 
     if deny_reasons:
         context_parts = deny_reasons + warn_reasons
@@ -715,13 +1268,103 @@ def _reconfigure_stdout_utf8():
         pass
 
 
+# ---------------------------------------------------------------------------
+# stdin-deadline helper: reading stdin to EOF must never hang a PreToolUse
+# check (and by extension the tool call it gates) forever on a harness that
+# opens the pipe but never actually writes/closes it. A daemon thread does
+# the blocking read; the main thread joins on a deadline instead of calling
+# sys.stdin.read() directly. On a timeout, the payload degrades to "no
+# payload" (silent pass, same as empty/malformed stdin), never a hang or a
+# crash. This is a LOCAL copy of the same helper tools/session_context.py
+# carries -- by design, not an oversight: each hook stays self-contained
+# (module docstring's "Reading stdin on a deadline").
+# ---------------------------------------------------------------------------
+
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Seconds to wait for stdin: env override, else the default.
+    Invalid, non-numeric, <=0, or > _STDIN_DEADLINE_MAX all fall back to
+    the default -- there is deliberately NO "0 = wait forever" mode (that
+    would resurrect the exact hang this helper exists to close)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """Returns (bytes, timed_out). Reads stdin to EOF, bounded by the
+    deadline above. A background daemon thread does the actual blocking
+    read; the deadline is enforced via thread.join(timeout) -- portable
+    across platforms where select/poll do not work on pipes (Windows).
+    A TTY returns b"" immediately, without reading anything. Any read
+    error degrades to b"" -- fail-open, same discipline as the rest of
+    this file."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+
+# Set when a stdin read actually timed out. The reader thread above is
+# left running as a daemon (it may still be blocked deep inside a
+# platform read syscall) -- on normal interpreter shutdown, a background
+# thread blocked on the real stdin buffered reader can crash the process
+# ("Fatal Python error: _enter_buffered_busy") instead of exiting
+# cleanly. main() itself is unaffected (a plain `return`, safe
+# in-process); only the actual __main__ script-exit path below
+# escalates to os._exit() when this flag is set.
+_STDIN_DEADLINE_STATE = {"hit": False}
+
+
 def main() -> int:
     _reconfigure_stdout_utf8()
 
-    # Byte-safe stdin read: sys.stdin.buffer.read() bypasses the
-    # platform text-mode encoding of sys.stdin, with an explicit
-    # utf-8 decode (errors="replace") that fails open on bad bytes.
-    raw_bytes = sys.stdin.buffer.read()
+    # Byte-safe, deadline-bounded stdin read: the deadline helper reads
+    # raw bytes via a background thread (bypassing the platform text-mode
+    # encoding of sys.stdin, same as the direct sys.stdin.buffer.read()
+    # this replaces), with an explicit utf-8 decode (errors="replace")
+    # that fails open on bad bytes -- now additionally bounded by
+    # OSLLM_STDIN_TIMEOUT instead of blocking forever with no EOF.
+    raw_bytes, timed_out = _read_stdin_bytes_deadline()
+    if timed_out:
+        _STDIN_DEADLINE_STATE["hit"] = True
+        try:
+            sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
+        except Exception:
+            pass
+        return 0
     raw = raw_bytes.decode("utf-8", errors="replace")
     try:
         payload = json.loads(raw)
@@ -735,4 +1378,20 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if _STDIN_DEADLINE_STATE["hit"]:
+        # A stdin-reader thread may still be blocked deep inside a
+        # platform read syscall -- normal interpreter shutdown can crash
+        # on that ("Fatal Python error: _enter_buffered_busy"). Flush
+        # both streams defensively, then exit immediately without
+        # running the normal shutdown sequence.
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

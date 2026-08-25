@@ -117,13 +117,80 @@ files_count, skipped_files) instead of the previous pair.
 (even when 0) -- the same "never a silent 0" discipline this kit
 applies to money-shaped counters elsewhere, applied here to walk
 telemetry.
+
+M2-1 (ported from the reference deployment's tools/critic_snapshot.py:
+210-245, the same class as this kit's own owns_gate.py K5-analog fix):
+A BLOCKED dispatch_gate DISPATCH (dispatch_gate.decide -> exit 2) no
+longer produces a snapshot. Before this fix, main() wrote/overwrote
+.claude/critic_snapshot.json on EVERY PreToolUse event for a
+Task/Agent dispatch with subagent_type=="critic" -- EVEN on a dispatch
+dispatch_gate itself would block (exit 2) -- such a dispatch NEVER
+ACTUALLY RUNS (the runtime executes PreToolUse hooks INDEPENDENTLY of
+one another), so no real critic review happened, yet the tree snapshot
+was already overwritten -- the trail of the LAST REAL critic review is
+lost.
+
+FIX -- the SAME pattern as owns_gate.py's K5: BEFORE writing the
+snapshot, main() calls `dispatch_gate.decide(payload)` on the SAME
+payload (a try-package/except-sibling import, LOCAL inside main(), not
+at module level -- see "LOCAL IMPORT" below for why). Three branches:
+ - exit_code == 2 (blocked) -> the snapshot is NOT written at all
+   (main() returns 0 immediately, BEFORE the prior-snapshot read / tree
+   walk / write) -- the PREVIOUS snapshot stays byte-for-byte untouched
+   (a skipped write and "keep the old snapshot" are the same action).
+ - exit_code != 2 (0 -- not blocked) -> the normal path, UNCHANGED, the
+   snapshot is written as before.
+ - an exception out of the import or dispatch_gate.decide (e.g. the
+   sibling is unavailable in either package- or sibling-form) ->
+   FAIL-OPEN: write, AS BEFORE this fix -- the same philosophy the rest
+   of this module already carries (the snapshot is a measuring
+   instrument, not a gate; this hook's own uncertainty must not deprive
+   the grader of data it would have gotten without this fix).
+A non-critic dispatch (subagent_type != "critic") keeps exiting BEFORE
+this check, unchanged. This hook's own exit_code is UNCHANGED -- main()
+always returns 0 (on the blocked branch too -- this hook never fails a
+dispatch, the invariant above holds literally).
+
+LOCAL IMPORT: the import of dispatch_gate lives INSIDE main(), locally,
+immediately before the `dispatch_gate.decide(payload)` call itself --
+i.e. AFTER all early exits (non-Task/Agent, a non-dict payload, a
+non-critic subagent_type). Two reasons: (1) COST -- a module-level
+import would run on EVERY PreToolUse Task/Agent event, including the
+vast majority of dispatches this hook immediately discards by
+subagent_type != "critic" (main() returns 0 several lines above, never
+reaching the point where the import would be needed) -- non-critic
+dispatches would pay the cost of importing dispatch_gate for NOTHING.
+A local import is cached by sys.modules on the first REAL critic
+dispatch, but each separate process invocation (a subprocess per
+PreToolUse event, the same architecture) still pays it once PER CALL --
+moving it after the early exits removes that cost for non-critic
+dispatches, where it was ALWAYS paid before. (2) FAIL-OPEN PERIMETER --
+a module-level import runs BEFORE main() -- if `dispatch_gate` is
+COMPLETELY unavailable in neither package- nor sibling-form (e.g. an
+exotic environment where neither the `tools` package nor a directory
+sibling is visible), the WHOLE critic_snapshot.py module would fail at
+import time -- BEFORE this hook's own fail-open (the try/except inside
+main()) ever gets a chance to run. A hook whose whole point is to NEVER
+fail a dispatch (the invariant above) would fail at import even on
+dispatches that never needed dispatch_gate at all (non-critic,
+non-Task/Agent). A local import inside main()'s try/except brings this
+dependency fully under the DECLARED fail-open perimeter -- an import
+failure is indistinguishable from a decide() failure (the "exception ->
+fail-open" branch above already covers it, now literally, with no
+exception carved out for one specific exception class).
 """
 
 import hashlib
 import json
+import os
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
+
+_TOOLS_DIR = Path(__file__).resolve().parent
+if str(_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_DIR))
 
 EXCLUDED_DIR_NAMES = {".claude", ".git", "__pycache__", ".pytest_cache"}
 EXCLUDED_REL_FILES = {Path("logs") / "routing-log.jsonl"}
@@ -207,11 +274,87 @@ def _write_failure_snapshot(snap: Path, exc: Exception) -> None:
         pass  # stderr only -- see the module docstring, "LOUD FAIL-OPEN"
 
 
+# --- stdin deadline (P4 class; a LOCAL copy, no shared module -- the
+# same helper toolkit/tools/owns_gate.py/dispatch_gate.py already carry)
+# ------------------------------------------------------------------
+
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Seconds to wait for stdin: env override, else the default.
+    Invalid, non-numeric, <=0, or > _STDIN_DEADLINE_MAX all fall back to
+    the default -- there is deliberately NO "0 = wait forever" mode (that
+    would resurrect the exact hang this helper exists to close)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """Returns (bytes, timed_out). Reads stdin to EOF, but no longer
+    than the deadline. Cross-platform by construction: select/poll do
+    not work on pipes on Windows, so a background daemon thread does
+    the actual blocking read and the deadline is enforced via
+    thread.join(timeout). A TTY returns b"" without reading anything.
+    Any read error degrades to b"" (fail-open)."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+
+# A background reader thread may still be blocked deep in a platform
+# read syscall at normal interpreter shutdown, which can crash the
+# process ("Fatal Python error: _enter_buffered_busy") instead of
+# exiting cleanly. main() itself is UNCHANGED (still a plain
+# `return 0`, safe in-process); only the actual __main__ script-exit
+# path below escalates to os._exit().
+_STDIN_DEADLINE_STATE = {"hit": False}
+
+
 def main() -> int:
-    # Raw-byte stdin read, decoded explicitly as UTF-8 -- see
-    # dispatch_gate.py's main() for why this matters on platforms
-    # whose locale encoding isn't UTF-8.
-    raw_bytes = sys.stdin.buffer.read()
+    # Byte-safe read via the stdin-deadline helper (replaces a former
+    # direct, unbounded sys.stdin.buffer.read()) -- see
+    # dispatch_gate.py's main() for why decoding explicitly as UTF-8
+    # matters on platforms whose locale encoding isn't UTF-8, now
+    # bounded by OSLLM_STDIN_TIMEOUT instead of blocking forever with
+    # no EOF.
+    raw_bytes, timed_out = _read_stdin_bytes_deadline()
+    if timed_out:
+        _STDIN_DEADLINE_STATE["hit"] = True
+        sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
+        return 0
     raw = raw_bytes.decode("utf-8", errors="replace")
     try:
         payload = json.loads(raw)
@@ -227,6 +370,31 @@ def main() -> int:
 
     cwd = Path(payload.get("cwd") or ".")
     snap = cwd / SNAPSHOT_REL_PATH
+
+    # M2-1: the dispatch is already BLOCKED by
+    # dispatch_gate (exit 2 on the SAME payload) -- the critic call will
+    # never actually run, no point writing a snapshot. Skipping the
+    # write PRESERVES the previous snapshot untouched (see the module
+    # docstring, "M2-1", edge (i)). An exception out of dispatch_gate ->
+    # fail-open, write as usual (the same philosophy the rest of this
+    # file carries; the same branch K5 applies in owns_gate.py). This
+    # hook's own exit stays 0 always (main() below returns 0 on the
+    # blocked branch too).
+    try:
+        # LOCAL import, here, AFTER all early exits -- non-critic
+        # dispatches (the vast majority) never reach this line and
+        # never pay the import cost; an import failure is caught by the
+        # SAME except as a decide() failure below -- see the module
+        # docstring, "LOCAL IMPORT", for both reasons in full.
+        try:
+            from tools import dispatch_gate  # package-style
+        except ImportError:
+            import dispatch_gate  # sibling-module fallback
+        gate_exit_code, _ = dispatch_gate.decide(payload)
+    except Exception:
+        gate_exit_code = 0  # fail-open: write, as before this fix
+    if gate_exit_code == 2:
+        return 0
 
     # Two DISTINCT failure points -- the tree walk and the snapshot
     # write -- see the module docstring, "TWO DISTINCT FAILURE POINTS".
@@ -257,4 +425,15 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if _STDIN_DEADLINE_STATE["hit"]:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

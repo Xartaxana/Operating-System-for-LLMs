@@ -103,16 +103,43 @@ add rows freely, never remove the standard ones without recording why):
 | Owns verification, layer 2 (`tools/owns_verify.py` — post-batch CLI companion to the owns-gate PreToolUse hook above, same manifest-overlap defense) | | |
 | Judge-calibration sanitize feed (`tools/judge_calib_sanitize.py` — key-stripped probe material for a live subscription-judge re-check against the leaf-routing calibration set above) | | |
 | Lead-replay shadow evaluation (`gateway/lead_replay.py`, `gateway/lead_replay_corpus.template.jsonl` — api-keys contour) | | |
+| WARN layer density meter (`tools/warn_density.py`, `tools/warn_layers.json` — Rule #1 applied to the routing machinery's own WARN layers, weekly-calibration check 11) | | |
+| R3 integration-review coverage informer (`tools/r3_integration_check.py` — deterministic large-commit/critic-trail informer for the critic-on-integration gate, rule 13(g)) | | |
+| Critic verdict schema (`tools/critic_verdict.schema.json` — the structured verdict shape the critic role file's own acceptance rule references) | | |
 | FINDINGS form + machine check (`docs/FINDINGS.template.md`, `tools/test_findings_form.py`) | | |
 | Skills (`.claude/skills/*`) | | |
 | PROCESS docs (`PROCESS/*.md`) | | |
 | Boot sequence / decision log / delegation table (`BOOT.md`, `DECISIONS.md`, `DELEGATION_TABLE.md`) | | |
 | Gateway / api-keys contour (`gateway/*.py`, `gateway/*.template.yaml`) | | |
+| Install parity (`tools/install_parity.py`, `tools/install_parity_anchors.json` — read-only structural check that every policy carrier's rules and clauses physically landed, run at the close of both a fresh install and an upgrade; see this template's own "Parity waivers" section below) | | |
 
 Rows with no plausible native-equivalent and no missing prerequisite
 default to **adopt** — leaving the status blank is not itself a
 decision; "nothing to compare against here" IS the adopt decision, and
 gets written down as one.
+
+## Parity waivers
+
+Rows above resolve WHOLE mechanisms. `tools/install_parity.py --check`
+resolves at the finer grain of individual ANCHORS (a rule, a clause) —
+so a mechanism can be `adopt` overall while one specific anchor is
+legitimately absent (a deliberate host adaptation, a rule the host
+dropped on purpose). Record that here, one row per anchor, instead of
+forcing the whole mechanism's row to a coarser status it doesn't
+actually hold:
+
+| unit_id | anchor | host_path | host_equivalent file:line | reason |
+|---|---|---|---|---|
+
+A waiver row is not legal without BOTH `host_equivalent file:line` (a
+concrete pointer to where the host's own equivalent lives, or `—` if
+there truly is none) and `reason` filled in — an empty pair is not a
+waiver, it's an unexplained gap that `install_parity.py --check` will
+keep reporting as `MISSING`/`UNKNOWN` every time it runs. Every
+upgrade's closing parity run (the onboarding skill's Upgrade mode,
+step 7) writes "Install parity: ..." as its own record line (in this
+ledger's "Kit snapshot revision" note, or the upgrade commit message)
+— that record names which run this waiver table reflects.
 
 This ledger is a first-class artifact, not scratch notes: once a
 deployment runs its own calibration process, drift between this

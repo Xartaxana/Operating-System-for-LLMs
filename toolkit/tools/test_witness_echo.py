@@ -686,10 +686,13 @@ def test_build_witness_segment_notes_excluded_from_output():
 
 
 def test_build_witness_segment_loud_exact_format():
+    # Rule-of-three text (imperative verb "re-run").
     ev = ("warn_loud", 2, "pytest tools/x.py -q", "2026-07-21T10:00:00.000000")
     seg = we.build_witness_segment([ev])
     assert seg == ("WITNESS ECHO: line 2 contradiction - command 'pytest tools/x.py -q' "
-                    "recorded RED in session track (last red at 2026-07-21T10:00:00.000000)")
+                    "recorded RED in session track at 2026-07-21T10:00:00.000000 - this "
+                    "line's accepted witness may not be trustworthy; re-run the command "
+                    "and confirm it is green before relying on this acceptance")
 
 
 def test_build_witness_segment_loud_sanitizes_ts_control_chars():
@@ -716,10 +719,13 @@ def test_build_witness_segment_loud_ts_truncated_at_max_message_len():
 
 
 def test_build_witness_segment_soft_exact_format():
+    # Rule-of-three text (imperative verb "verify").
     ev = ("warn_soft", 3)
     seg = we.build_witness_segment([ev])
-    assert seg == ("WITNESS ECHO: line 3 witness command(s) not observed in session track "
-                    "(batch/cross-session/retro acceptance legitimate - verify manually)")
+    assert seg == ("WITNESS ECHO: line 3 witness command(s) not observed in "
+                    "session track - this acceptance cannot be confirmed automatically; verify "
+                    "manually that the witness is legitimate (batch/cross-session/retro "
+                    "acceptance is a valid reason)")
 
 
 def test_build_witness_segment_exactly_five_boundary_no_more_suffix():
@@ -791,8 +797,13 @@ def test_e2e_green_witness_silent(tmp_path):
     _write_track(tmp_path, "sess-1", [
         _run_entry("2026-07-10T08:05:00.000000", "python -m pytest tools/ gateway/ -q", "green"),
     ])
+    # notes carries an R3-MIRROR concession (R3
+    # MIRROR fires on ANY builder accepted with no critic input, an
+    # unrelated layer sharing this hook's additionalContext channel) --
+    # this test's own subject is WITNESS ECHO silence, not R3 MIRROR.
     new_line = _accepted_line(ts=_fresh_ts(),
-                               witness="python -m pytest tools/ gateway/ -q -> 930 passed")
+                               witness="python -m pytest tools/ gateway/ -q -> 930 passed",
+                               notes="accepted; critic: skipped, small diff")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
     assert result.returncode == 0
@@ -822,9 +833,13 @@ def test_e2e_retro_no_warn_even_with_red_track(tmp_path):
     _write_track(tmp_path, "sess-1", [
         _run_entry("2026-07-10T08:05:00.000000", "python -m pytest tools/ gateway/ -q", "red"),
     ])
+    # notes carries the retro mark (this test's own subject) PLUS an
+    # R3-MIRROR concession (see test_e2e_green_witness_silent above for
+    # why -- R3 MIRROR is an unrelated layer sharing this hook's
+    # additionalContext channel).
     new_line = _accepted_line(ts=_fresh_ts(),
                                witness="python -m pytest tools/ gateway/ -q -> 3 failed",
-                               notes="retroactive fix of missed accepted event")
+                               notes="retroactive fix of missed accepted event; critic: skipped, small diff")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
     assert result.returncode == 0
@@ -834,8 +849,12 @@ def test_e2e_retro_no_warn_even_with_red_track(tmp_path):
 
 def test_e2e_missing_track_silent_note_not_exception(tmp_path):
     journal_path = _seed_committed_journal(tmp_path)
+    # notes carries an R3-MIRROR concession -- see
+    # test_e2e_green_witness_silent above for why (unrelated layer,
+    # same additionalContext channel).
     new_line = _accepted_line(ts=_fresh_ts(),
-                               witness="python -m pytest tools/ gateway/ -q -> 930 passed")
+                               witness="python -m pytest tools/ gateway/ -q -> 930 passed",
+                               notes="accepted; critic: skipped, small diff")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
     assert result.returncode == 0
@@ -848,8 +867,12 @@ def test_e2e_malformed_track_silent_note_not_exception(tmp_path):
     track_dir = tmp_path / ".claude" / "dod_track"
     track_dir.mkdir(parents=True)
     (track_dir / "sess-1.json").write_text("{not valid json at all", encoding="utf-8")
+    # notes carries an R3-MIRROR concession -- see
+    # test_e2e_green_witness_silent above for why (unrelated layer,
+    # same additionalContext channel).
     new_line = _accepted_line(ts=_fresh_ts(),
-                               witness="python -m pytest tools/ gateway/ -q -> 930 passed")
+                               witness="python -m pytest tools/ gateway/ -q -> 930 passed",
+                               notes="accepted; critic: skipped, small diff")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
     assert result.returncode == 0

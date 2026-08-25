@@ -37,12 +37,14 @@ clean):
      per hook, both reportable: untracked (missing from the index
      entirely -- a fresh clone gets NO gate at all, worse than
      non-executable) vs tracked-but-wrong-mode.
- (3) check_harness_hooks -- every "python tools/<file>.py" hook command
-     named in .claude/settings.json points to a file that EXISTS.
-     Existence only, deliberately no import check (unlike a sibling
-     deployment's harness_channel): this module runs against arbitrary
-     host repos, and importing arbitrary host code as a side effect of
-     a read-only auditor is out of scope.
+ (3) check_harness_hooks -- every hook command named in
+     .claude/settings.json, in EITHER legal form ("python
+     tools/<file>.py" or 'python "$CLAUDE_PROJECT_DIR/tools/<file>.py"'
+     -- see _HOOK_COMMAND_RE), points to a file that EXISTS. Existence
+     only, deliberately no import check (unlike a sibling deployment's
+     harness_channel): this module runs against arbitrary host repos,
+     and importing arbitrary host code as a side effect of a read-only
+     auditor is out of scope.
  (4) check_adoption_ledger -- if <root>/ADOPTION_LEDGER.md exists (the
      host's filled-in copy of ADOPTION_LEDGER.template.md, not the
      template itself), every row whose Status cell is exactly "adopt"
@@ -76,6 +78,14 @@ clean):
      committed tree, not live installation state. An untracked skill
      file is invisible to this check by construction (git ls-files only
      ever sees tracked paths) -- a documented limit, not a bug.
+ (7) check_install_parity_notices (K12, decision (д)=2 + B2 fix) -- a SEPARATE,
+     NON-BLOCKING "notices" class, not an "issue": the adoption ledger
+     records a "Kit snapshot revision" but carries no matching
+     "Install parity: ..." record for it. Never affects "ok"/exit code
+     -- printed in the WIRING summary line
+     (tools/session_context.py's wiring_summary_line) and invisible to
+     tools/enforcement_probe.py (which reads only the subprocess exit
+     code, never this module's stdout text).
 
 Every check function is self-contained and fails OPEN: a subprocess
 call that cannot even run (git missing, timeout) or a file that cannot
@@ -208,13 +218,30 @@ _REQUIRED_GITHOOKS = ("pre-commit", "commit-msg")
 _SETTINGS_RELPATH = Path(".claude") / "settings.json"
 _ADOPTION_LEDGER_NAME = "ADOPTION_LEDGER.md"
 
-# The one command shape every hook line in .claude/settings.json is
-# expected to use: exactly "python tools/<file>.py", no extra flags,
-# forward slashes. Anything else is reported as an honest "unparsed
-# hook command" issue rather than guessed at. `[^/\\]+` (not `[\w ]+`)
-# deliberately allows spaces in the filename so a path-with-spaces
-# command is still recognized and checked, not silently misparsed.
-_HOOK_COMMAND_RE = re.compile(r"^python tools/([^/\\]+\.py)$")
+# The two command shapes a hook line in .claude/settings.json is legal
+# in (command hygiene point 2's canonical flat form, plus a
+# $CLAUDE_PROJECT_DIR-qualified form some hosts' harness invocations
+# use): (1) "python tools/<file>.py" -- no extra flags, forward
+# slashes; (2) 'python "$CLAUDE_PROJECT_DIR/tools/<file>.py"' -- double
+# quotes, the literal $CLAUDE_PROJECT_DIR prefix, forward slashes.
+# Anything else -- a different interpreter, extra arguments, single
+# quotes, an unqualified $CLAUDE_PROJECT_DIR with no surrounding
+# quotes, backslashes inside form (2), a path outside tools/ -- is
+# reported as an honest "unparsed hook command" issue rather than
+# guessed at; the parser does not widen beyond these two forms.
+# `[^/\\]+` (not `[\w ]+`) deliberately allows spaces in the filename so
+# a path-with-spaces command is still recognized and checked, not
+# silently misparsed.
+#
+# Group 1 is the optional opening double-quote marker (form selector,
+# not the filename); the two conditional branches `(?(1)...)` tie the
+# quote to its matching prefix/suffix so a quote can appear only paired
+# with the $CLAUDE_PROJECT_DIR/ prefix and vice versa -- group 2 is the
+# filename, captured by the SAME group regardless of which of the two
+# forms matched.
+_HOOK_COMMAND_RE = re.compile(
+    r'^python (")?(?(1)\$CLAUDE_PROJECT_DIR/tools/|tools/)([^/\\]+\.py)(?(1)"|)$'
+)
 
 
 def _ascii_safe(value) -> str:
@@ -392,9 +419,11 @@ def _parse_hook_commands(settings) -> list:
 
 
 def check_harness_hooks(root: Path) -> list:
-    """(3) every "python tools/<file>.py" hook command in
-    .claude/settings.json names a file that exists. Existence-only, see
-    module docstring for why no import check is done here."""
+    """(3) every hook command in .claude/settings.json, in EITHER legal
+    form ("python tools/<file>.py" or 'python
+    "$CLAUDE_PROJECT_DIR/tools/<file>.py"' -- see _HOOK_COMMAND_RE),
+    names a file that exists. Existence-only, see module docstring for
+    why no import check is done here."""
     settings_path = root / _SETTINGS_RELPATH
     try:
         text = settings_path.read_text(encoding="utf-8")
@@ -417,7 +446,7 @@ def check_harness_hooks(root: Path) -> list:
         if not m:
             issues.append(f"unparsed hook command: {_ascii_safe(command.strip())}")
             continue
-        filename = m.group(1)
+        filename = m.group(2)
         if filename in seen:
             continue
         seen.add(filename)
@@ -564,6 +593,84 @@ def check_adoption_ledger(root: Path, git_issues: list, harness_issues: list) ->
     return issues
 
 
+# --- NOTICES (K12, spec decision D=2 + B2 fix) ---------------------
+#
+# A SEPARATE, NON-BLOCKING class from "issues" above: notices never
+# affect check_wiring()'s "ok" verdict or this module's exit code --
+# printed in the WIRING summary line at SessionStart (see
+# tools/session_context.py's wiring_summary_line), invisible to
+# tools/enforcement_probe.py (which reads only ok/issues -- a pin test
+# is mandatory for this invariant, per the spec's own B2 decision).
+#
+# What it checks: the adoption ledger records a "Kit snapshot
+# revision" (a filled-in, non-placeholder value) but carries no
+# matching "Install parity: ..." record for it -- the class of gap
+# ec4e6f0 was (files landed, the parity trail that proves it never
+# ran). This is READ-ONLY and does not itself run
+# tools/install_parity.py --check (that is a separate, heavier CLI
+# call -- this notice only checks whether the RECORD exists, the same
+# division of labor as spec decision E: "the tool is read-only, an
+# upgrade step writes the record, not the tool").
+
+_KIT_SNAPSHOT_REVISION_RE = re.compile(
+    r"Kit snapshot revision:\s*`?([^`\n]*)`?", re.IGNORECASE
+)
+_INSTALL_PARITY_RECORD_RE = re.compile(r"Install parity:", re.IGNORECASE)
+
+
+def _ledger_revision_value(text: str) -> str:
+    """Returns the trimmed value after "Kit snapshot revision:" (with
+    or without a backtick wrapper), or "" if the line is absent. A
+    placeholder value (the template's own unfilled
+    "<commit/tag of the toolkit snapshot...>" text, recognizable by
+    its leading "<") reads the SAME as absent -- an unfilled template
+    line is not a recorded revision."""
+    m = _KIT_SNAPSHOT_REVISION_RE.search(text)
+    if not m:
+        return ""
+    value = m.group(1).strip()
+    if not value or value.startswith("<"):
+        return ""
+    return value
+
+
+def check_install_parity_notices(root: Path) -> list:
+    """(6, notices-only): the adoption ledger has a recorded "Kit
+    snapshot revision" but no "Install parity: ..." record anywhere in
+    the ledger text -- a WARN notice, never an issue (see the section
+    docstring above for the class this closes and why it stays
+    non-blocking). No ledger at all, or a ledger with no recorded
+    revision yet (a fresh/pre-onboarding install, or the template's
+    own unfilled placeholder), is SILENT -- nothing to check against
+    yet, not a gap. A ledger that fails to read degrades to ONE
+    notice naming the failure (fail-open, the same discipline
+    check_adoption_ledger already applies to issues)."""
+    ledger_path = root / _ADOPTION_LEDGER_NAME
+    if not ledger_path.is_file():
+        return []
+
+    try:
+        text = ledger_path.read_text(encoding="utf-8")
+    except Exception as e:
+        return [f"{_ADOPTION_LEDGER_NAME} not readable for install-parity check ({type(e).__name__})"]
+
+    revision = _ledger_revision_value(text)
+    if not revision:
+        return []
+
+    if _INSTALL_PARITY_RECORD_RE.search(text):
+        return []
+
+    safe_revision = _ascii_safe(revision)
+    return [
+        f"adoption ledger records kit snapshot revision '{safe_revision}' but no "
+        "'Install parity: ...' record for it -- run tools/install_parity.py "
+        "--check and record the result (command hygiene point 6 class: a "
+        "revision with no matching parity record is indistinguishable from "
+        "one that was never actually verified)"
+    ]
+
+
 # Names check_wiring's `skip` parameter recognizes -- exactly the
 # check functions defined above, by their own function names, so a
 # caller of check_wiring() and someone reading this module's source
@@ -583,16 +690,22 @@ _KNOWN_CHECK_NAMES = frozenset(
         "check_untracked_enforcement_files",
         "check_adoption_ledger",
         "check_skills_casing",
+        "check_install_parity_notices",
     }
 )
 
 
 def check_wiring(root: Path = None, skip: frozenset = frozenset()) -> dict:
     """Runs every check above and aggregates them into
-    {"ok": bool, "issues": [str, ...]}. Never raises: each check
-    function already fails open (a subprocess/file/parse error becomes
-    an issue string, not an exception) -- this is a thin aggregator
-    with no I/O of its own beyond what the checks already perform.
+    {"ok": bool, "issues": [str, ...], "notices": [str, ...]}. Never
+    raises: each check function already fails open (a subprocess/file/
+    parse error becomes an issue/notice string, not an exception) --
+    this is a thin aggregator with no I/O of its own beyond what the
+    checks already perform. "notices" is a SEPARATE,
+    NON-BLOCKING class -- it never participates in "ok" (regression
+    pin: test_notices_never_affect_ok_verdict) and is invisible to
+    tools/enforcement_probe.py, which reads only "ok"/"issues" (a pin
+    test on that module is mandatory, per the spec's own B2 decision).
 
     `skip` -- a set of check function names (see _KNOWN_CHECK_NAMES)
     to OMIT from this run, each contributing an empty issue list in
@@ -620,8 +733,13 @@ def check_wiring(root: Path = None, skip: frozenset = frozenset()) -> dict:
         if "check_adoption_ledger" in skip
         else check_adoption_ledger(root, git_issues, harness_issues)
     )
+    notices = (
+        []
+        if "check_install_parity_notices" in skip
+        else check_install_parity_notices(root)
+    )
     issues = git_issues + harness_issues + untracked_issues + skills_casing_issues + ledger_issues
-    return {"ok": not issues, "issues": issues}
+    return {"ok": not issues, "issues": issues, "notices": notices}
 
 
 # Checks that are genuinely about a LIVE installation's state (a real
@@ -715,6 +833,15 @@ def main(argv=None) -> int:
         for issue in result["issues"]:
             print(f"  - {issue}")
         exit_code = 1
+
+    # notices: a SEPARATE, non-blocking class -- never
+    # changes exit_code, printed after issues (or after "WIRING: OK")
+    # regardless of which branch above fired.
+    notices = result.get("notices") or []
+    if notices:
+        print(f"WIRING NOTICES: {len(notices)} notice(s), does not affect exit code")
+        for notice in notices:
+            print(f"  * {notice}")
 
     if bad_root:
         # Caller-diagnosis error, not a clean/dirty wiring verdict: never

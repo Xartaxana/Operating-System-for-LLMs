@@ -224,9 +224,11 @@ one, for staleness OR for ts drift.
 
 import datetime
 import json
+import os
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -637,9 +639,16 @@ def _format_tier_line(event: tuple, ascii_only: bool) -> str:
     line_no, kind, declared_word, counts = event
     sanitize = _ascii_sanitize if ascii_only else _raw_sanitize
     measured = _format_measured(counts, ascii_only)
+    # Rule of three in both branches (what's wrong / what it risks / the
+    # action, imperative verb) -- neither branch carried a verb before.
     if kind == "mismatch":
-        return f"TIER ECHO: line {line_no} model='{sanitize(declared_word)}' vs measured {measured} MISMATCH"
-    return f"TIER ECHO: line {line_no} measured {measured}"
+        return (f"TIER ECHO: line {line_no} declared tier '{sanitize(declared_word)}' "
+                f"MISMATCH measured {measured} never confirm the declared tier - the "
+                "worker may actually have run on a different model; check the tier and "
+                "fix the record, or relaunch on the declared tier")
+    return (f"TIER ECHO: line {line_no} declared tier '{sanitize(declared_word)}' "
+            f"measured {measured} confirms it only partially - part of the transcript "
+            "may have run on a different model; check the tier manually")
 
 
 def build_tier_segment(tier_events: list, ascii_only: bool = False) -> str:
@@ -688,20 +697,29 @@ def build_context(violations: list, ascii_only: bool = False) -> str:
 
 def combine_context(violations: list, tier_events: list, witness_events: list = None,
                      ts_drift_events: list = None, escalation_events: list = None,
-                     fallback_marker: str = "", ascii_only: bool = False) -> str:
+                     fallback_marker: str = "", *, notes_len_events: list = None,
+                     r3_events: list = None,
+                     ascii_only: bool = False) -> str:
     """One JSON additionalContext can carry form defects, TIER ECHO
-    lines, WITNESS ECHO lines, TS DRIFT lines, ESCALATION lines,
-    and a fallback-base marker, joined by "; ". SIX
-    INDEPENDENT segments -- build_context(violations) (as a whole, its
-    own "JOURNAL ECHO: N defect(s)..." header unchanged),
+    lines, WITNESS ECHO lines, TS DRIFT lines, ESCALATION lines, NOTES
+    LEN lines, R3 MIRROR lines, and a fallback-base marker, joined by
+    "; ". EIGHT INDEPENDENT segments -- build_context(violations) (as a
+    whole, its own "JOURNAL ECHO: N defect(s)..." header unchanged),
     build_tier_segment(tier_events), build_witness_segment(
     witness_events), build_ts_drift_segment(ts_drift_events),
-    build_escalation_segment(escalation_events), and fallback_marker --
-    joined with "; ", only when non-empty. Any subset empty -> the
-    result is just the remaining non-empty segments, the JSON is still
-    printed as long as at least one segment is non-empty. All empty ->
-    "" -- the caller (main()) treats an empty string as complete
-    silence.
+    build_escalation_segment(escalation_events),
+    build_notes_len_segment(notes_len_events), build_r3_segment(
+    r3_events), and fallback_marker -- joined with "; ", only when
+    non-empty. Any subset empty -> the result is just the remaining
+    non-empty segments, the JSON is still printed as long as at least
+    one segment is non-empty. All empty -> "" -- the caller (main())
+    treats an empty string as complete silence. ORDER is fixed:
+    violations first (its "JOURNAL ECHO: N defect(s) in new lines: "
+    header literal never changes), then tier/witness/ts-drift/
+    escalation/notes-len/r3 in that order (r3_events is the LAST
+    content segment, strictly before fallback_marker), fallback_marker
+    LAST always -- no segment is a visibility condition for another,
+    each makes the call visible on its own.
 
     fallback_marker -- a LITERAL (FALLBACK_MARKER_TEXT, see the
     "PAYLOAD-SCOPED ECHO BASE" section below), never sanitized (a
@@ -718,14 +736,29 @@ def combine_context(violations: list, tier_events: list, witness_events: list = 
     violations, tier_events, witness_events, ts_drift_events))
     byte-for-byte: a None segment is "" exactly like an empty list, so
     every existing call/test using a shorter form is unaffected.
-    escalation_events is added as a NEW 5th positional parameter
-    (BEFORE fallback_marker, which shifts to 6th place) -- no existing
-    call site in this repo passes fallback_marker positionally (only
-    2-4 positional arguments, or a keyword call -- grepped across every
-    test_journal_echo*.py before this edit), so the shift breaks
-    nothing except main() below, which this same task updates.
-    fallback_marker="" (default) is the same story -- it never adds a
-    segment unless explicitly passed."""
+    escalation_events is a 5th positional parameter (BEFORE
+    fallback_marker, which sits 6th) -- a prior edit of this file
+    already established that shape; this task does not touch it.
+
+    notes_len_events/r3_events are added STRICTLY KEYWORD-ONLY (after
+    `*`, alongside ascii_only, which was already positional-or-keyword
+    but in practice always called by name at every call site in this
+    repo -- moving it past `*` too changes no existing call's
+    behavior). Reason: a live pin test
+    (test_journal_echo_escalation.py, test_combine_context_
+    escalation_joined_with_fallback_marker) calls combine_context with
+    SIX positional arguments, the sixth being the literal string
+    "MARKER" as fallback_marker. Adding either new parameter as a
+    further positional slot would silently turn that literal into
+    notes_len_events on the next call sharing that arg count -- the
+    test would either fail outright, or (worse) pass by accidental
+    type coincidence. Keyword-only excludes this class of regression
+    structurally: every existing 2-/3-/4-/5-/6-positional call in this
+    repo stays byte-for-byte unchanged (see the pin test
+    test_combine_context_six_positional_arg_form_unchanged in
+    test_journal_echo_r3.py). notes_len_events/r3_events both default
+    to None (not [] -- a None segment builds to "", identical to the
+    parameter's absence)."""
     parts = []
     if violations:
         parts.append(build_context(violations, ascii_only))
@@ -741,6 +774,12 @@ def combine_context(violations: list, tier_events: list, witness_events: list = 
     escalation_segment = build_escalation_segment(escalation_events or [], ascii_only)
     if escalation_segment:
         parts.append(escalation_segment)
+    notes_len_segment = build_notes_len_segment(notes_len_events or [], ascii_only)
+    if notes_len_segment:
+        parts.append(notes_len_segment)
+    r3_segment = build_r3_segment(r3_events or [], ascii_only)
+    if r3_segment:
+        parts.append(r3_segment)
     if fallback_marker:
         parts.append(fallback_marker)
     return "; ".join(parts)
@@ -1179,19 +1218,28 @@ def _format_witness_line(event: tuple, ascii_only: bool) -> str:
     sanitize = _ascii_sanitize if ascii_only else _raw_sanitize
     kind = event[0]
     line_no = event[1]
+    # Rule of three in the warn_loud/warn_stale branches too (what's
+    # wrong / what it risks / the action, imperative verb) -- warn_soft
+    # already carried one ("verify manually").
     if kind == "warn_loud":
         _, _, cmd, ts = event
         return (f"WITNESS ECHO: line {line_no} contradiction - command "
-                f"'{sanitize(cmd)}' recorded RED in session track (last red at {sanitize(str(ts))})")
+                f"'{sanitize(cmd)}' recorded RED in session track at {sanitize(str(ts))} "
+                "- this line's accepted witness may not be trustworthy; re-run the "
+                "command and confirm it is green before relying on this acceptance")
     if kind == "warn_stale":
         _, _, last_edit_ts, last_green_ts = event
         green_part = sanitize(str(last_green_ts)) if last_green_ts is not None else "none"
         return (f"WITNESS ECHO: line {line_no} track staleness - last code edit at "
                 f"{sanitize(str(last_edit_ts))} is after the last green run (last green: "
-                f"{green_part}) - witness not confirmed by a green run after the last edit")
+                f"{green_part}) - the witness predates the latest code change and may no "
+                "longer match it; re-run the witness command after this edit and confirm "
+                "it is green")
     # warn_soft
     return (f"WITNESS ECHO: line {line_no} witness command(s) not observed in "
-            "session track (batch/cross-session/retro acceptance legitimate - verify manually)")
+            "session track - this acceptance cannot be confirmed automatically; verify "
+            "manually that the witness is legitimate (batch/cross-session/retro "
+            "acceptance is a valid reason)")
 
 
 def build_witness_segment(witness_events: list, ascii_only: bool = False) -> str:
@@ -1464,9 +1512,11 @@ def _collect_escalation_events(new_lines: list, base_lines: list) -> list:
 
 
 def _format_escalation_line(event: tuple, ascii_only: bool) -> str:
-    """"ESCALATION: line N attempt A no escalated for task_id T - after
-    two rejected on the same tier escalation is mandatory" -- mirrors
-    the R6 rule's own wording. "line N" is added ON TOP of the message,
+    """"ESCALATION: line N attempt A no escalated for task_id T - two
+    rejected on the same tier with no escalation: a silent-retry loop
+    goes unnoticed; escalate to the tier above and append an escalated
+    event (rule 6)" -- rule of three ON TOP of the R6 rule's own
+    wording. "line N" is added ON TOP of the message,
     by analogy with every other formatter in this file (TIER ECHO/
     WITNESS ECHO/TS DRIFT ECHO all carry "line N" -- distinguishing
     batch lines when joined with "; "); the task_id VALUE is
@@ -1479,9 +1529,12 @@ def _format_escalation_line(event: tuple, ascii_only: bool) -> str:
     _format_witness_line applies to cmd/ts."""
     sanitize = _ascii_sanitize if ascii_only else _raw_sanitize
     line_no, _trigger, task_id, attempt_display = event
+    # Rule of three (what's wrong / what it risks / the action,
+    # imperative verb "escalate").
     return (f"ESCALATION: line {line_no} attempt {attempt_display} no escalated "
-            f"for task_id {sanitize(str(task_id))} - after two rejected on the "
-            "same tier escalation is mandatory")
+            f"for task_id {sanitize(str(task_id))} - two rejected on the same tier "
+            "with no escalation: a silent-retry loop goes unnoticed; escalate to the "
+            "tier above and append an escalated event (rule 6)")
 
 
 def build_escalation_segment(escalation_events: list, ascii_only: bool = False) -> str:
@@ -1500,6 +1553,551 @@ def build_escalation_segment(escalation_events: list, ascii_only: bool = False) 
     return body
 
 
+# --- NOTES LEN ECHO -----------------------------------------------------
+# An oversized `notes` field risks burying a load-bearing fact in
+# prose where no gate or later reader will find it again -- typed
+# fields carry facts, notes stays a human-readable pointer (see
+# CLAUDE.md's typed-fields rule). This layer warns (never blocks) when
+# a NEW line's notes exceeds a per-event threshold, at write time --
+# the same "close the gap before commit" motive TIER/WITNESS/TS DRIFT/
+# ESCALATION ECHO already carry above in this file.
+#
+# EVENT OUTSIDE THE TABLE / no `event` field: silent -- no assigned
+# threshold, no verdict (the same principle _extract_declared_word/
+# _detect_ts_drift/_find_agent_transcript already apply above).
+#
+# UNIT -- CHARACTERS, not bytes: len() of the Python string, the same
+# measure the constant name (NOTES_LEN_THRESHOLDS_CHARS) and the
+# warning text ("chars") both name -- this targets the volume of prose
+# a human reads, not the file's on-disk size; a byte measure would
+# make the penalty language-dependent (non-ASCII text is wider in
+# UTF-8 than plain ASCII).
+#
+# BASE: the SAME payload-scoped base (echo_new_lines/echo_base_lines
+# from _resolve_echo_base) TIER/WITNESS/TS-DRIFT/ESCALATION ECHO
+# already use above -- but, unlike those four, this layer is fully
+# DISABLED when used_fallback == True (see main()): in fallback mode
+# (an unreadable payload / a non-tail edit) it yields zero notes-len
+# events rather than merely "less confident" -- otherwise it would
+# re-evaluate the WHOLE uncommitted journal tail on every write, a
+# growing false-positive class. FALLBACK_MARKER_TEXT still prints as
+# usual regardless of this disablement -- "this layer stayed silent"
+# remains visible through the existing marker, not a silent death.
+#
+# WARNING TEXT: a static ASCII template, WITHOUT a notes fragment (see
+# _format_notes_len_line) -- every dynamic value inserted (line_no,
+# length, threshold are integers; event is one of the fixed ASCII keys
+# of NOTES_LEN_THRESHOLDS_CHARS, a closed set, never arbitrary
+# third-party JSON text) carries no injection risk -- unlike cmd/ts in
+# WITNESS ECHO or measured in TIER ECHO, no sanitizer is required here
+# (the same "clean dynamics" class _format_ts_drift_line already
+# establishes above for events carrying only integers).
+#
+# EDGES (fail-open, the same per-line try/except pattern every other
+# _collect_* in this file already uses): notes missing/not a string/
+# empty/whitespace-only -- silent (journal_validator already catches
+# the form defect; a second warning about the same defect would be
+# noise, not a new signal); a line that doesn't parse as JSON / isn't
+# an object -- per-line `continue`, a broken line doesn't stop the
+# rest of the same call from being parsed.
+NOTES_LEN_THRESHOLDS_CHARS = {
+    "delegated": 800,
+    "accepted": 800,
+    "rejected": 800,
+    "dispatch_skipped": 800,
+    "escalated": 800,
+    "defect_found": 800,
+    "decomposable": 800,
+    "calibrated": 15000,
+}
+# No external threshold-config file is introduced: it would create a
+# temporal edge ("before/after the file exists") and a second source
+# of truth alongside the code -- thresholds live EXCLUSIVELY here, in
+# this module constant.
+MAX_NOTES_LEN_LINES = 5  # the same class of ceiling as MAX_TIER_LINES/
+# MAX_WITNESS_LINES/MAX_TS_DRIFT_LINES/MAX_ESCALATION_LINES above in
+# this file -- the same motive (a payload-scoped base with NO ceiling
+# on a rare-but-real large batch -> unbounded additionalContext on one
+# hook call). Boundary tests at 5/6 -- see test_journal_echo_noteslen.py.
+
+
+def _collect_notes_len_events(new_lines: list, base_lines: list) -> list:
+    """For EVERY new line (the same new_lines/base_lines pair TIER/
+    WITNESS/TS-DRIFT/ESCALATION ECHO already use in main(), see
+    _resolve_echo_base) whose event IS IN NOTES_LEN_THRESHOLDS_CHARS,
+    and whose non-empty (after strip()) string notes is STRICTLY (>,
+    not >=) longer than the assigned threshold -- appends (line_no,
+    event, length, threshold) to the result. line_no is the SAME
+    formula journal_validator.validate_new_lines and every other
+    _collect_* in this file use (len(base_lines)+idx+1).
+
+    Silent (adds nothing) on: event missing/not in the threshold table
+    (no assigned threshold, no verdict); notes missing/not a string
+    (including int/list/None/dict -- len() is never called on a
+    non-string); notes empty/whitespace-only (the form defect is
+    already caught by journal_validator); length <= threshold (the
+    boundary itself stays silent).
+
+    Length is measured on the RAW notes (len(notes), including any
+    leading/trailing whitespace on otherwise non-empty content) -- the
+    emptiness check (notes.strip()) is used ONLY as an "is there
+    anything to evaluate" filter, not as preprocessing before the
+    measurement (unit: characters of the Python string as-is).
+
+    Fails open per line (the same pattern as every other _collect_* in
+    this file): broken JSON / a non-dict line -- try/except with
+    `continue`, does not stop parsing the rest of this call's lines
+    and does not crash the hook."""
+    events = []
+    for idx, line in enumerate(new_lines):
+        line_no = len(base_lines) + idx + 1
+        try:
+            obj = json.loads(line)
+            if not isinstance(obj, dict):
+                continue
+            event = obj.get("event")
+            threshold = NOTES_LEN_THRESHOLDS_CHARS.get(event)
+            if threshold is None:
+                continue
+            notes = obj.get("notes")
+            if not isinstance(notes, str):
+                continue
+            if not notes.strip():
+                continue
+            length = len(notes)
+            if length > threshold:
+                events.append((line_no, event, length, threshold))
+        except Exception:
+            continue
+    return events
+
+
+def _format_notes_len_line(event: tuple) -> str:
+    """"NOTES LEN: line <N> event=<e> notes <L> chars > threshold <T> -
+    ..." -- a static ASCII literal, WITHOUT the notes text itself
+    (inserting notes text would need its own sanitizer and its own
+    boundary tests -- deliberately not introduced). No part of this
+    message needs sanitize (see the section docstring above -- all
+    four substituted values are either plain integers or one of the
+    fixed ASCII keys of NOTES_LEN_THRESHOLDS_CHARS) -- no ascii_only
+    parameter, the same signature choice _format_ts_drift_line already
+    makes above for the same reason. Rule of three: what's wrong (an
+    oversized note), what it risks (burying load-bearing facts where
+    they won't be found later), the action (move load-bearing facts to
+    typed fields / task carrier, keep only a pointer in notes)."""
+    line_no, event_name, length, threshold = event
+    return (f"NOTES LEN: line {line_no} event={event_name} notes {length} chars "
+            f"> threshold {threshold} - an oversized note risks burying load-bearing "
+            "facts in prose where they will not be found later; move load-bearing "
+            "facts to typed fields / task carrier, keep only a pointer in notes")
+
+
+def build_notes_len_segment(events: list, ascii_only: bool = False) -> str:
+    """Assembles the NOTES LEN part of additionalContext -- the SAME
+    pattern as build_tier_segment/build_ts_drift_segment/
+    build_escalation_segment (ceiling MAX_NOTES_LEN_LINES=5 lines per
+    call, "+K more" on top). ascii_only is accepted for signature
+    uniformity with the other build_*/combine_context in this file, but
+    is actually a no-op here (the same choice build_ts_drift_segment
+    already documents for the same reason -- _format_notes_len_line
+    never inserts anything that would need sanitizing in either mode).
+    An empty list -> "" -- the caller treats an empty string as "no
+    segment", the same principle as the other build_* functions."""
+    if not events:
+        return ""
+    head = events[:MAX_NOTES_LEN_LINES]
+    rest = len(events) - len(head)
+    body = "; ".join(_format_notes_len_line(ev) for ev in head)
+    if rest > 0:
+        body += f"; +{rest} more"
+    return body
+
+
+# --- R3 MIRROR ------------------------------------------------------------
+# GAP: the acceptance-gate rule (critic is mandatory above a diff-size
+# threshold, or a data-schema/core/money diff, unless waived by
+# "critic: skipped, <reason>") is held ONLY by the acceptor's
+# discipline at write time -- nothing on the write path detects a
+# builder `accepted` line carrying neither signal. This layer is WARN,
+# NEVER a block (the same pattern ESCALATION ECHO/TS DRIFT ECHO
+# already apply above for the escalation rule -- a warning at write
+# time, a hard gate is a separate, coarser instrument, not engaged
+# here; this logic does NOT enter journal_validator.decide()).
+#
+# TRIGGER: a NEW line (echo_new_lines) with event=="accepted",
+# agent=="builder". Silent on the line at ANY of FIVE signals:
+#   S1 basis=="critic"
+#   S2 notes matches CRITIC_SKIP_RE (literally "critic: skipped",
+#      ignorecase, flexible whitespace around the colon)
+#   S3 delegated(agent=="critic") with the SAME task_id ANYWHERE in
+#      the file -- base_lines (history) + the WHOLE current batch
+#      (echo_new_lines) in BOTH directions (a critic delegation can sit
+#      either before or after the accepted line within one batch) --
+#      hence a full pre-pass over new_lines (alongside base_lines) for
+#      critic delegations BEFORE the main trigger pass, see
+#      _collect_r3_events.
+#   S4 basis=="judge" (a leaf-class judge acceptance silences this
+#      layer unconditionally)
+#   S5 a bare `critic:t-NNN` token in notes (regex CRITIC_TOKEN_RE =
+#      `\bcritic:(t-\d{3,})\b`, a literal -- the same case-sensitive
+#      convention journal_validator's replaces_worker token uses --
+#      NOT ignorecase, unlike CRITIC_SKIP_RE above) silences BOTH M1
+#      and M2, but ONLY if the cited t-NNN actually EXISTS in the file
+#      as delegated(agent=="critic") -- the check is free:
+#      critic_task_ids is already collected for S3 by the same
+#      pre-pass, S5 simply checks the extracted id against that same
+#      set. A token citing a NON-EXISTENT verdict does NOT silence
+#      (s5_valid stays False, the line falls through to the ordinary
+#      M1/M2 branch as if the token weren't there). The form mirrors
+#      the journal's own `closes:t-NNN` token -- several tokens in
+#      notes are legal, ONE valid one is enough (see
+#      _check_accepted_r3: `.finditer`, any match). UNLIKE S3 (requires
+#      the SAME task_id), S5 is CROSS-task_id by construction: the
+#      cited t-NNN can be ANY task_id in the file, as long as a
+#      delegated(critic) actually stands under it -- this is exactly
+#      the mechanism for "one bundling critic pass over several small
+#      accepted lines".
+#
+# M2 DETECTOR (independent of M1, fires ONLY when S1 is true):
+# basis=="critic" with NO delegated(agent=="critic") under this same
+# task_id ANYWHERE in the file AND no valid S5 token -> "a claimed
+# basis with no traceable delegation" (a phantom basis, class
+# completeness checks will read this as a false basis). PRIORITY: a
+# line with basis=="critic", no delegation, and no valid S5, but WITH
+# the concession literal (S2, "critic: skipped") in notes -- is a
+# CONTRADICTORY record, M2 is correct (silencing it via S2 would
+# forgive the contradiction) -- structurally guaranteed by check order
+# below: the basis=="critic" branch is checked FIRST and never looks
+# at S2/the notes-skip literal at all (S2 is a branch of M1 only, not
+# an alternative inside M2).
+#
+# EDGES: task_id missing/not a string/whitespace-only -> the whole
+# line is skipped (neither M1 nor M2) -- the same check applies to
+# critic_task_ids (_absorb_critic below -- a delegated(critic) with a
+# whitespace-only task_id does not enter the set, fix the class not
+# the instance); notes is None -> treated as empty (the S2/S5 regexes
+# simply don't match a non-string); basis absent -> the check falls
+# through S1/S4 to S2/S3/S5; basis=="queued-to-lead" -> does NOT
+# silence (equal to neither "critic" nor "judge"); agent != builder ->
+# outside the trigger, silent; a repeated accepted on one task_id ->
+# each line is checked independently (the shared critic_task_ids is
+# not consumed); a retro acceptance (notes contains "retroactive") ->
+# NOT exempted from R3 (unlike WITNESS ECHO, this layer gives no retro
+# exemption); used_fallback -> this layer runs REGARDLESS, on the
+# fallback (cumulative HEAD-diff) base as-is -- the same "noisy but
+# not correctness-false" class TIER/WITNESS/ESCALATION already are
+# (critic input/basis/notes do not depend on how much time passed
+# since an unrelated commit; there is no false verdict here, see
+# main() -- r3_events is NOT gated by used_fallback, computed
+# unconditionally); an empty journal/broken JSON/non-dict line ->
+# skipped without interrupting the rest of the batch (fail-open per
+# line, below); the `witness` field is NOT read by this layer (S2/S5
+# match ONLY notes) -- BATCH CANON in witness is untouched by this
+# layer entirely.
+#
+# Fails open per line (the same pattern as every other _collect_* in
+# this file): broken JSON on one line -- try/except with `continue`,
+# does not stop parsing the rest of the batch.
+MAX_R3_LINES = 5  # the same class of ceiling as MAX_TIER_LINES/
+# MAX_WITNESS_LINES/MAX_TS_DRIFT_LINES/MAX_ESCALATION_LINES/
+# MAX_NOTES_LEN_LINES above in this file -- the same own engineering
+# decision (5, "+K more" on top). Boundary tests at 5/6 -- see
+# test_journal_echo_r3.py.
+#
+# MAX_R3_BYTES: a ceiling by BYTES on the segment's json-wire footprint
+# (ensure_ascii bytes), INDEPENDENT of MAX_R3_LINES -- json.dumps(...,
+# ensure_ascii=True) escapes every non-ASCII character into "\uXXXX"
+# (6 ASCII bytes per character instead of 1-4 UTF-8 bytes), so a batch
+# whose task_ids or static text happen to carry non-ASCII content can
+# inflate the wire well beyond what MAX_R3_LINES alone would predict.
+# Even with short ASCII-only text (as this port keeps), the byte
+# ceiling stays a second, structural guard, independent of text
+# length, against a batch of long task_ids: when exceeded, lines fold
+# into "+K more" EARLIER than the line-count limit, even if
+# MAX_R3_LINES=5 hasn't been reached yet.
+MAX_R3_BYTES = 2600
+CRITIC_SKIP_RE = re.compile(r"critic\s*:\s*skipped", re.IGNORECASE)
+# The concession literal -- ONLY this form (ignorecase, flexible
+# whitespace around the colon) matches; no free-form wording ("critic:
+# skip", "no critic", "critic waived" -- do NOT match, see battery 3 in
+# test_journal_echo_r3.py).
+CRITIC_TOKEN_RE = re.compile(r"\bcritic:(t-\d{3,})\b")
+# Case-sensitive literal (NOT ignorecase, symmetric with
+# journal_validator's replaces_worker/closes token) -- a machine
+# structural token, not free prose, unlike CRITIC_SKIP_RE above. Group
+# 1 is the referenced task_id ("t-NNN"), checked against
+# critic_task_ids in _check_accepted_r3.
+
+
+def _json_wire_len(s: str) -> int:
+    """Bytes s will add to the JSON additionalContext wire under
+    ensure_ascii=True -- json.dumps itself escapes ANY non-ASCII
+    character into a safe "\\uXXXX" sequence (six ASCII bytes per
+    character instead of the native 1-4 UTF-8 bytes) and control
+    characters into "\\n"/"\\t"/"\\uXXXX" -- json.dumps's result is
+    ALWAYS pure ASCII, so len() of the Python string of that result ==
+    bytes on the wire. `- 2` removes the wrapping quotes json.dumps
+    adds for ANY string -- this function measures s's CONTRIBUTION to
+    the overall additionalContext wire (s is joined with other
+    segments via "; " INSIDE one larger JSON string, not as a separate
+    JSON value of its own) -- see build_r3_segment for the running
+    total this measure feeds."""
+    return len(json.dumps(s, ensure_ascii=True)) - 2
+
+
+def _collect_r3_events(new_lines: list, base_lines: list) -> list:
+    """One linear pass, structurally a direct sibling of
+    _collect_escalation_events above (the same base_lines(history) +
+    new_lines(payload-scoped trigger) pair, the same line_no formula
+    (len(base_lines)+idx+1), the same per-line fail-open).
+
+    The one structural difference from that sibling (S3 is NOT
+    positional -- the window is "anywhere in the file, in both
+    directions"): critic presence (critic_task_ids) is collected by
+    TWO full passes BEFORE the main trigger pass -- base_lines in full
+    (history, naturally "already known") AND new_lines in full (a
+    pre-pass over critic delegations, scanning the batch in BOTH
+    directions) -- NOT accumulated line-by-line as the main pass goes,
+    precisely because S3 must see a critic delegation standing AFTER
+    an accepted line in the same batch, not only before it. The main
+    trigger pass (only event=="accepted" agent=="builder" lines of
+    new_lines) runs SECOND, against the already-fully-collected
+    critic_task_ids -- the same "check against state accumulated
+    BEFORE it" shape the sibling applies to delegated lines, here "before"
+    means "after both pre-passes", not "after the earlier lines of the
+    current pass".
+
+    Returns a list of (line_no, kind, task_id, extra) -- kind in
+    ("no_input", "phantom_basis"), extra reserved (always None -- this
+    layer carries no extra data in either message kind, see
+    _format_r3_line)."""
+    events = []
+    critic_task_ids: set = set()
+
+    def _absorb_critic(lines):
+        for line in lines:
+            try:
+                obj = json.loads(line)
+                if not isinstance(obj, dict):
+                    continue
+                if obj.get("event") == "delegated" and obj.get("agent") == "critic":
+                    task_id = obj.get("task_id")
+                    # Fix the class, not the instance: a whitespace-only
+                    # task_id is treated the same "not a valid id" way
+                    # the trigger side applies in _check_accepted_r3
+                    # below (task_id.strip() empty -> not valid).
+                    if isinstance(task_id, str) and task_id.strip():
+                        critic_task_ids.add(task_id)
+            except Exception:
+                continue
+
+    _absorb_critic(base_lines)
+    _absorb_critic(new_lines)  # pre-pass over the WHOLE batch
+
+    for idx, line in enumerate(new_lines):
+        line_no = len(base_lines) + idx + 1
+        try:
+            obj = json.loads(line)
+            if not isinstance(obj, dict):
+                continue
+            warn = _check_accepted_r3(obj, critic_task_ids)
+            if warn is not None:
+                kind, task_id = warn
+                events.append((line_no, kind, task_id, None))
+        except Exception:
+            continue
+    return events
+
+
+def _check_accepted_r3(obj: dict, critic_task_ids: set):
+    """For ONE already-parsed dict line -- decides whether it triggers
+    (event=="accepted" agent=="builder") and, if so, which kind of warn
+    (or None -- complete silence) it produces against the already
+    collected critic_task_ids (see _collect_r3_events for how it's
+    collected). Split out as its own function by the same pattern
+    _check_delegated_retry follows above for ESCALATION ECHO.
+
+    S5 is computed ONCE (s5_valid) BEFORE the S1/S4 branching -- used
+    in BOTH branches (M1 -- one more independent silencer alongside
+    S2/S3; M2 -- an alternative to a delegated record under the SAME
+    task_id, literally per M2's text: "close with a critic:t-NNN token
+    ... OR a delegated record"). The M2 priority (basis=="critic" with
+    no delegation and no S5, but WITH the concession literal in notes
+    -- M2 is correct, NOT silenced by S2) holds STRUCTURALLY: the
+    basis=="critic" branch is checked first and never looks at
+    CRITIC_SKIP_RE/S2 at all -- S2 only participates in the M1 branch.
+
+    Returns ("no_input", task_id) | ("phantom_basis", task_id) | None."""
+    if obj.get("event") != "accepted":
+        return None
+    if obj.get("agent") != "builder":
+        return None
+    task_id = obj.get("task_id")
+    if not isinstance(task_id, str) or not task_id.strip():
+        return None  # edge: task_id missing/not a string/whitespace-only -> skip
+    basis = obj.get("basis")
+    notes = obj.get("notes")
+    s5_valid = False
+    if isinstance(notes, str):
+        for m in CRITIC_TOKEN_RE.finditer(notes):
+            if m.group(1) in critic_task_ids:
+                s5_valid = True
+                break
+    if basis == "judge":
+        return None  # S4
+    if basis == "critic":
+        if task_id in critic_task_ids or s5_valid:
+            return None  # S1 confirmed by delegation OR a valid S5
+        return ("phantom_basis", task_id)  # M2 (S2 is not consulted here)
+    if isinstance(notes, str) and CRITIC_SKIP_RE.search(notes):
+        return None  # S2
+    if task_id in critic_task_ids:
+        return None  # S3
+    if s5_valid:
+        return None  # S5
+    return ("no_input", task_id)  # M1
+
+
+def _format_r3_line(event: tuple, ascii_only: bool) -> str:
+    """M1/M2 literals -- short by design (a byte-budgeted segment, see
+    MAX_R3_BYTES above). The "R3 MIRROR: line " literal itself never
+    changes. task_id is the only dynamic content, sanitized PER CHANNEL
+    (the same principle _format_escalation_line applies above in this
+    file) -- MAX_MESSAGE_LEN applies to it like any other dynamic
+    element of this file (see _raw_sanitize/_ascii_sanitize).
+    "critic:t-NNN" in both texts is a LITERAL (NNN is a literal format
+    hint for the reader, not a real number, never substituted or
+    sanitized). Rule of three per message: what's wrong, what it
+    breaks, the closing action."""
+    sanitize = _ascii_sanitize if ascii_only else _raw_sanitize
+    line_no, kind, task_id, _extra = event
+    tid = sanitize(str(task_id))
+    if kind == "phantom_basis":
+        return (
+            f"R3 MIRROR: line {line_no} basis=critic for {tid}, no "
+            "delegated(critic) under this task_id - basis is not traceable; "
+            "close with a critic:t-NNN token on the covering verdict OR a "
+            "delegated record"
+        )
+    # "no_input" (M1)
+    return (
+        f"R3 MIRROR: line {line_no} accepted builder {tid}: no critic "
+        "input under this id and no concession - class-completeness review "
+        "will read this acceptance as self-certification; close with "
+        f"delegated(critic) for {tid} / a critic:t-NNN token on the "
+        'covering verdict / "critic: skipped, <reason>" (acceptor strictly '
+        "above)"
+    )
+
+
+def build_r3_segment(events: list, ascii_only: bool = False) -> str:
+    """Assembles the R3 MIRROR part of additionalContext -- TWO
+    INDEPENDENT ceilings: MAX_R3_LINES=5 lines (as before) AND
+    MAX_R3_BYTES=2600 bytes of the accumulated json-wire body
+    (_json_wire_len, see its docstring) -- whichever of the two fires
+    FIRST, the truncation is the same: a "+K more" tail. Greedy pass: a
+    line is added only if BOTH the line counter has NOT yet reached
+    MAX_R3_LINES, AND (for the second and later lines) the byte
+    contribution of the accumulated body (lines already added + "; " +
+    the candidate) does NOT exceed MAX_R3_BYTES -- otherwise the loop
+    stops, the candidate and everything after it fold into "+K more".
+
+    The FIRST line of the segment is ALWAYS accepted unconditionally by
+    bytes (`if head and ...` -- the byte-ceiling check is skipped while
+    head is still empty) -- not a hole, a consequence of a measured
+    fact: one line of this format with a task_id at the MAX_MESSAGE_LEN=500
+    boundary weighs far less than MAX_R3_BYTES=2600 on the wire -- the
+    two independent ceilings of this file (MAX_MESSAGE_LEN on task_id,
+    the short M1/M2 texts) structurally prevent any single line from
+    ever reaching the byte ceiling on its own -- the branch for "the
+    first line alone exceeds the ceiling" would be unreachable
+    (untestable without violating one of those two other invariants
+    separately) -- deliberately not introduced.
+
+    An empty events -> "" -- the caller (combine_context) treats an
+    empty string as "no segment", the same principle as the other
+    build_* functions."""
+    if not events:
+        return ""
+    head: list = []
+    for ev in events:
+        if len(head) >= MAX_R3_LINES:
+            break
+        candidate_line = _format_r3_line(ev, ascii_only)
+        candidate_body = "; ".join(head + [candidate_line])
+        if head and _json_wire_len(candidate_body) > MAX_R3_BYTES:
+            break
+        head.append(candidate_line)
+    # head is never empty here for a non-empty events (the first line
+    # is always accepted, see the docstring above), so `body` is never
+    # empty in the rest>0 branch either -- a plain join, no fallback
+    # form for an empty body.
+    rest = len(events) - len(head)
+    body = "; ".join(head)
+    if rest > 0:
+        body += f"; +{rest} more"
+    return body
+
+
+# --- STDOUT DEADLINE HELPER -----------------------------------------------
+# A non-draining consumer on the other end of the stdout pipe can hold
+# sys.stdout.write() stuck inside the OS on a full pipe, hanging this
+# hook (and the tool call waiting on it) forever. The final stdout
+# write in main() therefore runs on a daemon writer thread, joined by
+# the main thread with a deadline; if the writer thread is still alive
+# once the deadline passes, the caller does an IMMEDIATE os._exit(0) --
+# no further I/O on EITHER channel (stderr risks the same stuck-pipe
+# class on the same non-draining consumer). This hook already ALWAYS
+# returns 0 on the ordinary path (no legal form of an `accepted` line
+# fails the write) -- this branch changes only HOW that rc=0 is
+# reached on a non-draining consumer (previously: hang forever inside
+# sys.stdout.write(); now: a fast rc=0 exit).
+_STDOUT_DEADLINE_DEFAULT = 5.0
+_STDOUT_DEADLINE_MAX = 600.0
+_STDOUT_DEADLINE_ENV = "OSLLM_STDOUT_TIMEOUT"
+
+
+def _stdout_deadline_seconds():
+    """Seconds of the WRITE deadline -- invalid/non-numeric/<=0/>MAX ->
+    the default."""
+    try:
+        value = float(os.environ.get(_STDOUT_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDOUT_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDOUT_DEADLINE_MAX):
+        return _STDOUT_DEADLINE_DEFAULT
+    return value
+
+
+def _write_stdout_deadline(text: str) -> bool:
+    """Writes text as ONE logical write (sys.stdout.write + flush) on a
+    daemon thread; the main thread waits join(deadline). Returns True
+    if the writer thread FINISHED in time (write+flush either
+    succeeded, or raised a regular exception, re-raised here on the
+    main thread AFTER join()), False if the thread is still alive once
+    the deadline passes (a non-draining consumer is holding write()
+    stuck inside the OS on a full pipe). On False the caller MUST
+    os._exit(0) immediately and must not attempt to write ANYWHERE
+    else (see main())."""
+    box: dict = {}
+
+    def _writer():
+        try:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+        except BaseException as e:  # re-raised on the main thread below
+            box["exc"] = e
+
+    thread = threading.Thread(target=_writer, name="stdout-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdout_deadline_seconds())
+    if thread.is_alive():
+        return False
+    if "exc" in box:
+        raise box["exc"]
+    return True
+
+
 def _reconfigure_streams_utf8():
     """The static text (see build_context) goes on BOTH channels --
     without an explicit reconfigure, this machine's default stdout/
@@ -1516,10 +2114,88 @@ def _reconfigure_streams_utf8():
             pass
 
 
+# --- stdin deadline (P4 class; a LOCAL copy, no shared module -- the
+# same helper toolkit/tools/owns_gate.py/dispatch_gate.py already carry
+# -- this file already had the STDOUT half of P4 from an earlier wave,
+# the STDIN half was still a bare sys.stdin.buffer.read())
+# ------------------------------------------------------------------
+
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Seconds to wait for stdin: env override, else the default.
+    Invalid, non-numeric, <=0, or > _STDIN_DEADLINE_MAX all fall back to
+    the default -- there is deliberately NO "0 = wait forever" mode (that
+    would resurrect the exact hang this helper exists to close)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """Returns (bytes, timed_out). Reads stdin to EOF, but no longer
+    than the deadline. Cross-platform by construction: select/poll do
+    not work on pipes on Windows, so a background daemon thread does
+    the actual blocking read and the deadline is enforced via
+    thread.join(timeout). A TTY returns b"" without reading anything.
+    Any read error degrades to b"" (fail-open)."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+
+# A background reader thread may still be blocked deep in a platform
+# read syscall at normal interpreter shutdown, which can crash the
+# process ("Fatal Python error: _enter_buffered_busy") instead of
+# exiting cleanly. main() itself is UNCHANGED (still a plain
+# `return 0`, safe in-process); only the actual __main__ script-exit
+# path below escalates to os._exit().
+_STDIN_DEADLINE_STATE = {"hit": False}
+
+
 def main() -> int:
     _reconfigure_streams_utf8()
     try:
-        raw_bytes = sys.stdin.buffer.read()
+        # P4: byte-safe read via the stdin-deadline helper (replaces
+        # the former direct sys.stdin.buffer.read() -- bounded by
+        # OSLLM_STDIN_TIMEOUT instead of blocking forever with no EOF).
+        raw_bytes, timed_out = _read_stdin_bytes_deadline()
+        if timed_out:
+            _STDIN_DEADLINE_STATE["hit"] = True
+            sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
+            return 0
         raw = raw_bytes.decode("utf-8", errors="replace")
         try:
             payload = json.loads(raw)
@@ -1598,8 +2274,38 @@ def main() -> int:
         except Exception:
             escalation_events = []
 
+        # NOTES LEN ECHO: the SAME payload-scoped base as TIER/WITNESS/
+        # TS-DRIFT/ESCALATION above -- but fully disabled when
+        # used_fallback == True (see the "NOTES LEN ECHO" section above
+        # for the motive: otherwise it would re-evaluate the WHOLE
+        # uncommitted journal tail on every write). Fails open as a
+        # second layer on top of the per-line try/except already inside
+        # _collect_notes_len_events itself.
+        if used_fallback:
+            notes_len_events = []
+        else:
+            try:
+                notes_len_events = _collect_notes_len_events(echo_new_lines, echo_base_lines)
+            except Exception:
+                notes_len_events = []
+
+        # R3 MIRROR: the SAME payload-scoped base as TIER/WITNESS/
+        # ESCALATION above -- this layer runs UNCONDITIONALLY, including
+        # when used_fallback == True (see the "R3 MIRROR" section above:
+        # critic input/basis/notes do not depend on how much time
+        # passed since an unrelated commit -- the same "noisy but not
+        # correctness-false" class TIER/WITNESS/ESCALATION already are,
+        # NOT the class NOTES-LEN/TS-DRIFT belong to). Fails open as a
+        # second layer on top of the per-line try/except already inside
+        # _collect_r3_events itself.
+        try:
+            r3_events = _collect_r3_events(echo_new_lines, echo_base_lines)
+        except Exception:
+            r3_events = []
+
         if (not violations and not tier_events and not witness_visible
-                and not ts_drift_events and not escalation_events):
+                and not ts_drift_events and not escalation_events
+                and not notes_len_events and not r3_events):
             return 0
 
         # Fallback marker: visible ONLY when we're already
@@ -1608,9 +2314,13 @@ def main() -> int:
         fallback_marker = FALLBACK_MARKER_TEXT if used_fallback else ""
 
         context_for_stdout = combine_context(violations, tier_events, witness_events, ts_drift_events,
-                                              escalation_events, fallback_marker, ascii_only=False)
+                                              escalation_events, fallback_marker,
+                                              notes_len_events=notes_len_events, r3_events=r3_events,
+                                              ascii_only=False)
         context_for_stderr = combine_context(violations, tier_events, witness_events, ts_drift_events,
-                                              escalation_events, fallback_marker, ascii_only=True)
+                                              escalation_events, fallback_marker,
+                                              notes_len_events=notes_len_events, r3_events=r3_events,
+                                              ascii_only=True)
 
         sys.stderr.write(context_for_stderr + "\n")
         output = {
@@ -1625,11 +2335,32 @@ def main() -> int:
         # json.loads(). This makes the standard call safe even without
         # a stream reconfigure -- the reconfigure is kept regardless, as
         # protection for the stderr channel.
-        sys.stdout.write(json.dumps(output, ensure_ascii=True) + "\n")
+        #
+        # The final stdout write no longer calls sys.stdout.write()
+        # directly -- it goes through _write_stdout_deadline() (see its
+        # docstring/the "STDOUT DEADLINE HELPER" section above for the
+        # full contract). False (a non-draining consumer is holding
+        # write() stuck on a full pipe past the deadline) -> os._exit(0)
+        # IMMEDIATELY, with NO further write (stderr risks the same
+        # class of stuck pipe on the same non-draining consumer).
+        stdout_text = json.dumps(output, ensure_ascii=True) + "\n"
+        if not _write_stdout_deadline(stdout_text):
+            os._exit(0)
         return 0
     except Exception:
         return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if _STDIN_DEADLINE_STATE["hit"]:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

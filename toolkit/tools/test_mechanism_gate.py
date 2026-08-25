@@ -362,6 +362,206 @@ def test_decide_standalone_skip_line_passes():
     assert code == 0
 
 
+# --- Region-aware SKIP_RE/TIER_LINE_RE: a fenced/blockquoted line does
+# NOT count as a declaration; the SAME line outside a fence DOES --
+# a boundary pair per introduced-limit rule (6a): AT the region
+# boundary (inside the fence) and BEYOND it (outside the fence).
+
+
+def test_skip_line_inside_fence_does_not_pass_the_gate():
+    # AT the boundary: the skip line's own position is fenced -> filtered
+    # out, the gate still requires a real axis block -> code 1.
+    msg = ("docs: showing the reader an example\n\n"
+           "```\naxes: not a mechanism (example syntax for docs)\n```\n")
+    code, reason = mg.decide(msg=msg, block_extra="", staged=["CLAUDE.md"],
+                             map_text="## Axis 1 -- Deployments\n")
+    assert code == 1
+    assert "fail-closed" not in reason  # map exists -- rejected on the axis block, not the map
+    assert "axis block is incomplete" in reason
+
+
+def test_skip_line_outside_fence_passes_the_gate():
+    # BEYOND the boundary: the identical text, NOT inside a fence -> counts,
+    # code 0. Same message shape as the fenced case above, minus the fence.
+    msg = "docs: showing the reader an example\n\naxes: not a mechanism (example syntax for docs)\n"
+    code, _ = mg.decide(msg=msg, block_extra="", staged=["CLAUDE.md"],
+                        map_text="## Axis 1 -- Deployments\n")
+    assert code == 0
+
+
+def test_tier_line_inside_fence_gives_no_tier_line_error_not_pass():
+    # AT the boundary: a tier line fenced as a format example -> filtered
+    # out -> "No tier line" (not a silent pass, not "Not lead tier").
+    msg = ("feat: mechanism X\n\naxis 1: covered\n"
+           "Example of the declaration format:\n```\ntier: fable\n```\n")
+    code, reason = mg.decide_full(
+        msg=msg, block_extra="", staged=["CLAUDE.md"], map_text="## Axis 1 --\n",
+        config_text=None)
+    assert code == 1
+    assert "No \"tier:" in reason
+
+
+def test_tier_line_outside_fence_passes():
+    # BEYOND the boundary: the identical tier line, NOT fenced -> counts,
+    # matches the fable default binding -> code 0.
+    msg = "feat: mechanism X\n\naxis 1: covered\ntier: fable\n"
+    code, _ = mg.decide_full(
+        msg=msg, block_extra="", staged=["CLAUDE.md"], map_text="## Axis 1 --\n",
+        config_text=None)
+    assert code == 0
+
+
+def test_fenced_wrong_tier_spoofer_ignored_missing_real_line_still_rejects():
+    # ALL-MUST-PASS counts only UNQUOTED tier lines: a fenced line with a
+    # deliberately WRONG value ("sonnet", binding defaults to fable) sits
+    # next to the ABSENCE of any real prose tier line -- the fenced
+    # spoofer is dropped from consideration entirely -> "No tier line"
+    # (not "Not lead tier": the spoofer never entered the checked list).
+    msg = ("feat: mechanism X\n\naxis 1: covered\n"
+           "Format example (for documentation):\n```\ntier: sonnet\n```\n")
+    code, reason = mg.decide_full(
+        msg=msg, block_extra="", staged=["CLAUDE.md"], map_text="## Axis 1 --\n",
+        config_text=None)
+    assert code == 1
+    assert "No \"tier:" in reason
+    assert "Not lead tier" not in reason
+
+
+def test_fenced_wrong_spoofer_beside_real_correct_prose_line_passes():
+    # The same fenced wrong-value line, but a REAL correct prose tier line
+    # is ALSO present -- the fenced spoofer is filtered out, only the real
+    # prose line is checked, and it matches -> code 0.
+    msg = ("feat: mechanism X\n\naxis 1: covered\n"
+           "Format example (for documentation):\n```\ntier: sonnet\n```\n"
+           "tier: fable\n")
+    code, reason = mg.decide_full(
+        msg=msg, block_extra="", staged=["CLAUDE.md"], map_text="## Axis 1 --\n",
+        config_text=None)
+    assert code == 0, reason
+
+
+def test_axis_line_inside_fence_still_counts_documented_non_goal():
+    # Deliberate non-goal (see module docstring "AXIS LINES ARE NOT
+    # FILTERED"): an axis line INSIDE a fence still closes the axis --
+    # find_missing() is region-blind by design, not a gap.
+    msg = "feat: mechanism X\n\n```\naxis 1: covered -- both deployments\n```\n"
+    code, _ = mg.decide(msg=msg, block_extra="", staged=["CLAUDE.md"],
+                        map_text="## Axis 1 --\n")
+    assert code == 0
+
+
+def test_block_extra_fenced_axis_text_not_region_scanned_documented_non_goal():
+    # block_extra is never region-scanned (see module docstring "block_extra
+    # IS NEVER REGION-SCANNED") -- a fence-shaped diff text with an axis
+    # line still closes the axis via find_missing(), unaffected by region.
+    code, _ = mg.decide(
+        msg="feat: mechanism X", block_extra="+```\n+axis 1: covered\n+```\n",
+        staged=["CLAUDE.md"], map_text="## Axis 1 --\n")
+    assert code == 0
+
+
+def test_scan_not_called_on_non_mechanism_commit(monkeypatch):
+    # Laziness (I-1): zero scan() calls when the commit doesn't touch any
+    # mechanism path -- the hits branch returns before _maybe_scan runs.
+    calls = {"n": 0}
+    real_scan = mg.scan
+
+    def _counting(text):
+        calls["n"] += 1
+        return real_scan(text)
+
+    monkeypatch.setattr(mg, "scan", _counting)
+    mg.decide_full(
+        msg="```\naxes: not a mechanism (check)\n```\n", block_extra="",
+        staged=["gateway/metrics.py"], map_text="## Axis 1 --\n", config_text=None)
+    assert calls["n"] == 0
+
+
+def test_scan_not_called_without_marker_hint(monkeypatch):
+    # Laziness (I-1): no "axes"/"tier" literal in the message -> no scan
+    # call, even with region marker characters present.
+    calls = {"n": 0}
+    real_scan = mg.scan
+
+    def _counting(text):
+        calls["n"] += 1
+        return real_scan(text)
+
+    monkeypatch.setattr(mg, "scan", _counting)
+    mg.decide(msg="feat: X\n> just a quote with no keywords `code`\n",
+              block_extra="", staged=["CLAUDE.md"], map_text="## Axis 1 --\n")
+    assert calls["n"] == 0
+
+
+def test_scan_not_called_without_region_marker_chars(monkeypatch):
+    # Laziness (I-1): the message has a marker hint but no "`>~" at all ->
+    # no scan call (md_regions would deterministically say "all prose").
+    calls = {"n": 0}
+    real_scan = mg.scan
+
+    def _counting(text):
+        calls["n"] += 1
+        return real_scan(text)
+
+    monkeypatch.setattr(mg, "scan", _counting)
+    mg.decide(msg="feat: X\n\naxis 1: covered\ntier: fable\n",  # no `>~ at all
+              block_extra="", staged=["CLAUDE.md"], map_text="## Axis 1 --\n")
+    assert calls["n"] == 0
+
+
+def test_scan_called_exactly_once_per_decide_full_call(monkeypatch):
+    # Laziness (I-1): ONE scan() call for the whole decide_full(), reused
+    # by both the skip check and the tier check.
+    calls = {"n": 0}
+    real_scan = mg.scan
+
+    def _counting(text):
+        calls["n"] += 1
+        return real_scan(text)
+
+    monkeypatch.setattr(mg, "scan", _counting)
+    msg = "feat: X\n\naxis 1: covered\n```\ntier: fable\n```\ntier: fable\n"
+    mg.decide_full(msg=msg, block_extra="", staged=["CLAUDE.md"],
+                    map_text="## Axis 1 --\n", config_text=None)
+    assert calls["n"] == 1
+
+
+def test_scan_failure_falls_back_to_pre_region_quoted_skip_silences_gate(monkeypatch):
+    # Fail-open (see module docstring "FAIL-OPEN ON SCANNER FAILURE"): if
+    # scan() raises, the region filter becomes a no-op -- the quoted skip
+    # line silences the gate again (the same residual gap the pre-region
+    # gate always had), NOT a new code path.
+    def _broken_scan(text):
+        raise RuntimeError("md_regions exploded")
+
+    monkeypatch.setattr(mg, "scan", _broken_scan)
+    msg = "docs: example\n\n```\naxes: not a mechanism (example)\n```\n"
+    code, _ = mg.decide(msg=msg, block_extra="", staged=["CLAUDE.md"],
+                        map_text="## Axis 1 -- Deployments\n")
+    assert code == 0
+
+
+def test_scan_degraded_falls_back_to_pre_region_quoted_skip_silences_gate(monkeypatch):
+    class _FakeResult:
+        degraded = True
+        reason = "text_too_large"
+        regions = []
+
+    monkeypatch.setattr(mg, "scan", lambda text: _FakeResult())
+    msg = "docs: example\n\n```\naxes: not a mechanism (example)\n```\n"
+    code, _ = mg.decide(msg=msg, block_extra="", staged=["CLAUDE.md"],
+                        map_text="## Axis 1 -- Deployments\n")
+    assert code == 0
+
+
+def test_scan_module_absent_falls_back_to_pre_region_quoted_skip_silences_gate(monkeypatch):
+    monkeypatch.setattr(mg, "scan", None)
+    msg = "docs: example\n\n```\naxes: not a mechanism (example)\n```\n"
+    code, _ = mg.decide(msg=msg, block_extra="", staged=["CLAUDE.md"],
+                        map_text="## Axis 1 -- Deployments\n")
+    assert code == 0
+
+
 # --- Tier declaration on the "mechanism" branch ---------------------------
 
 def test_resolve_lead_binding_defaults_to_fable_without_config():

@@ -1,0 +1,16 @@
+{"event": "delegated", "agent": "critic", "task_id": "t-100"}
+{"event": "accepted", "agent": "builder", "task_id": "t-100", "basis": "critic"}
+{"event": "accepted", "agent": "builder", "task_id": "t-101", "basis": "critic"}
+{"event": "accepted", "agent": "builder", "task_id": "t-102", "notes": "critic: skipped, small fix"}
+{"event": "accepted", "agent": "builder", "task_id": "t-103"}
+{"event": "delegated", "agent": "critic", "task_id": "t-103"}
+{"event": "accepted", "agent": "builder", "task_id": "t-104", "basis": "judge"}
+{"event": "accepted", "agent": "builder", "task_id": "t-105", "notes": "closes:t-100 critic:t-100 done"}
+{"event": "accepted", "agent": "builder", "task_id": "t-106", "notes": "critic:t-999 done"}
+{"event": "accepted", "agent": "builder", "task_id": "t-107"}
+{"event": "accepted", "agent": "builder", "task_id": "   "}
+{"event": "delegated", "agent": "builder", "task_id": "t-109"}
+{"event": "accepted", "agent": "builder", "task_id": "t-109"}
+{"event": "accepted", "agent": "builder", "task_id": "t-105", "basis": "critic", "notes": "critic:t-999"}
+{"event": "accepted", "agent": "builder", "task_id": "t-110", "notes": "critic:t-103 done"}
+{"event": "accepted", "agent": "builder", "task_id": "t-111", "notes": "retroactive fixup, retro accepted"}

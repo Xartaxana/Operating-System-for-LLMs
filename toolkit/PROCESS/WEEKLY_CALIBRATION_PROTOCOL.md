@@ -77,6 +77,13 @@ for the period, and diffs to DECISIONS.md.
    over roughly 100 changed lines, accepted with no
    `delegated(critic)` and no "critic: skipped, <reason>" note in the
    accepting `accepted` event. Source: `git log --stat` + journal.
+   CUMULATIVE SUBCASE (rule 13's judge/critic-integration clause):
+   judge acceptance of a leaf does NOT substitute for a critic entry at
+   integration — this check reads COMMITS, the leaf's acceptance form
+   is irrelevant to it; more than 2 small judge-accepted leaves of the
+   SAME topic/blast-radius, merged in the window with no critic entry
+   on the integration, is a violation of the same class (whether "one
+   topic" holds is a semantic call for the calibrating Lead).
 3. **Rule 6 / the escalation rule.** Two `rejected` events for the
    same task at the same tier with no subsequent `escalated` = a
    violation. An `escalated` with no `rejected` trail = a question
@@ -193,6 +200,33 @@ for the period, and diffs to DECISIONS.md.
     to the check-10 counts; monotonic growth run over run with no
     decision behind it is evidence for simplification — the same
     class as the overhead check above.
+    Also here — WARN LAYER DENSITY (extension from a single hook's
+    output size to the load of EVERY warn layer). Run
+    `python tools/warn_density.py --window-start <ts of the previous
+    calibrated> --window-end <ts of this run>` and record, per layer,
+    its calls/achievable share (or the honest "n/a (population not
+    declared: <reason>)" line for a layer whose registry entry has no
+    measured `reachable` kind) plus the rate-per-100-tool_use number
+    (the one base comparable ACROSS layers) in the `calibrated` event's
+    notes. Layers and carriers: GIVEN-PATH, ROLE-TYPE, FRESHNESS WARN,
+    WRITE-QUOTED, DOD-QUOTED, MANIFEST-QUOTED --
+    tools/dispatch_gate.py; OWNS OVERLAP, BLIND_OWNS, QUOTED_OWNS --
+    tools/owns_gate.py; TIER ECHO, WITNESS ECHO, TS DRIFT, ESCALATION,
+    NOTES LEN, R3 MIRROR, JOURNAL ECHO -- tools/journal_echo.py; NEGATIVE LINT --
+    tools/negative_lint.py; Negative
+    claim -- tools/claim_control_gate.py; Search returned nothing --
+    tools/search_control_gate.py; Command hygiene -- tools/
+    hygiene_gate.py. LIST IS OPEN: a live layer missing from this list
+    is a finding about THIS CHECK, not about the layer; a layer NAMED
+    here but missing from `tools/warn_layers.json` is a finding about
+    the registry (`warn_density.py`'s own `--check` mode surfaces both
+    directions as its reconciliation section). A layer stably marking
+    tens of percent of its own achievable population is a finding: not
+    "the layer is strict", but a mechanism defect, because a warn that
+    dense trains the reader to ignore it. No share threshold is set in
+    advance -- the run's own judgment names one; the OBLIGATION is to
+    name every layer's share as a number (or the honest n/a), not to
+    hit a target.
 12. **SIBLING_MAP liveness.** Every concrete path named in the map
     exists; the rules/mechanisms it names are still live. A dead path
     is a violation of the map's own same-commit-maintenance rule.
@@ -260,7 +294,18 @@ for the period, and diffs to DECISIONS.md.
     that line — the marker disappearing after a hook edit is a
     regression. Reconciling the actual tier against reality is check
     5's job; this subcheck only verifies the declaration's wording
-    stays honest.
+    stays honest. AUTO-BOOT EMISSION CLOSING LITERAL (coordinated with
+    the session-hook node's own delta): the same window transcripts
+    checked above for the "NOW: ..." line are also checked for the
+    boot hook's CLOSING line for its layer-A emission — a count of
+    files/lines/bytes taken BY EMISSION (what actually got written to
+    stdout), not by what exists on disk; the closing line's absence on
+    a transcript that otherwise shows a live boot is the same class of
+    violation as (g)'s own "NOW: ..." absence — a truncated emission
+    with no closing count is indistinguishable from a healthy one
+    without it. On a fresh install with no BOOT.md yet (layer A empty),
+    the honest "layer A empty" line takes its place — silence in
+    either world is the violation, not the specific wording.
     (h) traffic_kind honesty: a spot-scan of the window's requests for
     the signature of an unmarked generator — a multi-alias batch in a
     single tick (several models sharing a millisecond-precision ts)
@@ -531,7 +576,11 @@ sub-points land inside THIS file's existing check 1, as sub-points (c)/
 (d), for the same reason. Source checks 15/17/27/28 are NOT ported (15
 duplicates this file's own already-ported check 15; 17 is a reserved
 placeholder in both files independently; 27/28 are specific to a
-sibling deployment this deployment does not run).
+sibling deployment this deployment does not run). Check 30 continues
+the same pattern (kit v0.9.0 release batch, node C4): the local
+equivalent of a source deployment's Opportunity-scan-of-delegation
+check, ported under this file's own continuous numbering rather than
+the source's own number.
 
 20. **Leaf-routing judge acceptance (rule 13).** Mechanism: rule 13 of
     CLAUDE.md's core policy, a `"judge"` value in the journal
@@ -606,7 +655,14 @@ sibling deployment this deployment does not run).
     rows, not only the configured hooks. The counterpart of this
     check, on the side of whoever maintains the kit you're adopting
     from, is their own port-batch delta check (their calibration
-    protocol).
+    protocol). (d) Install-parity leg: CONTENT actually landed, not just ledger
+    rows — a recorded "Kit snapshot revision" with no matching
+    "Install parity: ..." record is a finding, the same class
+    `tools/wiring_check.py`'s own notices channel (K12) surfaces as a
+    non-blocking WARN at SessionStart; this window check runs
+    `tools/install_parity.py --check` against the CURRENT tree and
+    treats any MISSING/UNKNOWN anchor with no matching waiver row as
+    the finding, not a bare ledger-row read.
 
 23. **Closing out the previous run (retro-contour).** Open the notes
     of the last `calibrated` event and that run's findings: each is
@@ -782,6 +838,21 @@ sibling deployment this deployment does not run).
     present and looks installed. An empty window (no port-batches
     shipped in the period) is noted explicitly — "no outgoing
     batches".
+
+30. **Opportunity scan of delegation (the assignment table's Update
+    Rule 2, executable).** For the LARGEST blocks of the window's
+    self-executed Lead-class work (usage records: main chains with no
+    sidechain; git diffs of Lead sessions): for each one, ask "could
+    this largest block of self-executed Lead work have gone DOWN to an
+    existing tier, and did not — and what stopped it (no spec / the
+    tier lacks the tool / an operator decision / nothing — a miss)."
+    Output: 0..N new table rows; "no candidates" is a valid outcome as
+    an explicit line in notes. This complements the violation-hunting
+    checks above — the one place calibration looks for OPPORTUNITIES,
+    not failures. CADENCE: this check runs ONCE EVERY FOUR calibration
+    runs, or on the operator's word; a skipped run gets the line "check
+    30: cadence, next run #NN". The signal for revising the check's own
+    wording is not "empty" but "costs attention and catches nothing".
 
 ## Closing out a run
 

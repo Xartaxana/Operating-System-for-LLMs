@@ -26,6 +26,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 import enforcement_probe
 
 SOURCE_SCRIPT = Path(__file__).resolve().parent / "enforcement_probe.py"
@@ -188,6 +190,57 @@ def test_referenced_tool_paths_extracts_from_text():
 
 def test_referenced_tool_paths_empty_text_empty_set():
     assert enforcement_probe._referenced_tool_paths("") == set()
+
+
+# ---------------------------------------------------------------------
+# Dual command-form parsing (flat "python tools/x.py" AND the
+# $CLAUDE_PROJECT_DIR-qualified quoted form, same two shapes
+# tools/wiring_check.py's own _HOOK_COMMAND_RE recognizes), plus an
+# adversarial battery of illegal neighboring forms that must NOT match
+# (builder-role rule 6a: >=6 neighboring illegal forms).
+# ---------------------------------------------------------------------
+
+
+def test_referenced_tool_paths_qualified_claude_project_dir_form():
+    text = 'blah "command": "python \\"$CLAUDE_PROJECT_DIR/tools/foo_bar.py\\"" end'
+    paths = enforcement_probe._referenced_tool_paths(text)
+    assert paths == {"tools/foo_bar.py"}
+
+
+def test_referenced_tool_paths_both_forms_of_same_file_dedupe():
+    text = (
+        'python tools/foo_bar.py and also '
+        'python "$CLAUDE_PROJECT_DIR/tools/foo_bar.py"'
+    )
+    paths = enforcement_probe._referenced_tool_paths(text)
+    assert paths == {"tools/foo_bar.py"}
+
+
+def test_referenced_tool_paths_mixed_forms_both_captured():
+    text = 'python tools/a.py then python "$CLAUDE_PROJECT_DIR/tools/b.py"'
+    paths = enforcement_probe._referenced_tool_paths(text)
+    assert paths == {"tools/a.py", "tools/b.py"}
+
+
+@pytest.mark.parametrize(
+    "illegal_snippet",
+    [
+        # (1) quoted flat form -- quote/prefix must appear together.
+        'python "tools/foo_bar.py"',
+        # (2) qualified prefix without quotes.
+        "python $CLAUDE_PROJECT_DIR/tools/foo_bar.py",
+        # (3) single quotes.
+        "python '$CLAUDE_PROJECT_DIR/tools/foo_bar.py'",
+        # (4) wrong interpreter.
+        "python3 tools/foo_bar.py",
+        # (5) missing closing quote.
+        'python "$CLAUDE_PROJECT_DIR/tools/foo_bar.py',
+        # (6) wrong env-var name (typo class).
+        'python "$CLAUDE_PROJECT_DIRECTORY/tools/foo_bar.py"',
+    ],
+)
+def test_referenced_tool_paths_adversarial_illegal_forms_do_not_match(illegal_snippet):
+    assert enforcement_probe._referenced_tool_paths(illegal_snippet) == set()
 
 
 def test_chain_paths_includes_known_repo_hooks():

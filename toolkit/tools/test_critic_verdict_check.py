@@ -23,7 +23,10 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+import pytest
 
 import critic_verdict_check as cvc
 
@@ -72,12 +75,22 @@ def _base_blocker():
 
 
 def _run_cli(args, input_text=None):
+    # critic_verdict_check now decodes stdin as BYTES, strictly UTF-8 (the
+    # stdin-deadline helper this task adds), not via sys.stdin.read()'s
+    # locale-dependent text mode -- text=True with no explicit encoding=
+    # would encode input in this machine's LOCALE encoding (not
+    # necessarily UTF-8), which would desync from the child's now-strict
+    # UTF-8 decode on non-ASCII content. encoding="utf-8" here pins BOTH
+    # sides (the parent writes the input as UTF-8 bytes -- the same form
+    # a real harness uses; the output is decoded as UTF-8 for the str
+    # asserts) -- changes no test's semantics, only the transport.
     return subprocess.run(
         [sys.executable, str(CHECKER_PATH)] + args,
         cwd=str(REPO_ROOT),
         input=input_text,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=15,
     )
 
@@ -410,3 +423,110 @@ def test_verdict_enum_each_value_accepted_one_case_per_value():
         ok, errors, obj = cvc.check_text(_wrap(builder()))
         assert ok, errors
         assert obj["verdict"] == value
+
+
+# ---------------------------------------------------------------------------
+# stdin deadline (this task's addition): a non-draining/never-closing
+# writer on stdin must not hang this script forever -- a daemon reader
+# thread + a join(deadline), the same helper form this toolkit's other
+# stdin-reading hooks already carry, ported here as a local copy.
+# ---------------------------------------------------------------------------
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+
+
+@pytest.mark.parametrize("raw_value,expected", [
+    ("", 10.0),
+    ("abc", 10.0),
+    ("0", 10.0),
+    ("-1", 10.0),
+    ("1e9", 10.0),
+    ("600.1", 10.0),  # BEYOND the MAX boundary -> default (rule 6a)
+    ("600", 600.0),  # EXACTLY at the MAX boundary -> passes through (rule 6a)
+    ("5", 5.0),
+])
+def test_stdin_deadline_env_parsing_branches(raw_value, expected, monkeypatch):
+    monkeypatch.setenv(cvc._STDIN_DEADLINE_ENV, raw_value)
+    assert cvc._stdin_deadline_seconds() == expected
+
+
+def test_stdin_deadline_env_absent_uses_default(monkeypatch):
+    monkeypatch.delenv(cvc._STDIN_DEADLINE_ENV, raising=False)
+    assert cvc._stdin_deadline_seconds() == cvc._STDIN_DEADLINE_DEFAULT == 10.0
+
+
+def _run_holding_stdin_open(deadline, extra_wait=5.0):
+    """Holds the process's stdin open, closing and writing nothing -- a
+    real "writer that never closed" (Popen, NOT Popen.communicate(),
+    which itself closes stdin and would cancel the simulation)."""
+    env = os.environ.copy()
+    env["OSLLM_STDIN_TIMEOUT"] = str(deadline)
+    proc = subprocess.Popen(
+        [sys.executable, str(CHECKER_PATH), "-"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=env,
+    )
+    try:
+        proc.wait(timeout=deadline + extra_wait)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise
+    out = proc.stdout.read()
+    err = proc.stderr.read()
+    proc.stdin.close()
+    proc.stdout.close()
+    proc.stderr.close()
+    return proc.returncode, out, err
+
+
+def test_stdin_deadline_timeout_rc_matches_empty_input_one_stderr_line():
+    # On timeout: rc == the same failure code an empty/invalid input gets
+    # (1, not 0 -- this script is not a hook), stdout is EMPTY, stderr is
+    # exactly one line with the script's own filename prefix. Also proves
+    # the __main__ escalation (os._exit) doesn't crash the process with a
+    # "Fatal Python error" -- rc==1 is a clean exit, not a crash code.
+    rc, out, err = _run_holding_stdin_open(1.0)
+    assert rc == 1
+    assert out == b""
+    expected_err = f"{CHECKER_PATH.name}: {_STDIN_DEADLINE_MSG}\n".encode("utf-8")
+    assert err.replace(b"\r\n", b"\n") == expected_err
+    assert b"Fatal Python error" not in err
+
+
+def test_stdin_deadline_timeout_lands_within_deadline_plus_margin_boundary():
+    # A short deadline (0.3s): the actual elapsed time stays within
+    # deadline+margin, never hangs forever (a lower bound of ~0.25s --
+    # join(timeout) sometimes returns slightly early -- same tolerance
+    # class as journal_echo.py's own stdout-deadline test battery).
+    t0 = time.monotonic()
+    rc, out, err = _run_holding_stdin_open(0.3)
+    elapsed = time.monotonic() - t0
+    assert rc == 1
+    assert out == b""
+    assert 0.25 <= elapsed < 1.3, f"timeout should land within deadline+margin, took {elapsed:.3f}s"
+
+
+def test_stdin_deadline_quick_close_before_deadline_still_valid():
+    # A positive control on the NON-timeout path: the writer closes the
+    # channel BEFORE the deadline -- the ordinary path must not have
+    # regressed after moving to the byte-deadline helper.
+    env = os.environ.copy()
+    env["OSLLM_STDIN_TIMEOUT"] = "5.0"
+    payload = _wrap(_base_fit()).encode("utf-8")
+    proc = subprocess.Popen(
+        [sys.executable, str(CHECKER_PATH), "-"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=env,
+    )
+    proc.stdin.write(payload)
+    proc.stdin.close()
+    proc.wait(timeout=5.0)
+    out = proc.stdout.read()
+    err = proc.stderr.read()
+    proc.stdout.close()
+    proc.stderr.close()
+    assert proc.returncode == 0
+    assert out.decode("utf-8").strip().startswith("VERDICT OK:")
+    assert err == b""

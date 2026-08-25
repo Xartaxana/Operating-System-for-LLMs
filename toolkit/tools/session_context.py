@@ -108,9 +108,11 @@ instead.
 
 import datetime
 import json
+import os
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 # N4 (carried forward from review): this import used to sit
@@ -154,6 +156,29 @@ BOOT_BREACH_THRESHOLD = 100000
 BOOT_BUDGET_LIMIT = 100000
 
 _ALWAYS_INCLUDE_BOOT_FILE = "CLAUDE.md"
+
+# Personal WARN threshold for the kit's OWN CLAUDE.md, layered on top of
+# the whole-boot-path thresholds above (a narrower, earlier-firing signal:
+# only the CLAUDE-layer of a boot diet is due, not necessarily the whole
+# boot path). Simplified relative to the staff deployment's own ratchet
+# (WARN-only here, no BREACH/ratchet-ceiling machinery -- not requested
+# by this port): a fixed WARN constant with >=15% headroom over a
+# measured baseline, re-derived by hand when it goes stale.
+#
+# Re-derived 2026-08-25 (kit-v0.9.0 port): toolkit/CLAUDE.md was 48716
+# bytes AT THE TIME OF THIS MEASUREMENT -- taken AFTER an earlier
+# port of toolkit/CLAUDE.md's content landed (the prior baseline below,
+# 46323 bytes, was measured BEFORE that port and is now superseded).
+# WARN = ceil(measured * 1.15 / 100) * 100:
+# ceil(48716 * 1.15 / 100) * 100 = 56100 (margin over measured:
+# (56100 - 48716) / 48716 = ~15.16%, >= the 15% floor).
+# Prior measurement (now stale, kept for history): 2026-08-25 node C1,
+# 46323 bytes -> CLAUDE_WARN = 53300.
+# RE-DERIVE AT ONBOARDING: recompute this constant as
+# ceil(os.path.getsize("CLAUDE.md") * 1.15 / 100) * 100 whenever it goes
+# stale (kit CLAUDE.md size drifted) -- lowering is always safe; raising
+# should keep the same >=15% margin.
+CLAUDE_WARN = 56100
 
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
@@ -536,26 +561,203 @@ def quota_lines(gateway_root: Path, now: datetime.datetime = None) -> list:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# stdin-deadline helper: reading stdin to EOF must never hang session start
+# forever on a harness that opens the pipe but never actually writes/closes
+# it. A daemon thread does the blocking read; the main thread joins on a
+# deadline instead of calling sys.stdin.read() directly. TTY input is still
+# never read at all (unchanged contract) -- read_stdin_payload() below keeps
+# that guard. On a timeout, the payload degrades to "no payload" (None),
+# never a crash -- the rest of this hook already treats None exactly like
+# "no model info in the harness's stdin JSON".
+# ---------------------------------------------------------------------------
+
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Seconds to wait for stdin: env override, else the default.
+    Invalid, non-numeric, <=0, or > _STDIN_DEADLINE_MAX all fall back to
+    the default -- there is deliberately NO "0 = wait forever" mode (that
+    would resurrect the exact hang this helper exists to close)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """Returns (bytes, timed_out). Reads stdin to EOF, bounded by the
+    deadline above. A background daemon thread does the actual blocking
+    read; the deadline is enforced via thread.join(timeout) -- portable
+    across platforms where select/poll do not work on pipes (Windows).
+    A TTY returns b"" immediately, without reading anything (same guard
+    read_stdin_payload() used to apply itself). Any read error degrades to
+    b"" -- fail-open, same discipline as the rest of this hook."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+
+# Set by read_stdin_payload() when a stdin read actually timed out. The
+# stdin-reader thread above is left running as a daemon (it may still be
+# blocked deep inside a platform read syscall) -- on normal interpreter
+# shutdown, a background thread blocked on the real stdin buffered reader
+# can crash the process ("Fatal Python error: _enter_buffered_busy")
+# instead of exiting cleanly. main()'s own try/except does NOT see this
+# (read_stdin_payload() already degraded to None, business as usual) --
+# the crash would only surface LATER, at normal process exit. The
+# __main__ guard at the bottom of this file checks this flag AFTER
+# main() has fully returned and calls os._exit() instead of falling
+# through to the normal interpreter shutdown path.
+_STDIN_DEADLINE_STATE = {"hit": False}
+
+
 def read_stdin_payload():
     """Reads and JSON-parses stdin, but ONLY when stdin is not a TTY.
     A SessionStart hook receives the harness's JSON on stdin; a human
     running this script by hand from an interactive shell has no piped
-    input, and blocking on sys.stdin.read() there would hang forever --
-    the isatty() guard is what keeps both modes safe. Any failure
-    (unreadable stdin, empty input, invalid JSON) returns None rather
-    than raising; callers treat None exactly like "no model info"."""
-    if sys.stdin.isatty():
+    input -- the TTY guard (now inside _read_stdin_bytes_deadline()) is
+    what keeps both modes safe, and a non-TTY read that never reaches EOF
+    is now bounded by the stdin deadline above instead of blocking
+    forever. Any failure (unreadable stdin, empty input, invalid JSON, a
+    stdin deadline) returns None rather than raising; callers treat None
+    exactly like "no model info". Reads raw bytes via the deadline helper
+    and decodes explicitly (utf-8, replace) rather than going through
+    Python's platform-encoding text layer."""
+    raw_bytes, timed_out = _read_stdin_bytes_deadline()
+    if timed_out:
+        _STDIN_DEADLINE_STATE["hit"] = True
+        try:
+            sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
+        except Exception:
+            pass
         return None
-    try:
-        data = sys.stdin.read()
-    except Exception:
+    if not raw_bytes:
         return None
-    if not data or not data.strip():
+    data = raw_bytes.decode("utf-8", "replace")
+    if not data.strip():
         return None
     try:
         return json.loads(data)
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# stdout-deadline helper: mirrors the stdin-deadline helper above (same
+# daemon-thread-plus-join(deadline) shape), for WRITING instead of reading.
+# A landed SessionStart hook can write several KB in one call; a harness
+# that does not drain its child's stdout concurrently would otherwise block
+# that write forever once the OS pipe fills -- session start would never
+# return, which is strictly worse than every other failure mode this file
+# already guards against (truncation, a blanked context). On a timeout,
+# main() must call os._exit(0) immediately (see _write_stdout_deadline's
+# own docstring below for why even a diagnostic write would hang the same
+# way).
+# ---------------------------------------------------------------------------
+
+_STDOUT_DEADLINE_DEFAULT = 5.0
+_STDOUT_DEADLINE_MAX = 600.0
+_STDOUT_DEADLINE_ENV = "OSLLM_STDOUT_TIMEOUT"
+
+
+def _stdout_deadline_seconds():
+    """Seconds to wait for the write to complete: env override, else the
+    default. Same validation shape as _stdin_deadline_seconds() above:
+    invalid, non-numeric, <=0, or > _STDOUT_DEADLINE_MAX fall back to the
+    default; no "0 = wait forever" mode, same reasoning as the read side."""
+    try:
+        value = float(os.environ.get(_STDOUT_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDOUT_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDOUT_DEADLINE_MAX):
+        return _STDOUT_DEADLINE_DEFAULT
+    return value
+
+
+def _write_stdout_deadline(text: str) -> bool:
+    """Writes `text` in ONE logical write (sys.stdout.write + flush) on a
+    daemon thread; the main thread joins on a deadline -- the write-side
+    mirror of _read_stdin_bytes_deadline() above. The write stays exactly
+    ONE call (never split into chunks): chunking would not help against a
+    non-draining consumer -- it blocks on total volume, not on the size of
+    a single call, and splitting would break the "one logical write"
+    invariant the rest of this module relies on.
+
+    Returns True if the writer thread finished within the deadline
+    (write+flush either succeeded, or raised an ordinary exception -- see
+    below); False if the thread is still alive when the deadline expires:
+    a non-draining consumer left write() stuck inside the OS on a full,
+    unread pipe.
+
+    An exception raised INSIDE the writer thread (e.g. OSError on an
+    already-closed stdout) is caught there and RE-RAISED here, on the
+    main thread, after join() -- but only on the True path (the thread
+    actually finished): callers see this exactly as they would have seen
+    it from a direct sys.stdout.write() call, so main()'s existing
+    fail-open except block is unchanged. On an actual timeout (False)
+    there is no exception to raise -- the thread is still blocked inside
+    the write syscall itself, not failed.
+
+    CRITICAL for the caller: on False (timeout), it MUST call os._exit(0)
+    immediately and attempt NO further writes anywhere -- not stdout (the
+    same stuck channel), not stderr (often the same terminal/consumer).
+    The writer thread is, at that moment, blocked inside the OS on a full
+    pipe; any further write to the same class of resource would hang for
+    the same reason, so attempting to report the timeout would itself
+    become a second hang rather than a diagnostic. The thread stays a
+    daemon and keeps hanging in the background after os._exit(0) --
+    os._exit() does not wait for it or touch its state (interpreter
+    shutdown/atexit is skipped entirely), which is what makes the
+    immediate exit safe regardless of whether that thread ever unblocks."""
+    box: dict = {}
+
+    def _writer():
+        try:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+        except BaseException as e:  # re-raised on the main thread below
+            box["exc"] = e
+
+    thread = threading.Thread(target=_writer, name="stdout-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdout_deadline_seconds())
+    if thread.is_alive():
+        return False
+    if "exc" in box:
+        raise box["exc"]
+    return True
 
 
 def extract_model_id(payload):
@@ -581,6 +783,34 @@ def extract_model_id(payload):
         return model_id
 
     return None
+
+
+def extract_source(payload) -> "str | None":
+    """Looks for the SessionStart "source" field on the harness payload
+    (mirrors extract_model_id's defensive style). Returns
+    payload.get("source") only when payload is a dict AND that value is
+    a non-empty string; every other shape (non-dict payload, missing
+    key, empty string, non-string value) returns None."""
+    if not isinstance(payload, dict):
+        return None
+    source = payload.get("source")
+    if isinstance(source, str) and source:
+        return source
+    return None
+
+
+# Sources meaning "state already carries over" -- Layer A inline
+# injection must NOT fire for these (re-injecting the whole boot-file
+# block on every resume/compact would pay its full byte cost again, on
+# top of what a resume/compact summary already covers). Any OTHER
+# source string, including None (missing/unrecognized), still fires --
+# fail TOWARD booting rather than silently going quiet on a future
+# harness source value this module does not yet recognize.
+_AUTOBOOT_NO_FIRE_SOURCES = {"resume", "compact"}
+
+
+def should_emit_layer_a(source) -> bool:
+    return source not in _AUTOBOOT_NO_FIRE_SOURCES
 
 
 def model_tier(model_id: str) -> str:
@@ -698,7 +928,26 @@ def boot_budget_lines(root: Path) -> list:
     else:
         status_suffix = ""
 
-    lines = [base + missing_suffix + status_suffix]
+    # Personal CLAUDE.md ratchet suffix -- printed ALWAYS (unlike the
+    # WARN/BREACH pieces above, which only appear once the WHOLE boot
+    # path is over threshold): this is a narrower, earlier signal that
+    # only the CLAUDE.md layer of a boot diet is due. Comparison is
+    # strictly ">", matching BOOT_WARN/BREACH above; a missing CLAUDE.md
+    # prints "missing", never "under budget".
+    claude_size = next(
+        (size for name, size in sizes if name == _ALWAYS_INCLUDE_BOOT_FILE), 0
+    )
+    if _ALWAYS_INCLUDE_BOOT_FILE in missing:
+        claude_suffix = f" | {_ALWAYS_INCLUDE_BOOT_FILE}: missing"
+    else:
+        claude_suffix = f" | {_ALWAYS_INCLUDE_BOOT_FILE}: {claude_size}/{CLAUDE_WARN}"
+        if claude_size > CLAUDE_WARN:
+            claude_suffix += (
+                " OVER -> boot-diet due (CLAUDE layer; report first,"
+                " operator word starts it)"
+            )
+
+    lines = [base + missing_suffix + status_suffix + claude_suffix]
 
     if status_suffix:
         top3 = sorted(sizes, key=lambda t: t[1], reverse=True)[:3]
@@ -1127,7 +1376,14 @@ def wiring_summary_line(root: Path) -> str:
     full multi-line report). Wrapped in its own try/except -- an
     import or call failure here must not blank NOW/MODEL/JOURNAL/etc.
     via main()'s single outer boundary, same rationale as
-    quota_lines()'s local catch."""
+    quota_lines()'s local catch.
+
+    A non-empty "notices" list (a SEPARATE, non-blocking class -- see
+    wiring_check.py's own check_install_parity_notices()) is appended
+    as ", N notice(s)" -- on EITHER branch (OK or issue-count), never
+    changing which branch fires; a missing/absent "notices" key (an
+    older wiring_check.py, or a test double supplying only ok/issues)
+    degrades to an empty list, not an exception."""
     try:
         import wiring_check
 
@@ -1135,10 +1391,329 @@ def wiring_summary_line(root: Path) -> str:
     except Exception as e:
         return f"WIRING: check unavailable ({type(e).__name__})"
 
+    notice_count = len(result.get("notices") or [])
+    notice_suffix = f", {notice_count} notice(s)" if notice_count else ""
+
     if result.get("ok"):
-        return "WIRING: OK"
+        return f"WIRING: OK{notice_suffix}"
     count = len(result.get("issues") or [])
-    return f"WIRING: {count} issue(s), run tools/wiring_check.py --check"
+    return f"WIRING: {count} issue(s){notice_suffix}, run tools/wiring_check.py --check"
+
+
+# ---------------------------------------------------------------------------
+# LAYER A CONTENT: prints the kit's own boot-file content verbatim,
+# alongside the boot-lite context above, instead of leaving a session to
+# go re-read those files itself. Ported from the staff deployment's
+# equivalent AUTO-BOOT hybrid mechanism (its own session_context.py).
+#
+# RESOLVED (Lead decision: kit's Layer A
+# = the boot list WITHOUT the state file): the kit's own BOOT.md now
+# carries the SAME explicit split the staff deployment's BOOT.md
+# carries -- a "## Layer A" heading (README/SYSTEM_PROMPT/DECISIONS/
+# DELEGATION_TABLE) followed by a "## Layer B" heading
+# (CURRENT_CONTEXT.md, the kit's own state file, read by the session
+# itself, never injected here). layer_a_file_names() below parses ONLY
+# the "Read X.md" lines that fall inside the "## Layer A" section (up
+# to the next "## " heading, or end of file if there is none) --
+# CURRENT_CONTEXT.md is excluded from injection by construction, the
+# same way the staff deployment's own Layer A never includes its state
+# file. TEMPORAL EDGE, BOTH WORLDS (R11(c)/D-0054): a BOOT.md that
+# still carries no "## Layer A" heading at all (an older/unmarked form,
+# or a fresh installation before this port ever landed) falls back to
+# the OLD flat-list behavior, MINUS CURRENT_CONTEXT.md by NAME (a
+# hardcoded exclusion, not a section boundary) -- the fallback still
+# never injects the state file, it just cannot rely on markup that
+# is not there.
+# ---------------------------------------------------------------------------
+
+# The state file this kit's own Layer A must never include, in BOTH the
+# markup-aware path and the flat-list fallback (see above).
+_LAYER_A_EXCLUDED_STATE_FILE = "CURRENT_CONTEXT.md"
+
+# Node E item 8: a short, EN, imperative directive printed as the FIRST
+# line of the injected block -- tells the reading session it does not
+# need to re-read the files about to follow, and that Layer B (state)
+# is its own separate responsibility. Placed ahead of the "--- BOOT
+# LAYER A INJECTED ..." opening line itself (see layer_a_lines()).
+# Prefix DELIBERATELY distinct from the "AUTO-BOOT: Layer A is <N>
+# bytes..." threshold-notice line above (a different message on the
+# same block) -- test_layer_a_lines_*_warn_threshold_* below asserts
+# "AUTO-BOOT: Layer A is" absence/presence to detect ONLY that notice;
+# a shared prefix would give it a false positive on every call.
+LAYER_A_DIRECTIVE_LINE = (
+    "AUTO-BOOT: read Layer A below -- do not re-read these files "
+    "yourself; read Layer B (CURRENT_CONTEXT.md) yourself, it is not "
+    "injected here; see the closing '--- END BOOT LAYER A: ...' line "
+    "for the emission contract (a missing closing line means a "
+    "truncated injection -- read the file(s) directly in that case)."
+)
+
+# WARN (not a hard cap): the total on-disk byte sum of every layer-A file
+# crossing this threshold prints one loud notice line but never truncates
+# or skips injection -- the threshold exists so growth of the boot-file
+# set is a visible decision, not silent drift. Same value as the staff
+# deployment's own constant (16384 bytes) -- a project constant, not
+# derived from any one measurement, so it carries no monotonicity claim.
+LAYER_A_INLINE_WARN_BYTES = 16384
+
+# Meaning-preserving transliteration table for a narrow console codepage
+# (this hook's own ASCII-safe-output invariant, see the module
+# docstring): boot-file prose can legitimately carry em/en dashes,
+# arrows, ellipses and curly quotes for MEANING, not decoration -- a raw
+# non-ASCII print risks either an un-encodable write crashing mid-flush,
+# or a silent meaning-losing '?' drop. Anything outside this table still
+# degrades via encode("ascii","replace") rather than crashing the write,
+# but is reported with a loud per-file WARNING line (see layer_a_lines()
+# below) rather than silently swallowed -- meaning loss must never be
+# silent.
+_LAYER_A_TRANSLIT = {
+    "—": "--",  # em dash
+    "–": "-",  # en dash
+    "→": "->",  # right arrow
+    "←": "<-",  # left arrow
+    "…": "...",  # ellipsis
+    "«": '"',  # left guillemet
+    "»": '"',  # right guillemet
+    "“": '"',  # left double quote
+    "”": '"',  # right double quote
+    "‘": "'",  # left single quote
+    "’": "'",  # right single quote
+    " ": " ",  # non-breaking space
+}
+_LAYER_A_TRANSLATE_TABLE = str.maketrans(_LAYER_A_TRANSLIT)
+
+# Control characters stripped from layer-A content lines -- same ranges
+# _ascii_sanitize already strips (\x00-\x1f\x7f) EXCEPT \t (boot files
+# may use it inside code fences). \r/\n are never seen here -- the
+# caller already splits on them via str.splitlines() before calling
+# _ascii_content_line per line.
+_LAYER_A_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _ascii_content_line(s: str) -> "tuple[str, int, int]":
+    """Returns (ascii_safe_line, translit_count, unmapped_count) for ONE
+    logical line of layer-A file content. A deliberately separate helper
+    from _ascii_sanitize above -- that one truncates to 80 chars, unusable
+    for a prose line that can legitimately run past 500 characters. Never
+    truncates, never raises on its own (its caller, layer_a_lines(),
+    still wraps everything in its own try/except regardless).
+
+    translit_count is how many characters were rewritten via the
+    meaning-preserving table above -- reported by the caller as a soft
+    "[note: ...]" line when it is the ONLY thing that fired for a file.
+    unmapped_count is how many remaining non-ASCII characters, AFTER the
+    table, had no mapping and were replaced with '?' -- reported by the
+    caller as a loud "[WARNING: ... MEANING MAY BE LOST]" line."""
+    s = _LAYER_A_CONTROL_RE.sub("", s)
+    translit_count = sum(1 for ch in s if ch in _LAYER_A_TRANSLIT)
+    s = s.translate(_LAYER_A_TRANSLATE_TABLE)
+    unmapped_count = sum(1 for ch in s if ord(ch) > 127)
+    if unmapped_count:
+        s = s.encode("ascii", "replace").decode("ascii")
+    return s, translit_count, unmapped_count
+
+
+def _layer_a_unavailable_line(exc: Exception) -> str:
+    """Single degraded line used both by layer_a_lines()'s own
+    try/except AND by main()'s second, outer defensive wrapper around
+    its call -- factored out so both print the IDENTICAL text rather
+    than risking two messages that drift apart. f"{exc}" calls
+    exc.__str__() implicitly, which could itself raise for a
+    pathological exception subclass -- wrapped in its own try with a
+    CONSTANT fallback, not a second str(exc) attempt that could raise
+    the exact same way again."""
+    try:
+        detail = _ascii_sanitize(f"{type(exc).__name__}: {exc}", 200)
+    except Exception:
+        detail = f"{type(exc).__name__}: <unprintable exception>"
+    return (
+        f"AUTO-BOOT: Layer A inline unavailable ({detail}) -- read the "
+        "files listed in BOOT.md yourself."
+    )
+
+
+# Node E item 8: the "## Layer A" heading BOOT.md now carries -- start
+# of the markup-aware slice. Matched at the start of a line, tolerant
+# of an em/en-dash or plain "--"/":" trailer after "Layer A" (the exact
+# heading text is BOOT.md's own prose, not pinned character-for-
+# character here).
+_LAYER_A_HEADING_RE = re.compile(r"^##\s*Layer\s+A\b", re.IGNORECASE | re.MULTILINE)
+# Any NEXT "## "-level heading (Layer B or otherwise) closes the Layer
+# A slice -- the parser does not need to recognize "Layer B" BY NAME,
+# only that Layer A's own section has ended.
+_NEXT_HEADING_RE = re.compile(r"^##\s", re.MULTILINE)
+
+
+def layer_a_file_names(root: Path) -> list:
+    """Kit's own layer-A file list. MARKUP-AWARE: parses
+    ONLY the "Read X.md" lines that fall inside BOOT.md's own
+    "## Layer A" section (from that heading up to the next "## "
+    heading, or end of file if there is none) -- this EXCLUDES
+    CURRENT_CONTEXT.md by construction, the kit's own state file, which
+    BOOT.md's "## Layer B" section lists instead (the session reads
+    Layer B itself, it is never injected here). FALLBACK, both worlds
+    (R11(c)): a BOOT.md carrying no "## Layer A" heading at all (an
+    older/unmarked form) falls back to the flat list of every
+    "Read X.md" line in the WHOLE file (same regex boot_path_files()
+    above uses for BUDGET arithmetic), MINUS CURRENT_CONTEXT.md by
+    NAME -- the fallback still never injects the state file, it simply
+    cannot rely on section markup that is not there. WITHOUT
+    force-appending CLAUDE.md in either path: CLAUDE.md auto-loads
+    separately via the harness's own mechanism and must not be
+    double-printed as boot-file content here. Missing/unreadable
+    BOOT.md, or a BOOT.md that lists no "Read X.md" lines at all
+    (in-scope or in the fallback), both yield an empty list --
+    layer_a_lines() below turns that into one honest line, never a
+    traceback."""
+    boot_md = Path(root) / "BOOT.md"
+    try:
+        text = boot_md.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+
+    heading_match = _LAYER_A_HEADING_RE.search(text)
+    if heading_match is not None:
+        start = heading_match.end()
+        next_heading = _NEXT_HEADING_RE.search(text, start)
+        end = next_heading.start() if next_heading is not None else len(text)
+        scope = text[start:end]
+    else:
+        # Fallback: no "## Layer A" markup at all -- the whole file,
+        # minus the state file by name.
+        scope = text
+
+    names = []
+    for m in re.finditer(r"Read ([A-Z_]+\.md)", scope):
+        name = m.group(1)
+        if name == _LAYER_A_EXCLUDED_STATE_FILE:
+            continue
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def layer_a_lines(root: Path) -> list:
+    """The layer-A content block, printed verbatim (one list element per
+    output line; no element embeds an internal '\\n'). NEVER raises --
+    the whole body is wrapped in its own try/except: an unforeseen
+    failure anywhere in this function degrades to ONE line
+    (_layer_a_unavailable_line) instead of propagating to main()'s outer
+    boundary, which would discard NOW/MODEL/BOOT BUDGET/etc for the sake
+    of an unprinted boot file -- strictly worse than just losing this
+    block. (main() ALSO wraps its own call to this function a second
+    time, belt-and-suspenders, in case a future edit replaces this
+    function wholesale and bypasses this try/except entirely.)
+
+    An empty file list (BOOT.md missing/empty/lists nothing -- the "not
+    yet onboarded" world) prints ONE honest line, not an empty or
+    malformed block and never a traceback.
+
+    The HEADER's byte total ("N bytes on disk") is measured from
+    st_size (os.stat), matching boot_budget_lines()'s own choice above.
+    The FOOTER's byte total ("N bytes emitted") is DELIBERATELY a
+    different measurement: st_size counts bytes ON DISK, while "emitted"
+    is accumulated per LINE (len(ascii_line) + 1 for the join separator)
+    as each line is actually appended to this function's own return
+    value -- the two are expected to diverge on content with CRLF line
+    endings or transliterated characters; this is what makes the closing
+    line a genuine per-emission count, not a disk-size tautology, and
+    lets a truncated/interrupted emission be detected by the closing
+    line's simple ABSENCE (see test_session_context_layer_a.py's
+    negative-control test).
+
+    Missing/unreadable individual files (absent, or any OSError
+    including "path is actually a directory") degrade to a single
+    per-file "[missing: ...]" line; the block still includes every OTHER
+    file. A present-but-EMPTY (0-byte) file is NOT missing -- it gets an
+    empty BEGIN/END pair, deliberately distinguished from "absent"."""
+    try:
+        root = Path(root)
+        names = layer_a_file_names(root)
+        if not names:
+            return [
+                "AUTO-BOOT: Layer A file list is empty (BOOT.md is missing, "
+                "unreadable, or lists no boot files yet) -- nothing to inject."
+            ]
+
+        sizes = []
+        for name in names:
+            try:
+                size = (root / name).stat().st_size
+            except OSError:
+                size = None
+            sizes.append((name, size))
+
+        total_on_disk = sum(size for _name, size in sizes if size is not None)
+
+        # Node E item 8: the directive line comes FIRST, ahead of the
+        # opening "--- BOOT LAYER A INJECTED ..." line itself -- only
+        # printed when there is actual content about to follow (the
+        # empty-list path above already returned before this point).
+        block = [LAYER_A_DIRECTIVE_LINE]
+        if total_on_disk > LAYER_A_INLINE_WARN_BYTES:
+            block.append(
+                f"AUTO-BOOT: Layer A is {total_on_disk} bytes, over the "
+                f"{LAYER_A_INLINE_WARN_BYTES} byte notice threshold -- "
+                "injected in full; every fresh session now pays these "
+                "bytes of context, the threshold exists so growth is a "
+                "decision, not drift -- tell the operator the boot-file "
+                "set has grown."
+            )
+        block.append(
+            f"--- BOOT LAYER A INJECTED -- {len(names)} files, "
+            f"{total_on_disk} bytes on disk ---"
+        )
+
+        emitted_files = 0
+        emitted_lines = 0
+        emitted_bytes = 0
+        summary_notes = []
+
+        for name, size in sizes:
+            if size is None:
+                block.append(f"[missing: {name} -- not injected, read this one file yourself]")
+                continue
+            path = root / name
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                block.append(f"[missing: {name} -- not injected, read this one file yourself]")
+                continue
+
+            raw_lines = text.splitlines()
+            block.append(f"----- BEGIN {name} ({size} bytes) -----")
+            file_translit = 0
+            file_unmapped = 0
+            for raw_line in raw_lines:
+                ascii_line, t_count, u_count = _ascii_content_line(raw_line)
+                file_translit += t_count
+                file_unmapped += u_count
+                block.append(ascii_line)
+                emitted_lines += 1
+                emitted_bytes += len(ascii_line) + 1
+            block.append(f"----- END {name} -----")
+
+            emitted_files += 1
+            if file_unmapped:
+                summary_notes.append(
+                    f"[WARNING: {file_unmapped} unmapped non-ASCII characters "
+                    f"in {name} were replaced with '?' -- MEANING MAY BE LOST; "
+                    "tell the operator]"
+                )
+            elif file_translit:
+                summary_notes.append(
+                    f"[note: {file_translit} non-ASCII characters transliterated "
+                    "for the console -- source files are unmodified]"
+                )
+
+        block.extend(summary_notes)
+        block.append(
+            f"--- END BOOT LAYER A: {emitted_files} files, "
+            f"{emitted_lines} lines, {emitted_bytes} bytes emitted ---"
+        )
+        return block
+    except Exception as e:
+        return [_layer_a_unavailable_line(e)]
 
 
 def build_context_lines(
@@ -1189,16 +1764,102 @@ def main(root: Path = None) -> int:
     half-crashed) is a worse failure mode than no context at all --
     a session trusting a half-populated 'reality' block is exactly the
     kind of silent gap this hook exists to prevent. So any error, from
-    anywhere in reading stdin or build_context_lines(), discards
-    everything gathered so far and prints only the warning line."""
+    anywhere in reading stdin, build_context_lines() or the layer-A
+    block, discards everything gathered so far and prints only the
+    warning line.
+
+    ALL lines (boot-lite context + layer A, when it fires) are joined
+    into ONE string and handed to a SINGLE _write_stdout_deadline() call,
+    not one print() per line -- this is what makes "discards everything
+    gathered so far" literally true on a mid-build failure: a build-time
+    exception now always discards the whole partial context (never a
+    partial print), while the warning line itself stays visible (see the
+    except block below), so a build failure with a healthy stdout is
+    never silent, only context-less.
+
+    The single write runs on a deadline (_write_stdout_deadline): True
+    means the write actually completed, or raised an ORDINARY exception
+    that this function re-raises here into the SAME try -- caught by the
+    except below exactly like a bare sys.stdout.write() call used to be.
+    False means a non-draining consumer left the write stuck inside the
+    OS on a full pipe past the deadline: os._exit(0) below terminates
+    IMMEDIATELY, with NO further I/O of any kind (see the helper's own
+    docstring for why even a diagnostic write would hang the same way)
+    -- rc 0, not 1: this hook did not "crash", it emitted as much as
+    made it through before the deadline, and session start must proceed
+    regardless.
+
+    The warning path itself (except block) is attempted on STDOUT FIRST
+    -- a session must see it in the same stream a healthy build would
+    have used (a broken journal/quota/wiring read must still surface as
+    a visible line, not vanish into a stream nobody reads); only when
+    THAT write itself raises (a genuinely dead stdout, not merely a
+    build-time exception) does the same message fall back to stderr,
+    under its own nested try -- if BOTH channels are down, the warning
+    is silently dropped and this still returns 0: a SessionStart hook
+    must never itself crash the session, on either channel. The
+    exception's str(e) is routed through this module's own
+    _ascii_sanitize(text, 300) before being formatted into the warning,
+    on EVERY channel attempt -- an unsanitized non-ASCII or multi-line
+    message could break a narrow-codepage console or the one-line/
+    no-injected-newline invariant this hook otherwise holds everywhere
+    else."""
     try:
+        resolved_root = Path(root) if root else repo_root()
         stdin_payload = read_stdin_payload()
-        for line in build_context_lines(root, stdin_payload=stdin_payload):
-            print(line)
+        lines = build_context_lines(resolved_root, stdin_payload=stdin_payload)
+
+        source = extract_source(stdin_payload)
+        if should_emit_layer_a(source):
+            # Wrapped a SECOND time here, on top of layer_a_lines()'s own
+            # internal try/except -- so even a future edit replacing
+            # layer_a_lines() wholesale, bypassing its own guard entirely,
+            # still cannot blow past THIS boundary and discard
+            # NOW/MODEL/BOOT BUDGET/etc for the sake of an unprinted
+            # boot file.
+            try:
+                lines = lines + layer_a_lines(resolved_root)
+            except Exception as _layer_a_exc:
+                lines = lines + [_layer_a_unavailable_line(_layer_a_exc)]
+
+        output = "\n".join(lines)
+        if lines:
+            output += "\n"
+        if not _write_stdout_deadline(output):
+            os._exit(0)
     except Exception as e:  # fail-open: this hook must never break session start
-        print(f"session-context warning: {e}")
+        try:
+            safe_detail = _ascii_sanitize(str(e), 300)
+        except Exception:
+            safe_detail = f"{type(e).__name__}: <unprintable exception>"
+        warning = f"session-context warning: {safe_detail}\n"
+        try:
+            sys.stdout.write(warning)
+            sys.stdout.flush()
+        except Exception:
+            try:
+                sys.stderr.write(warning)
+                sys.stderr.flush()
+            except Exception:
+                pass
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if _STDIN_DEADLINE_STATE["hit"]:
+        # A stdin-reader thread may still be blocked deep inside a
+        # platform read syscall -- normal interpreter shutdown can crash
+        # on that ("Fatal Python error: _enter_buffered_busy"). Flush
+        # both streams defensively, then exit immediately without
+        # running the normal shutdown sequence.
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

@@ -121,11 +121,25 @@ SETTINGS_PATH = os.path.join(REPO, ".claude", "settings.json")
 GITHOOKS_DIR = os.path.join(REPO, ".githooks")
 WIRING_CHECK_REL = "tools/wiring_check.py"
 
-# Matches a `python tools/<name>.py`-shaped hook command reference,
-# inside either .claude/settings.json's JSON text or a .githooks/*
-# shell script -- the same shape every hook in this repo already uses
-# (see .claude/settings.json's own "command" values).
-_PY_TOOL_CMD_RE = re.compile(r"python\s+(tools/[A-Za-z0-9_./\\-]+\.py)")
+# Matches a `python tools/<name>.py`-shaped hook command reference OR
+# its $CLAUDE_PROJECT_DIR-qualified quoted sibling (`python
+# "$CLAUDE_PROJECT_DIR/tools/<name>.py"`), inside either
+# .claude/settings.json's RAW JSON text or a .githooks/* shell script --
+# the two shapes tools/wiring_check.py's own _HOOK_COMMAND_RE also
+# recognizes (see that module for the full two-form rationale). This
+# module scans RAW file text (not parsed JSON, see the module
+# docstring's PARSER REUSE note) -- inside settings.json's own raw JSON
+# source, the qualified form's double quotes are themselves JSON-escaped
+# (`\"$CLAUDE_PROJECT_DIR/tools/x.py\"`), while inside a .githooks/*
+# shell script they appear as plain, unescaped quotes; `\\?"` (an
+# OPTIONAL literal backslash before each quote) matches both forms with
+# the one pattern. Group 1 matches the flat form's filename; group 2
+# matches the qualified form's filename -- exactly one of the two is
+# non-None on any successful match, never both.
+_PY_TOOL_CMD_RE = re.compile(
+    r'python\s+(?:tools/([A-Za-z0-9_./\\-]+\.py)'
+    r'|\\?"\$CLAUDE_PROJECT_DIR/tools/([A-Za-z0-9_./\\-]+\.py)\\?")'
+)
 
 
 def _read_text_best_effort(path):
@@ -141,7 +155,11 @@ def _read_text_best_effort(path):
 
 
 def _referenced_tool_paths(text):
-    return {m.group(1).replace("\\", "/") for m in _PY_TOOL_CMD_RE.finditer(text)}
+    paths = set()
+    for m in _PY_TOOL_CMD_RE.finditer(text):
+        filename = m.group(1) or m.group(2)
+        paths.add("tools/" + filename.replace("\\", "/"))
+    return paths
 
 
 def _githooks_files():

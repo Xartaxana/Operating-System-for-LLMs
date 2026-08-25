@@ -37,8 +37,11 @@ of the "no generic parser" design:
 """
 
 import json
+import os
 import re
 import sys
+import threading
+from pathlib import Path
 
 VERDICT_ENUM = ("fit", "fit_with_fixes", "blocker")
 
@@ -183,6 +186,77 @@ def check_text(text):
     return True, [], obj
 
 
+# --- BEGIN stdin-deadline helper (a local copy -- a shared module across
+# hooks/tools is deliberately not introduced, the same self-containment
+# principle this toolkit's other scripts already apply) ---------------
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Deadline seconds: env override, else the default. Invalid,
+    non-numeric, <=0, or > _STDIN_DEADLINE_MAX -> the default; there is
+    NO "0 = wait forever" mode on purpose (that would resurrect the very
+    hang this helper closes)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """(bytes, timed_out). Reads stdin to EOF, but no longer than the
+    deadline. A cross-platform form: select/poll doesn't work on pipes on
+    Windows, so a daemon reader thread does the actual read, and the
+    deadline is held by join(timeout). A TTY -> b"" without reading (the
+    same guard this toolkit's other stdin-reading scripts already carry).
+    Any read error -> b"" (fail-open, the same principle as elsewhere in
+    this toolkit)."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+# --- END stdin-deadline helper ---
+
+# A background reader thread left blocked on the REAL stdin buffer at
+# ordinary interpreter shutdown can crash the process with "Fatal Python
+# error: _enter_buffered_busy" instead of a clean exit -- the same class
+# this toolkit's other stdin-reading hooks/scripts already guard against.
+# main() itself is unchanged (still a plain `return <rc>`, safe
+# in-process); only the actual __main__ script-exit path below escalates
+# to os._exit() on a timeout.
+_STDIN_DEADLINE_STATE = {"hit": False}
+
+
 def main(argv):
     if len(argv) != 2:
         sys.stderr.write("usage: critic_verdict_check.py <path-or-->\n")
@@ -190,8 +264,13 @@ def main(argv):
 
     source = argv[1]
     if source == "-":
+        raw_bytes, timed_out = _read_stdin_bytes_deadline()
+        if timed_out:
+            _STDIN_DEADLINE_STATE["hit"] = True
+            sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
+            return 1  # the same failure class as an empty/invalid input
         try:
-            text = sys.stdin.read()
+            text = raw_bytes.decode("utf-8")
         except (UnicodeDecodeError, ValueError):
             sys.stderr.write("INVALID VERDICT: input is not valid UTF-8\n")
             return 1
@@ -223,4 +302,15 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    _rc = main(sys.argv)
+    if _STDIN_DEADLINE_STATE["hit"]:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

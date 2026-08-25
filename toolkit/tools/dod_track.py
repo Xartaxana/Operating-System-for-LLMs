@@ -80,13 +80,50 @@ _is_scratchpad_path().
 """
 
 import json
+import os
 import re
 import sys
+import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
 
 EDIT_TOOL_NAMES = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
+# ONE-OFF SCRIPT WRAPPER CONVENTION: a script run with no "test"/"pytest"
+# word in the command text (e.g. `python docs/tasks/x.py`) is NOT
+# recognized as a verification command by VERIFICATION_COMMAND_RE below
+# -- the regex is deliberately not widened (treating ANY script run as
+# a verification command would be a hole: the gate would count an
+# arbitrary python invocation as "green" with no actual confirmation of
+# a check). The LEGAL wrapper form for a one-off script witness run:
+#
+#     <command> && echo "verification test passed: <what was checked>"
+#
+# -- `echo` runs ONLY on the previous command's exit 0 (`&&`), so its
+# appearing in the output is an honest "the command really finished
+# green" marker, not a bare unconditional claim.
+#
+# TWO INDEPENDENT gates must BOTH recognize this line, or the
+# convention produces a recognized-but-RED command:
+#  1. is_verification_command() (VERIFICATION_COMMAND_RE below,
+#     unchanged): the word "test" inside the echo string matches the
+#     third alternative (`python\s+.*test`, no word boundary,
+#     case-insensitive) -- `.*` between "python" and "test" covers
+#     everything, including `&&`/`echo`/quotes, so the wrapped command
+#     is recognized as a verification command with no regex edit at all.
+#  2. determine_outcome() (SUCCESS_INDICATORS_RE below): the word
+#     "passed" in "verification test passed: ..." is what makes
+#     has_success True (no failure indicator present) -> "green". A
+#     wrapper form without the word "passed"/"ok"/"xfailed" would be
+#     recognized as a verification command (gate 1) but still classified
+#     "red" by determine_outcome's safe default (gate 2) -- looking to
+#     the performer like "the gate sees the verification command, but
+#     still blocks acceptance for no visible reason". The word "passed"
+#     inside the convention itself is what closes that gap -- see
+#     test_is_verification_command_one_off_script_wrapper_convention /
+#     test_determine_outcome_wrapper_convention_marker_is_green in
+#     test_dod_track.py.
 VERIFICATION_COMMAND_RE = re.compile(
     r"pytest|python\s+-m\s+pytest|python\s+.*test", re.IGNORECASE
 )
@@ -276,12 +313,24 @@ def build_fact(payload: dict):
     Every fact carries "agent_id" (str | None); None means main
     thread. tools/main_gate.py (Stop) filters to main-only records;
     tools/dod_gate.py (SubagentStop) reads every record and filters to
-    its own agent_id (see that file for the per-agent-filter logic)."""
+    its own agent_id (see that file for the per-agent-filter logic).
+
+    GUARD non-dict root AND non-dict tool_input: silently returns None
+    on either -- the same pattern journal_echo.py already applies
+    (`if not isinstance(payload, dict): return 0`). Checked ONCE here
+    (not separately in each branch below)."""
+    if not isinstance(payload, dict):
+        return None
+
     tool_name = payload.get("tool_name")
     agent_id = _extract_agent_id(payload)
 
+    tool_input_raw = payload.get("tool_input")
+    if tool_input_raw is not None and not isinstance(tool_input_raw, dict):
+        return None
+
     if is_edit_tool(tool_name):
-        tool_input = payload.get("tool_input") or {}
+        tool_input = tool_input_raw or {}
         file_path = tool_input.get("file_path")
         file_path = file_path if isinstance(file_path, str) else None
         # Scratchpad/outside-repo-root edits are excluded from main-edit
@@ -298,7 +347,7 @@ def build_fact(payload: dict):
         }
 
     if tool_name in ("Bash", "PowerShell"):
-        tool_input = payload.get("tool_input") or {}
+        tool_input = tool_input_raw or {}
         command = tool_input.get("command") or ""
         if is_verification_command(command):
             outcome = determine_outcome(payload.get("tool_response"))
@@ -335,10 +384,39 @@ def _load_track(path: Path) -> dict:
     return data
 
 
-def _save_track(path: Path, data: dict) -> None:
+def _atomic_write_text(path: Path, text: str) -> None:
+    """mkdir(parents=True, exist_ok=True) preserved literally (a
+    regression pin) -- the write goes to a mkstemp file in the SAME
+    directory as path, then os.replace() over the live path.
+    Uniqueness of the name is OS-level (mkstemp, scheme
+    prefix=path.name+"." + suffix=".tmp"). The suffix ".tmp" is LAST
+    and NOT ".json" -- session_context.py globs "*.json" and takes
+    .stem as the session_id; a ".json" ending would make a leftover
+    temp file look like someone else's track. If the write to tmp
+    fails -- the tmp file itself is removed (best-effort, does not
+    swallow the original exception) and the exception is re-raised to
+    the caller (main()'s total try/except decides what happens next --
+    this function does not swallow errors on its own)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        tmp_path.write_text(text, encoding="utf-8")
+        os.replace(str(tmp_path), str(path))
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _save_track(path: Path, data: dict) -> None:
+    _atomic_write_text(
+        path, json.dumps(data, ensure_ascii=False, indent=2) + "\n"
     )
 
 
@@ -349,38 +427,150 @@ def _reconfigure_stderr_utf8():
         pass
 
 
+# --- stdin deadline (P4 class: bounds a PostToolUse hook's stdin read
+# to a deadline instead of blocking forever on a non-TTY pipe with no
+# EOF; a LOCAL copy, no shared module -- the same helper toolkit/tools/
+# owns_gate.py/dispatch_gate.py/journal_echo.py and others already
+# carry)
+# ------------------------------------------------------------------
+
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Seconds to wait for stdin: env override, else the default.
+    Invalid, non-numeric, <=0, or > _STDIN_DEADLINE_MAX all fall back to
+    the default -- there is deliberately NO "0 = wait forever" mode (that
+    would resurrect the exact hang this helper exists to close)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """Returns (bytes, timed_out). Reads stdin to EOF, but no longer
+    than the deadline. Cross-platform by construction: select/poll do
+    not work on pipes on Windows, so a background daemon thread does
+    the actual blocking read and the deadline is enforced via
+    thread.join(timeout). A TTY returns b"" without reading anything.
+    Any read error degrades to b"" (fail-open)."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+
+# A background reader thread may still be blocked deep in a platform
+# read syscall at normal interpreter shutdown, which can crash the
+# process ("Fatal Python error: _enter_buffered_busy") instead of
+# exiting cleanly. main() itself is UNCHANGED (still a plain
+# `return 0`, safe in-process); only the actual __main__ script-exit
+# path below escalates to os._exit().
+_STDIN_DEADLINE_STATE = {"hit": False}
+
+
 def main() -> int:
     _reconfigure_stderr_utf8()
 
-    # Raw-byte stdin read, decoded explicitly as UTF-8 -- see
-    # dispatch_gate.py's main() for the platform-encoding rationale.
-    raw_bytes = sys.stdin.buffer.read()
-    raw = raw_bytes.decode("utf-8", errors="replace")
+    # TOTAL try: everything below (except _reconfigure_stderr_utf8()
+    # above, which stays BEFORE the try) is wrapped in one try/except
+    # Exception. Every existing early fail-open return (broken JSON,
+    # non-dict payload, build_fact()->None, no session_id) stays SILENT
+    # (a recognized, expected non-relevant input, not an error) -- only
+    # a genuinely UNEXPECTED exception (e.g. a PermissionError writing
+    # the track, a locked file) now also exits 0, but LOUDLY.
     try:
-        payload = json.loads(raw)
-    except Exception:
+        # P4: byte-safe read via the stdin-deadline helper (replaces
+        # the former direct sys.stdin.buffer.read() -- bounded by
+        # OSLLM_STDIN_TIMEOUT instead of blocking forever with no EOF).
+        raw_bytes, timed_out = _read_stdin_bytes_deadline()
+        if timed_out:
+            _STDIN_DEADLINE_STATE["hit"] = True
+            sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
+            return 0
+        raw = raw_bytes.decode("utf-8", errors="replace")
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return 0
+
+        if not isinstance(payload, dict):
+            # A non-dict root -- the same pattern journal_echo.py
+            # applies. main() duplicates build_fact()'s own check
+            # (belt-and-suspenders) BEFORE calling build_fact, so it
+            # doesn't rely on build_fact alone to run first (the next
+            # line calls build_fact(payload) regardless, which checks
+            # this itself too -- this early return only skips a
+            # redundant call).
+            return 0
+
+        fact = build_fact(payload)
+        if fact is None:
+            return 0
+
+        session_id = payload.get("session_id")
+        if not session_id:
+            # No session_id -- nowhere to write the track (the file is
+            # named by session_id) -- fail open, the fact is lost but the
+            # hook does not crash.
+            return 0
+
+        cwd = payload.get("cwd") or "."
+        path = _track_path(cwd, session_id)
+        data = _load_track(path)
+
+        kind, entry = fact
+        data.setdefault(kind + "s", []).append(entry)
+        _save_track(path, data)
         return 0
-
-    fact = build_fact(payload)
-    if fact is None:
+    except Exception as exc:
+        print(
+            f"dod_track.py: FAILED to save track ({type(exc).__name__}: {exc})",
+            file=sys.stderr,
+        )
         return 0
-
-    session_id = payload.get("session_id")
-    if not session_id:
-        # No session_id -- nowhere to write the track (the file is
-        # named by session_id) -- fail open, the fact is lost but the
-        # hook does not crash.
-        return 0
-
-    cwd = payload.get("cwd") or "."
-    path = _track_path(cwd, session_id)
-    data = _load_track(path)
-
-    kind, entry = fact
-    data.setdefault(kind + "s", []).append(entry)
-    _save_track(path, data)
-    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if _STDIN_DEADLINE_STATE["hit"]:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

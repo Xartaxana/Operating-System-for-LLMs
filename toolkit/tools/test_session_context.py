@@ -9,9 +9,11 @@ Run from the repo root: python -m pytest tools/test_session_context.py
 import datetime
 import importlib
 import json
+import os
 import sqlite3
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import yaml
@@ -493,6 +495,127 @@ def test_main_success_path_prints_lines_and_exits_zero(tmp_path, capsys):
     assert not any(l.startswith("session-context warning:") for l in out)
 
 
+# ---- stdout-deadline: env boundaries + a genuinely blocked writer ----
+# (builder-role rule 6a: AT the boundary and BEYOND it, for every limit
+# this port introduces.)
+
+
+def test_stdout_deadline_seconds_default_with_no_env(monkeypatch):
+    monkeypatch.delenv(sc._STDOUT_DEADLINE_ENV, raising=False)
+    assert sc._stdout_deadline_seconds() == sc._STDOUT_DEADLINE_DEFAULT
+
+
+def test_stdout_deadline_seconds_valid_env_override(monkeypatch):
+    monkeypatch.setenv(sc._STDOUT_DEADLINE_ENV, "1.5")
+    assert sc._stdout_deadline_seconds() == 1.5
+
+
+def test_stdout_deadline_seconds_zero_is_invalid_no_wait_forever_mode(monkeypatch):
+    monkeypatch.setenv(sc._STDOUT_DEADLINE_ENV, "0")
+    assert sc._stdout_deadline_seconds() == sc._STDOUT_DEADLINE_DEFAULT
+
+
+def test_stdout_deadline_seconds_negative_falls_back(monkeypatch):
+    monkeypatch.setenv(sc._STDOUT_DEADLINE_ENV, "-1")
+    assert sc._stdout_deadline_seconds() == sc._STDOUT_DEADLINE_DEFAULT
+
+
+def test_stdout_deadline_seconds_at_max_boundary_is_valid(monkeypatch):
+    monkeypatch.setenv(sc._STDOUT_DEADLINE_ENV, str(sc._STDOUT_DEADLINE_MAX))
+    assert sc._stdout_deadline_seconds() == sc._STDOUT_DEADLINE_MAX
+
+
+def test_stdout_deadline_seconds_just_over_max_falls_back(monkeypatch):
+    monkeypatch.setenv(sc._STDOUT_DEADLINE_ENV, str(sc._STDOUT_DEADLINE_MAX + 0.001))
+    assert sc._stdout_deadline_seconds() == sc._STDOUT_DEADLINE_DEFAULT
+
+
+def test_stdout_deadline_seconds_non_numeric_falls_back(monkeypatch):
+    monkeypatch.setenv(sc._STDOUT_DEADLINE_ENV, "not-a-number")
+    assert sc._stdout_deadline_seconds() == sc._STDOUT_DEADLINE_DEFAULT
+
+
+def test_write_stdout_deadline_normal_write_returns_true(capsys, monkeypatch):
+    monkeypatch.delenv(sc._STDOUT_DEADLINE_ENV, raising=False)
+    assert sc._write_stdout_deadline("hello\n") is True
+    assert capsys.readouterr().out == "hello\n"
+
+
+def test_write_stdout_deadline_reraises_ordinary_write_exception(monkeypatch):
+    class _DeadStdout:
+        def write(self, _text):
+            raise OSError("simulated: stdout is dead")
+
+        def flush(self):
+            pass
+
+    monkeypatch.setattr(sys, "stdout", _DeadStdout())
+    import pytest as _pytest
+
+    with _pytest.raises(OSError, match="simulated: stdout is dead"):
+        sc._write_stdout_deadline("x")
+
+
+def test_write_stdout_deadline_hanging_writer_times_out_returns_false(monkeypatch):
+    class _HangingStdout:
+        def write(self, _text):
+            time.sleep(3600)
+
+        def flush(self):
+            pass  # pragma: no cover -- never reached
+
+    monkeypatch.setenv(sc._STDOUT_DEADLINE_ENV, "0.1")
+    monkeypatch.setattr(sys, "stdout", _HangingStdout())
+    started = time.monotonic()
+    result = sc._write_stdout_deadline("x")
+    elapsed = time.monotonic() - started
+    assert result is False
+    assert elapsed < 2.0  # bounded by the 0.1s deadline, not the 3600s sleep
+
+
+def test_main_stdout_deadline_timeout_exits_immediately_via_subprocess(tmp_path):
+    # main()'s own contract on a write timeout is os._exit(0) -- calling
+    # that in-process would kill the pytest worker itself, so this is
+    # exercised as a real subprocess instead. A NON-draining consumer
+    # (stdout piped but never read) alone is not enough by itself --
+    # small output fits inside the OS pipe buffer and the write simply
+    # returns without ever blocking. This test forces genuine
+    # backpressure by making the Layer A block emit ~200KB (a BOOT.md
+    # that references one large file), comfortably over any platform's
+    # actual pipe capacity (the staff deployment's own critic-measured
+    # value on its machine was ~4096 bytes), combined with an
+    # artificially tiny OSLLM_STDOUT_TIMEOUT -- the single sys.stdout
+    # write() call genuinely blocks on the full, undrained pipe, and
+    # main() must os._exit(0) instead of hanging forever.
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "routing-log.jsonl").write_text("", encoding="utf-8")
+    (tmp_path / "BOOT.md").write_text("1. Read BIGFILE.md.\n", encoding="utf-8")
+    (tmp_path / "BIGFILE.md").write_text("x" * 200_000 + "\n", encoding="utf-8")
+    env = dict(os.environ, OSLLM_STDOUT_TIMEOUT="0.2")
+    script = Path(__file__).resolve().parent / "session_context.py"
+    proc = subprocess.Popen(
+        [sys.executable, str(script)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(tmp_path),
+        env=env,
+    )
+    started = time.monotonic()
+    # Deliberately never read proc.stdout -- an un-drained pipe is the
+    # scenario under test. wait() only watches the process exit, not
+    # the pipe.
+    returncode = proc.wait(timeout=15)
+    elapsed = time.monotonic() - started
+    proc.stdout.close()
+    proc.stderr.close()
+    assert returncode == 0
+    # Bounded well under the 15s Popen.wait timeout above: proves the
+    # process actually exited via the deadline path rather than hanging
+    # until some external kill.
+    assert elapsed < 10.0
+
+
 # ---- N4 (carried forward from review): import-time failure must ALSO fail open ----
 
 def test_deferred_import_error_reaches_mains_fail_open_boundary(tmp_path, capsys, monkeypatch):
@@ -766,7 +889,7 @@ def test_boot_budget_normal_under_warn_threshold(tmp_path):
     root = tmp_path
     _seed_boot_files(root, {"README.md": 100, "CLAUDE.md": 200})
     lines = sc.boot_budget_lines(root)
-    assert lines == ["BOOT BUDGET: 300 bytes / 100000 (2 files)"]
+    assert lines == ["BOOT BUDGET: 300 bytes / 100000 (2 files) | CLAUDE.md: 200/56100"]
 
 
 def test_boot_budget_warn_includes_top3(tmp_path):
@@ -784,7 +907,7 @@ def test_boot_budget_warn_includes_top3(tmp_path):
     total = 40000 + 30000 + 25000 + 100
     assert total > sc.BOOT_WARN_THRESHOLD
     assert total <= sc.BOOT_BREACH_THRESHOLD
-    assert lines[0] == f"BOOT BUDGET: {total} bytes / 100000 (4 files) WARN"
+    assert lines[0] == f"BOOT BUDGET: {total} bytes / 100000 (4 files) WARN | CLAUDE.md: 100/56100"
     assert lines[1] == "  40000  README.md"
     assert lines[2] == "  30000  PROJECT_CHARTER.md"
     assert lines[3] == "  25000  ANTI_GOALS.md"
@@ -807,7 +930,7 @@ def test_boot_budget_breach_includes_hint_and_top3(tmp_path):
     assert total > sc.BOOT_BREACH_THRESHOLD
     assert lines[0] == (
         f"BOOT BUDGET: {total} bytes / 100000 (4 files) BREACH -> boot-diet due "
-        "(report first, operator word starts it)"
+        "(report first, operator word starts it) | CLAUDE.md: 100/56100"
     )
     assert lines[1] == "  60000  README.md"
     assert lines[2] == "  30000  PROJECT_CHARTER.md"
@@ -820,7 +943,10 @@ def test_boot_budget_missing_file_counts_zero_and_is_flagged(tmp_path):
     (root / "BOOT.md").write_text("1. Read GHOST_FILE.md.\n", encoding="utf-8")
     (root / "CLAUDE.md").write_bytes(b"x" * 50)
     lines = sc.boot_budget_lines(root)
-    assert lines[0] == "BOOT BUDGET: 50 bytes / 100000 (2 files) [missing: GHOST_FILE.md]"
+    assert lines[0] == (
+        "BOOT BUDGET: 50 bytes / 100000 (2 files) [missing: GHOST_FILE.md]"
+        " | CLAUDE.md: 50/56100"
+    )
 
 
 def test_boot_budget_lines_within_output_budget(tmp_path):
@@ -1362,6 +1488,23 @@ def test_wiring_summary_line_ok_on_fully_wired_repo(tmp_path):
         json.dumps({"hooks": {}}), encoding="utf-8"
     )
     assert sc.wiring_summary_line(tmp_path) == "WIRING: OK"
+
+
+def test_wiring_summary_line_appends_notice_count_without_flipping_ok(tmp_path):
+    # Node E item 10: a non-blocking "notices" entry appends ", N
+    # notice(s)" on the OK branch -- never flips it to the issue-count
+    # branch.
+    _init_repo_with_hooks(tmp_path)
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    (claude_dir / "settings.json").write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+    (tmp_path / "ADOPTION_LEDGER.md").write_text(
+        "# Adoption Ledger\n\n"
+        "## Kit snapshot revision\n\nKit snapshot revision: `abc1234`\n",
+        encoding="utf-8",
+    )
+    line = sc.wiring_summary_line(tmp_path)
+    assert line == "WIRING: OK, 1 notice(s)"
 
 
 def test_wiring_summary_line_reports_issue_count(tmp_path):

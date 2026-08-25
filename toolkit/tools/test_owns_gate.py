@@ -19,6 +19,7 @@ Run from the repo root: python -m pytest toolkit/tools/test_owns_gate.py
 """
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -682,7 +683,10 @@ def test_window_on_boundary_still_live(tmp_path):
     registry = tmp_path / "owns_registry.jsonl"
     now = datetime(2026, 7, 28, 12, 0, 0)
     boundary_ts = (now - timedelta(seconds=owns_gate.WINDOW_SECONDS)).strftime(owns_gate._TS_FORMAT)
-    _write_registry_line(registry, boundary_ts, "s-1", "D:\\repo", "sonnet: prior write", ["D:\\repo\\tools\\x.py"])
+    # A DIFFERENT session than the new dispatch below -- same-session
+    # retry exclusion (K1) would otherwise silence an equal owns set,
+    # which is not what this test is checking (the window boundary).
+    _write_registry_line(registry, boundary_ts, "s-OTHER", "D:\\repo", "sonnet: prior write", ["D:\\repo\\tools\\x.py"])
 
     payload = _writing_payload("D:\\repo\\tools\\x.py", session_id="s-1", cwd="D:\\repo")
     exit_code, output = owns_gate.decide(payload, registry_path=registry, now=now)
@@ -858,8 +862,12 @@ def test_malformed_registry_line_fail_open(tmp_path):
     fresh_ts = now.strftime(owns_gate._TS_FORMAT)
     with registry.open("a", encoding="utf-8") as f:
         f.write("{not valid json\n")
+        # A DIFFERENT session than the new dispatch below -- same-session
+        # retry exclusion (K1) would otherwise silence an equal owns set,
+        # which is not what this test is checking (fail-open on a
+        # malformed sidecar line).
         f.write(json.dumps({
-            "ts": fresh_ts, "session_key": "s-1", "cwd": "D:\\repo",
+            "ts": fresh_ts, "session_key": "s-OTHER", "cwd": "D:\\repo",
             "description": "d", "owns": ["D:\\repo\\tools\\x.py"],
         }) + "\n")
 
@@ -1002,3 +1010,267 @@ def test_owns_gate_imports_is_path_like_token_from_dispatch_gate():
     assert owns_gate.is_path_token is not dispatch_gate.is_path_like_token
     for tok in ("D:/a.py", "/a.py", "tools/*.py", "**bold**", "relative/x.py", ""):
         assert owns_gate.is_path_token(tok) == dispatch_gate.is_path_like_token(tok), tok
+
+
+# ---------------------------------------------------------------------
+# ROOT-ONLY path tokens: a live cross-dependency (see the module
+# docstring, "Root-only path tokens"). owns_gate.is_path_token() has no
+# local logic of its own -- these tests exercise the boundary through
+# owns_gate's OWN public entry points (is_path_token / extract_owns_paths)
+# and assert CONSISTENCY with whatever dispatch_gate.is_path_like_token
+# currently returns, rather than hard-coding the guard's post-fix
+# verdict -- correct either before or after that guard lands in
+# dispatch_gate.py. AT the boundary: "/"/"D:\\"/"D:/" (no segment).
+# BEYOND it: "/a"/"D:/a" (one real segment) -- rule 6a, both sides.
+# ---------------------------------------------------------------------
+
+
+def test_root_only_tokens_match_shared_predicate_at_and_beyond_boundary():
+    for tok in ("/", "//", "D:\\", "D:/", "/a", "D:/a", "/a/b"):
+        assert owns_gate.is_path_token(tok) == dispatch_gate.is_path_like_token(tok), tok
+
+
+def test_root_only_token_in_owns_declaration_matches_shared_predicate():
+    # A bare-root owns declaration through the real extraction path: the
+    # observable outcome (registered vs. not) must track whatever the
+    # shared predicate currently decides for a bare root -- no local
+    # duplicate of the root-only guard exists in this file.
+    prompt = "owns: /"
+    expected = [ "/" ] if dispatch_gate.is_path_like_token("/") else []
+    assert owns_gate.extract_owns_paths(prompt) == expected
+
+
+# ---------------------------------------------------------------------
+# stdin deadline (a local copy of the same mechanism this kit's
+# tools/session_context.py already carries, see the module docstring,
+# "stdin deadline (P4 class)"). Boundary-tested both sides (rule 6a):
+# 0 is explicitly invalid (no "wait forever" mode), the max is valid,
+# just over the max falls back to the default.
+# ---------------------------------------------------------------------
+
+
+def test_stdin_deadline_seconds_default_with_no_env(monkeypatch):
+    monkeypatch.delenv(owns_gate._STDIN_DEADLINE_ENV, raising=False)
+    assert owns_gate._stdin_deadline_seconds() == owns_gate._STDIN_DEADLINE_DEFAULT
+
+
+def test_stdin_deadline_seconds_valid_env_override(monkeypatch):
+    monkeypatch.setenv(owns_gate._STDIN_DEADLINE_ENV, "2.5")
+    assert owns_gate._stdin_deadline_seconds() == 2.5
+
+
+def test_stdin_deadline_seconds_non_numeric_falls_back(monkeypatch):
+    monkeypatch.setenv(owns_gate._STDIN_DEADLINE_ENV, "not-a-number")
+    assert owns_gate._stdin_deadline_seconds() == owns_gate._STDIN_DEADLINE_DEFAULT
+
+
+def test_stdin_deadline_seconds_zero_is_invalid_no_wait_forever_mode(monkeypatch):
+    monkeypatch.setenv(owns_gate._STDIN_DEADLINE_ENV, "0")
+    assert owns_gate._stdin_deadline_seconds() == owns_gate._STDIN_DEADLINE_DEFAULT
+
+
+def test_stdin_deadline_seconds_negative_falls_back(monkeypatch):
+    monkeypatch.setenv(owns_gate._STDIN_DEADLINE_ENV, "-5")
+    assert owns_gate._stdin_deadline_seconds() == owns_gate._STDIN_DEADLINE_DEFAULT
+
+
+def test_stdin_deadline_seconds_at_max_boundary_is_valid(monkeypatch):
+    monkeypatch.setenv(owns_gate._STDIN_DEADLINE_ENV, str(owns_gate._STDIN_DEADLINE_MAX))
+    assert owns_gate._stdin_deadline_seconds() == owns_gate._STDIN_DEADLINE_MAX
+
+
+def test_stdin_deadline_seconds_just_over_max_falls_back(monkeypatch):
+    monkeypatch.setenv(owns_gate._STDIN_DEADLINE_ENV, str(owns_gate._STDIN_DEADLINE_MAX + 0.001))
+    assert owns_gate._stdin_deadline_seconds() == owns_gate._STDIN_DEADLINE_DEFAULT
+
+
+def test_stdin_deadline_seconds_smallest_positive_is_valid(monkeypatch):
+    monkeypatch.setenv(owns_gate._STDIN_DEADLINE_ENV, "0.001")
+    assert owns_gate._stdin_deadline_seconds() == 0.001
+
+
+class _FakeTTYStdin:
+    def isatty(self):
+        return True
+
+    def read(self):  # pragma: no cover -- must never be called
+        raise AssertionError("read() must not be called when stdin is a TTY")
+
+
+def test_read_stdin_bytes_deadline_tty_returns_immediately(monkeypatch):
+    monkeypatch.setattr(sys, "stdin", _FakeTTYStdin())
+    data, timed_out = owns_gate._read_stdin_bytes_deadline()
+    assert data == b""
+    assert timed_out is False
+
+
+class _FakeBytesStdin:
+    def __init__(self, payload: bytes):
+        self._buffer = self
+        self._payload = payload
+
+    def isatty(self):
+        return False
+
+    def read(self):
+        return self._payload
+
+
+def test_read_stdin_bytes_deadline_normal_read(monkeypatch):
+    monkeypatch.setattr(sys, "stdin", _FakeBytesStdin(b'{"tool_name": "Task"}'))
+    data, timed_out = owns_gate._read_stdin_bytes_deadline()
+    assert data == b'{"tool_name": "Task"}'
+    assert timed_out is False
+
+
+class _HangingStdin:
+    """.read() never returns within the test's lifetime -- exercises the
+    genuine timeout branch. The reader thread stays a daemon and is
+    simply abandoned (never joined) after the test, same contract the
+    production code relies on."""
+
+    def isatty(self):
+        return False
+
+    @property
+    def buffer(self):
+        return self
+
+    def read(self):
+        time.sleep(3600)
+        return b""  # pragma: no cover -- never reached
+
+
+def test_read_stdin_bytes_deadline_hanging_reader_times_out(monkeypatch):
+    monkeypatch.setenv(owns_gate._STDIN_DEADLINE_ENV, "0.1")
+    monkeypatch.setattr(sys, "stdin", _HangingStdin())
+    started = time.monotonic()
+    data, timed_out = owns_gate._read_stdin_bytes_deadline()
+    elapsed = time.monotonic() - started
+    assert timed_out is True
+    assert data == b""
+    assert elapsed < 2.0  # bounded by the 0.1s deadline, not the 3600s sleep
+
+
+def test_echo_json_subprocess_survives_stdin_that_is_never_closed(tmp_path):
+    # Real subprocess: OSLLM_STDIN_TIMEOUT overrides a genuinely blocked
+    # pipe (nothing is ever written to the child's stdin, and it is
+    # never closed either) -- the real-world shape of a harness bug
+    # this mechanism exists to survive.
+    env = dict(os.environ, OSLLM_STDIN_TIMEOUT="0.3")
+    proc = subprocess.Popen(
+        [sys.executable, str(SCRIPT)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(tmp_path),
+        env=env,
+    )
+    try:
+        out, err = proc.communicate(timeout=10)
+    finally:
+        proc.stdin.close()
+    assert proc.returncode == 0
+    assert out.strip() == b""
+    assert b"Traceback" not in err
+
+
+# ---------------------------------------------------------------------
+# M2-1-analog (the same class the reference deployment's owns_gate.py:
+# 1882-1905 fixes): decide() runs dispatch_gate.decide(payload) BEFORE
+# _append_registry -- a blocked (exit 2) dispatch must not leave a
+# sidecar registry line (the runtime executes ALL PreToolUse hooks
+# independently of a neighboring block). This hook's own exit_code
+# stays 0 in all three branches below.
+# ---------------------------------------------------------------------
+
+_K5_BLOCKED_PROMPT = (
+    # An owns-declaration with a real path IS present, but a "given"
+    # manifest marker is NOT -- dispatch_gate blocks (check 2, "no manifest")
+    # regardless of the DoD marker being present.
+    "DoD: the test is green, witness attached.\n"
+    "owns: D:/repo/tools/k5_blocked_target.py.\n"
+    "Edit the file per spec."
+)
+
+
+def _k5_blocked_payload(session_id="s-k5-blocked"):
+    return {
+        "tool_name": "Task",
+        "tool_input": {
+            "subagent_type": "builder",
+            "prompt": _K5_BLOCKED_PROMPT,
+            "description": "sonnet: x",
+        },
+        "session_id": session_id,
+        "cwd": "D:\\repo",
+    }
+
+
+def test_k5_blocked_dispatch_skips_registration(tmp_path):
+    registry = tmp_path / "owns_registry.jsonl"
+    payload = _k5_blocked_payload()
+    # Positive control (command hygiene p.6): confirm this payload is
+    # ACTUALLY blocked by the live dispatch_gate -- otherwise the test
+    # below would not prove what it claims.
+    gate_exit_code, gate_message = owns_gate.dispatch_gate.decide(payload)
+    assert gate_exit_code == 2, gate_message
+
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=datetime(2026, 8, 25, 15, 35, 0))
+    assert exit_code == 0  # owns_gate's own exit_code is ALWAYS 0
+    assert not registry.exists()  # registration SKIPPED
+
+
+def test_k5_passing_dispatch_still_registers_edge_i(tmp_path):
+    # Edge (i): exit 0 (even with warn text) -> register as before.
+    registry = tmp_path / "owns_registry.jsonl"
+    payload = _writing_payload("D:/repo/tools/k5_allowed_target.py", session_id="s-k5-ok")
+    gate_exit_code, _ = owns_gate.dispatch_gate.decide(payload)
+    assert gate_exit_code == 0
+
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=datetime(2026, 8, 25, 15, 35, 0))
+    assert exit_code == 0
+    assert registry.exists()
+    assert "k5_allowed_target.py" in registry.read_text(encoding="utf-8")
+
+
+def test_k5_dispatch_gate_decide_exception_fails_open_still_registers(monkeypatch, tmp_path):
+    # An exception out of dispatch_gate.decide -> register anyway
+    # (fail-open, the same philosophy this hook's own WARN mode
+    # already carries for its own failures).
+    registry = tmp_path / "owns_registry.jsonl"
+
+    def _raise(payload):
+        raise RuntimeError("boom -- dispatch_gate exploded")
+
+    monkeypatch.setattr(owns_gate.dispatch_gate, "decide", _raise)
+    payload = _writing_payload("D:/repo/tools/k5_failopen_target.py", session_id="s-k5-failopen")
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=datetime(2026, 8, 25, 15, 35, 0))
+    assert exit_code == 0
+    assert registry.exists()
+    assert "k5_failopen_target.py" in registry.read_text(encoding="utf-8")
+
+
+def test_k5_own_exit_code_always_zero_even_when_gate_blocks(tmp_path):
+    # Invariant: this hook's own exit_code stays 0 -- the branch above
+    # decides ONLY the registration, never the return value.
+    registry = tmp_path / "owns_registry.jsonl"
+    payload = _k5_blocked_payload(session_id="s-k5-invariant")
+    exit_code, _ = owns_gate.decide(payload, registry_path=registry, now=datetime(2026, 8, 25, 15, 35, 0))
+    assert exit_code == 0
+
+
+def test_k5_temporal_edge_pre_fix_registry_line_not_purged(tmp_path):
+    # Temporal edge R11(c): a registry line written BEFORE this fix is
+    # NOT purged -- append-only, this check only concerns NEW records.
+    registry = tmp_path / "owns_registry.jsonl"
+    _write_registry_line(
+        registry, "2026-08-25T15:35:06", "pre-fix-session", "D:\\repo",
+        "sonnet: EXPERIMENT-BLOCK D-0105 probe, dispatch should not have run",
+        ["D:/repo/tools/EXP_D0105_PROBE.txt"],
+    )
+    before = registry.read_text(encoding="utf-8")
+    payload = _k5_blocked_payload(session_id="s-k5-temporal")
+    exit_code, _ = owns_gate.decide(payload, registry_path=registry, now=datetime(2026, 8, 25, 15, 35, 0))
+    after = registry.read_text(encoding="utf-8")
+    assert before == after  # old line untouched, no new line added

@@ -313,6 +313,66 @@ def test_classify_settings_commands_python_tool_and_info_line():
     assert "informational" in info_lines[0]
 
 
+# ---------------------------------------------------------------------
+# Dual command-form parsing (flat "python tools/x.py" AND the
+# $CLAUDE_PROJECT_DIR-qualified quoted form, same two shapes
+# tools/wiring_check.py's own _HOOK_COMMAND_RE recognizes), plus an
+# adversarial battery of illegal neighboring forms that must NOT match
+# (builder-role rule 6a: >=6 neighboring illegal forms).
+# ---------------------------------------------------------------------
+
+
+def test_classify_settings_commands_qualified_claude_project_dir_form():
+    pairs = [("SessionStart", 'python "$CLAUDE_PROJECT_DIR/tools/dispatch_gate.py"')]
+    scripts, info_lines = hlp.classify_settings_commands(pairs)
+    assert scripts == {"tools/dispatch_gate.py"}
+    assert info_lines == []
+
+
+def test_classify_settings_commands_both_forms_of_same_file_dedupe():
+    pairs = [
+        ("SessionStart", "python tools/dispatch_gate.py"),
+        ("PreToolUse", 'python "$CLAUDE_PROJECT_DIR/tools/dispatch_gate.py"'),
+    ]
+    scripts, info_lines = hlp.classify_settings_commands(pairs)
+    assert scripts == {"tools/dispatch_gate.py"}
+    assert info_lines == []
+
+
+@pytest.mark.parametrize(
+    "illegal_command",
+    [
+        # (1) quoted flat form -- quote/prefix must appear together.
+        'python "tools/dispatch_gate.py"',
+        # (2) qualified prefix without quotes.
+        "python $CLAUDE_PROJECT_DIR/tools/dispatch_gate.py",
+        # (3) single quotes.
+        "python '$CLAUDE_PROJECT_DIR/tools/dispatch_gate.py'",
+        # (4) wrong interpreter.
+        "python3 tools/dispatch_gate.py",
+        # (5) missing closing quote.
+        'python "$CLAUDE_PROJECT_DIR/tools/dispatch_gate.py',
+        # (6) path outside tools/.
+        "python scripts/dispatch_gate.py",
+        # (7) wrong env-var name (typo class).
+        'python "$CLAUDE_PROJECT_DIRECTORY/tools/dispatch_gate.py"',
+    ],
+)
+def test_classify_settings_commands_adversarial_illegal_forms_are_informational(illegal_command):
+    # NOTE: classify_settings_commands uses .search(), not an anchored
+    # full-string match (unlike tools/wiring_check.py's own
+    # _HOOK_COMMAND_RE) -- a pre-existing, unchanged design difference,
+    # not part of this port's dual-form fix; a case like "python
+    # tools/x.py --verbose" is therefore deliberately NOT included here,
+    # since .search() legitimately still finds the embedded legal
+    # substring regardless of trailing text.
+    pairs = [("SessionStart", illegal_command)]
+    scripts, info_lines = hlp.classify_settings_commands(pairs)
+    assert scripts == set()
+    assert len(info_lines) == 1
+    assert "informational" in info_lines[0]
+
+
 def test_check_composition_case_missing_when_settings_names_uncovered_script(monkeypatch):
     monkeypatch.setattr(
         hlp, "load_settings_hook_commands",

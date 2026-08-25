@@ -188,6 +188,76 @@ def test_harness_hooks_dedupes_repeated_filename(repo):
 
 
 # ---------------------------------------------------------------------
+# check_harness_hooks -- dual command-form parsing (flat "python
+# tools/x.py" AND the $CLAUDE_PROJECT_DIR-qualified quoted form), plus
+# an adversarial battery of illegal neighboring forms that must NOT
+# parse (builder-role rule 6a: >=6 neighboring illegal forms, each
+# individually distinct from the two legal shapes).
+# ---------------------------------------------------------------------
+
+
+def test_harness_hooks_qualified_claude_project_dir_form_parses_existing_file(repo):
+    (repo / "tools").mkdir()
+    (repo / "tools" / "my_hook.py").write_text("pass\n", encoding="utf-8")
+    _write_settings(repo, ['python "$CLAUDE_PROJECT_DIR/tools/my_hook.py"'])
+    issues = wiring_check.check_harness_hooks(repo)
+    assert issues == []
+
+
+def test_harness_hooks_qualified_claude_project_dir_form_missing_file_is_an_issue(repo):
+    _write_settings(repo, ['python "$CLAUDE_PROJECT_DIR/tools/nonexistent_hook.py"'])
+    issues = wiring_check.check_harness_hooks(repo)
+    assert issues == ["hook file not found: tools/nonexistent_hook.py"]
+
+
+def test_harness_hooks_both_legal_forms_of_same_file_dedupe(repo):
+    (repo / "tools").mkdir()
+    (repo / "tools" / "my_hook.py").write_text("pass\n", encoding="utf-8")
+    _write_settings(
+        repo,
+        [
+            "python tools/my_hook.py",
+            'python "$CLAUDE_PROJECT_DIR/tools/my_hook.py"',
+        ],
+    )
+    issues = wiring_check.check_harness_hooks(repo)
+    assert issues == []
+
+
+@pytest.mark.parametrize(
+    "illegal_command",
+    [
+        # (1) flat form without the required $CLAUDE_PROJECT_DIR prefix,
+        # but quoted anyway -- quote/prefix must appear together, never
+        # one without the other.
+        'python "tools/my_hook.py"',
+        # (2) qualified prefix WITHOUT quotes -- the other half of the
+        # same pairing requirement.
+        "python $CLAUDE_PROJECT_DIR/tools/my_hook.py",
+        # (3) single quotes instead of double quotes.
+        "python '$CLAUDE_PROJECT_DIR/tools/my_hook.py'",
+        # (4) wrong interpreter.
+        "python3 tools/my_hook.py",
+        # (5) extra flag/argument appended.
+        "python tools/my_hook.py --verbose",
+        # (6) backslashes inside the qualified form.
+        'python "$CLAUDE_PROJECT_DIR\\tools\\my_hook.py"',
+        # (7) path outside tools/.
+        "python scripts/my_hook.py",
+        # (8) missing closing quote on the qualified form.
+        'python "$CLAUDE_PROJECT_DIR/tools/my_hook.py',
+    ],
+)
+def test_harness_hooks_adversarial_illegal_forms_do_not_parse(repo, illegal_command):
+    (repo / "tools").mkdir()
+    (repo / "tools" / "my_hook.py").write_text("pass\n", encoding="utf-8")
+    _write_settings(repo, [illegal_command])
+    issues = wiring_check.check_harness_hooks(repo)
+    assert len(issues) == 1
+    assert issues[0].startswith("unparsed hook command:")
+
+
+# ---------------------------------------------------------------------
 # check_untracked_enforcement_files
 # ---------------------------------------------------------------------
 
@@ -367,8 +437,151 @@ def test_ledger_harness_keyword_row_reconciled_against_harness_issues(repo):
 
 
 # ---------------------------------------------------------------------
+# check_install_parity_notices() -- a SEPARATE, non-blocking "notices"
+# class (K12).
+# ---------------------------------------------------------------------
+
+
+def test_notices_no_ledger_at_all_is_silent(repo):
+    assert wiring_check.check_install_parity_notices(repo) == []
+
+
+def test_notices_ledger_with_no_revision_line_is_silent(repo):
+    (repo / "ADOPTION_LEDGER.md").write_text(_LEDGER_TEMPLATE, encoding="utf-8")
+    assert wiring_check.check_install_parity_notices(repo) == []
+
+
+def test_notices_ledger_with_unfilled_placeholder_revision_is_silent(repo):
+    text = _LEDGER_TEMPLATE + (
+        "\n## Kit snapshot revision\n\n"
+        "Kit snapshot revision: `<commit/tag of the toolkit snapshot "
+        "this ledger was last reconciled against>`\n"
+    )
+    (repo / "ADOPTION_LEDGER.md").write_text(text, encoding="utf-8")
+    assert wiring_check.check_install_parity_notices(repo) == []
+
+
+def test_notices_revision_recorded_no_parity_record_warns(repo):
+    text = _LEDGER_TEMPLATE + "\n## Kit snapshot revision\n\nKit snapshot revision: `abc1234`\n"
+    (repo / "ADOPTION_LEDGER.md").write_text(text, encoding="utf-8")
+    notices = wiring_check.check_install_parity_notices(repo)
+    assert len(notices) == 1
+    assert "abc1234" in notices[0]
+    assert "Install parity" in notices[0]
+
+
+def test_notices_revision_recorded_with_parity_record_is_silent(repo):
+    # Positive control of the exclusion (command hygiene point 6): the
+    # SAME revision, but a matching "Install parity: ..." record IS
+    # present -- must be silent.
+    text = _LEDGER_TEMPLATE + (
+        "\n## Kit snapshot revision\n\nKit snapshot revision: `abc1234`\n"
+        "Install parity: OK, 2026-08-25.\n"
+    )
+    (repo / "ADOPTION_LEDGER.md").write_text(text, encoding="utf-8")
+    assert wiring_check.check_install_parity_notices(repo) == []
+
+
+def test_notices_ledger_broken_encoding_fails_open_with_notice(repo):
+    (repo / "ADOPTION_LEDGER.md").write_bytes(b"\xff\xfe not valid utf-8 \x80\x81")
+    notices = wiring_check.check_install_parity_notices(repo)
+    assert len(notices) == 1
+    assert "not readable" in notices[0]
+
+
+def test_notices_never_affect_ok_verdict(repo):
+    # The invariant this class exists under: notices NEVER flip "ok".
+    _git(["config", "--local", "core.hooksPath", ".githooks"], repo)
+    _add_githook(repo, "pre-commit", executable=True)
+    _add_githook(repo, "commit-msg", executable=True)
+    _write_settings(repo, [])
+    text = _LEDGER_TEMPLATE + "\n## Kit snapshot revision\n\nKit snapshot revision: `abc1234`\n"
+    (repo / "ADOPTION_LEDGER.md").write_text(text, encoding="utf-8")
+    result = wiring_check.check_wiring(repo)
+    assert result["notices"] != []
+    assert result["ok"] is True  # notices present, but "ok" is still True
+    assert result["issues"] == []
+
+
+def test_notices_skip_name_recognized_omits_the_check(repo):
+    text = _LEDGER_TEMPLATE + "\n## Kit snapshot revision\n\nKit snapshot revision: `abc1234`\n"
+    (repo / "ADOPTION_LEDGER.md").write_text(text, encoding="utf-8")
+    result = wiring_check.check_wiring(repo, skip=frozenset({"check_install_parity_notices"}))
+    assert result["notices"] == []
+
+
+def test_notices_cli_prints_notices_block_without_affecting_exit_code(repo, monkeypatch):
+    _git(["config", "--local", "core.hooksPath", ".githooks"], repo)
+    _add_githook(repo, "pre-commit", executable=True)
+    _add_githook(repo, "commit-msg", executable=True)
+    _write_settings(repo, [])
+    text = _LEDGER_TEMPLATE + "\n## Kit snapshot revision\n\nKit snapshot revision: `abc1234`\n"
+    (repo / "ADOPTION_LEDGER.md").write_text(text, encoding="utf-8")
+    monkeypatch.setattr(wiring_check, "repo_root", lambda: repo)
+    monkeypatch.chdir(repo)
+    import io
+    import contextlib
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        exit_code = wiring_check.main(["--check"])
+    assert exit_code == 0  # notices never flip a clean exit code
+    out = buf.getvalue()
+    assert "WIRING: OK" in out
+    assert "WIRING NOTICES: 1 notice(s), does not affect exit code" in out
+
+
+def test_notices_invisible_to_enforcement_probe_pin(repo):
+    """The mandatory pin from the spec's own B2 decision: enforcement_
+    probe.py reads ONLY the wiring_check subprocess's EXIT CODE (never
+    parses its stdout text for "issues"/"notices") -- so a notices
+    block in the printed output can never turn into a rejection. Proven
+    directly against enforcement_probe.decide() with an injected
+    run_wiring_check() returning (True, <text containing a notices
+    block>) -- ok=True must still mean "no rejection", regardless of
+    what the detail text says."""
+    import importlib.util
+
+    ep_path = Path(__file__).resolve().parent / "enforcement_probe.py"
+    spec = importlib.util.spec_from_file_location("enforcement_probe_notices_pin", ep_path)
+    ep = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ep)
+
+    def _fake_run_wiring_check():
+        return True, (
+            "WIRING: OK\n"
+            "WIRING NOTICES: 1 notice(s), does not affect exit code\n"
+            "  * adoption ledger records kit snapshot revision 'abc1234' but no "
+            "'Install parity: ...' record for it\n"
+        )
+
+    exit_code, message = ep.decide(["tools/wiring_check.py"], {"tools/wiring_check.py"}, _fake_run_wiring_check)
+    assert exit_code == 0
+    assert message == ""
+
+
+# ---------------------------------------------------------------------
 # check_wiring() aggregation + never-raises contract
 # ---------------------------------------------------------------------
+
+
+def test_check_wiring_same_verdict_for_flat_and_qualified_settings_forms(repo):
+    # DoD edge (R11b): settings.json in EITHER legal command form must
+    # produce the SAME wiring verdict end-to-end (check_wiring(), not
+    # just the isolated check_harness_hooks() unit above).
+    _git(["config", "--local", "core.hooksPath", ".githooks"], repo)
+    _add_githook(repo, "pre-commit", executable=True)
+    _add_githook(repo, "commit-msg", executable=True)
+    (repo / "tools").mkdir()
+    (repo / "tools" / "my_hook.py").write_text("pass\n", encoding="utf-8")
+
+    _write_settings(repo, ["python tools/my_hook.py"])
+    flat_result = wiring_check.check_wiring(repo)
+
+    _write_settings(repo, ['python "$CLAUDE_PROJECT_DIR/tools/my_hook.py"'])
+    qualified_result = wiring_check.check_wiring(repo)
+
+    assert flat_result == qualified_result == {"ok": True, "issues": [], "notices": []}
 
 
 def test_check_wiring_all_clean_ok_true(repo):
@@ -377,7 +590,7 @@ def test_check_wiring_all_clean_ok_true(repo):
     _add_githook(repo, "commit-msg", executable=True)
     _write_settings(repo, [])
     result = wiring_check.check_wiring(repo)
-    assert result == {"ok": True, "issues": []}
+    assert result == {"ok": True, "issues": [], "notices": []}
 
 
 def test_check_wiring_aggregates_multiple_issue_sources(repo):
@@ -454,8 +667,8 @@ def test_check_wiring_default_skip_is_byte_identical_to_before(repo):
     _add_githook(repo, "pre-commit", executable=True)
     _add_githook(repo, "commit-msg", executable=True)
     _write_settings(repo, [])
-    assert wiring_check.check_wiring(repo) == {"ok": True, "issues": []}
-    assert wiring_check.check_wiring(repo, skip=frozenset()) == {"ok": True, "issues": []}
+    assert wiring_check.check_wiring(repo) == {"ok": True, "issues": [], "notices": []}
+    assert wiring_check.check_wiring(repo, skip=frozenset()) == {"ok": True, "issues": [], "notices": []}
 
 
 def test_check_wiring_skip_git_hooks_path_omits_that_check_only(repo):
@@ -478,7 +691,7 @@ def test_check_wiring_skip_unknown_name_is_a_silent_no_op(repo):
     _add_githook(repo, "commit-msg", executable=True)
     _write_settings(repo, [])
     result = wiring_check.check_wiring(repo, skip=frozenset({"check_does_not_exist"}))
-    assert result == {"ok": True, "issues": []}
+    assert result == {"ok": True, "issues": [], "notices": []}
 
 
 # ---------------------------------------------------------------------
@@ -604,7 +817,7 @@ def test_mode_installed_wrong_root_diagnostic_forces_nonzero_even_if_hypothetica
     # confirm main() still returns 1.
     bad_root = tmp_path / "not_a_host_either"
     bad_root.mkdir()
-    monkeypatch.setattr(wiring_check, "check_wiring", lambda root: {"ok": True, "issues": []})
+    monkeypatch.setattr(wiring_check, "check_wiring", lambda root: {"ok": True, "issues": [], "notices": []})
     exit_code = wiring_check.main(["--mode", "installed", "--host-root", str(bad_root)])
     assert exit_code == 1
 
@@ -660,7 +873,7 @@ def test_existing_tests_untouched_still_exercise_check_wiring_directly(repo):
     _add_githook(repo, "pre-commit", executable=True)
     _add_githook(repo, "commit-msg", executable=True)
     _write_settings(repo, [])
-    assert wiring_check.check_wiring(repo) == {"ok": True, "issues": []}
+    assert wiring_check.check_wiring(repo) == {"ok": True, "issues": [], "notices": []}
 
 
 # ---------------------------------------------------------------------

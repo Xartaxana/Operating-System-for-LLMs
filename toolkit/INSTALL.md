@@ -169,3 +169,40 @@ disk (git status, DECISIONS.md's entry count, CURRENT_CONTEXT.md's
 queue, and so on). Note in the report itself that it was hand-assembled
 rather than hook-emitted, so a later reader doesn't mistake it for
 evidence the hook fired.
+
+## Policy parity
+
+Both paths — a fresh Path A/B install AND a later Upgrade mode run of
+the onboarding skill (below) — end at the SAME closing step: a
+read-only run of `tools/install_parity.py --check`. Files landing on
+disk is not the same fact as the RULE TEXT they carry actually being
+present and intact — a real upgrade incident once delivered every
+file and every check correctly while a host-branch-restoration step
+silently reverted ~14 policy blocks in the host's own `CLAUDE.md` back
+to stale text; the checks that referenced those blocks ran green
+against an empty room. `install_parity.py` compares the host tree
+against `tools/install_parity_anchors.json` (structural anchors —
+headers, numbered rules, CAPS-marker clauses — derived from this
+kit's own policy carriers) and reports, by name, anything the
+adoption ledger doesn't already excuse (`native-equivalent` /
+`deferred` / `rejected`) as either `MISSING` or `UNKNOWN`.
+
+This check is deliberately **NOT wired into pre-commit**: the very
+first commit of a fresh install (see "A note on your first commit",
+above) is already installing the ledger and the policy files in the
+SAME commit that would need to pass a parity check against them —
+gating that commit on parity would make it unclosable. Run it by hand
+(or as the last step the onboarding/upgrade skill performs) once the
+files and the ledger are both actually on disk:
+
+```
+python tools/install_parity.py --check
+```
+
+Read the report before committing: every `MISSING` line is a real gap
+(the ledger says this mechanism is adopted, but the text isn't there);
+`UNKNOWN` means the tool can't tell (no ledger row matches, or its
+status text doesn't parse) and is worth a second look; `informational`
+lines are expected — the ledger already says this row is
+`native-equivalent`/`deferred`/`rejected`, so its absence is not a
+defect.

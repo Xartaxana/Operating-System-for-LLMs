@@ -907,20 +907,45 @@ def _agent_payload(subagent_type=None, description=None, prompt="noop", cwd=None
     return payload
 
 
+def _scout_families():
+    """(live_family, foreign_family) for scout.md's own binding.
+
+    Route port, node D1 (DoD item 6): these tests derive their
+    match/mismatch labels from the LIVE role file through the SAME
+    resolver the gate itself uses, instead of pinning a model name --
+    "model name as the test's own criterion" is a known failure class:
+    the earlier hardcoded assumption "scout.md declares model: haiku"
+    broke the moment scout.md was rebound to sonnet, with the gate
+    itself fully intact (measured baseline before this edit: 6 of
+    these tests failed on a clean run, not because the layer regressed
+    but because the pin did). The tests' subject is the LOGIC
+    (mismatch -> WARN, match -> silence), not a particular binding."""
+    known, model = dispatch_gate._find_agent_role_model("scout")
+    assert known and model, "scout.md must exist and carry model: (otherwise these tests are moot)"
+    fam = dispatch_gate._model_family(model)
+    assert fam, f"model {model!r} of scout.md's role file does not resolve to a known family"
+    return fam, ("haiku" if fam != "haiku" else "sonnet")
+
+
 def test_role_type_warn_known_role_family_mismatch_warns():
-    # scout.md declares model: haiku; the label declares "sonnet:".
+    # The label declares a family DELIBERATELY FOREIGN to scout.md's
+    # live binding (binding-agnostic, see _scout_families).
+    live, foreign = _scout_families()
     warn = dispatch_gate.role_type_warn(
-        _agent_payload(subagent_type="scout", description="sonnet: does recon")
+        _agent_payload(subagent_type="scout", description=f"{foreign}: does recon")
     )
     assert "ROLE-TYPE WARN" in warn
-    assert "sonnet" in warn
+    assert foreign in warn
     assert "scout" in warn
-    assert "haiku" in warn
+    assert live in warn
 
 
 def test_role_type_warn_known_role_family_match_silent():
+    # Positive control (symmetric with the mismatch above): the same
+    # type, label matching the role file's LIVE model -> "".
+    live, _foreign = _scout_families()
     warn = dispatch_gate.role_type_warn(
-        _agent_payload(subagent_type="scout", description="haiku: does recon")
+        _agent_payload(subagent_type="scout", description=f"{live}: does recon")
     )
     assert warn == ""
 
@@ -979,8 +1004,13 @@ def test_subagent_type_case_and_whitespace_variants_silent():
 
 
 def test_subagent_type_case_mismatch_still_warns_on_real_mismatch():
+    # Regression guard paired with the test above: case does NOT mask
+    # a real family mismatch -- "Scout" (different case) with a label
+    # of a family foreign to the live binding still warns
+    # (binding-agnostic, see _scout_families).
+    _live, foreign = _scout_families()
     warn = dispatch_gate.role_type_warn(
-        _agent_payload(subagent_type="Scout", description="sonnet: does recon")
+        _agent_payload(subagent_type="Scout", description=f"{foreign}: does recon")
     )
     assert "ROLE-TYPE WARN" in warn
 
@@ -1201,7 +1231,8 @@ def test_role_type_warn_tool_input_missing_silent():
 
 
 def test_role_type_warn_huge_description_does_not_hang():
-    huge_description = "sonnet: " + ("x" * 100_000)
+    _live, foreign = _scout_families()
+    huge_description = f"{foreign}: " + ("x" * 100_000)
     huge_prompt = "y" * 240_000
     start = time.monotonic()
     warn = dispatch_gate.role_type_warn(
@@ -1209,7 +1240,7 @@ def test_role_type_warn_huge_description_does_not_hang():
     )
     elapsed = time.monotonic() - start
     assert elapsed < 5.0, f"took {elapsed:.2f}s"
-    assert "ROLE-TYPE WARN" in warn  # scout(haiku) != sonnet -- a real mismatch
+    assert "ROLE-TYPE WARN" in warn  # foreign family != scout's live binding -- a real mismatch
 
 
 def test_role_type_warn_known_role_without_model_in_frontmatter_silent(tmp_path, monkeypatch):
@@ -1290,6 +1321,92 @@ def test_role_type_warn_agents_dir_present_positive_control():
     assert dispatch_gate.AGENTS_DIR.is_dir()
 
 
+# =======================================================================
+# ROLE_TYPE_WARN split -- PROJECT vs. BUILTIN_TYPE (route port, node D1;
+# staff twin's split-warn fix): the branching LOGIC (what counts as an unknown
+# role) is unchanged, only the TEXT differs by whether subagent_type is
+# a known harness built-in (no role file expected) or a project role
+# (a role file is expected but missing).
+# =======================================================================
+
+
+def test_role_type_warn_both_texts_share_byte_identical_prefix():
+    prefix = "ROLE-TYPE WARN:"
+    assert dispatch_gate.ROLE_TYPE_WARN_PROJECT.startswith(prefix)
+    assert dispatch_gate.ROLE_TYPE_WARN_BUILTIN_TYPE.startswith(prefix)
+
+
+def test_role_type_warn_both_texts_carry_no_role_file_substring():
+    assert "no role file" in dispatch_gate.ROLE_TYPE_WARN_PROJECT
+    assert "no role file" in dispatch_gate.ROLE_TYPE_WARN_BUILTIN_TYPE
+
+
+def test_role_type_warn_builtin_type_uses_builtin_text():
+    for builtin_type in ("general-purpose", "claude-code-guide", "Explore", "Plan", "statusline-setup"):
+        warn = dispatch_gate.role_type_warn(
+            _agent_payload(subagent_type=builtin_type, description="sonnet: do something")
+        )
+        assert "ROLE-TYPE WARN" in warn, builtin_type
+        assert "no role file" in warn, builtin_type
+        assert "expected" in warn, builtin_type  # BUILTIN_TYPE-specific phrase
+
+
+def test_role_type_warn_unknown_type_not_in_list_uses_project_text():
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="totally-unknown-role-xyz", description="fable: something")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "no role file" in warn
+    assert "add a role file" in warn
+    assert "not yet in the known list" in warn  # a miss falls through, not a silent pass
+
+
+def test_role_type_warn_builtin_match_is_case_insensitive():
+    for variant in ("GENERAL-PURPOSE", "General-Purpose", " general-purpose "):
+        warn = dispatch_gate.role_type_warn(
+            _agent_payload(subagent_type=variant, description="sonnet: x")
+        )
+        assert "expected" in warn, f"variant={variant!r}"
+
+
+def test_role_type_warn_mismatch_case_unaffected_by_split():
+    # Regression guard: the MISMATCH branch (a role file IS found, the
+    # family diverges) is untouched by the split -- verbatim old text,
+    # no "no role file" substring.
+    warn = dispatch_gate.role_type_warn(
+        _agent_payload(subagent_type="builder", description="opus: fix the file")
+    )
+    assert "ROLE-TYPE WARN" in warn
+    assert "opus" in warn
+    assert "builder" in warn
+    assert "sonnet" in warn
+    assert "no role file" not in warn
+
+
+# --- ROOT-ONLY GUARD on is_path_like_token (route port, node D1; staff
+# twin ~:863-884): a bare root with no segment ("/", "C:\\") is NOT a
+# path token; a root WITH a segment ("/etc", "C:\\x") IS -- both edges
+# tested (rule 6a).
+# =======================================================================
+
+
+def test_is_path_like_token_bare_root_alone_is_not_a_token():
+    for tok in ["/", "//", "///", "C:\\", "C:/", "\\", "", "   ", "."]:
+        assert dispatch_gate.is_path_like_token(tok) is False, tok
+
+
+def test_is_path_like_token_root_with_segment_is_a_token():
+    for tok in ["/etc", "/etc/x", "C:\\x", "C:/x", "C:\\AI CRM\\x\\AGENTS.md", "//server/share"]:
+        assert dispatch_gate.is_path_like_token(tok) is True, tok
+
+
+def test_is_path_like_token_doubled_bare_root_still_not_a_token():
+    # The class is "root without ANY segment", not "exactly one slash"
+    # -- a doubled/tripled root with no segment stays False.
+    for tok in ["//", "///", "C://"]:
+        assert dispatch_gate.is_path_like_token(tok) is False, tok
+
+
 # --- Invariants at the main()/subprocess level: WARN never replaces a
 # block, exit-2 branches stay unreachable to the new code, stdout stays
 # a single JSON object. ------------------------------------------------
@@ -1310,7 +1427,11 @@ def test_role_type_warn_not_computed_when_gate_blocks_check1():
 
 
 def test_role_type_warn_never_sets_exit_2_or_permission_decision():
-    payload = _agent_payload(subagent_type="scout", description="sonnet: does recon")
+    # A mismatch (binding-agnostic, see _scout_families) guarantees the
+    # WARN actually fires, so the subprocess-level invariants below
+    # have something to check.
+    _live, foreign = _scout_families()
+    payload = _agent_payload(subagent_type="scout", description=f"{foreign}: does recon")
     payload["tool_input"]["prompt"] = "DoD: the test is green."
     result = subprocess.run(
         [sys.executable, str(SCRIPT)],
@@ -1326,10 +1447,14 @@ def test_role_type_warn_never_sets_exit_2_or_permission_decision():
 
 
 def test_both_warn_layers_fire_single_json_object_given_path_first():
+    # Same reasoning as above: a foreign-family label guarantees the
+    # role-type WARN actually fires alongside the given-path one
+    # (binding-agnostic, see _scout_families).
+    _live, foreign = _scout_families()
     repo_root = str(Path(__file__).resolve().parents[1])
     payload = _agent_payload(
         subagent_type="scout",
-        description="sonnet: recon",
+        description=f"{foreign}: recon",
         prompt="Given: tools/fake_does_not_exist.py. Find mentions.",
         cwd=repo_root,
     )

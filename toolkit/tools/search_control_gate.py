@@ -148,7 +148,9 @@ side, see tools/claim_control_gate.py's own docstring):
 import json
 import os
 import sys
+import threading
 from datetime import datetime
+from pathlib import Path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEFAULT_SAMPLE = os.path.join(REPO, "logs", "posttooluse-schema-sample.json")
@@ -191,10 +193,17 @@ EXAMINE_TOOLS = {"Read"}
 # grep-equivalent cmdlet, `Select-String`.
 SEARCH_TOKENS = ("grep", "rg ", "ripgrep", "find ", "fd ", "ls -1", "awk ", "select-string")
 
+# RULE-OF-THREE TEXT (synced from HQ's tools/search_control_gate.py,
+# where the consequence clause below was added): what's wrong (an
+# empty result may just mean a miscall), what it risks (reporting
+# absence when the thing may be present), the action (run a same-form
+# positive control) -- HQ's own literal wording kept, only the rule
+# reference translated to this template's own numbering.
 MSG = (
-    "Search returned nothing. Command hygiene point 6: an empty result is "
-    "reportable as absence ONLY after a positive control -- run the same tool "
-    "and syntax against a sample known to exist. Known miscall modes here: "
+    "Search returned nothing. Command hygiene point 6: an empty result may "
+    "simply mean the tool was miscalled, not that the thing is absent -- report "
+    "absence ONLY after a positive control: run the same tool and syntax against "
+    "a sample known to exist. Known miscall modes here: "
     "\\b does not fire on Cyrillic; shell-grep -i does not case-fold Cyrillic; "
     "single-language queries miss localised data; a marker searched in file "
     "bodies may be written in varying formats -- use a structural field."
@@ -581,10 +590,81 @@ def _read_stdin_bytes():
     surrounding try/except -- invalid UTF-8 on stdin under a
     UTF-8-locked locale (PYTHONIOENCODING=utf-8) raised
     UnicodeDecodeError and exited 1, breaking the "exit 0 always"
-    contract this docstring documents everywhere else."""
+    contract this docstring documents everywhere else. Superseded by
+    `_read_stdin_bytes_deadline()` below -- kept only
+    as a documented predecessor, no longer called from `main()`."""
     if sys.stdin.isatty():
         return b""
     return sys.stdin.buffer.read()
+
+
+# --- stdin deadline (P4 class; a LOCAL copy, no shared module -- the
+# same helper toolkit/tools/owns_gate.py/dispatch_gate.py already carry)
+# ------------------------------------------------------------------
+
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Seconds to wait for stdin: env override, else the default.
+    Invalid, non-numeric, <=0, or > _STDIN_DEADLINE_MAX all fall back to
+    the default -- there is deliberately NO "0 = wait forever" mode (that
+    would resurrect the exact hang this helper exists to close)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """Returns (bytes, timed_out). Reads stdin to EOF, but no longer
+    than the deadline. Cross-platform by construction: select/poll do
+    not work on pipes on Windows, so a background daemon thread does
+    the actual blocking read and the deadline is enforced via
+    thread.join(timeout). A TTY returns b"" without reading anything.
+    Any read error degrades to b"" (fail-open)."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+
+# A background reader thread may still be blocked deep in a platform
+# read syscall at normal interpreter shutdown, which can crash the
+# process ("Fatal Python error: _enter_buffered_busy") instead of
+# exiting cleanly. main() itself is UNCHANGED (still a plain
+# `return 0`, safe in-process); only the actual __main__ script-exit
+# path below escalates to os._exit().
+_STDIN_DEADLINE_STATE = {"hit": False}
 
 
 def main():
@@ -594,10 +674,18 @@ def main():
     -- exit 0 on every path, including a TTY with nothing piped in,
     malformed stdin, invalid UTF-8 bytes, a non-dict payload, or any
     unexpected exception anywhere in `_process` (ledger I/O, sample
-    I/O, the warn print). Never raises, never returns non-zero."""
+    I/O, the warn print). Never raises, never returns non-zero. P4: the
+    former `_read_stdin_bytes()` is replaced by the deadline helper
+    above; on a stdin deadline `_process` is deliberately NOT called
+    (named deviation from the empty-input path, which DOES call
+    `_process({}, "")` and writes the schema-sample warning)."""
     try:
         _reconfigure_stdout_utf8()
-        raw_bytes = _read_stdin_bytes()
+        raw_bytes, timed_out = _read_stdin_bytes_deadline()
+        if timed_out:
+            _STDIN_DEADLINE_STATE["hit"] = True
+            sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
+            return 0
         raw = raw_bytes.decode("utf-8", errors="replace") if raw_bytes else ""
         try:
             payload = json.loads(raw) if raw.strip() else {}
@@ -610,4 +698,15 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if _STDIN_DEADLINE_STATE["hit"]:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

@@ -121,6 +121,85 @@ the hook's own behavior ("the same analysis" in the literal sense --
 the same silence/message criterion, not only the same detection
 algorithm), documented here, not guessed silently.
 
+REGION-AWARE (ported from the reference deployment's tools/negative_lint.py,
+same class as docs/SIBLING_MAP.md's "a guard does not distinguish the
+author's own claim from quoted/nested content"): substring matching in
+a +/-3-line window alone cannot tell WHERE a marker physically sits --
+in the author's own prose (a real claim/control) or inside a quote/
+fence of someone else's text (not the author's own statement at all).
+Symmetric for the negative marker itself.
+
+POLICY (B1, literal): fenced/blockquote -- NOT a violation (and does
+NOT count as a control), inline_code -- a violation (and DOES count as
+a control). AN UNTERMINATED FENCE = PROSE (silence-looks-like-success
+lesson -- a degraded module or unterminated markup must never WIDEN
+the silence zone; safer to over-count an unterminated fence chunk as a
+violation than to silently swallow it).
+
+CLASSIFICATION PRIORITY of a single position (_classify, this
+implementation's own engineering decision, not silently guessed --
+justified here because the discrimination negative control below makes
+the choice CHECKABLE, not arbitrary): Region.kinds is a tuple, may be
+("blockquote", "fenced") or ("blockquote", "prose") or
+("blockquote", "inline_code") etc. (md_regions.py). Rule, in order:
+ 1. unterminated AND KIND_FENCED in kinds -> "prose" (the "unterminated
+    fence = prose" rule, BEFORE everything else -- overrides even
+    blockquote nesting).
+ 2. KIND_FENCED in kinds -> "fenced" (fenced never mixes with
+    inline_code -- fenced lines never go through md_regions.scan()'s
+    inline splitter).
+ 3. KIND_INLINE_CODE in kinds -> "inline_code" (even inside a quote --
+    "inline code is a violation" reads literally unconditional, not
+    restricted by nesting in the spec).
+ 4. KIND_BLOCKQUOTE in kinds (without 1-3) -> "blockquote" (ordinary
+    quoted prose, ("blockquote", "prose") in md_regions -- NOT a
+    violation).
+ 5. else -> "prose" (top-level author prose, the default).
+This resolves the spec's one explicit fork: "fenced/blockquote -- not
+a violation, inline_code -- a violation" reads as PRIORITY ORDER
+(1 > 2 > 3 > 4 > 5), not independent bits -- an alternative (e.g. "any
+blockquote admixture silences, even alongside inline_code") would make
+the discrimination negative control below INDISTINGUISHABLE (both
+forms give the same result for the "control quoted, negative in prose"
+test pair) -- ordered reading is the only one guaranteed to change the
+result when the region filter is disabled.
+
+POSITIONAL INVARIANT (literal): the +/-3-line window is computed over
+the ORIGINAL text.splitlines() indices -- no index shifts or
+renumbers because of a region (region filtering is an ADDITIONAL
+predicate on a line found the ordinary way, not a re-indexing of the
+line list). TEST PAIR "control quoted, negative in prose": the
+negative sits in prose (violation candidate), the control marker sits
+physically inside a quote within the +/-3 window -- the region filter
+must tell the two cases apart and not let the quoted "control"
+suppress a real violation (see test_negative_lint_md.py, the
+discrimination section, plus a SEPARATE run with
+MODULE_UNDER_TEST=live that suppresses the violation on the same text
+-- a red run as the negative control, command hygiene point 6).
+
+I-0 (ANY md_regions failure -- a module-wide ImportError, an exception
+out of scan(), or a degraded=True result) -> this guard behaves EXACTLY
+as before region-awareness: find_violations() runs the SAME algorithm
+the pre-region file did (a +/-3-line window by substring match, no
+region access at all) -- see _safe_scan and every "if scan_result is
+not None:" branch below, which becomes a NO-OP when scan_result is
+None -- the branching is not a separately-built code path, it is ONE
+loop whose region branch goes dead.
+
+I-1 (Rule #1, laziness): the scanner is called AFTER the cheap
+pre-filter -- the cheap pre-filter here IS the already-existing O(n)
+substring search for NEG_MARKERS over every line (find_violations
+already did this FIRST); scan() is called EXACTLY ONCE per
+find_violations call, and ONLY if that pre-filter found at least one
+candidate line -- on text carrying no negative marker at all, scan()
+is never called (count 0).
+
+Import -- a try/except pair (the same pattern tools/owns_gate.py uses
+for md_regions), scan staying None on failure (a missing sibling is
+not a live error here -- md_regions.py is a standing module this kit
+already carries, but I-0 must survive its complete absence too, the
+same fallback as an exception out of an already-imported scan()).
+
 ASYNC LAUNCH (a recurring finding on the source deployment): the
 tool_response of an ASYNCHRONOUS Task/Agent launch (`isAsync: true` /
 `status: "async_launched"`) is LAUNCH METADATA (agentId, description,
@@ -141,9 +220,24 @@ fallback stays live for other unrecognized dict shapes.
 """
 
 import argparse
+import bisect
 import json
+import os
 import sys
+import threading
 from pathlib import Path
+
+_TOOLS_DIR = Path(__file__).resolve().parent
+if str(_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_DIR))
+
+try:
+    from md_regions import scan, KIND_FENCED, KIND_BLOCKQUOTE, KIND_INLINE_CODE
+except ImportError:
+    scan = None
+    KIND_FENCED = "fenced"
+    KIND_BLOCKQUOTE = "blockquote"
+    KIND_INLINE_CODE = "inline_code"
 
 NEG_MARKERS_RU = [
     "не найден",
@@ -183,10 +277,16 @@ WINDOW_RADIUS = 3
 PREVIEW_MAX_LEN = 200
 PREVIEW_HEAD_COUNT = 3
 
+# RULE-OF-THREE TEXT (synced from HQ's tools/negative_lint.py, where an
+# ACTION imperative clause was added before the provenance parenthetical):
+# what's wrong (a negative with no nearby control), what it risks (a
+# reject candidate), the action (add a same-form control, or double-check
+# it) -- the registry literal "NEGATIVE LINT: " kept byte-exact.
 WARN_PREFIX_TEMPLATE = (
     "NEGATIVE LINT: {n} negative statement(s) with no same-form control "
     "nearby: {body}. A negative claim without a positive same-form "
-    "control is a reject candidate (command hygiene point 6)."
+    "control is a reject candidate; add a same-form control next to each "
+    "statement, or double-check it (command hygiene point 6)."
 )
 
 
@@ -194,26 +294,128 @@ def _line_has_any_marker(line_lower: str, markers: list) -> bool:
     return any(marker in line_lower for marker in markers)
 
 
+# Regions whose kinds exclude a position from consideration (neither as
+# a violation, nor as a control) -- see the module docstring, "POLICY".
+_EXCLUDED_KINDS = ("fenced", "blockquote")
+
+
+def _safe_scan(text: str):
+    """I-0: None on a missing module / an exception out of scan() /
+    a degraded=True result -- all three collapse to one "no region"
+    signal for the caller (find_violations simply stops filtering by
+    region, matching the pre-region algorithm exactly)."""
+    if scan is None:
+        return None
+    try:
+        result = scan(text)
+    except Exception:
+        return None
+    if result.degraded:
+        return None
+    return result
+
+
+def _region_at(scan_result, offset: int):
+    """The same bisect algorithm as md_regions.kind_at(), but returns
+    the WHOLE Region (not just its kinds) -- needed for .unterminated,
+    the "unterminated fence = prose" rule."""
+    regions = scan_result.regions
+    if not regions:
+        return None
+    starts = [r.start for r in regions]
+    idx = bisect.bisect_right(starts, offset) - 1
+    if idx < 0:
+        return None
+    region = regions[idx]
+    if region.start <= offset < region.end:
+        return region
+    return None
+
+
+def _classify(region) -> str:
+    """See the module docstring, "CLASSIFICATION PRIORITY". region is
+    None (no region at this position, end of text, outside coverage)
+    -> "prose" (the safe default -- behaves as if there were no region
+    at all)."""
+    if region is None:
+        return "prose"
+    if region.unterminated and KIND_FENCED in region.kinds:
+        return "prose"
+    if KIND_FENCED in region.kinds:
+        return "fenced"
+    if KIND_INLINE_CODE in region.kinds:
+        return "inline_code"
+    if KIND_BLOCKQUOTE in region.kinds:
+        return "blockquote"
+    return "prose"
+
+
+def _line_start_offsets(text: str) -> list:
+    """Start offset (in CHARACTERS of the original text) of every
+    text.splitlines() line -- the same scheme as
+    md_regions._split_lines() (splitlines(keepends=True), a cumulative
+    sum of lengths)."""
+    offsets = []
+    pos = 0
+    for wt in text.splitlines(keepends=True):
+        offsets.append(pos)
+        pos += len(wt)
+    return offsets
+
+
+def _marker_offset_in_line(line_lower: str, markers: list) -> int:
+    """Position of the first matched marker inside an ALREADY-found
+    line (the line is guaranteed to carry at least one marker --
+    called only after _line_has_any_marker returned True)."""
+    for marker in markers:
+        idx = line_lower.find(marker)
+        if idx != -1:
+            return idx
+    return 0
+
+
 def find_violations(text: str) -> list:
     """Returns a list of (line_no, 1-indexed, original_line_text) for
     every line of text carrying a negative marker with NO control
     marker in the +/-WINDOW_RADIUS-line window (including the line
-    itself). Empty text -> empty list (the silent path for both the
-    hook and the CLI)."""
+    itself), with region policy B1 (fenced/blockquote excluded on
+    BOTH sides, inline_code and prose count; an unterminated fence =
+    prose) -- see the module docstring, "REGION-AWARE", in full.
+    Empty text -> empty list (the silent path for both the hook and
+    the CLI)."""
     if not text:
         return []
     lines = text.splitlines()
     lowered = [ln.lower() for ln in lines]
+
+    negative_idxs = [i for i, low in enumerate(lowered) if _line_has_any_marker(low, NEG_MARKERS)]
+    if not negative_idxs:
+        return []  # I-1: scan() is NOT called -- nothing to check
+
+    scan_result = _safe_scan(text)
+    line_offsets = _line_start_offsets(text) if scan_result is not None else None
+
     violations = []
-    for i, low in enumerate(lowered):
-        if not _line_has_any_marker(low, NEG_MARKERS):
-            continue
+    for i in negative_idxs:
+        if scan_result is not None:
+            pos = _marker_offset_in_line(lowered[i], NEG_MARKERS)
+            kind = _classify(_region_at(scan_result, line_offsets[i] + pos))
+            if kind in _EXCLUDED_KINDS:
+                continue  # B1: fenced/blockquote -- not a violation
+
         lo = max(0, i - WINDOW_RADIUS)
         hi = min(len(lines) - 1, i + WINDOW_RADIUS)
-        window_has_control = any(
-            _line_has_any_marker(lowered[j], CONTROL_MARKERS)
-            for j in range(lo, hi + 1)
-        )
+        window_has_control = False
+        for j in range(lo, hi + 1):
+            if not _line_has_any_marker(lowered[j], CONTROL_MARKERS):
+                continue
+            if scan_result is not None:
+                cpos = _marker_offset_in_line(lowered[j], CONTROL_MARKERS)
+                ckind = _classify(_region_at(scan_result, line_offsets[j] + cpos))
+                if ckind in _EXCLUDED_KINDS:
+                    continue  # a quoted/fenced "control" does not count
+            window_has_control = True
+            break
         if not window_has_control:
             violations.append((i + 1, lines[i]))
     return violations
@@ -328,8 +530,81 @@ def _cli_main(text_path: str) -> int:
     return 0
 
 
+# --- stdin deadline (P4 class; a LOCAL copy, no shared module -- the
+# same helper toolkit/tools/owns_gate.py/dispatch_gate.py already carry)
+# ------------------------------------------------------------------
+
+_STDIN_DEADLINE_DEFAULT = 10.0
+_STDIN_DEADLINE_MAX = 600.0
+_STDIN_DEADLINE_ENV = "OSLLM_STDIN_TIMEOUT"
+
+
+def _stdin_deadline_seconds():
+    """Seconds to wait for stdin: env override, else the default.
+    Invalid, non-numeric, <=0, or > _STDIN_DEADLINE_MAX all fall back to
+    the default -- there is deliberately NO "0 = wait forever" mode (that
+    would resurrect the exact hang this helper exists to close)."""
+    try:
+        value = float(os.environ.get(_STDIN_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDIN_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDIN_DEADLINE_MAX):
+        return _STDIN_DEADLINE_DEFAULT
+    return value
+
+
+def _read_stdin_bytes_deadline():
+    """Returns (bytes, timed_out). Reads stdin to EOF, but no longer
+    than the deadline. Cross-platform by construction: select/poll do
+    not work on pipes on Windows, so a background daemon thread does
+    the actual blocking read and the deadline is enforced via
+    thread.join(timeout). A TTY returns b"" without reading anything.
+    Any read error degrades to b"" (fail-open)."""
+    stdin = getattr(sys, "stdin", None)
+    if stdin is None:
+        return b"", False
+    try:
+        if stdin.isatty():
+            return b"", False
+    except Exception:
+        pass
+    stream = getattr(stdin, "buffer", stdin)
+    box = {}
+
+    def _reader():
+        try:
+            box["data"] = stream.read()
+        except Exception:
+            box["data"] = b""
+
+    thread = threading.Thread(target=_reader, name="stdin-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdin_deadline_seconds())
+    if thread.is_alive():
+        return b"", True
+    data = box.get("data") or b""
+    if not isinstance(data, bytes):
+        data = str(data).encode("utf-8", "replace")
+    return data, False
+
+
+_STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
+
+# A background reader thread may still be blocked deep in a platform
+# read syscall at normal interpreter shutdown, which can crash the
+# process ("Fatal Python error: _enter_buffered_busy") instead of
+# exiting cleanly. main()/_hook_main() are UNCHANGED (still a plain
+# `return 0`, safe in-process); only the actual __main__ script-exit
+# path below escalates to os._exit().
+_STDIN_DEADLINE_STATE = {"hit": False}
+
+
 def _hook_main() -> int:
-    raw_bytes = sys.stdin.buffer.read()
+    raw_bytes, timed_out = _read_stdin_bytes_deadline()
+    if timed_out:
+        _STDIN_DEADLINE_STATE["hit"] = True
+        sys.stderr.write(f"{Path(__file__).name}: {_STDIN_DEADLINE_MSG}\n")
+        return 0
     raw = raw_bytes.decode("utf-8", errors="replace")
     try:
         payload = json.loads(raw)
@@ -358,4 +633,15 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    _rc = main()
+    if _STDIN_DEADLINE_STATE["hit"]:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(_rc)
+    sys.exit(_rc)

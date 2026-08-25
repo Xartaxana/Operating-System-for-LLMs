@@ -400,14 +400,23 @@ def check_append_only(staged_lines: list[str], head_lines: list[str]):
     are neither changed nor removed). Returns (ok, message)."""
     if len(staged_lines) < len(head_lines):
         return False, (
-            f"append-only: staged has FEWER lines ({len(staged_lines)}) "
-            f"than HEAD ({len(head_lines)}) -- existing lines were removed"
+            f"append-only: staged has FEWER lines ({len(staged_lines)}) than "
+            f"HEAD ({len(head_lines)}) -- some already-accepted journal "
+            "lines are gone; dispatch history becomes unrecoverable and any "
+            "accepted/rejected referencing a removed line loses its anchor "
+            "-- restore every HEAD line as an unchanged prefix in staged and "
+            "add new events only at the end (rule 1, append-only)"
         )
     for i, head_line in enumerate(head_lines):
         if staged_lines[i] != head_line:
             return False, (
-                f"append-only: line {i + 1} diverges from HEAD -- "
-                "existing lines cannot be changed, only appended"
+                f"append-only: line {i + 1} diverges from the HEAD version -- "
+                "an existing record was edited after the fact; the journal "
+                "stops being a trustworthy log of accepted decisions, and "
+                "acceptances/escalations that cited it lose their basis -- "
+                f"restore line {i + 1} to its HEAD form and record the "
+                "correction as a NEW line at the end, leaving the old one "
+                "untouched (rule 1, append-only)"
             )
     return True, ""
 
@@ -452,9 +461,11 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
         # looked at by at all -- this check closes that hole.
         return (
             f"role-vs-tier acceptance matrix: by={by!r} is not a known "
-            f"tier ({sorted(TIER_ORDER)}) -- basis cannot legalize an "
-            f"acceptance from an unknown acceptor (an enum/shape check "
-            f"precedes the matrix's semantics)"
+            f"tier ({sorted(TIER_ORDER)}) -- no basis can legalize an "
+            "acceptance from an acceptor whose own tier can't be "
+            "identified, and the whole matrix below is unreachable while "
+            f"this holds -- set 'by' to one of {sorted(TIER_ORDER)} (an "
+            "enum/shape check precedes the matrix's semantics)"
         )
     agent_tier_name = AGENT_TIER[agent]
     agent_tier = TIER_ORDER[agent_tier_name]
@@ -476,16 +487,23 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
         if obj.get("category") not in LEAF_CATEGORIES:
             return (
                 f"role-vs-tier acceptance matrix: basis \"judge\" is legal "
-                f"only for a leaf-class dispatch (category recon/"
-                f"implementation), got category={obj.get('category')!r}"
+                "only for a leaf-class dispatch (category recon/"
+                f"implementation), got category={obj.get('category')!r} -- "
+                "a judge is not calibrated to evaluate non-executor work, "
+                "and this acceptance would go through with no critic "
+                "judgment over architecture or spec -- switch basis to "
+                "'critic'/'queued-to-lead' for the (by, agent) pair, or fix "
+                "category if the work is genuinely leaf-class"
             )
         if agent not in ("scout", "builder"):
             return (
                 f"role-vs-tier acceptance matrix: basis \"judge\" is legal "
                 f"only for agent∈{{scout,builder}} (leaf-class EXECUTORS) -- "
-                f"agent={agent!r} is not eligible for judge acceptance "
-                f"regardless of category (specs and reviews stay outside "
-                f"the judge's remit by policy)"
+                f"agent={agent!r} is not eligible; a judge accepting "
+                "designer/critic-class output would bypass the mandatory "
+                "critic gate on specs and reviews -- switch basis to "
+                "'critic'/'queued-to-lead' for the (by, agent) pair, judge "
+                "is not legal for this agent regardless of category"
             )
         return None
 
@@ -501,10 +519,13 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
     # see the module docstring's rule 11.
     if by_tier is not None and by_tier < TIER_ORDER["sonnet"]:
         return (
-            f"role-vs-tier acceptance matrix: by={by!r} -- tier below "
-            f"sonnet, no coordination is provided for at any basis="
-            f"{basis!r} ('below Sonnet: no coordination is provided "
-            f"for'); agent={agent!r} cannot be accepted by this by"
+            f"role-vs-tier acceptance matrix: by={by!r} -- a tier below "
+            f"sonnet, and no basis={basis!r} rescues it ('below Sonnet: no "
+            "coordination is provided for') -- an acceptance from a "
+            f"non-functioning coordinator would legalize agent={agent!r} "
+            "with no real tier oversight -- raise 'by' to at least sonnet, "
+            "or route the acceptance through a judge on a leaf-class "
+            "dispatch"
         )
 
     # (4) basis=="critic" -- legal if the critic (opus) is strictly
@@ -519,11 +540,12 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
         return (
             f"role-vs-tier acceptance matrix: agent={agent!r} (tier "
             f"{agent_tier_name}) accepted with basis='critic', but the "
-            f"critic (opus) is not strictly above the executor's tier -- "
-            f"basis='critic' does not raise acceptance above its own "
-            f"opus tier; the legal path for agent={agent!r} is by "
-            f"strictly above opus (by='fable'), or basis='queued-to-lead' "
-            f"at by∈{{sonnet,opus}}"
+            "critic (opus) is not strictly above the executor's own tier "
+            "-- this would legalize an acceptance this exact matrix row "
+            "forbids, voiding the critic-gate guarantee for the "
+            f"upper-mid tier -- the legal path for agent={agent!r} is by "
+            "strictly above opus (by='fable'), or basis='queued-to-lead' "
+            "at by∈{sonnet,opus}"
         )
 
     # (5) basis=="queued-to-lead" -- legal for the upper-mid-tier CLASS
@@ -535,22 +557,40 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict) -> str | None
             return None
         return (
             f"role-vs-tier acceptance matrix: agent={agent!r} accepted "
-            f"by={by!r} with basis='queued-to-lead' -- for {agent!r}-class "
-            f"at a {by!r} coordinator only basis='critic' is legal (or "
-            f"judge on a leaf-implementation, if category is leaf-class "
-            f"AND agent∈{{scout,builder}}); the queue (queued-to-lead) is "
-            f"available only for the class {sorted(QUEUED_TO_LEAD_AGENTS)}"
+            f"by={by!r} with basis='queued-to-lead' -- this queue is not "
+            f"legal for {agent!r}-class at a {by!r} coordinator; accepting "
+            "sonnet-class (builder) work through the lead queue would let "
+            "the critic gate on that executor's work go unchecked -- the "
+            f"legal path here is basis='critic' (or judge on a leaf "
+            f"implementation, if category is leaf-class AND "
+            f"agent∈{{scout,builder}}); queued-to-lead is available only "
+            f"for the class {sorted(QUEUED_TO_LEAD_AGENTS)}"
         )
 
     # (6) anything else -- generic role-vs-tier rejection.
     return (
         f"role-vs-tier acceptance matrix: agent={agent!r} accepted by={by!r} "
-        f"(not strictly above the executor's tier) and no valid basis "
-        f"(need critic/queued-to-lead by pair, or judge on a leaf-class "
-        f"dispatch [category recon/implementation])"
+        "-- by is not strictly above the executor's tier, and no valid "
+        "basis rescues it; an acceptance with no coordinator above the "
+        "executor's tier and no critic justification bypasses the whole "
+        "role-vs-tier acceptance matrix -- set basis='critic' (agent "
+        "strictly below opus), or 'queued-to-lead' (agent∈{critic,"
+        "designer}, by∈{sonnet,opus}), or judge on category∈{recon,"
+        "implementation} with agent∈{scout,builder}"
     )
 
 
+# TEXT REWRITE: every BLOCK-violation message in this module
+# (check_append_only, _matrix_d0058_violation, validate_new_lines) is
+# written by the rule of three -- (1) what's wrong, (2) what breaks as a
+# consequence (for the journal/gate, not a bare restatement of the
+# fact), (3) which action closes it (an imperative verb aimed at the
+# line's author); the internal rule-number pointer (this module's own
+# docstring numbering) is a tail, never a substitute for the action.
+# The meaning of the checks themselves is UNCHANGED -- only the message
+# text -- verified by a quantitative control: the old and new text ran
+# against the same fixture journal produce the SAME set of violating
+# line numbers (see the builder's report / test_journal_validator.py).
 def validate_new_lines(new_lines: list[str], head_lines: list[str],
                         now: datetime.datetime) -> list[str]:
     violations: list[str] = []
@@ -566,10 +606,21 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
         try:
             obj = json.loads(line)
         except (json.JSONDecodeError, TypeError) as e:
-            violations.append(f"line {line_no}: invalid JSON ({e})")
+            violations.append(
+                f"line {line_no}: invalid JSON ({e}) -- the line can't be "
+                "parsed into any event at all, and none of rules 2-11 "
+                "below can run against it -- fix the JSON for this line "
+                "(one valid object per line)"
+            )
             continue
         if not isinstance(obj, dict):
-            violations.append(f"line {line_no}: not a JSON object")
+            violations.append(
+                f"line {line_no}: parsed to something other than a JSON "
+                "object (dict) -- a list/string/number carries no typed "
+                "event/agent/notes fields, so none of rules 2-11 below "
+                "apply -- rewrite the line as a JSON object with the "
+                "required fields"
+            )
             continue
 
         event = obj.get("event")
@@ -582,61 +633,146 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
         notes = obj.get("notes")
 
         if not isinstance(ts, str) or not ts:
-            violations.append(f"{tag}: missing/invalid required field 'ts'")
+            violations.append(
+                f"{tag}: field 'ts' is missing/invalid -- without it, "
+                "monotonicity (rule 10) and the narrative-future check "
+                "cannot run, and the event doesn't slot into the journal's "
+                "timeline at all -- set ts to ISO format with no timezone, "
+                "read off the system clock at write time (rule 2)"
+            )
         if not isinstance(event, str) or not event:
-            violations.append(f"{tag}: missing/invalid required field 'event'")
+            violations.append(
+                f"{tag}: field 'event' is missing/invalid -- without it, "
+                "the line matches no ENUM event, and every event-keyed "
+                "check below (model/task_id/witness/the role-vs-tier "
+                f"matrix) silently skips it -- set event to one of "
+                f"{sorted(EVENTS)} (rule 2)"
+            )
         if not isinstance(agent, str) or not agent:
-            violations.append(f"{tag}: missing/invalid required field 'agent'")
+            violations.append(
+                f"{tag}: field 'agent' is missing/invalid -- without it, "
+                "there's no record of whose result was accepted/rejected, "
+                "and the role-vs-tier matrix can't decide whether the "
+                "acceptance is legal -- set agent to who did the work "
+                "(rule 2)"
+            )
         if not isinstance(category, str) or not category:
-            violations.append(f"{tag}: missing/invalid required field 'category'")
+            violations.append(
+                f"{tag}: field 'category' is missing/invalid -- without "
+                "it, leaf-class dispatches (recon/implementation) can't "
+                "be told apart from the rest, and basis='judge' becomes "
+                "unverifiable -- set category (rule 2)"
+            )
         if not isinstance(notes, str) or not notes.strip():
-            violations.append(f"{tag}: missing/empty required field 'notes'")
+            violations.append(
+                f"{tag}: field 'notes' is missing/empty -- without it, "
+                "the event carries no recorded reason at all (this "
+                "journal has no separate 'reason' field), and the "
+                "decision stays unexplained on later review -- set a "
+                "non-empty notes (rule 2)"
+            )
 
         if isinstance(event, str) and event and event not in EVENTS:
-            violations.append(f"{tag}: 'event' not in the enum ({event!r})")
+            violations.append(
+                f"{tag}: 'event'={event!r} is not in the enum "
+                f"({sorted(EVENTS)}) -- an unrecognized event matches "
+                "none of the checks in rules 3-11 below, so the gate "
+                "silently skips its requirements -- fix event to one of "
+                "the listed values (rule 3)"
+            )
 
         if event in MODEL_REQUIRED_EVENTS:
             model = obj.get("model")
             if not isinstance(model, str) or not model:
-                violations.append(f"{tag}: 'model' is required for event={event}")
+                violations.append(
+                    f"{tag}: 'model' is required for event={event} -- "
+                    "without it, there's no self-declaration to reconcile "
+                    "against the actual transcript model, and a tier "
+                    "mismatch goes undetected -- set model (rule 4)"
+                )
 
         if event in TASK_ID_REQUIRED_EVENTS:
             if not isinstance(task_id, str) or not task_id:
-                violations.append(f"{tag}: 'task_id' is required for event={event}")
+                violations.append(
+                    f"{tag}: 'task_id' is required for event={event} -- "
+                    "without it, the event attaches to no task at all, "
+                    "and a later closes:/defect_found/accepted has nothing "
+                    "to reference -- set task_id in the t-NNN format "
+                    "(rule 5)"
+                )
             elif not TASK_ID_RE.match(task_id):
-                violations.append(f"{tag}: task_id {task_id!r} does not match the t-NNN format (3+ digits)")
+                violations.append(
+                    f"{tag}: task_id {task_id!r} does not match the t-NNN "
+                    "format (3+ digits) -- a non-standard id is invisible "
+                    "to the novelty/max+1 check and to the earlier-in-file "
+                    "existence lookup, inviting numbering collisions -- "
+                    "set an id shaped like t-NNN (rule 5)"
+                )
 
         if event == "rejected":
             attempt = obj.get("attempt")
             if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
-                violations.append(f"{tag}: 'attempt' must be an integer >=1")
+                violations.append(
+                    f"{tag}: 'attempt' must be an integer >=1 -- without "
+                    "an attempt number, the escalation rule (two rejected "
+                    "on one tier makes escalation mandatory) can't count "
+                    "this task's failures -- set attempt to an integer "
+                    "starting at 1 (rule 6)"
+                )
             failure_class = obj.get("failure_class")
             if failure_class not in FAILURE_CLASSES:
                 violations.append(
-                    f"{tag}: 'failure_class' must be one of {sorted(FAILURE_CLASSES)}"
+                    f"{tag}: 'failure_class' must be one of "
+                    f"{sorted(FAILURE_CLASSES)} -- without a failure "
+                    "class, a later recurrence can't tell a spec defect "
+                    "apart from a missing capability or a tooling gap -- "
+                    "set failure_class from the listed values (rule 6)"
                 )
 
         if event == "accepted" and agent == "builder":
             witness = obj.get("witness")
             if not isinstance(witness, str) or not witness.strip():
-                violations.append(f"{tag}: 'witness' is required (non-empty string) for accepted+agent=builder")
+                violations.append(
+                    f"{tag}: 'witness' is required (non-empty string) for "
+                    "accepted+agent=builder -- without it, acceptance of a "
+                    "builder diff carries no verbatim verification-run "
+                    "output, and accepted becomes a retelling instead of "
+                    "proof -- set witness (rule 7)"
+                )
 
         if event == "delegated":
             worker_ref = obj.get("worker_ref")
             if not isinstance(worker_ref, str) or not worker_ref.strip():
                 violations.append(
-                    f"{tag}: 'worker_ref' is required (non-empty string) for delegated"
+                    f"{tag}: 'worker_ref' is required (non-empty string) "
+                    "for delegated -- without it, no handle exists by "
+                    "which a later session can find the worker or its "
+                    "result, and a launch that never actually happened "
+                    "goes undetected -- set worker_ref to the launch's "
+                    "handle (rule 12)"
                 )
 
         if event == "defect_found":
             ref = obj.get("ref")
             if not isinstance(ref, str) or not ref:
-                violations.append(f"{tag}: 'ref' is required (non-empty) for defect_found")
+                violations.append(
+                    f"{tag}: 'ref' is required (non-empty) for "
+                    "defect_found -- without it, the late defect doesn't "
+                    "point back to the accepted event it invalidates, and "
+                    "the false-accept stream loses that link -- set ref "
+                    "to the original accepted's task_id (rule 8)"
+                )
 
         if event in ("accepted", "rejected"):
             by = obj.get("by")
             if not isinstance(by, str) or not by:
-                violations.append(f"{tag}: 'by' is required (non-empty) for {event} (the role-vs-tier acceptance matrix)")
+                violations.append(
+                    f"{tag}: 'by' is required (non-empty) for {event} -- "
+                    "without it, the role-vs-tier acceptance matrix has no "
+                    "acceptor tier to check, and a self-certified "
+                    "acceptance can't be told apart from a legitimate one "
+                    "-- set by to the accepting tier (rule 11)"
+                )
             else:
                 mv = _matrix_d0058_violation(event, agent, by, obj)
                 if mv:
@@ -650,13 +786,25 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
                 actual = int(TASK_ID_RE.match(task_id).group(1))
                 if actual != expected:
                     violations.append(
-                        f"{tag}: task_id novelty violated -- expected t-{expected:03d} (max+1), got {task_id}"
+                        f"{tag}: task_id novelty violated -- expected "
+                        f"t-{expected:03d} (max+1), got {task_id} -- a "
+                        "brand-new task with a non-sequential id means the "
+                        "log's tail wasn't re-read right before writing "
+                        "delegated, opening the door to an id collision "
+                        "with a parallel session -- re-read the journal "
+                        f"tail and use t-{expected:03d} for a new task "
+                        "(rule 9a)"
                     )
             elif task_id in closed_tasks:
                 # (d) reopen forbidden -- a collision counts as two tasks.
                 violations.append(
-                    f"{tag}: delegated on a CLOSED task {task_id!r} (an accepted already exists above) -- "
-                    "reopen forbidden, the collision counts as two tasks (the no-silent-reuse rule)"
+                    f"{tag}: delegated on a CLOSED task {task_id!r} (an "
+                    "accepted already exists above) -- reopening a closed "
+                    "task silently reuses its id for unrelated new work, "
+                    "and the two tasks' history becomes indistinguishable "
+                    "-- issue a fresh task_id instead of reopening "
+                    f"{task_id!r} (this collision counts as two tasks, the "
+                    "no-silent-reuse rule)"
                 )
             else:
                 prior_agents = delegated_agents.get(task_id, set())
@@ -739,7 +887,13 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
         elif event in ("accepted", "rejected", "escalated", "defect_found") and valid_tid:
             if task_id not in seen_task_ids:
                 violations.append(
-                    f"{tag}: task_id {task_id!r} does not reference anything existing earlier in the file"
+                    f"{tag}: task_id {task_id!r} does not reference "
+                    "anything existing earlier in the file -- an "
+                    f"{event} with no matching delegated leaves this "
+                    "event orphaned, and a reader can never find what "
+                    f"task it belongs to -- point task_id at a real "
+                    "earlier delegated, or issue the missing delegated "
+                    "first"
                 )
 
         _harvest_line_into(len(head_lines) + idx, event, task_id, agent, obj.get("worker_ref"),
@@ -748,16 +902,33 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
 
         parsed_ts = parse_ts(ts) if isinstance(ts, str) else None
         if isinstance(ts, str) and ts and parsed_ts is None:
-            violations.append(f"{tag}: ts {ts!r} is not ISO format without a timezone")
+            violations.append(
+                f"{tag}: ts {ts!r} is not ISO format without a timezone -- "
+                "an unparseable ts can't be checked for monotonicity or "
+                "future drift, and this line silently escapes both -- "
+                "write ts as ISO local time with no timezone suffix "
+                "(rule 10)"
+            )
         if parsed_ts is not None:
             if last_ts is not None and parsed_ts < last_ts:
                 violations.append(
-                    f"{tag}: ts is not monotonic -- {parsed_ts.isoformat()} is earlier than the previous {last_ts.isoformat()}"
+                    f"{tag}: ts is not monotonic -- {parsed_ts.isoformat()} "
+                    f"is earlier than the previous {last_ts.isoformat()} -- "
+                    "an out-of-order ts means the journal's own event "
+                    "order no longer matches wall-clock time, breaking any "
+                    "later reconstruction of what happened when -- "
+                    "re-read the clock and re-order the batch before "
+                    "writing (rule 10)"
                 )
             if parsed_ts > now_limit:
                 violations.append(
-                    f"{tag}: ts {ts!r} is later than now+10min ({now_limit.isoformat()}) -- "
-                    "a narrative-future timestamp"
+                    f"{tag}: ts {ts!r} is later than now+10min "
+                    f"({now_limit.isoformat()}) -- a timestamp this far "
+                    "in the future was almost certainly narrated rather "
+                    "than read off the clock, and later monotonicity "
+                    "checks would then be anchored to a false ts -- read "
+                    "ts from the system clock immediately before writing, "
+                    "never from the session's narrative (rule 10)"
                 )
             last_ts = parsed_ts
 

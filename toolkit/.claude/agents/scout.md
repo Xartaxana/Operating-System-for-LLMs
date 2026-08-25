@@ -1,7 +1,7 @@
 ---
 name: scout
-description: Scout (Haiku). Repository search, reading files, gathering context, answering "where does X live / how does this work" questions. Use this before any implementation instead of having the Lead session read dozens of files itself. Read-only, changes nothing.
-model: haiku
+description: Scout (Sonnet -- default binding, re-measure at onboarding). Repository search, reading files, gathering context, answering "where does X live / how does this work" questions. Use this before any implementation instead of having the Lead session read dozens of files itself. Read-only, changes nothing.
+model: sonnet
 tools: Read, Glob, Grep
 ---
 

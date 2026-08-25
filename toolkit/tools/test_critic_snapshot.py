@@ -332,3 +332,244 @@ def test_failure_document_no_prev_fields_when_prior_was_itself_a_failure(
 
     doc = json.loads(snap.read_text(encoding="utf-8"))
     assert set(doc.keys()) == {"error", "error_ts"}
+
+
+# ---------------------------------------------------------------------
+# M2-1: a dispatch that dispatch_gate.decide() ACTUALLY BLOCKS (exit 2 on the
+# SAME payload) -- no snapshot is written, the prior snapshot stays
+# byte-for-byte untouched. Three tests: block -> old snapshot intact,
+# pass (not blocked) -> a new one is written, an exception out of
+# dispatch_gate.decide -> written anyway (fail-open).
+# ---------------------------------------------------------------------
+
+
+def _blocked_critic_payload(cwd: Path) -> dict:
+    """subagent_type=="critic" (the snapshot even considers this call),
+    but a description with NO model-prefix separator at all -- this
+    kit's actual dispatch_gate.decide() on this payload gives (2, ...)
+    -- see LABEL_MODEL_PREFIX_RE in tools/dispatch_gate.py (checked
+    empirically before writing this test: this kit's own
+    LABEL_MODEL_PREFIX_RE = r"^\\S+[ :-]", broader than the reference
+    deployment's tier-word-only form -- a description with no space/
+    colon/dash separator anywhere fails it regardless)."""
+    return {
+        "tool_name": "Task",
+        "tool_input": {
+            "subagent_type": "critic",
+            "description": "nomodelprefixlabelatall",
+            "prompt": "irrelevant",
+        },
+        "cwd": str(cwd),
+    }
+
+
+def test_m2_1_blocked_dispatch_leaves_prior_snapshot_byte_identical(tmp_path):
+    (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
+
+    # 1) a normal successful call -- creates a REAL snapshot with known
+    # content (the "old" source of truth).
+    result = _run_hook(_critic_payload(tmp_path), cwd=tmp_path)
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    snap = tmp_path / ".claude" / "critic_snapshot.json"
+    before_bytes = snap.read_bytes()
+    assert b"tree_hash" in before_bytes
+
+    # 2) a dispatch dispatch_gate.decide() ACTUALLY BLOCKS (exit 2) --
+    # the snapshot must not change by even one byte.
+    result2 = _run_hook(_blocked_critic_payload(tmp_path), cwd=tmp_path)
+    assert result2.returncode == 0, (
+        "critic_snapshot's own exit must stay 0 even on the blocked "
+        "branch: " + result2.stderr.decode("utf-8", errors="replace")
+    )
+
+    after_bytes = snap.read_bytes()
+    assert after_bytes == before_bytes, (
+        "a blocked dispatch overwrote the snapshot -- M2-1 edge (i) "
+        "violated: the old snapshot must stay byte-for-byte untouched"
+    )
+
+
+def test_m2_1_non_blocked_dispatch_still_writes_new_snapshot(tmp_path):
+    """Control (the positive side of the pair): a payload with a
+    CORRECT model-prefix in description -- dispatch_gate.decide() does
+    NOT block (0, '') -- the snapshot is written AS USUAL (the second
+    call's ts must differ from the first's -- a real overwrite
+    happened)."""
+    (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {
+            "subagent_type": "critic",
+            "description": "sonnet: review the diff",
+            "prompt": "irrelevant",
+        },
+        "cwd": str(tmp_path),
+    }
+
+    result = _run_hook(payload, cwd=tmp_path)
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    snap = tmp_path / ".claude" / "critic_snapshot.json"
+    first_ts = json.loads(snap.read_text(encoding="utf-8"))["ts"]
+
+    result2 = _run_hook(payload, cwd=tmp_path)
+    assert result2.returncode == 0, result2.stderr.decode("utf-8", errors="replace")
+    second_doc = json.loads(snap.read_text(encoding="utf-8"))
+    assert "tree_hash" in second_doc
+    assert second_doc["ts"] != first_ts, (
+        "a non-blocked dispatch did not overwrite the snapshot -- "
+        "regression of the normal M2-1 path"
+    )
+
+
+# ---------------------------------------------------------------------
+# LOCAL IMPORT ("LOCAL IMPORT" in the module docstring):
+# the dispatch_gate import lives INSIDE main(), locally, AFTER early
+# exits -- an IMPORT failure (not just a decide() failure) is also
+# under fail-open. Both failure scenarios -- IMPORT and decide() -- are
+# checked via a subprocess on an ISOLATED copy of critic_snapshot.py
+# (not module-attribute monkeypatch -- after moving the import inside
+# the function, `cs.dispatch_gate` no longer exists as a module
+# attribute of the critic_snapshot module at all; a subprocess is the
+# REAL, not simulated, form of an import failure).
+# ---------------------------------------------------------------------
+
+
+def _write_isolated_copy(tmp_path, dirname: str, with_dispatch_gate: bool, broken_decide: bool = False):
+    """A copy of critic_snapshot.py (NO mutation -- byte-for-byte) into
+    an isolated tools/ directory. with_dispatch_gate=False -- the
+    sibling is absent entirely (a real ImportError on both import
+    forms -- neither the `tools` package nor a sibling module is
+    visible on the subprocess's sys.path, whose script directory is
+    the only relevant element). with_dispatch_gate=True,
+    broken_decide=True -- the sibling is present, but its decide()
+    unconditionally raises (a different failure point -- not the
+    import, the call itself)."""
+    repo_root = tmp_path / dirname
+    tools_dir = repo_root / "tools"
+    tools_dir.mkdir(parents=True)
+    (tools_dir / "critic_snapshot.py").write_text(
+        SCRIPT.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    if with_dispatch_gate:
+        dg_src = (SCRIPT.parent / "dispatch_gate.py").read_text(encoding="utf-8")
+        if broken_decide:
+            dg_src += (
+                "\n\n# test probe: decide() unconditionally raises.\n"
+                "def decide(payload):\n"
+                '    raise RuntimeError("simulated dispatch_gate.decide failure")\n'
+            )
+        (tools_dir / "dispatch_gate.py").write_text(dg_src, encoding="utf-8")
+    return tools_dir / "critic_snapshot.py"
+
+
+def test_missing_dispatch_gate_sibling_fail_open_snapshot_written(tmp_path):
+    """A literal witness case: running critic_snapshot WITHOUT the
+    dispatch_gate.py sibling module -> rc 0, the snapshot is written
+    fail-open (a normal successful snapshot, tree_hash present -- the
+    IMPORT failed, gate_exit_code is treated as 0 -- "not blocked")."""
+    script = _write_isolated_copy(tmp_path, "isolated_no_sibling", with_dispatch_gate=False)
+    work_cwd = tmp_path / "work_no_sibling"
+    work_cwd.mkdir()
+    (work_cwd / "a.txt").write_text("hello", encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        input=json.dumps(_critic_payload(work_cwd), ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(work_cwd),
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+    snap = work_cwd / ".claude" / "critic_snapshot.json"
+    assert snap.exists()
+    doc = json.loads(snap.read_text(encoding="utf-8"))
+    assert "tree_hash" in doc, (
+        "a missing dispatch_gate.py sibling (ImportError) must "
+        "fail-open write a normal snapshot, not block the write"
+    )
+
+
+def test_non_critic_dispatch_never_needs_sibling_import_at_all(tmp_path):
+    """Structural proof of the cost argument (not timing -- an
+    observable fact): WITHOUT the dispatch_gate.py sibling AT ALL, a
+    non-critic dispatch (subagent_type="builder") passes cleanly -- the
+    early exit (subagent_type != "critic") happens BEFORE the import
+    line, so non-critic dispatches (the vast majority) NEVER pay the
+    import cost -- if they did, there would be an ImportError here
+    (the sibling is entirely absent), which main() would either not
+    catch (pre-fix code -- a module-level import, caught even before
+    main() runs) or would catch, but the test still would NOT prove
+    "never needed at all" -- it would only prove "fail-open worked"."""
+    script = _write_isolated_copy(tmp_path, "isolated_non_critic", with_dispatch_gate=False)
+    work_cwd = tmp_path / "work_non_critic"
+    work_cwd.mkdir()
+
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "builder"},
+        "cwd": str(work_cwd),
+    }
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(work_cwd),
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    assert not (work_cwd / ".claude" / "critic_snapshot.json").exists()
+
+
+def test_dispatch_gate_decide_raises_fail_open_snapshot_written(tmp_path):
+    """The second failure point (not the import -- the call to
+    decide() itself): the sibling IS present, but its decide()
+    unconditionally raises -- the same fail-open branch (one shared
+    except around BOTH the import and the call)."""
+    script = _write_isolated_copy(
+        tmp_path, "isolated_broken_decide", with_dispatch_gate=True, broken_decide=True
+    )
+    work_cwd = tmp_path / "work_broken_decide"
+    work_cwd.mkdir()
+    (work_cwd / "a.txt").write_text("hello", encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        input=json.dumps(_critic_payload(work_cwd), ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(work_cwd),
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+    snap = work_cwd / ".claude" / "critic_snapshot.json"
+    assert snap.exists()
+    doc = json.loads(snap.read_text(encoding="utf-8"))
+    assert "tree_hash" in doc
+
+
+# ---------------------------------------------------------------------
+# P4: stdin-deadline -- a hanging stdin degrades to
+# no-payload (exit 0, no snapshot, no crash), bounded by
+# OSLLM_STDIN_TIMEOUT rather than blocking forever.
+# ---------------------------------------------------------------------
+
+
+def test_stdin_deadline_hanging_pipe_degrades_to_no_payload(tmp_path):
+    env = dict(__import__("os").environ, OSLLM_STDIN_TIMEOUT="0.3")
+    proc = subprocess.Popen(
+        [sys.executable, str(SCRIPT)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(tmp_path),
+        env=env,
+    )
+    try:
+        out, err = proc.communicate(timeout=10)
+    finally:
+        proc.stdin.close()
+    assert proc.returncode == 0
+    assert out.strip() == b""
+    assert b"Traceback" not in err
+    assert not (tmp_path / ".claude" / "critic_snapshot.json").exists()

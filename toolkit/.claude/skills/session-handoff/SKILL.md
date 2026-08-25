@@ -37,6 +37,15 @@ reads in the morning, handoff verifies in the evening.
    at the original `accepted`) if it doesn't — never a silent re-run
    passed off as if nothing happened. The weekly net for this check is
    its own calibration entry (PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md).
+   2b. **Integration critic-trail informant**: `python
+   tools/r3_integration_check.py --since <session start>` -- prints
+   large commits of the session (>100 lines by numstat) with no critic
+   trail found in the journal as CANDIDATES (not a verdict -- the
+   calibration protocol's own check decides); candidates and the
+   window's small-commit count (the input to the cumulative
+   judge/critic-integration clause) go into the handoff report. The
+   script only reads git and the journal, exit is always 0 (an
+   informant, not a gate).
 3. **CURRENT_CONTEXT.md**: closed work is archived out (docs/task_
    reports/, or wherever your deployment keeps closed-work detail —
    boot-context-is-expensive rule), the queue is current. Handoff

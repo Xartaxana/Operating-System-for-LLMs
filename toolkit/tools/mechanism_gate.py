@@ -83,15 +83,91 @@ without git):
    two-layer enforcement: code guarantees the line's presence and
    shape, truth is judged by calibration against transcripts, a tier
    above.
+
+REGION-AWARE SKIP_RE/TIER_LINE_RE (ported from the HQ mirror's own
+region-aware gate; toolkit's own md_regions scanner, already landed
+standalone -- see toolkit/tools/md_regions.py). Residual gap this
+closes: rules 3 and 7 above already anchor SKIP_RE/TIER_LINE_RE to
+their OWN separate line (^...$/MULTILINE) against an inline quote
+mid-prose -- but that anchor alone does not know whether the WHOLE
+line sits inside a fenced code block or a blockquote (both still look
+like "a standalone line" to ^...$/MULTILINE). Example: a commit
+message that QUOTES the skip syntax as a whole line inside a triple-
+backtick example (a natural shape for documentation/PR text showing
+the reader "this is what a skip looks like") used to silence the gate
+entirely -- a false pass of the axis-block rule.
+
+POLICY: a SKIP_RE or TIER_LINE_RE match whose OWN position sits in a
+FENCED or BLOCKQUOTE region does NOT count (filtered out before it
+reaches decide()/decide_full()'s verdict). This makes the gate
+STRICTER, not looser -- a quoted/fenced skip or tier line that used to
+pass now needs a real, unquoted declaration instead; the gate stays
+fail-closed throughout.
+
+ALL-MUST-PASS COUNTS ONLY UNQUOTED TIER LINES: a new function,
+_region_filtered_tier_declarations(), returns only the values of
+TIER_LINE_RE matches sitting in PROSE; decide_full()'s existing
+"every found line must pass" semantics applies to THIS filtered list.
+find_tier_declarations() (public) is untouched -- region-blind,
+byte for byte (kept for direct callers/back-compat, same as
+find_missing() below).
+
+AXIS LINES ARE NOT FILTERED -- A DELIBERATE NON-GOAL, not a missed
+symmetry: find_missing() stays byte for byte, region is never passed
+to it. Axis-line filtering is a separate, unlanded piece of scope
+(the HQ mirror defers it the same way, pending its own measurement).
+
+block_extra IS NEVER REGION-SCANNED: scan() runs only on `msg`, never
+on `block_extra` (the diff text of DECISIONS.md) -- a unified diff has
+no markdown "fence/quote" semantics in the sense this scanner parses;
+scanning it would be a category error. block_extra keeps its existing
+role in find_missing(msg + "\n" + block_extra, axes) only.
+
+BRANCH ORDER UNCHANGED: hits -> merging -> skip -> fail-closed
+(map/axes) -> (decide_full) tier -- no branch added, removed, or
+reordered; only WHAT COUNTS as a SKIP_RE/TIER_LINE_RE match changes.
+
+LAZINESS (Rule #1): scan(msg) runs AT MOST ONCE per decide()/
+decide_full() call (one shared _maybe_scan(), reused by both the skip
+check and, inside decide_full(), the tier check too) -- and only when
+(a) the commit actually touches a mechanism path and isn't a merge
+(every other commit -> zero scan calls, the hits/merging branches
+return before _maybe_scan is even reached), (b) the message carries a
+cheap marker hint (the literal "axes" or "tier", case-insensitive),
+AND (c) the message carries at least one of "`>~" (without them,
+md_regions.scan() would deterministically say "all prose" anyway --
+the call would be wasted).
+
+FAIL-OPEN ON SCANNER FAILURE (ANY of: module missing / scan()
+raises / degraded=True): the region filter becomes a no-op --
+SKIP_RE.search(msg) and find_tier_declarations(msg) (the region-blind
+forms) give EXACTLY the answers the pre-region gate gave. Concretely:
+if only a QUOTED skip line exists, this fallback reverts THIS FILE to
+the PRE-region behavior for that one message -- the gate silences
+again on the quoted example (the same residual gap the pre-region
+gate always had) -- not a new code path, the same cycle with the
+region branch gone dead (the same posture as owns_gate.py/
+negative_lint.py's own scanner fallbacks).
 """
 from __future__ import annotations
 
+import bisect
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 import yaml
+
+try:
+    from tools.md_regions import scan, KIND_FENCED, KIND_BLOCKQUOTE  # package-style
+except ImportError:
+    try:
+        from md_regions import scan, KIND_FENCED, KIND_BLOCKQUOTE  # sibling-module fallback
+    except ImportError:
+        scan = None
+        KIND_FENCED = "fenced"
+        KIND_BLOCKQUOTE = "blockquote"
 
 REPO = Path(__file__).resolve().parents[1]
 MAP_PATH = REPO / "docs" / "SIBLING_MAP.md"
@@ -146,6 +222,7 @@ MECHANISM_PREFIXES = (
     "tools/tier_echo.py",           # imported by tools/journal_echo.py
     "tools/preflight_quota.py",     # imported by tools/session_context.py
     "tools/wiring_check.py",        # imported by tools/session_context.py
+    "tools/md_regions.py",          # imported by THIS file (region scanner)
 )
 
 # Template dependency (toolkit transfer, empirically verified against
@@ -164,6 +241,76 @@ AXIS_HEADING_RE = re.compile(r"^##\s+Axis\s+(\d+)", re.MULTILINE)
 # line \"axes: not a mechanism (example)\" would bypass...") silenced
 # the whole gate. Symmetric with the already-anchored TIER_LINE_RE.
 SKIP_RE = re.compile(r"^\s*axes\s*:\s*not\s+a\s+mechanism\s*\(", re.IGNORECASE | re.MULTILINE)
+
+# --- region predicate (see module docstring, "REGION-AWARE SKIP_RE/
+# TIER_LINE_RE") ---------------------------------------------------------
+
+# Fail-closed asymmetry (see the docstring section "POLICY"): only
+# FENCED and BLOCKQUOTE exclude a SKIP_RE/TIER_LINE_RE match --
+# inline_code is not imported at all: a backtick (opening or a lone
+# one mid-word) cannot structurally sit at the position where
+# ^\s*(axes|tier) expects literal text with no leading backtick, so
+# KIND_INLINE_CODE is structurally inapplicable to these two
+# whole-line-anchored regexes.
+_EXCLUDED_KINDS = ("fenced", "blockquote")
+
+_REGION_MARKER_CHARS = ("`", ">", "~")
+_MARKER_HINT_RE = re.compile(r"axes|tier", re.IGNORECASE)
+
+
+def _has_region_marker_chars(text: str) -> bool:
+    return any(ch in text for ch in _REGION_MARKER_CHARS)
+
+
+def _safe_scan(text: str):
+    """Fail-open on scanner failure: None on a missing module / an
+    exception from scan() / degraded=True -- the region filter becomes
+    a no-op (see the docstring section "FAIL-OPEN ON SCANNER
+    FAILURE")."""
+    if scan is None:
+        return None
+    try:
+        result = scan(text)
+    except Exception:
+        return None
+    if result.degraded:
+        return None
+    return result
+
+
+def _region_at(scan_result, offset: int):
+    regions = scan_result.regions
+    if not regions:
+        return None
+    starts = [r.start for r in regions]
+    idx = bisect.bisect_right(starts, offset) - 1
+    if idx < 0:
+        return None
+    region = regions[idx]
+    if region.start <= offset < region.end:
+        return region
+    return None
+
+
+def _classify(region) -> str:
+    """See the docstring section "POLICY": fenced (including an
+    unterminated fence -- no priority rule "unterminated -> prose",
+    the same fail-closed choice as elsewhere: the content of an
+    ambiguously-closed fence does NOT get "prose" status) > blockquote
+    > prose."""
+    if region is None:
+        return "prose"
+    if KIND_FENCED in region.kinds:
+        return "fenced"
+    if KIND_BLOCKQUOTE in region.kinds:
+        return "blockquote"
+    return "prose"
+
+
+def _is_prose_position(scan_result, offset: int) -> bool:
+    if scan_result is None:
+        return True  # fail-open: no-op
+    return _classify(_region_at(scan_result, offset)) not in _EXCLUDED_KINDS
 
 
 def parse_axes(map_text: str) -> list[int]:
@@ -186,6 +333,8 @@ def mechanism_paths(staged: list[str]) -> list[str]:
 
 
 def find_missing(text: str, axes: list[int]) -> list[int]:
+    # Deliberate non-goal (see the docstring section "AXIS LINES ARE NOT
+    # FILTERED"): byte for byte, region is never passed here.
     return [n for n in axes
             if not re.search(rf"axis\s+{n}\s*:", text, re.IGNORECASE)]
 
@@ -255,6 +404,19 @@ def find_tier_declaration(msg: str) -> str | None:
     all-lines semantics used by decide_full())."""
     declarations = find_tier_declarations(msg)
     return declarations[0] if declarations else None
+
+
+def _region_filtered_tier_declarations(msg: str, scan_result) -> list[str]:
+    """A TIER_LINE_RE match counts ONLY when its own position is prose
+    (see the docstring section "ALL-MUST-PASS COUNTS ONLY UNQUOTED
+    TIER LINES"). scan_result is None -- fail-open, identical to
+    find_tier_declarations() (every match counts)."""
+    result = []
+    for match in TIER_LINE_RE.finditer(msg):
+        if not _is_prose_position(scan_result, match.start()):
+            continue
+        result.append(match.group(1).strip())
+    return result
 
 
 # --- config onboarding ladder (a full mirror of HQ's own gate logic):
@@ -465,15 +627,47 @@ def _tier_queue_note() -> str:
             "lead-tier session adds the line \"tier: <its own model>\".")
 
 
-def decide(msg: str, block_extra: str, staged: list[str],
-           map_text: str | None, merging: bool = False) -> tuple[int, str]:
-    """Pure gate decision. block_extra -- the diff of DECISIONS.md."""
+def _maybe_scan(msg: str, staged: list[str], merging: bool):
+    """See the docstring section "LAZINESS": scan(msg) runs only when
+    (a) the commit actually touches a mechanism path and isn't a
+    merge, (b) the message carries a cheap marker hint ("axes"/
+    "tier"), (c) the message carries at least one of "`>~". Returns
+    None (zero scan calls) in every other case."""
+    hits = mechanism_paths(staged)
+    if not hits or merging:
+        return None
+    if not _MARKER_HINT_RE.search(msg):
+        return None
+    if not _has_region_marker_chars(msg):
+        return None
+    return _safe_scan(msg)
+
+
+def _skip_declared(msg: str, scan_result) -> bool:
+    """A SKIP_RE match counts ONLY when its position is prose (see the
+    docstring section "POLICY"). scan_result is None -- fail-open, the
+    FIRST match (if any) is immediately True -- byte for byte
+    SKIP_RE.search(msg) of the pre-region gate (see the docstring
+    section "FAIL-OPEN ON SCANNER FAILURE")."""
+    for match in SKIP_RE.finditer(msg):
+        if scan_result is None:
+            return True
+        if _is_prose_position(scan_result, match.start()):
+            return True
+    return False
+
+
+def _decide_core(msg: str, block_extra: str, staged: list[str],
+                  map_text: str | None, merging: bool, scan_result) -> tuple[int, str]:
+    """Pure core of decide() -- the hits->merging->skip->fail-closed
+    branch order is UNCHANGED (see the docstring section "BRANCH
+    ORDER UNCHANGED")."""
     hits = mechanism_paths(staged)
     if not hits:
         return 0, ""
     if merging:
         return 0, ""
-    if SKIP_RE.search(msg):  # message only -- not looked up in the diff + own separate line only (line anchor)
+    if _skip_declared(msg, scan_result):
         return 0, ""
     if map_text is None:
         return 1, (f"axis map not found ({MAP_PATH}) -- fail-closed, "
@@ -495,6 +689,13 @@ def decide(msg: str, block_extra: str, staged: list[str],
     return 0, ""
 
 
+def decide(msg: str, block_extra: str, staged: list[str],
+           map_text: str | None, merging: bool = False) -> tuple[int, str]:
+    """Pure gate decision. block_extra -- the diff of DECISIONS.md."""
+    scan_result = _maybe_scan(msg, staged, merging)
+    return _decide_core(msg, block_extra, staged, map_text, merging, scan_result)
+
+
 def decide_full(msg: str, block_extra: str, staged: list[str],
                  map_text: str | None, config_text: str | None,
                  merging: bool = False) -> tuple[int, str]:
@@ -502,18 +703,22 @@ def decide_full(msg: str, block_extra: str, staged: list[str],
     "tier: <value>" line on the "mechanism" branch (axis block already
     satisfied, not skip, not merge). config_text -- the text of
     delegation.config.yaml (or None if the file is absent), the same
-    pattern as map_text."""
-    code, reason = decide(msg, block_extra, staged, map_text, merging)
+    pattern as map_text. ONE _maybe_scan() call for the whole call,
+    reused by both the skip check (via _decide_core) and the tier
+    check below (see the docstring section "LAZINESS")."""
+    scan_result = _maybe_scan(msg, staged, merging)
+    code, reason = _decide_core(msg, block_extra, staged, map_text, merging, scan_result)
     if code:
         return code, reason
     hits = mechanism_paths(staged)
-    if not hits or merging or SKIP_RE.search(msg):
+    if not hits or merging or _skip_declared(msg, scan_result):
         return 0, ""
     binding = resolve_lead_binding(config_text)
     # ALL found tier lines must pass -- reject if even ONE does not
     # match the binding (see find_tier_declarations()'s docstring for
-    # the chosen semantics).
-    declared_list = find_tier_declarations(msg)
+    # the chosen semantics). Region-aware selection (see the docstring
+    # section "ALL-MUST-PASS COUNTS ONLY UNQUOTED TIER LINES").
+    declared_list = _region_filtered_tier_declarations(msg, scan_result)
     if not declared_list:
         return 1, ("commit touches mechanism files:\n  " + "\n  ".join(hits)
                     + "\nNo \"tier: <value>\" line (lead binding: "

@@ -54,6 +54,12 @@ vocabulary; the mapping between the two vocabularies is documented in
    at least one load-bearing claim (a negative claim — "X is nowhere
    to be found" — must be spot-checked), noting the check in the
    `accepted` event; a digest with no trail → `rejected`.
+
+   | R1 | when | duty |
+   |---|---|---|
+   | a | the scout binding holds a CURRENT pass of its registered exam set (no rebinding, no role-file edit, no exam-set rebuild, no `defect_found` on an accepted digest since that pass) | acceptance is by trail-coverage alone; the mandatory re-verification of claims/negatives is LIFTED; spot-checks stay legal, just optional |
+   | b | currency voided by any event listed in (a) | the STRICT form returns until a fresh pass: spot-verify at least one load-bearing claim, verifying a negative claim is mandatory, and the check is noted in the `accepted` event |
+
 2. Implementation from a finished spec → builder. Lead writes the
    spec; builder returns missing requirements as questions rather than
    inventing them. Accepting a builder diff goes by witness (witness
@@ -387,6 +393,10 @@ vocabulary; the mapping between the two vocabularies is documented in
    covered by their own dedicated mechanisms (the Lead exam, weekly
    calibration, and judge calibration — not repeated here).
 
+   | R11 | when | duty |
+   |---|---|---|
+   | m | a WRITING dispatch's "given" manifest | executed as a MARKED declaration: an inline enumeration, OR a pointer to a persisted spec that itself carries the enumeration, ONE hop away — no marker, no manifest; `owns` itself is always given INLINE, never by pointer |
+
 11a. Question routing (question-routing rule): questions route UP,
    work routes DOWN; the apex of the hierarchy is the OPERATOR —
    above Lead itself. An underspecified REQUIREMENT (interpreting
@@ -455,6 +465,10 @@ vocabulary; the mapping between the two vocabularies is documented in
    leaf that turns out to be a graph comes back via a judge REJECT or a
    `decomposable` event (rule 5); a graph-classified task that turns out
    simple only pays the ordinary coordination tax, nothing more.
+
+   | R13 | when | duty |
+   |---|---|---|
+   | g | judge acceptance of a leaf | does NOT replace the critic gate at INTEGRATION: critic review is required on merge when a leaf's diff is over roughly 100 lines; leaves of the SAME topic are merged TOGETHER through one critic pass; more than 2 small judge-accepted leaves of the same topic/blast-radius merged with no critic pass is the same violation class (cumulative) |
 
 ## Routing log — logs/routing-log.jsonl
 
@@ -691,6 +705,12 @@ operator. For all sessions and subagents in this repo:
    ` 2>&1` — both break the allowlist match.
 4. File edits — only via Edit/Write tools (not `python - <<EOF`, not
    `python -c "...replace..."`).
+
+   | pt.4 | when | duty |
+   |---|---|---|
+   | a | a NAMED, committed script with its output attached | legitimate: point 4's target is an ad-hoc, unauditable mutation, not a committed, reviewable one |
+   | b | a `-c`/heredoc payload that is a pure calculation/read | outside this point's scope, the gate stays silent; a mutation, or an opaque payload, still gets a WARN |
+
 5. Log entries — via an Edit/Write tool, not `printf` with `$(date)`.
 6. An environment-negative claim requires verification: empty output
    or "command not found" from an INCORRECTLY invoked tool is a
@@ -725,6 +745,13 @@ operator. For all sessions and subagents in this repo:
    registries put the verdict at the END of a multi-section entry, so
    a truncated window systematically shows the problem without its
    resolution.
+
+   | pt.6 | when | duty |
+   |---|---|---|
+   | a | a project decision rests on an UNKNOWN property of the environment | run ONE experiment first; building machinery instead of measuring is legitimate only when the measurement itself doesn't port (e.g. a port number) or the experiment would be destructive |
+   | b | a measured number appears in a norm/report | it carries its counting carrier (file/command) alongside it, or it isn't written at all; a comparison stays inside ONE metric |
+   | c | a character-level claim (a slash, a case, a specific symbol) | valid ONLY by reading the carrier directly (the Read tool); a search tool's output is not a basis for it |
+
 7. Temporary corruption (a mutation probe, a red-probe, "corrupt and
    restore") is rolled back by a BYTE COPY, never by `git checkout` /
    `git restore`: (a) take the copy BEFORE corrupting, and restore

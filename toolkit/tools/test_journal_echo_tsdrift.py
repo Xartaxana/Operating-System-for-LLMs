@@ -1290,10 +1290,14 @@ def test_echo_witness_staleness_not_flagged_when_journal_write_itself_is_the_onl
         edits=[{"ts": "2026-07-23T23:59:59.000000", "file_path": "logs/routing-log.jsonl"}],
     )
     fresh_ts = dt.datetime.now().isoformat()
+    # notes carries a critic-skip concession so the (unrelated) R3 MIRROR
+    # layer this task adds stays silent too -- this test is about the
+    # doc-only staleness exemption, not about R3.
     new_line = _line(ts=fresh_ts, event="accepted", agent="builder",
                       task_id="t-001", by="opus", model="sonnet",
                       witness="ran: python -m pytest tools/ -q",
-                      notes="only edit in track is the journal write itself")
+                      notes="only edit in track is the journal write itself; "
+                             "critic: skipped, sibling-layer e2e fixture")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=str(tmp_path), session_id="sess-1"))
     assert result.returncode == 0

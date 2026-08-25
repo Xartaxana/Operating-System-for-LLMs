@@ -366,6 +366,53 @@ is the REVISION DELTA, never the full kit:
    into the batch's acceptance. Check hook executability while
    you're there: `git ls-files -s .githooks` must show `100755`
    (`100644` = a silently dead gate on Linux clones).
+6. **Merge protocol for `CLAUDE.md` and every other policy carrier**
+   (role profiles, `PROCESS/*.md`) — the class this step exists to
+   close: an upgrade whose host-branch-restoration step ("host branch
+   is RESTORED on top of the new kit base") ran over `CLAUDE.md` the
+   same way it runs over code, silently reverting the host's freshly
+   delivered policy blocks back to their PRE-upgrade text. Files and
+   the checks that reference them can land correctly while the RULE
+   TEXT itself is gone — a checker watching an empty room stays green.
+   **CLAUDE.md is never restored from the host's HEAD as a whole
+   file** — restoration is legitimate for CODE, not for the policy
+   carriers named above:
+   1. Write the host's own adaptations inside the policy block as an
+      explicit LIST (what/where/why) — from the ledger's rows and a
+      comparison against the previously delivered revision; name this
+      list in the upgrade commit.
+   2. Replace the content between the `BEGIN`/`END supervised-
+      delegation policy` markers with the new kit revision's
+      `CLAUDE.md` content WHOLE — not a line-by-line diff/restore.
+   3. Reapply each adaptation from step 1 onto the new block, one at a
+      time, and VERIFY each one is present after reapplying; an
+      unverified adaptation is a step not actually done.
+   4. Outside the markers — host-local sections — stays untouched.
+   5. **Path A case: no markers exist yet** (a pre-convention install,
+      or one that predates this convention). Set them this same move —
+      `BEGIN` immediately before the first policy heading, `END` at
+      the end of the delivered block — and record the fact as an
+      adoption-ledger row. Until the markers exist, search the WHOLE
+      file for adaptations to preserve; once they exist, search only
+      inside the block.
+   6. Two things never get confused with each other: the ANCHOR
+      MANIFEST (`tools/install_parity_anchors.json`, if this host
+      carries its own copy) is replaced WHOLE on a kit upgrade — but
+      `CLAUDE.md` itself is never replaced whole; it is always merged
+      per steps 1-5 above.
+7. **Parity as the closing step.** The upgrade's commit does not land
+   until `tools/install_parity.py --check` has run against the FINAL,
+   post-merge tree (after step 6, after every other delta item is
+   applied) and every `MISSING`/`UNKNOWN` line it reports has an
+   explicit adoption-ledger decision — a Parity waiver row
+   (`ADOPTION_LEDGER.template.md`'s own "Parity waivers" section) for
+   anything legitimately absent, or the merge is genuinely incomplete
+   and step 6 isn't actually done. ANY edit to the tree between that
+   parity run and the commit invalidates the run — re-run it. Install
+   parity: ... — the upgrade step itself writes this line into the
+   host's own record of the upgrade (the ledger's "Kit snapshot
+   revision" note, or the upgrade commit message); the tool never
+   writes its own result anywhere, being read-only by construction.
 
 ## Failure detector
 
@@ -385,4 +432,9 @@ install, where it's still mandatory); a ledger row marked `adopt` whose
 own prerequisite (step 3's table) was never actually installed; and a
 `contour` field with no accompanying "not asked — environment clause"
 marker in a project where no operator was ever actually asked (step 1's
-headless branch used silently instead of explicitly).
+headless branch used silently instead of explicitly). One more,
+specific to Upgrade mode's step 7: an upgrade commit that lands with no
+`tools/install_parity.py --check` run recorded against it at all, or
+one whose `MISSING`/`UNKNOWN` lines carry no matching Parity waiver row
+— either means the merge protocol's closing step (Upgrade mode, step
+7) was skipped, not merely unrecorded.

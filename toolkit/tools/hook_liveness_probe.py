@@ -299,7 +299,23 @@ def _verify_const(module_name, const_name):
 
 import re  # noqa: E402 -- after sys.path manipulation, same style as sibling gates
 
-_PY_TOOL_CMD_RE = re.compile(r"python\s+(tools/[A-Za-z0-9_./\\-]+\.py)")
+# Recognizes both legal hook-command shapes (same two forms
+# tools/wiring_check.py's own _HOOK_COMMAND_RE and
+# tools/enforcement_probe.py's own _PY_TOOL_CMD_RE recognize): the flat
+# "python tools/<name>.py" form, and the $CLAUDE_PROJECT_DIR-qualified
+# quoted form 'python "$CLAUDE_PROJECT_DIR/tools/<name>.py"'. Unlike
+# enforcement_probe.py (which scans RAW file text and therefore needs to
+# tolerate JSON-escaped quotes), this module's caller
+# (load_settings_hook_commands) already runs settings.json through
+# json.loads() first -- the command strings this regex sees are
+# already-decoded Python strings with plain, unescaped quotes, the same
+# shape wiring_check.py's own parser sees. Group 1 matches the flat
+# form's filename; group 2 matches the qualified form's filename --
+# exactly one is non-None on any successful match.
+_PY_TOOL_CMD_RE = re.compile(
+    r'python\s+(?:tools/([A-Za-z0-9_./\\-]+\.py)'
+    r'|"\$CLAUDE_PROJECT_DIR/tools/([A-Za-z0-9_./\\-]+\.py)")'
+)
 
 
 def _read_text_best_effort(path):
@@ -348,7 +364,8 @@ def classify_settings_commands(pairs):
     for event_name, cmd in pairs:
         m = _PY_TOOL_CMD_RE.search(cmd)
         if m:
-            scripts.add(m.group(1).replace("\\", "/"))
+            filename = m.group(1) or m.group(2)
+            scripts.add(("tools/" + filename).replace("\\", "/"))
         else:
             info_lines.append(f'{event_name}: non-python hook command (informational): "{cmd}"')
     return scripts, info_lines
@@ -534,6 +551,15 @@ def _case_2_owns_gate_artifact():
             "subagent_type": "builder",
             "description": "sonnet: probe",
             "prompt": (
+                # DoD/Given markers added (M2-1-analog):
+                # owns_gate now consults dispatch_gate.decide() on the
+                # same payload before registering -- a dispatch missing
+                # either marker is BLOCKED (exit 2) and no longer
+                # registers at all, so this fixture (which is meant to
+                # exercise the SUCCESSFUL registration path) needs a
+                # non-blocked payload to still prove that path.
+                "DoD: the probe feature is implemented, tests green.\n"
+                "Given: the whole repo.\n"
                 "Implement the probe feature.\n\n"
                 f"owns (ABSOLUTE write paths): {owns_path}\n"
             ),
@@ -904,7 +930,8 @@ CASES = [
         "expected_exit": 0,
         "anchors": (
             "Negative claim about to be written without a matching "
-            "search/read this session (command hygiene point 6)",
+            "search/read this session",
+            "(command hygiene point 6)",
         ),
         "const_ref": ("claim_control_gate", "MSG_TEMPLATE"),
     },
