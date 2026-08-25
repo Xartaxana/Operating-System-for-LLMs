@@ -659,7 +659,7 @@ def test_harness_channel_path_with_spaces_missing_file_warns(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 13. harness-channel: the $CLAUDE_PROJECT_DIR-qualified form (M1,
+# 12b. harness-channel: the $CLAUDE_PROJECT_DIR-qualified form (M1,
 #     docs/tasks/2026-08-25_wave2-misc-spec.md) -- ON boundary: this
 #     second form is recognized and checked exactly like form (1); OFF
 #     boundaries: single quotes, an unquoted $CLAUDE_PROJECT_DIR, and

@@ -1578,7 +1578,8 @@ def boot_budget_lines(root: Path) -> list:
 #
 #   (a) git-channel   -- core.hooksPath resolves to <root>/.githooks AND
 #                         both required git hook files exist under it.
-#   (b) harness-channel -- every "python tools/<file>.py" hook command in
+#   (b) harness-channel -- every hook command (flat "python tools/<file>.py"
+#       or M1-qualified "python \"$CLAUDE_PROJECT_DIR/tools/<file>.py\"") in
 #                         .claude/settings.json names a file that exists
 #                         and imports cleanly.
 #   (c) python-channel -- shutil.which("python") finds an interpreter on
@@ -1930,7 +1931,9 @@ def _parse_hook_commands(settings) -> list:
 
 def harness_channel(root: Path):
     """harness-channel: every hook command line in .claude/settings.json
-    of the form "python tools/<file>.py" names a file that (a) exists
+    of either legal form (flat "python tools/<file>.py" or M1-qualified
+    "python \"$CLAUDE_PROJECT_DIR/tools/<file>.py\"", t-608) names a
+    file that (a) exists
     and (b) imports cleanly via importlib (top-level of these modules is
     side-effect-free -- verified by critic t-256). Returns
     (warnings, importable_count) -- importable_count is the number of
