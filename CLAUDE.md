@@ -9,12 +9,10 @@ docs/DECISIONS_FULL.md. Permanent behaviour (D-0011): never invent
 project state — retrieve it from the repository; the repository
 overrides chat. This repo is the reference (dogfooding) deployment.
 
-Size budget: this file is capped at 37500 bytes (breach 37800); an
-amendment to a rule with a registry block is a ROW in that registry,
-never a paragraph in its core; a rule without a block has no
-amendments yet — the first amendment creates the block; rationale
-goes to docs/POLICY_FULL.md (axis-4 pair, same commit). Breach →
-boot-diet, CLAUDE layer.
+Size budget: cap 37500 B (breach 37800); amendments = ROWS in a
+rule's registry block (the first amendment creates it), never core
+paragraphs; rationale → docs/POLICY_FULL.md (axis-4 pair, same
+commit). Breach → boot-diet, CLAUDE layer.
 
 ## Tiers — functions, not models (D-0062)
 
@@ -285,6 +283,7 @@ Graph tasks keep the standard Lead loop.
 | d | the dispatch is NOT leaf-class — a mechanism, a policy edit, an integration whole | judge acceptance is illegal: those keep the D-0058 matrix — it is legal ONLY for leaf-class dispatches: recon / implementation to a written spec | D-0087 |
 | e | a quality-critical task, on the operator's word | H-mode: a Lead-authored DAG + per-node intent keys incl. adversarial probes + D-machinery on leaves | D-0087 |
 | f | the classification was wrong | Misclassification is recoverable by construction: a leaf that was really a graph comes back via judge reject / `decomposable` (R5); a graph-classified simple task only pays the Lead-layer tax | D-0087 |
+| g | judge-приёмка листа НЕ заменяет критик-гейт ИНТЕГРАЦИИ | критик при вливании: лист >100 строк; листы одной темы — ВМЕСТЕ; >2 малых одной темы/места последствий — тоже (кумулятив) | D-0110 |
 
 ## Journal — logs/routing-log.jsonl
 
@@ -402,14 +401,11 @@ coordinator's ACTUAL tier:
 | at the `roles.builder` rung | scout; builder diffs ONLY with a critic input (skip concession unavailable) | critic-class and Lead-class → queue |
 | below the `roles.builder` rung | no coordination is provided for | — |
 
-Keyed by RUNG, not by model name: this table is a CRITERION, and a
-pinned name here answers the wrong question silently after the next
-rebinding (failure-mode register, docs/SIBLING_MAP.md). Ladder:
-scout < builder < critic < lead < reserve.
-
-The standing mode "operator coordinates with Sonnet, the Lead tier
-(Opus) runs in batches over the Lead queue" is the same matrix;
-degradation (below) is an unplanned entry into it.
+Keyed by RUNG, not by model name — pinned names answer the wrong
+question after rebinding (register, SIBLING_MAP). Ladder:
+scout < builder < critic < lead < reserve. The standing mode
+"Sonnet coordinates, Lead runs the queue in batches" is the same
+matrix; degradation (below) is an unplanned entry into it.
 
 ## Lead degradation (D-0039, D-0042, D-0056)
 
@@ -437,10 +433,9 @@ needed, its use is the operator's word (D-0099). (б) EXIT — a visible ascent 
 itself PROOF of a window, regardless of the journal: in the same
 move, a retroactive `lead_degraded` (mark + actual bounds), window
 acceptance as stated above, `lead_restored`. (в) EXTERNAL NET —
-calibration check 5: actual Lead-session models from transcripts vs
-window coverage by event pairs; catches both in-session points
-failing, incl. a session that died degraded. A degradation crossing
-the session boundary must be the journal's last event.
+calibration check 5 (transcripts vs window pairs; full text —
+protocol). A degradation crossing the session boundary must be the
+journal's last event.
 
 ## Command hygiene (permission hygiene)
 
