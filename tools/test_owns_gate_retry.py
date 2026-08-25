@@ -10,13 +10,18 @@ warn-population-class.md "ТРЕТИЙ ЭКЗЕМПЛЯР ПОДКЛАССА I")
 
 MODULE_UNDER_TEST переключает цель (та же конвенция, что tools/
 test_owns_gate_md.py / tools/test_dispatch_gate_md.py уже несут):
-default -> сиблинг tools/owns_gate_retry.py (фикс узла I);
-MODULE_UNDER_TEST=live -> живой tools/owns_gate.py БЕЗ единой правки --
-используется ТОЛЬКО как цель негативного контроля дискриминации: тесты,
-имя которых содержит "discrimination", зелёные на сиблинге, ОБЯЗАНЫ
-быть КРАСНЫМИ на живой (нерегионной, без фикса узла I) цели -- живой
-код не различает пересдачу и параллельный конфликт вовсе, поэтому те
-же сценарии на нём warn'ят.
+пусто/не задано -> сиблинг tools/owns_gate_retry.py (фикс узла I), ЕСЛИ
+он существует, иначе МОЛЧА живой tools/owns_gate.py (temporal-край,
+поведение неизменно); MODULE_UNDER_TEST=live -> живой tools/owns_gate.py
+БЕЗ единой правки -- используется ТОЛЬКО как цель негативного контроля
+дискриминации: тесты, имя которых содержит "discrimination", зелёные на
+сиблинге, ОБЯЗАНЫ быть КРАСНЫМИ на живой (нерегионной, без фикса узла I)
+цели -- живой код не различает пересдачу и параллельный конфликт вовсе,
+поэтому те же сценарии на нём warn'ят; ЛЮБОЕ ДРУГОЕ непустое значение
+(например MODULE_UNDER_TEST=sibling) -- сиблинг ЗАПРОШЕН ЯВНО, при его
+отсутствии ГРОМКИЙ КРАС (pytest.fail, называющий запрошенный путь), не
+тихая подмена живым (F1, ФИКС-РАУНД docs/tasks/2026-08-25_queue8-
+mechbatch-spec.md).
 
 Существующий tools/test_owns_gate.py (батарея живого файла) НЕ
 ТРОГАЕТСЯ этим диспатчем -- прогоняется отдельно как подтверждение
@@ -34,6 +39,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 TOOLS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOLS_DIR))
 
@@ -42,11 +49,23 @@ MODULE_UNDER_TEST = os.environ.get("MODULE_UNDER_TEST", "").strip().lower()
 
 def _resolve_script_path() -> Path:
     # f61-форма (образец test_owns_gate_md.py._resolve_script_path):
-    # default -- сиблинг, ЕСЛИ он существует, иначе живой файл.
+    # default (MODULE_UNDER_TEST пуст) -- сиблинг, ЕСЛИ он существует,
+    # иначе живой файл, МОЛЧА (поведение как сегодня). Сиблинг ЗАПРОШЕН
+    # ЯВНО (MODULE_UNDER_TEST задан и НЕ "live") -- при отсутствии
+    # сиблинга ГРОМКИЙ КРАС, не тихая подмена живым (F1, ФИКС-РАУНД
+    # docs/tasks/2026-08-25_queue8-mechbatch-spec.md).
+    live = TOOLS_DIR / "owns_gate.py"
     if MODULE_UNDER_TEST == "live":
-        return TOOLS_DIR / "owns_gate.py"
+        return live
     sibling = TOOLS_DIR / "owns_gate_retry.py"
-    return sibling if sibling.exists() else TOOLS_DIR / "owns_gate.py"
+    if MODULE_UNDER_TEST == "":
+        return sibling if sibling.exists() else live
+    if not sibling.exists():
+        pytest.fail(
+            f"MODULE_UNDER_TEST={MODULE_UNDER_TEST!r} requested sibling "
+            f"{sibling} but it does not exist -- no silent live fallback (F1)"
+        )
+    return sibling
 
 
 SCRIPT = _resolve_script_path()

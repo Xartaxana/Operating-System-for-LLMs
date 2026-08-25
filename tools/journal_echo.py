@@ -1,39 +1,18 @@
-# SIBLING, НЕ ЖИВОЙ ПУТЬ (t-503 узел N3, q503-remediation, 2026-08-19):
-# tools/journal_echo_q503.py -- сиблинг живого tools/journal_echo.py по
-# образцу узлов A/B F-61 (dod_track_q503.py и т.п.) -- .claude/settings.json
-# по-прежнему запускает `python tools/journal_echo.py`, ЭТОТ файл не
-# исполняется PostToolUse-хуком. Посадка (слияние в живой путь) --
-# отдельный акт Lead байт-копией, вне owns этой задачи (см. non-цели узла
-# N3). Разница от живого файла -- ровно секция "PAYLOAD-SCOPED ECHO BASE"
-# и main() ниже (K14/K15/К16/K17 узла N3, докстринги отмечают правки
-# буквально "q503"); остальной код -- дословная копия живого файла на
-# момент 2026-08-19, НЕ трогается этой задачей за пределами этих правок.
+# ЖИВОЙ ПУТЬ: этот файл исполняется PostToolUse-хуком
+# (.claude/settings.json -> `python tools/journal_echo.py`). Посажен
+# байт-копией сиблинга journal_echo_r3.py (t-609, 2026-08-25, критик-гейт
+# с блокером Б1 закрыт: дедлайн записи + байтовый потолок сегмента);
+# шапка приведена к факту тем же актом посадки Lead (прежняя лгала про
+# сиблинг q503 и несла дублированный абзац — находка F-41 критика t-609).
 #
-# Слои, накопленные в этом файле по сей день (аддитивно, один и тот же
-# живой путь): TS DRIFT ECHO (константы TS_FUTURE_TOLERANCE_SECONDS/
-# TS_STALE_TOLERANCE_SECONDS, функции _detect_ts_drift/
-# _collect_ts_drift_events/_format_ts_drift_line/build_ts_drift_segment),
-# TIER ECHO, WITNESS ECHO (+ WITNESS ECHO STALENESS), ESCALATION ECHO
-# (batch B6), PAYLOAD-SCOPED ECHO BASE (t-277/t-279) и, этой задачей
-# (t-447, замер 2026-08-16), NOTES LEN ECHO -- WARN при записи строки,
-# чьё поле notes длиннее порога, назначенного типу события (константы
-# NOTES_LEN_THRESHOLDS_CHARS/MAX_NOTES_LEN_LINES, функции
-# _collect_notes_len_events/_format_notes_len_line/build_notes_len_segment,
-# точки вставки в combine_context()/main() -- см. секцию "NOTES LEN ECHO"
-# ниже за полный разбор).
-#
-# Слои, накопленные в этом файле по сей день (аддитивно, один и тот же
-# живой путь): TS DRIFT ECHO (константы TS_FUTURE_TOLERANCE_SECONDS/
-# TS_STALE_TOLERANCE_SECONDS, функции _detect_ts_drift/
-# _collect_ts_drift_events/_format_ts_drift_line/build_ts_drift_segment),
-# TIER ECHO, WITNESS ECHO (+ WITNESS ECHO STALENESS), ESCALATION ECHO
-# (batch B6), PAYLOAD-SCOPED ECHO BASE (t-277/t-279) и, этой задачей
-# (t-447, замер 2026-08-16), NOTES LEN ECHO -- WARN при записи строки,
-# чьё поле notes длиннее порога, назначенного типу события (константы
-# NOTES_LEN_THRESHOLDS_CHARS/MAX_NOTES_LEN_LINES, функции
-# _collect_notes_len_events/_format_notes_len_line/build_notes_len_segment,
-# точки вставки в combine_context()/main() -- см. секцию "NOTES LEN ECHO"
-# ниже за полный разбор).
+# Слои, накопленные в этом файле (аддитивно, один живой путь):
+# TS DRIFT ECHO, TIER ECHO, WITNESS ECHO (+ STALENESS), ESCALATION ECHO
+# (R6-ЗЕРКАЛО, batch B6), PAYLOAD-SCOPED ECHO BASE (t-277/t-279),
+# NOTES LEN ECHO (t-447), и R3-ЗЕРКАЛО (t-609: полнота ЗАПИСИ
+# builder-приёмки — сигналы S1-S5, тексты M1/M2, MAX_R3_LINES/
+# MAX_R3_BYTES, секция "R3-ЗЕРКАЛО" ниже; дедлайн записи stdout
+# _write_stdout_deadline — порт из session_context.py t-587,
+# ось карты «недренирующий потребитель»).
 """journal_echo.py -- PostToolUse-хук Claude Code, эхом валидирующий
 СВЕЖЕЕ (только что записанное на диск) состояние logs/routing-log.jsonl
 СРАЗУ после любого tool-вызова, чей tool_input несёт путь на этот файл --
@@ -457,11 +436,15 @@ def _format_ts_drift_line(event: tuple) -> str:
     line_no, kind, delta = event
     seconds = int(round(abs(delta)))
     if kind == "future":
-        return (f"TS DRIFT: line {line_no} event ts is {seconds}s in the FUTURE "
-                 "(F-29: ts must be read from the system clock immediately before writing)")
-    return (f"TS DRIFT: line {line_no} event ts is {seconds}s STALE "
-            "(D-0079: batch ts must still be read from the system clock right "
-            "before writing the batch, not carried over from an earlier check)")
+        # УЗЕЛ C (посадка Lead 2026-08-25, t-607): правило трёх, провенанс хвостом.
+        return (f"TS DRIFT: line {line_no} event ts is {seconds}s in the FUTURE - "
+                 "ordering/audit by ts for this line is now unreliable; do not edit "
+                 "the past line, note the drift in the NEXT event's notes and read ts "
+                 "fresh from the clock next time (F-29)")
+    return (f"TS DRIFT: line {line_no} event ts is {seconds}s STALE - this ts was "
+            "likely carried over instead of read fresh, so ordering/audit by ts is "
+            "unreliable; do not edit the past line, note the drift in the NEXT "
+            "event's notes and read ts fresh right before writing next time (D-0079)")
 
 
 def build_ts_drift_segment(ts_drift_events: list, ascii_only: bool = False) -> str:
@@ -710,9 +693,15 @@ def _format_tier_line(event: tuple, ascii_only: bool) -> str:
     line_no, kind, declared_word, counts = event
     sanitize = _ascii_sanitize if ascii_only else _raw_sanitize
     measured = _format_measured(counts, ascii_only)
+    # УЗЕЛ C (посадка Lead 2026-08-25, t-607): правило трёх в обеих ветках.
     if kind == "mismatch":
-        return f"TIER ECHO: строка {line_no} model='{sanitize(declared_word)}' vs measured {measured} MISMATCH"
-    return f"TIER ECHO: строка {line_no} measured {measured}"
+        return (f"TIER ECHO: строка {line_no} заявлен ярус '{sanitize(declared_word)}' "
+                f"MISMATCH measured {measured} ни разу не подтверждают заявленный ярус "
+                "- воркер мог фактически идти на другой модели; сверь ярус и поправь "
+                "запись или перезапусти на нужном ярусе")
+    return (f"TIER ECHO: строка {line_no} заявлен ярус '{sanitize(declared_word)}' "
+            f"measured {measured} подтверждает его лишь частично - часть транскрипта "
+            "могла идти на другой модели; сверь ярус вручную")
 
 
 def build_tier_segment(tier_events: list, ascii_only: bool = False) -> str:
@@ -762,9 +751,10 @@ def build_context(violations: list, ascii_only: bool = False) -> str:
 def combine_context(violations: list, tier_events: list, witness_events: list = None,
                      ts_drift_events: list = None, escalation_events: list = None,
                      fallback_marker: str = "", *, notes_len_events: list = None,
+                     r3_events: list = None,
                      ascii_only: bool = False) -> str:
     """Спека п.3: "один JSON additionalContext может нести и дефекты
-    формы, и TIER ECHO-строки (раздели '; ')". СЕМЬ НЕЗАВИСИМЫХ
+    формы, и TIER ECHO-строки (раздели '; ')". ВОСЕМЬ НЕЗАВИСИМЫХ
     сегментов -- build_context(violations) (ЦЕЛИКОМ, свой заголовок
     "JOURNAL ECHO: N дефект(ов)..." не меняется -- существующие тесты
     завязаны на этот формат буквально), build_tier_segment(tier_events),
@@ -772,18 +762,21 @@ def combine_context(violations: list, tier_events: list, witness_events: list = 
     build_witness_segment(witness_events), (расширение TS-DRIFT-задачи)
     build_ts_drift_segment(ts_drift_events), (batch B6, задача 1)
     build_escalation_segment(escalation_events), (t-447, эта задача)
-    build_notes_len_segment(notes_len_events) и (t-277/t-279)
+    build_notes_len_segment(notes_len_events), (узел 1, R3-ЗЕРКАЛО, F7)
+    build_r3_segment(r3_events) и (t-277/t-279)
     fallback_marker -- склеиваются через "; ", только если непусты. Любое
     подмножество сегментов пусто -> итог = склейка ОСТАВШИХСЯ непустых,
     JSON всё равно печатается, пока хоть один сегмент непуст. Все пусты
     -> "" -- вызывающий код (main()) трактует пустую строку как полную
     тишину (та же проверка истинности, что раньше была
-    `if not violations`). ПОРЯДОК фиксирован (R-6 спеки t-447):
-    violations первым (литерал заголовка "JOURNAL ECHO: N дефект(ов) в
-    новых строках: " не меняется ни на символ), затем tier/witness/
-    ts-drift/escalation/notes-len в этом порядке, fallback_marker
-    ПОСЛЕДНИМ всегда -- ни один сегмент не является условием видимости
-    другого, каждый делает вызов видимым самостоятельно.
+    `if not violations`). ПОРЯДОК фиксирован (R-6 спеки t-447, П4 спеки
+    узла 1 продолжает тот же принцип): violations первым (литерал
+    заголовка "JOURNAL ECHO: N дефект(ов) в новых строках: " не меняется
+    ни на символ), затем tier/witness/ts-drift/escalation/notes-len/r3 в
+    этом порядке (r3_events -- ПОСЛЕДНИЙ СОДЕРЖАТЕЛЬНЫЙ сегмент, СТРОГО
+    ПЕРЕД fallback_marker, П4 спеки узла 1), fallback_marker ПОСЛЕДНИМ
+    всегда -- ни один сегмент не является условием видимости другого,
+    каждый делает вызов видимым самостоятельно.
 
     fallback_marker -- ЛИТЕРАЛ (FALLBACK_MARKER_TEXT + Q503 K15
     диагностический код причины хвостом, см. секцию "PAYLOAD-SCOPED ECHO
@@ -830,7 +823,19 @@ def combine_context(violations: list, tier_events: list, witness_events: list = 
     и остальные существующие 2-/3-/4-/5-/6-позиционные вызовы этого
     репо остаются побайтово прежними (см. тест-пин
     test_combine_context_six_positional_arg_form_unchanged в
-    tools/test_journal_echo_noteslen.py)."""
+    tools/test_journal_echo_noteslen.py).
+
+    r3_events (узел 1, R3-ЗЕРКАЛО, П3 спеки узла 1): ТОТ ЖЕ принцип, что
+    notes_len_events выше -- добавлен СТРОГО KEYWORD-ONLY (после `*`),
+    default None (не [] -- сегмент для None -> build_r3_segment([]) ->
+    "", идентично отсутствию параметра). Этот выбор -- ПРЯМОЕ следствие
+    того же пина t-431: любой НОВЫЙ параметр, вставленный позиционным
+    слотом, молча сдвинул бы существующий 6-позиционный вызов
+    (test_journal_echo_escalation.py:431) на неверный аргумент; за `*`
+    он структурно не может это сделать. См. тест-пин
+    test_combine_context_six_positional_arg_form_unchanged в
+    tools/test_journal_echo_r3.py (тот же побайтовый вызов, тот же
+    ожидаемый результат, импортированный из этого модуля)."""
     parts = []
     if violations:
         parts.append(build_context(violations, ascii_only))
@@ -849,6 +854,9 @@ def combine_context(violations: list, tier_events: list, witness_events: list = 
     notes_len_segment = build_notes_len_segment(notes_len_events or [], ascii_only)
     if notes_len_segment:
         parts.append(notes_len_segment)
+    r3_segment = build_r3_segment(r3_events or [], ascii_only)
+    if r3_segment:
+        parts.append(r3_segment)
     if fallback_marker:
         parts.append(fallback_marker)
     return "; ".join(parts)
@@ -1231,17 +1239,24 @@ def _format_witness_line(event: tuple, ascii_only: bool) -> str:
     line_no = event[1]
     if kind == "warn_loud":
         _, _, cmd, ts = event
+        # УЗЕЛ C (посадка Lead 2026-08-25, t-607): правило трёх во всех трёх ветках.
         return (f"WITNESS ECHO: line {line_no} contradiction - command "
-                f"'{sanitize(cmd)}' recorded RED in session track (last red at {sanitize(str(ts))})")
+                f"'{sanitize(cmd)}' recorded RED in session track at {sanitize(str(ts))} "
+                "- this line's accepted witness may not be trustworthy; re-run the "
+                "command and confirm it is green before relying on this acceptance")
     if kind == "warn_stale":
         _, _, last_edit_ts, last_green_ts = event
         green_part = sanitize(str(last_green_ts)) if last_green_ts is not None else "none"
         return (f"WITNESS ECHO: line {line_no} track staleness - last code edit at "
                 f"{sanitize(str(last_edit_ts))} is after the last green run (last green: "
-                f"{green_part}) - witness not confirmed by a green run after the last edit")
+                f"{green_part}) - the witness predates the latest code change and may no "
+                "longer match it; re-run the witness command after this edit and confirm "
+                "it is green")
     # warn_soft
     return (f"WITNESS ECHO: line {line_no} witness command(s) not observed in "
-            "session track (batch/cross-session/retro acceptance legitimate - verify manually)")
+            "session track - this acceptance cannot be confirmed automatically; verify "
+            "manually that the witness is legitimate (batch/cross-session/retro "
+            "acceptance is a valid reason)")
 
 
 def build_witness_segment(witness_events: list, ascii_only: bool = False) -> str:
@@ -1511,9 +1526,11 @@ def _format_escalation_line(event: tuple, ascii_only: bool) -> str:
     cmd/ts в _format_witness_line."""
     sanitize = _ascii_sanitize if ascii_only else _raw_sanitize
     line_no, _trigger, task_id, attempt_display = event
+    # УЗЕЛ C (посадка Lead 2026-08-25, t-607): правило трёх.
     return (f"R6-ЗЕРКАЛО: line {line_no} attempt {attempt_display} без escalated "
-            f"по task_id {sanitize(str(task_id))} - после двух rejected одного "
-            "яруса эскалация обязательна")
+            f"по task_id {sanitize(str(task_id))} - два rejected одного яруса без "
+            "эскалации: цикл немых повторов останется незамеченным; эскалируй на "
+            "ярус выше и допиши событие escalated (R6)")
 
 
 def build_escalation_segment(escalation_events: list, ascii_only: bool = False) -> str:
@@ -1684,8 +1701,11 @@ def _format_notes_len_line(event: tuple) -> str:
     нет параметра ascii_only, тот же выбор сигнатуры, что
     _format_ts_drift_line уже сделал в этом файле по той же причине."""
     line_no, event_name, length, threshold = event
+    # УЗЕЛ C (посадка Lead 2026-08-25, t-607): правило трёх.
     return (f"NOTES LEN: line {line_no} event={event_name} notes {length} chars "
-            f"> threshold {threshold} (move load-bearing facts to typed fields / task carrier)")
+            f"> threshold {threshold} - an oversized note risks burying load-bearing "
+            "facts in prose where they will not be found later; move load-bearing "
+            "facts to typed fields / task carrier, keep only a pointer in notes")
 
 
 def build_notes_len_segment(events: list, ascii_only: bool = False) -> str:
@@ -1704,6 +1724,342 @@ def build_notes_len_segment(events: list, ascii_only: bool = False) -> str:
     head = events[:MAX_NOTES_LEN_LINES]
     rest = len(events) - len(head)
     body = "; ".join(_format_notes_len_line(ev) for ev in head)
+    if rest > 0:
+        body += f"; +{rest} more"
+    return body
+
+
+# --- R3-ЗЕРКАЛО (узел 1, docs/tasks/2026-08-25_r3-mirror-spec.md, F7
+# протечка калибровки 8) --------------------------------------------------
+# ДЫРА (F7): R3 (CLAUDE.md) требует критик-вход ЛИБО пометку "critic:
+# skipped, <причина>" на builder-приёмках >~100 строк / схемы / ядра /
+# денег -- держится ТОЛЬКО дисциплиной приёмщика на пути записи. Замер
+# калибровки 8 нашёл 11 builder-accepted строк окна 08-14..08-18 БЕЗ
+# обоих сигналов (t-437 t-444 t-447 t-449 t-453 t-492 t-496 t-501 t-503
+# t-504 t-537) -- приёмка без входа выше исполнителя есть
+# самосертификация (D-0037/D-0058), детектора на пути записи не было
+# вовсе (только недельный чек 2, постфактум). Этот слой -- WARN, НИКОГДА
+# блок (тот же паттерн, что ESCALATION ECHO/TS DRIFT ECHO выше в этом
+# файле уже применяют для R6/F-29 -- предупреждение на моменте записи,
+# жёсткий гейт -- отдельный, более грубый инструмент, здесь не
+# задействован; логика НЕ входит в journal_validator.decide(), см. П1
+# спеки узла 1).
+#
+# ТРИГГЕР: НОВАЯ строка (echo_new_lines) event=="accepted" agent=="builder".
+# Тишина по строке при ЛЮБОМ из ПЯТИ сигналов (S5 -- ПОПРАВКА Lead 17:0x,
+# критик-гейт t-609, фикс-раунд после узла 1):
+#   S1 basis=="critic"
+#   S2 notes матчит CRITIC_SKIP_RE (буквально "critic: skipped", ignorecase,
+#      гибкие пробелы вокруг двоеточия)
+#   S3 delegated(agent=="critic") с ТЕМ ЖЕ task_id ГДЕ УГОДНО в файле --
+#      base_lines (история) + ВЕСЬ текущий батч (echo_new_lines) В ОБЕ
+#      СТОРОНЫ (Р4(б) спеки: критик-делегирование может лежать И до, И
+#      ПОСЛЕ accepted-строки в пределах одного батча -- окно S3 не
+#      ограничено позицией) -- отсюда предварительный полный проход
+#      new_lines (наравне с base_lines) за критик-делегированиями ДО
+#      основного триггер-прохода, см. _collect_r3_events.
+#   S4 basis=="judge" (Р3(а) спеки: R13/D-0087 лист-приёмка листа глушит
+#      этот слой безусловно; коллизия норм R3 x R13(г) -- вопрос
+#      оператору, отдельный узел Л, вне этой задачи).
+#   S5 (Ф3 поправки) голый токен `critic:t-NNN` в notes (регекс
+#      CRITIC_TOKEN_RE = `\bcritic:(t-\d{3,})\b`, литерал -- та же
+#      case-sensitive конвенция, что journal_validator.REPLACES_WORKER_RE
+#      -- НЕ ignorecase, в отличие от CRITIC_SKIP_RE выше) глушит M1 И
+#      M2, но ТОЛЬКО если указанный t-NNN СУЩЕСТВУЕТ в файле как
+#      delegated(agent=="critic") -- проверка бесплатна: critic_task_ids
+#      уже собран для S3 тем же предварительным проходом, S5 просто
+#      сверяет извлечённый id по тому же множеству. Токен на
+#      НЕСУЩЕСТВУЮЩИЙ вердикт НЕ глушит (s5_valid остаётся False, строка
+#      падает в обычную M1/M2-развилку как если бы токена не было вовсе).
+#      Форма зеркалит УЖЕ узаконенный `closes:t-NNN` журнала (CLAUDE.md) --
+#      несколько токенов в notes легальны, ДОСТАТОЧНО одного валидного
+#      (см. _check_accepted_r3: `.finditer`, ИЛИ по всем совпадениям).
+#      В ОТЛИЧИЕ от S3 (требует ТОТ ЖЕ task_id), S5 -- КРОСС-task_id по
+#      конструкции: указанный t-NNN может быть ЛЮБЫМ task_id файла, лишь
+#      бы под ним реально стоит delegated(critic) -- это ИМЕННО механизм
+#      для "сборочного critic на бандл" (см. К6 ретро-замер отчёта
+#      builder'а узла 1 -- 99 "лишних" исторических случаев были ровно
+#      этим классом: критик-вход существует, но под ДРУГИМ task_id).
+#
+# M2-ДЕТЕКТОР (независимый от M1, срабатывает ТОЛЬКО когда S1 истинно):
+# basis=="critic" БЕЗ delegated(agent=="critic") по этому же task_id ГДЕ
+# УГОДНО в файле И БЕЗ валидного S5-токена -> "заявленное основание без
+# делегирования" (фантомное basis, чек 2 прочтёт это как ложное
+# основание). Ф4 ПРИОРИТЕТ КОДИФИЦИРОВАН (поправка Lead 17:0x): строка
+# basis=="critic" БЕЗ делегирования И БЕЗ валидного S5, но С литералом
+# концессии (S2, "critic: skipped") В NOTES -- ПРОТИВОРЕЧИВАЯ запись,
+# M2 ВЕРЕН (тишина через S2 была бы прощением противоречия) -- структурно
+# это уже гарантировано порядком проверок ниже: ветка basis=="critic"
+# проверяется ПЕРВОЙ и НИКОГДА не заглядывает в S2/notes-skip-литерал
+# вовсе (S2 -- ветвь ТОЛЬКО ветки M1, не альтернатива внутри ветки M2).
+#
+# КРАЯ (см. спеку узла 1 + Ф4 поправки, буквально): task_id нет/не
+# строка/из ОДНИХ ПРОБЕЛОВ (Ф4: task_id.strip() пуст) -> пропуск строки
+# целиком (ни M1, ни M2) -- та же проверка применена к critic_task_ids
+# (_absorb_critic ниже -- delegated(critic) с task_id из пробелов НЕ
+# входит в множество, класс, не экземпляр); notes None -> трактуется как
+# пустая (регэксп S2/S5 просто не матчат нестроку); basis нет -> проверка
+# падает сквозь S1/S4 к S2/S3/S5; basis=="queued-to-lead" -> НЕ глушит
+# (не равно ни "critic", ни "judge"); agent!=builder -> строка вне
+# триггера, тишина; повторный accepted одного task_id -> каждая строка
+# проверяется независимо (общий critic_task_ids не расходуется);
+# ретро-приёмка (notes содержит "retroactive") -> НЕ освобождается от R3
+# (Р6(а) спеки: этот слой, в отличие от WITNESS ECHO, не даёт
+# retro-исключения); used_fallback -> слой РАБОТАЕТ на фолбэковой
+# (кумулятивной HEAD-дифф) базе как есть (Р8(а) спеки: тот же класс
+# "шумный, но не корректностно-ложный", что TIER/WITNESS/ESCALATION --
+# критик-вход/basis/notes не зависят от "сколько времени прошло с
+# несвязанного коммита", здесь нет неверного вердикта, см. main() --
+# r3_events НЕ входит в ветку used_fallback, вычисляется безусловно);
+# пустой журнал/битый JSON/не-dict строка -> пропуск без прерывания
+# остальных строк (fail-open построчно, П5 ниже); витринное поле witness
+# НЕ читается этим слоем (S2/S5 матчат ТОЛЬКО notes, battery 1 ниже) --
+# BATCH CANON в witness этот слой не касается вовсе.
+#
+# Fail-open построчно (тот же паттерн, что _collect_tier_events/
+# _collect_escalation_events выше в этом файле): битый JSON одной строки
+# -- try/except с `continue`, не роняет разбор остальных строк батча.
+MAX_R3_LINES = 5  # тот же класс потолка, что MAX_TIER_LINES/
+# MAX_WITNESS_LINES/MAX_TS_DRIFT_LINES/MAX_ESCALATION_LINES/
+# MAX_NOTES_LEN_LINES выше в этом файле -- то же собственное инженерное
+# решение (спека узла 1 называет число явно -- "ЛИМИТЫ: MAX_R3_LINES=5
+# (+«+K more»)"). Граничные тесты на 5/6 -- правило 6а, см.
+# tools/test_journal_echo_r3.py.
+#
+# MAX_R3_BYTES (Б1(iii) поправки Lead 17:0x, критик-гейт t-609): потолок
+# ПО БАЙТАМ на json-провод сегмента (ensure_ascii-байты), НЕЗАВИСИМЫЙ от
+# MAX_R3_LINES -- критик замерил (t-595): 4 accepted/builder-строки с
+# ПРЕЖНИМИ (длинными, кириллическими) текстами M1/M2 давали additionalContext
+# 6835 Б при замеренной ёмкости пайпа 4096 Б -- json.dumps(...,
+# ensure_ascii=True) эскейпит КАЖДЫЙ кириллический символ в "\uXXXX"
+# (6 ASCII-байт на символ вместо 2 UTF-8-байт) -- кириллическая проза
+# статических частей M1/M2 инфлировала провод многократно. Тексты
+# сокращены втрое (Б1(ii), ниже), но потолок ПО БАЙТАМ -- независимая,
+# структурная защита (не полагается на то, что тексты останутся
+# короткими навсегда, и защищает от батчей с длинными/кириллическими
+# task_id): при превышении строки сворачиваются в "+K more" РАНЬШЕ
+# лимита строк, даже если MAX_R3_LINES=5 ещё не достигнут. Новый
+# эксперимент не нужен -- свойство уже замерено критиком (t-595, п.6(а)
+# поправки) -- это порт готового числа, не догадка.
+MAX_R3_BYTES = 2600
+CRITIC_SKIP_RE = re.compile(r"critic\s*:\s*skipped", re.IGNORECASE)  # Р7(а)
+# спеки узла 1: литерал концессии -- ТОЛЬКО эта форма (ignorecase,
+# гибкие пробелы вокруг двоеточия), никакая свободная формулировка
+# ("critic: skip", "критик пропущен", "без критика" -- НЕ матчат, см.
+# battery 3 в tools/test_journal_echo_r3.py).
+CRITIC_TOKEN_RE = re.compile(r"\bcritic:(t-\d{3,})\b")  # Ф3/S5 поправки
+# Lead 17:0x -- case-sensitive литерал (НЕ ignorecase, симметрично
+# journal_validator.REPLACES_WORKER_RE/CLOSES-токену -- машинный
+# структурный токен, не свободная проза, в отличие от CRITIC_SKIP_RE
+# выше). Группа 1 -- ссылочный task_id ("t-NNN"), сверяется по
+# critic_task_ids в _check_accepted_r3.
+
+
+def _json_wire_len(s: str) -> int:
+    """Байты, которые s добавит на JSON-проводе additionalContext при
+    ensure_ascii=True (Б1(iii) поправки Lead 17:0x) -- json.dumps сам
+    эскейпит ЛЮБОЙ non-ASCII символ в безопасный "\\uXXXX" (шесть
+    ASCII-байт на символ вместо родных 1-4 UTF-8-байт) и управляющие
+    символы в "\\n"/"\\t"/"\\uXXXX" -- результат json.dumps ВСЕГДА чистый
+    ASCII, поэтому len() символов Python-строки результата == байты на
+    проводе. `- 2` убирает обрамляющие кавычки, которые json.dumps
+    добавляет для ЛЮБОЙ строки -- эта функция меряет ВКЛАД s в общий
+    additionalContext-провод (s склеивается с другими сегментами через
+    "; " ВНУТРИ одной большой JSON-строки, не как отдельное JSON-значение
+    само по себе) -- см. build_r3_segment за накопление по этой мере."""
+    return len(json.dumps(s, ensure_ascii=True)) - 2
+
+
+def _collect_r3_events(new_lines: list, base_lines: list) -> list:
+    """Один линейный проход, СТРУКТУРНО прямой близнец
+    _collect_escalation_events (:1431-1490 живого journal_echo.py, см.
+    докстринг спеки узла 1, п. "ТРИГГЕР И СИГНАЛЫ") -- та же пара
+    base_lines(история)+new_lines(payload-scoped триггер), та же формула
+    line_no (len(base_lines)+idx+1), тот же fail-open построчно.
+
+    Единственное структурное отличие от твина (S3 не позиционен -- окно
+    "где угодно в файле, в обе стороны", Р4(б) спеки): критик-присутствие
+    (critic_task_ids) собирается ДВУМЯ полными проходами ПЕРЕД основным
+    триггер-проходом -- base_lines целиком (история, естественно "уже
+    известна") И ВЕСЬ new_lines целиком (предварительный проход за
+    критик-делегированиями, Р4(б) буквально: "скан батча в ОБЕ стороны")
+    -- НЕ накапливается по ходу строка-за-строкой, как rejected/escalated
+    в твине, ровно потому что S3 обязан видеть критик-делегирование,
+    стоящее ПОСЛЕ accepted-строки в том же батче, не только до неё.
+    Основной триггер-проход (только event=="accepted" agent=="builder"
+    строки new_lines) идёт ВТОРЫМ, против уже полностью собранного
+    critic_task_ids -- та же "проверка против состояния, накопленного
+    ДО неё" форма, что твин применяет к delegated-строкам, здесь просто
+    "до" означает "после обоих предварительных проходов", а не "после
+    предыдущих строк текущего прохода".
+
+    Возвращает список (line_no, kind, task_id, extra) -- kind in
+    ("no_input", "phantom_basis"), extra зарезервирован (пока всегда
+    None -- слой не переносит доп. данные ни в одном из двух видов
+    сообщения, см. _format_r3_line)."""
+    events = []
+    critic_task_ids: set = set()
+
+    def _absorb_critic(lines):
+        for line in lines:
+            try:
+                obj = json.loads(line)
+                if not isinstance(obj, dict):
+                    continue
+                if obj.get("event") == "delegated" and obj.get("agent") == "critic":
+                    task_id = obj.get("task_id")
+                    # Ф4 поправки Lead 17:0x (класс, не экземпляр): task_id
+                    # из ОДНИХ пробелов -- та же "пропуск" гарантия, что
+                    # _check_accepted_r3 применяет на стороне триггера ниже
+                    # (task_id.strip() пуст -> не считается валидным id).
+                    if isinstance(task_id, str) and task_id.strip():
+                        critic_task_ids.add(task_id)
+            except Exception:
+                continue
+
+    _absorb_critic(base_lines)
+    _absorb_critic(new_lines)  # Р4(б): предварительный проход ВСЕГО батча
+
+    for idx, line in enumerate(new_lines):
+        line_no = len(base_lines) + idx + 1
+        try:
+            obj = json.loads(line)
+            if not isinstance(obj, dict):
+                continue
+            warn = _check_accepted_r3(obj, critic_task_ids)
+            if warn is not None:
+                kind, task_id = warn
+                events.append((line_no, kind, task_id, None))
+        except Exception:
+            continue
+    return events
+
+
+def _check_accepted_r3(obj: dict, critic_task_ids: set):
+    """Для ОДНОЙ уже распарсенной dict-строки -- решает, триггерит ли она
+    (event=="accepted" agent=="builder") и, если да, какой вид warn (или
+    None -- полная тишина) даёт против уже собранного critic_task_ids
+    (см. _collect_r3_events за то, как он собран). Выделено отдельной
+    функцией по аналогии с _check_delegated_retry (твин-форма спеки,
+    "ТРИГГЕР И СИГНАЛЫ").
+
+    S5 (Ф3 поправки Lead 17:0x) вычисляется ОДИН раз (s5_valid) ДО
+    ветвления S1/S4 -- используется В ОБЕИХ ветках (M1 -- как ЕЩЁ один
+    независимый глушитель наравне с S2/S3; M2 -- как альтернатива
+    delegated-записи под ТЕМ ЖЕ task_id, буквально по новому тексту M2:
+    "закрой: токен critic:t-NNN ... ЛИБО delegated-запись"). Ф4 приоритет
+    (basis=="critic" без делегирования и без S5, но с литералом концессии
+    в notes -- M2 верен, НЕ гасится S2) держится СТРУКТУРНО: ветка
+    basis=="critic" проверяется первой и НИКОГДА не смотрит на
+    CRITIC_SKIP_RE/S2 вовсе -- S2 участвует ТОЛЬКО в развилке M1.
+
+    Возвращает ("no_input", task_id) | ("phantom_basis", task_id) | None."""
+    if obj.get("event") != "accepted":
+        return None
+    if obj.get("agent") != "builder":
+        return None
+    task_id = obj.get("task_id")
+    if not isinstance(task_id, str) or not task_id.strip():
+        return None  # край: task_id нет/не строка/из пробелов (Ф4) -> пропуск
+    basis = obj.get("basis")
+    notes = obj.get("notes")
+    s5_valid = False
+    if isinstance(notes, str):
+        for m in CRITIC_TOKEN_RE.finditer(notes):
+            if m.group(1) in critic_task_ids:
+                s5_valid = True
+                break
+    if basis == "judge":
+        return None  # S4
+    if basis == "critic":
+        if task_id in critic_task_ids or s5_valid:
+            return None  # S1 подтверждён делегированием ИЛИ валидным S5
+        return ("phantom_basis", task_id)  # M2 (Ф4: S2 сюда не заглядывает)
+    if isinstance(notes, str) and CRITIC_SKIP_RE.search(notes):
+        return None  # S2
+    if task_id in critic_task_ids:
+        return None  # S3
+    if s5_valid:
+        return None  # S5
+    return ("no_input", task_id)  # M1
+
+
+def _format_r3_line(event: tuple, ascii_only: bool) -> str:
+    """M1/M2, литералы ПОПРАВКИ Lead 17:0x (Б1(ii), критик-гейт t-609)
+    буквально -- заменяют старые тексты узла 1 (втрое короче: критик
+    замерил, что старая кириллическая проза раздувала json-провод при
+    ensure_ascii-эскейпинге, см. MAX_R3_BYTES/_json_wire_len выше). Р9(а)
+    литерал слоя "R3-ЗЕРКАЛО: line " не меняется. task_id -- единственная
+    динамика, вставлена через ОДИН и тот же санитайз по каналу (тот же
+    принцип, что task_id у _format_escalation_line выше в этом файле) --
+    MAX_MESSAGE_LEN применяется к нему как к любому другому динамическому
+    элементу этого файла (см. _raw_sanitize/_ascii_sanitize). "critic:t-NNN"
+    в обоих текстах -- ЛИТЕРАЛ (NNN -- буквальная подсказка формата
+    читателю, не реальный номер, НЕ подставляется и не санитайзится)."""
+    sanitize = _ascii_sanitize if ascii_only else _raw_sanitize
+    line_no, kind, task_id, _extra = event
+    tid = sanitize(str(task_id))
+    if kind == "phantom_basis":
+        return (
+            f"R3-ЗЕРКАЛО: line {line_no} basis=critic по {tid}, но "
+            "delegated(critic) под ЭТИМ task_id нет - основание механически "
+            "не прослеживается; закрой: токен critic:t-NNN на покрывший "
+            "вердикт ЛИБО delegated-запись"
+        )
+    # "no_input" (M1)
+    return (
+        f"R3-ЗЕРКАЛО: line {line_no} accepted builder {tid}: нет "
+        "критик-входа под этим id и нет концессии - чек 2 прочтёт приёмку "
+        "как самосертификацию; закрой: delegated(critic) по "
+        f'{tid} / токен critic:t-NNN на покрывший вердикт / '
+        '"critic: skipped, <причина>" (приёмщик строго выше)'
+    )
+
+
+def build_r3_segment(events: list, ascii_only: bool = False) -> str:
+    """Собирает R3-ЗЕРКАЛО-часть additionalContext -- ДВА НЕЗАВИСИМЫХ
+    потолка (Б1(iii) поправки Lead 17:0x): MAX_R3_LINES=5 строк (как
+    прежде) И MAX_R3_BYTES=2600 байт json-провода накопленного тела
+    (_json_wire_len, см. её докстринг) -- КАКОЙ БЫ из двух ни сработал
+    ПЕРВЫМ, обрезка одна и та же: "+K more" хвостом. Жадный проход:
+    строка добавляется, только если И счётчик строк ЕЩЁ не достиг
+    MAX_R3_LINES, И (для ВТОРОЙ и последующих строк) байтовый вклад
+    накопленного тела (уже добавленные строки + "; " + кандидат) НЕ
+    превышает MAX_R3_BYTES -- иначе цикл останавливается, кандидат и всё,
+    что после него, уходят в "+K more".
+
+    ПЕРВАЯ строка сегмента ВСЕГДА принимается безусловно по байтам (`if
+    head and ...` -- проверка байтового потолка пропускается, пока head
+    пуст) -- НЕ дыра, а следствие измеренного факта: одна строка ЭТОГО
+    формата с task_id на пределе MAX_MESSAGE_LEN=500 весит ~1921 байт на
+    проводе (замерено), Меньше MAX_R3_BYTES=2600 -- две независимые
+    границы этого файла (MAX_MESSAGE_LEN на task_id, Б1(ii) укороченные
+    тексты) СТРУКТУРНО не дают ни одной одиночной строке в принципе
+    достичь потолка байт -- "первая строка сама превышает потолок"
+    недостижимо БЕЗ нарушения одной из этих двух границ отдельно, ветка
+    для этого случая была бы недостижимым (нетестируемым без обхода
+    других инвариантов) кодом -- сознательно не заводится.
+
+    Пустой events -> "" -- вызывающий код (combine_context) трактует
+    пустую строку как отсутствие сегмента, тот же принцип, что остальные
+    build_*."""
+    if not events:
+        return ""
+    head: list = []
+    for ev in events:
+        if len(head) >= MAX_R3_LINES:
+            break
+        candidate_line = _format_r3_line(ev, ascii_only)
+        candidate_body = "; ".join(head + [candidate_line])
+        if head and _json_wire_len(candidate_body) > MAX_R3_BYTES:
+            break
+        head.append(candidate_line)
+    # head никогда не пуст здесь при непустом events -- первая строка
+    # принимается безусловно (см. докстринг выше), поэтому `body` тоже
+    # никогда не пуст в ветке rest>0 -- простая конкатенация без запасной
+    # формы для пустого body.
+    rest = len(events) - len(head)
+    body = "; ".join(head)
     if rest > 0:
         body += f"; +{rest} more"
     return body
@@ -1982,6 +2338,79 @@ def _read_stdin_bytes_deadline():
 _STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
 # --- END stdin-deadline helper ---
 
+# --- BEGIN stdout-deadline helper (Б1(i), поправка Lead 17:0x, критик-гейт
+# t-609, ось карты :1003 "недренирующий потребитель") -- ПОРТ ФОРМЫ
+# _write_stdout_deadline/_stdout_deadline_seconds из
+# tools/session_context.py (спека R2-K1, docs/tasks/2026-08-25_autoboot-
+# hybrid-spec.md, задача t-587) -- ТОТ ЖЕ контракт буквально: 5с default /
+# env-переопределение OSLLM_STDOUT_TIMEOUT (0.0 < value <= 600.0, иначе
+# дефолт -- режима "0 = ждать вечно" НЕТ намеренно, та же дыра, что и у
+# stdin-дедлайна выше в этом файле), демон-поток делает write()+flush(),
+# главный поток join(дедлайн); недописанность (поток жив по истечении
+# дедлайна -- недренирующий потребитель держит write() застрявшим внутри
+# ОС на полном пайпе) -> НЕМЕДЛЕННЫЙ os._exit(0), НИКАКОГО дальнейшего
+# I/O (ни stdout, ни stderr -- тот же застрявший канал/тот же
+# недренирующий потребитель на другом конце). journal_echo(_r3) уже
+# и без того ВСЕГДА возвращает 0 (П1, ни одна легальная форма accepted
+# не валит коммит) -- эта ветка не меняет этой гарантии, только МЕНЯЕТ
+# способ дойти до неё на недренирующем потребителе (раньше -- зависание
+# навсегда внутри sys.stdout.write(); теперь -- быстрый выход rc=0).
+# ЛОКАЛЬНАЯ копия (не импорт session_context -- та же самодостаточность
+# хуков кита, что уже объясняет докстринг модуля для _raw_sanitize/
+# _ascii_sanitize/стдин-дедлайна выше; PostToolUse vs SessionStart --
+# разные хуки, тот же принцип копирования, что уже применён к
+# stdin-дедлайну). Применяется ТОЛЬКО к ФИНАЛЬНОЙ записи stdout в main()
+# (Б1(i) буквально) -- stderr-дубль НЕ оборачивается (критик-замер и
+# спека называют именно stdout-провод/ёмкость пайпа как уязвимое место;
+# stderr остаётся как был, без дедлайна).
+_STDOUT_DEADLINE_DEFAULT = 5.0
+_STDOUT_DEADLINE_MAX = 600.0
+_STDOUT_DEADLINE_ENV = "OSLLM_STDOUT_TIMEOUT"
+
+
+def _stdout_deadline_seconds():
+    """Секунды дедлайна ЗАПИСИ -- та же форма валидации, что
+    _stdin_deadline_seconds() выше (invalid/нечисловое/<=0/>MAX -> дефолт)."""
+    try:
+        value = float(os.environ.get(_STDOUT_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDOUT_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDOUT_DEADLINE_MAX):
+        return _STDOUT_DEADLINE_DEFAULT
+    return value
+
+
+def _write_stdout_deadline(text: str) -> bool:
+    """Пишет text ОДНОЙ логической записью (sys.stdout.write + flush) на
+    демон-потоке; главный поток ждёт join(дедлайн) -- зеркало
+    _read_stdin_bytes_deadline() выше, для записи вместо чтения. Возвращает
+    True, если поток-писатель ЗАВЕРШИЛСЯ в срок (write+flush либо прошли
+    успешно, либо бросили штатное исключение, перебрасываемое здесь на
+    главном потоке ПОСЛЕ join()), False, если поток всё ещё жив по
+    истечении дедлайна (недренирующий потребитель держит write()
+    застрявшим внутри ОС на полном пайпе). На False вызывающий код ОБЯЗАН
+    немедленно os._exit(0) и не пытаться писать НИКУДА больше (см. main())."""
+    box: dict = {}
+
+    def _writer():
+        try:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+        except BaseException as e:  # перебрасывается на главном потоке ниже
+            box["exc"] = e
+
+    thread = threading.Thread(target=_writer, name="stdout-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdout_deadline_seconds())
+    if thread.is_alive():
+        return False
+    if "exc" in box:
+        raise box["exc"]
+    return True
+
+
+# --- END stdout-deadline helper ---
+
 # P4/В3.1 (К7-эмпирика): a background reader thread left blocked on the REAL
 # stdin buffered-reader at normal interpreter shutdown crashes with "Fatal
 # Python error: _enter_buffered_busy" instead of exiting cleanly. main()
@@ -2153,12 +2582,31 @@ def main() -> int:
             except Exception:
                 notes_len_events = []
 
-        # R-7 (спека t-447): "полная тишина на чистой записи" сохраняется
-        # -- notes_len_events добавлен В ТУ ЖЕ проверку истинности, что
-        # решает "печатать ли вообще что-то в этом вызове", наравне с
-        # остальными пятью источниками.
+        # R3-ЗЕРКАЛО (узел 1, docs/tasks/2026-08-25_r3-mirror-spec.md, F7
+        # протечка калибровки 8 -- см. секцию "R3-ЗЕРКАЛО" выше за полный
+        # разбор). ТА ЖЕ payload-scoped база, что TIER/WITNESS/ESCALATION
+        # выше (Р8(а) спеки узла 1: этот слой РАБОТАЕТ безусловно, В ТОМ
+        # ЧИСЛЕ при used_fallback == True -- НЕ входит в used_fallback-
+        # ветку, СИММЕТРИЧНО TIER/WITNESS/ESCALATION, а не NOTES-LEN/
+        # TS-DRIFT, которые отключаются выше: critic-вход/basis/notes не
+        # зависят от "сколько времени прошло с несвязанного коммита", тот
+        # же "шумный, но не корректностно-ложный" класс). Fail-open вторым
+        # слоем поверх построчного try/except внутри самой
+        # _collect_r3_events -- тот же паттерн, что WITNESS/TS-DRIFT/
+        # ESCALATION/NOTES-LEN выше.
+        try:
+            r3_events = _collect_r3_events(echo_new_lines, echo_base_lines)
+        except Exception:
+            r3_events = []
+
+        # R-7 (спека t-447), продолжено узлом 1 (П2 спеки узла 1: "новый
+        # источник -- в ТУ ЖЕ проверку истинности"): "полная тишина на
+        # чистой записи" сохраняется -- r3_events добавлен В ТУ ЖЕ
+        # проверку истинности, что решает "печатать ли вообще что-то в
+        # этом вызове", наравне с остальными шестью источниками.
         if (not violations and not tier_events and not witness_visible
-                and not ts_drift_events and not escalation_events and not notes_len_events):
+                and not ts_drift_events and not escalation_events and not notes_len_events
+                and not r3_events):
             return 0
 
         # Фолбэк-пометка: видна ТОЛЬКО когда мы всё равно что-то печатаем
@@ -2184,16 +2632,19 @@ def main() -> int:
         # два разных варианта санитайза (см. докстринг build_context).
         # combine_context склеивает дефекты формы, TIER ECHO-строки,
         # WITNESS ECHO-строки, TS DRIFT-строки, ESCALATION-строки (batch
-        # B6), NOTES LEN-строки (t-447) и фолбэк-пометку (спека п.3) --
-        # см. докстринг combine_context. notes_len_events -- ТОЛЬКО
-        # keyword (combine_context требует его строго keyword-only, см.
-        # её докстринг за разбор ловушки t-447).
+        # B6), NOTES LEN-строки (t-447), R3-ЗЕРКАЛО-строки (узел 1) и
+        # фолбэк-пометку (спека п.3) -- см. докстринг combine_context.
+        # notes_len_events/r3_events -- ТОЛЬКО keyword (combine_context
+        # требует их строго keyword-only, см. её докстринг за разбор
+        # ловушки t-431/t-447).
         context_for_stdout = combine_context(violations, tier_events, witness_events, ts_drift_events,
                                               escalation_events, fallback_marker,
-                                              notes_len_events=notes_len_events, ascii_only=False)
+                                              notes_len_events=notes_len_events, r3_events=r3_events,
+                                              ascii_only=False)
         context_for_stderr = combine_context(violations, tier_events, witness_events, ts_drift_events,
                                               escalation_events, fallback_marker,
-                                              notes_len_events=notes_len_events, ascii_only=True)
+                                              notes_len_events=notes_len_events, r3_events=r3_events,
+                                              ascii_only=True)
 
         sys.stderr.write(context_for_stderr + "\n")
         output = {
@@ -2208,7 +2659,17 @@ def main() -> int:
         # восстанавливает читаемый текст через json.loads(). Это делает
         # стандартный вызов безопасным даже без reconfigure-потока --
         # reconfigure оставлен как есть (защита для stderr-канала).
-        sys.stdout.write(json.dumps(output, ensure_ascii=True) + "\n")
+        #
+        # Б1(i) поправки Lead 17:0x: финальная запись stdout больше не
+        # вызывает sys.stdout.write() напрямую -- она идёт через
+        # _write_stdout_deadline() (см. её докстринг/секцию "stdout-deadline
+        # helper" выше за полный контракт, порт tools/session_context.py,
+        # t-587). False (недренирующий потребитель держит write() застрявшим
+        # на полном пайпе дольше дедлайна) -> os._exit(0) НЕМЕДЛЕННО, БЕЗ
+        # какой-либо дальнейшей записи (ни stderr -- тот же класс риска).
+        stdout_text = json.dumps(output, ensure_ascii=True) + "\n"
+        if not _write_stdout_deadline(stdout_text):
+            os._exit(0)
         return 0
     except Exception:
         return 0

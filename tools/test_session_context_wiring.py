@@ -659,6 +659,66 @@ def test_harness_channel_path_with_spaces_missing_file_warns(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# 13. harness-channel: the $CLAUDE_PROJECT_DIR-qualified form (M1,
+#     docs/tasks/2026-08-25_wave2-misc-spec.md) -- ON boundary: this
+#     second form is recognized and checked exactly like form (1); OFF
+#     boundaries: single quotes, an unquoted $CLAUDE_PROJECT_DIR, and
+#     backslashes inside the qualified form all stay "unparsed" (the
+#     parser does not widen beyond the two named forms).
+# ---------------------------------------------------------------------------
+
+
+def test_harness_channel_claude_project_dir_form_ok(tmp_path):
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "ok.py").write_text("X = 1\n", encoding="utf-8")
+    _write_settings(tmp_path, ['python "$CLAUDE_PROJECT_DIR/tools/ok.py"'])
+    warnings, count = sc.harness_channel(tmp_path)
+    assert warnings == []
+    assert count == 1
+
+
+def test_harness_channel_claude_project_dir_form_missing_file_warns(tmp_path):
+    _write_settings(tmp_path, ['python "$CLAUDE_PROJECT_DIR/tools/nope.py"'])
+    warnings, count = sc.harness_channel(tmp_path)
+    assert count == 0
+    assert any(
+        w == "hook file not found: tools/nope.py" for w in warnings
+    ), warnings
+
+
+def test_harness_channel_claude_project_dir_form_single_quotes_unparsed(tmp_path):
+    _write_settings(tmp_path, ["python '$CLAUDE_PROJECT_DIR/tools/ok.py'"])
+    warnings, count = sc.harness_channel(tmp_path)
+    assert count == 0
+    assert any("unparsed hook command" in w for w in warnings), warnings
+
+
+def test_harness_channel_claude_project_dir_form_unquoted_unparsed(tmp_path):
+    _write_settings(tmp_path, ["python $CLAUDE_PROJECT_DIR/tools/ok.py"])
+    warnings, count = sc.harness_channel(tmp_path)
+    assert count == 0
+    assert any("unparsed hook command" in w for w in warnings), warnings
+
+
+def test_harness_channel_claude_project_dir_form_backslashes_unparsed(tmp_path):
+    _write_settings(tmp_path, ['python "$CLAUDE_PROJECT_DIR\\tools\\ok.py"'])
+    warnings, count = sc.harness_channel(tmp_path)
+    assert count == 0
+    assert any("unparsed hook command" in w for w in warnings), warnings
+
+
+def test_harness_channel_claude_project_dir_form_trailing_flags_unparsed(tmp_path):
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "ok.py").write_text("X = 1\n", encoding="utf-8")
+    _write_settings(tmp_path, ['python "$CLAUDE_PROJECT_DIR/tools/ok.py" --flag'])
+    warnings, count = sc.harness_channel(tmp_path)
+    assert count == 0
+    assert any("unparsed hook command" in w for w in warnings), warnings
+
+
+# ---------------------------------------------------------------------------
 # 13. python-channel: not found -> WARNING (via wiring_lines(), monkeypatched)
 # ---------------------------------------------------------------------------
 

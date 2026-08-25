@@ -125,7 +125,10 @@ start>=end, реестр не читается структурно).
 копия), `subagent_type_builder` (три QUOTED-слоя, `tool_input.
 subagent_type == "builder"`, dispatch_gate.py :1743/:1779/:1846),
 `search_tool_or_pattern` (SEARCH_RETURNED_NOTHING, `search_control_
-gate._looks_like_search` БУКВАЛЬНО, импорт); везде, где барьер --
+gate._looks_like_search` БУКВАЛЬНО, импорт), `dispatch_prompt_
+freshness_token` (FRESHNESS, узел FRESHNESS 2026-08-25: tool_name в
+{Task, Agent} И предфильтр слоя нашёл >=1 кандидата -- ИМПОРТОМ трёх
+регексов из dispatch_gate, не копией); везде, где барьер --
 свойство ОТВЕТА инструмента (NEGATIVE_LINT) или требует парсера гейта
 (OWNS_OVERLAP/BLIND_OWNS/QUOTED_OWNS/NEGATIVE_CLAIM), либо развилка не
 решена (HYGIENE) или слой не подкласса II (GIVEN_PATH/ROLE_TYPE,
@@ -187,6 +190,7 @@ except AttributeError:
 # уровня вне `if __name__ == "__main__":`).
 import journal_echo as _journal_echo_gate
 import search_control_gate as _search_control_gate
+import dispatch_gate as _dispatch_gate
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REGISTRY = REPO_ROOT / "tools" / "warn_layers.json"
@@ -219,14 +223,21 @@ _FIXTURE_LITERAL = "GIVEN-PATH WARN:"
 # членства); "unmeasured" -- отдельно, требует 'reason' (validate_layers).
 # ---------------------------------------------------------------------------
 
-POPULATION_KINDS_MEASURED = ("journal_path", "subagent_type_builder", "search_tool_or_pattern")
+POPULATION_KINDS_MEASURED = (
+    "journal_path", "subagent_type_builder", "search_tool_or_pattern",
+    "dispatch_prompt_freshness_token",
+)
 POPULATION_KINDS_ALL = POPULATION_KINDS_MEASURED + ("unmeasured",)
 
 # Б-К7: версия ПРАВИЛА подсчёта популяции (не путать с registry_version
 # самого реестра) -- пишется в КАЖДУЮ новую запись сайдкара, чтобы окна
 # ДО и ПОСЛЕ этого узла были МАШИННО отличимы (а не только по памяти
 # людей) -- даже если registry_sha по случайному совпадению не изменится.
-POPULATION_RULE_VERSION = 1
+# Ф6b (узел FRESHNESS, docs/tasks/2026-08-25_freshness-layer-spec.md):
+# 1 -> 2 -- новый вид населённости dispatch_prompt_freshness_token ниже
+# меняет семантику подсчёта достижимой популяции для Task/Agent-матчера
+# (тот же мотив, что первая версия -- окна ДО/ПОСЛЕ несравнимы).
+POPULATION_RULE_VERSION = 2
 
 # Наборы имён инструментов -- та же матчер-группа, что у соответствующих
 # слоёв реестра (tools/warn_layers.json); ограничивают предикаты ниже,
@@ -235,6 +246,7 @@ POPULATION_RULE_VERSION = 1
 _JOURNAL_LAYER_TOOL_NAMES = {"Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShell"}
 _QUOTED_LAYER_TOOL_NAMES = {"Task", "Agent"}
 _SEARCH_LAYER_TOOL_NAMES = {"Bash", "PowerShell", "Grep", "Glob", "Read"}
+_FRESHNESS_LAYER_TOOL_NAMES = {"Task", "Agent"}
 
 
 def _population_journal_path(tool_name: str, tool_input: Dict[str, Any]) -> bool:
@@ -282,10 +294,41 @@ def _population_search_tool_or_pattern(tool_name: str, tool_input: Dict[str, Any
     return _search_control_gate._looks_like_search(tool_name, command_text)
 
 
+def _population_dispatch_prompt_freshness_token(tool_name: str, tool_input: Dict[str, Any]) -> bool:
+    """Барьер слоя FRESHNESS (узел FRESHNESS, docs/tasks/2026-08-25_
+    freshness-layer-spec.md, Ф5b) -- tool_name в {Task, Agent} И
+    предфильтр слоя нашёл >=1 кандидата (класс (в) ЛИБО класс (а)).
+    ИМПОРТОМ регексов из dispatch_gate (не копией, B-К6) -- ВСЕ ТРИ
+    (обе формы класса (в): относительная FRESHNESS_LINE_ANCHOR_RE и
+    абсолютная FRESHNESS_LINE_ANCHOR_ABS_RE, плюс класс (а)
+    FRESHNESS_CHECK_TOKEN_RE), не только пара, названная в Ф5b словом
+    "обоих" -- иначе предикат был бы УЖЕ фактического условия варна на
+    абсолютных путях класса (в), что запрещено самим Ф5b ("предикат --
+    НАДМНОЖЕСТВО условия варна, иначе ДЕФЕКТ ПРЕДИКАТА exit 1"):
+    freshness_warn() сам проверяет ОБА регекса класса (в) (см. его
+    докстринг/тело), достижимая популяция обязана быть не Уже этого.
+    Предфильтр -- ТОЛЬКО regex-присутствие, БЕЗ региональной фильтрации
+    (_safe_scan/_is_quoted) и БЕЗ файловой/протокольной проверки --
+    сознательно ШИРЕ фактического срабатывания (given_tokens может
+    оказаться пустым, файл может существовать -- предикат не знает и не
+    обязан)."""
+    if tool_name not in _FRESHNESS_LAYER_TOOL_NAMES:
+        return False
+    prompt = tool_input.get("prompt")
+    if not isinstance(prompt, str) or not prompt:
+        return False
+    return bool(
+        _dispatch_gate.FRESHNESS_LINE_ANCHOR_RE.search(prompt)
+        or _dispatch_gate.FRESHNESS_LINE_ANCHOR_ABS_RE.search(prompt)
+        or _dispatch_gate.FRESHNESS_CHECK_TOKEN_RE.search(prompt)
+    )
+
+
 POPULATION_PREDICATES = {
     "journal_path": _population_journal_path,
     "subagent_type_builder": _population_subagent_type_builder,
     "search_tool_or_pattern": _population_search_tool_or_pattern,
+    "dispatch_prompt_freshness_token": _population_dispatch_prompt_freshness_token,
 }
 
 

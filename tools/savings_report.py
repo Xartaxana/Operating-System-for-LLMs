@@ -18,6 +18,13 @@ read x0.1 / write x1.25 — реальный API-механизм):
    старая точка тренда воспроизводима флагом --counterfactual-model.
 3. API-контур: запросы и учётная стоимость по traffic_kind.
 
+--window-start/--window-end (M3, docs/tasks/2026-08-25_wave2-misc-spec.md,
+F15-ii): сужают выборку учитываемых событий (PRE/ROUTED/контрфакт, п.1-2
+выше) до окна [window-start, window-end) поверх существующих условий;
+--routed-start остаётся базой PRE/ROUTED-разреза и контрфакта, окно её
+не переопределяет. API-контур (п.3) остаётся "вся история", окном не
+режется. Без обоих флагов -- вывод байт-в-байт как раньше.
+
 Baseline первого замера (2026-07-11, сверка тренда):
 docs/task_reports/2026-07-11_savings-analysis.md. Оговорки метода
 (цензурированный baseline, нераздельность премии координации от
@@ -231,14 +238,40 @@ def api_contour_summary(db: sqlite3.Connection) -> dict:
 
 def print_report(db_path: str, routed_start: str, until: str = None,
                   config_text=_CONFIG_TEXT_UNSET,
-                  override_model: str | None = None) -> None:
+                  override_model: str | None = None,
+                  window_start: str | None = None,
+                  window_end: str | None = None) -> None:
     db = sqlite3.connect(db_path)
     until_cond, until_params = ("", ()) if not until else (" and ts < ?", (until,))
 
+    # M3 (docs/tasks/2026-08-25_wave2-misc-spec.md, F15-iii): --window-start/
+    # --window-end сужают выборку УЧИТЫВАЕМЫХ событий (PRE, ROUTED,
+    # контрфакт -- все три cc_usage-секции разреза, item 1/2 докстринга
+    # модуля) поверх существующих условий; --routed-start остаётся базой
+    # сравнения PRE/ROUTED (окно её не переопределяет). API-контур (item 3,
+    # requests.db, "вся история") НЕ окном -- отдельный контур с
+    # намеренно неоконным охватом (собственная печать "вся история").
+    # Границы: --window-start включительно (>=), --window-end
+    # исключительно (< , тот же паттерн, что уже у --until выше) -- без
+    # аргументов window_cond/window_params пусты, SQL и вывод байт-в-байт
+    # как раньше (негативный контроль).
+    window_cond = ""
+    window_params: tuple = ()
+    if window_start:
+        window_cond += " and ts >= ?"
+        window_params += (window_start,)
+    if window_end:
+        window_cond += " and ts < ?"
+        window_params += (window_end,)
+    if window_start or window_end:
+        print(f"ОКНО: {window_start or '-'} .. {window_end or '-'}")
+
     for label, cond, params in [
-        ("PRE-ROUTING (< %s)" % routed_start, "ts < ?", (routed_start,)),
+        ("PRE-ROUTING (< %s)" % routed_start, "ts < ?" + window_cond,
+         (routed_start,) + window_params),
         ("ROUTED (>= %s%s)" % (routed_start, f" .. {until}" if until else ""),
-         "ts >= ?" + until_cond, (routed_start,) + until_params),
+         "ts >= ?" + until_cond + window_cond,
+         (routed_start,) + until_params + window_params),
     ]:
         w = window_summary(db, cond, params)
         print(f"\n===== {label} =====")
@@ -249,8 +282,8 @@ def print_report(db_path: str, routed_start: str, until: str = None,
         print(f"  ИТОГО: {w['total_turns']} ходов, ${w['total_cost']:.2f},"
               f" {w['days']} дней, ${w['per_day']:.2f}/день")
 
-    c = counterfactual_summary(db, "ts >= ?" + until_cond,
-                               (routed_start,) + until_params,
+    c = counterfactual_summary(db, "ts >= ?" + until_cond + window_cond,
+                               (routed_start,) + until_params + window_params,
                                config_text, override_model)
     # R-6/R-7: заголовок и подписи называют ФАКТИЧЕСКУЮ модель контрфакта
     # (или "н/д", когда as_lead не определён -- R-5), слова "Fable" не
@@ -304,9 +337,22 @@ def main(argv=None) -> int:
                          " точку тренда до смены базы 2026-08-16. Неизвестный"
                          " id уходит в ту же ветку 'н/д', что и непрайсованная"
                          " привязка.")
+    ap.add_argument("--window-start", default=None,
+                    help="M3: нижняя граница окна учитываемых событий (ISO,"
+                         " включительно) -- сужает выборку PRE/ROUTED/"
+                         "контрфакта, НЕ переопределяет --routed-start как"
+                         " базу сравнения")
+    ap.add_argument("--window-end", default=None,
+                    help="M3: верхняя граница окна учитываемых событий (ISO,"
+                         " исключительно -- тот же паттерн, что --until)")
     args = ap.parse_args(argv)
+    if args.window_start and args.window_end and args.window_start > args.window_end:
+        print(f"savings_report: --window-start > --window-end "
+              f"({args.window_start!r} > {args.window_end!r})", file=sys.stderr)
+        return 2
     print_report(args.db, args.routed_start, args.until,
-                 override_model=args.counterfactual_model)
+                 override_model=args.counterfactual_model,
+                 window_start=args.window_start, window_end=args.window_end)
     return 0
 
 

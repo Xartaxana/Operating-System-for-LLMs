@@ -339,28 +339,16 @@ write the literal form with a live id in prose. Enforced at TWO
 points: the pre-commit validator and the journal_echo write-time warn
 (tools/journal_validator.py).
 
-```mermaid
-stateDiagram-v2
-    [*] --> Open: delegated (after the dispatch call returns)
-    Open --> Open: rejected → retry attempt≥2 | critic entry | replaces_worker
-    Open --> Closed: accepted (from above / basis critic / queued-to-lead)
-    Open --> Open: escalated / decomposable → re-dispatched (same task_id; closure is reader-specific, see note below)
-    Open --> Closed: closes:t-NNN token in a later event's notes
-    Closed --> [*]: reopen forbidden (D-0060); late defects → defect_found(ref)
-```
+Диаграмма жизненного цикла — docs/POLICY_FULL.md (перенос диетой
+2026-08-25); нормы закрытия — текстом ниже.
 
-Closure is reader-specific, not one fact: `tools/journal_validator.py`
-(D-0060's reopen-forbidden law) marks a task_id CLOSED only by
-`accepted` — `escalated`, `decomposable` and a `closes:t-NNN` token do
-NOT close it there, so a repeat `delegated` after escalated or
-decomposable stays legal for the validator. `tools/session_context.py`'s
-`open_dispatches()` (the SessionStart OPEN DISPATCH line) uses a
-narrower window: a task_id is OPEN only while its LAST lifecycle event
-(delegated/accepted/rejected/escalated/decomposable) is `delegated`;
-after `escalated` or `decomposable` — or a later `closes:t-NNN` token
-in ANY event's notes — it silently drops off the boot list even
-though the validator still treats the task as open. The two readers
-agree only that `accepted` closes unconditionally.
+Closure is reader-specific: journal_validator (D-0060) closes ONLY by
+`accepted` — escalated/decomposable/`closes:`-token do NOT close there
+(repeat delegated after them stays legal). session_context
+`open_dispatches()` is narrower: OPEN only while the LAST lifecycle
+event is `delegated`; escalated/decomposable or a later `closes:`
+token drop it off the boot list. The readers agree only that
+`accepted` closes unconditionally (full text: POLICY_FULL).
 
 Events: `delegated`, `accepted`, `rejected`, `escalated`,
 `decomposable`, `dispatch_skipped` (reason mandatory), `defect_found`
@@ -379,10 +367,8 @@ Three definitions that are NOT synonyms:
   delegation.config.yaml, D-0099); Fable is the reserve tier ABOVE
   the binding; "Lead" is the tier-function (decomposition, specs,
   acceptance, mechanisms), not a role in the dialog. THE TWO NAMES
-  HERE ARE DATED, NOT NORMATIVE — what `roles.lead`/`roles.reserve`
-  resolved to AS OF 2026-08-16, kept on purpose (rationale:
-  POLICY_FULL). The config is the authority; on divergence it wins
-  and this line is stale.
+  ARE DATED (2026-08-16), NOT NORMATIVE; the config is the authority
+  and wins on divergence (rationale: POLICY_FULL).
 - The COORDINATOR role = ROUTING, not execution. Any model leading
   the dialog with the operator carries it, from any tier, and it does
   NOT make the session a Lead. The coordinator DISTRIBUTES work
@@ -470,6 +456,11 @@ all sessions and subagents of this repo:
    allowlist matching.
 4. File edits — only via the Edit/Write tools (no `python - <<EOF`,
    no `python -c "...replace..."`).
+
+| п.4 | when | duty | src |
+|---|---|---|---|
+| а | именованный закоммиченный скрипт с приложенным выводом | легален: цель п.4 — ad-hoc мутация, не аудируемый перенос | D-0109 |
+| б | payload -c/heredoc — чистый расчёт/чтение | не подпадает, гейт молчит; мутация/непрозрачность — WARN | D-0109 |
 5. Journal writes — Edit/Write tool, not printf with `$(date)`.
 6. Environment negatives require verification (F-30/F-34): an empty
    output or "command not found" from a MISCALLED tool is a call
@@ -497,6 +488,8 @@ all sessions and subagents of this repo:
 | п.6 | when | duty | src |
 |---|---|---|---|
 | а | проектное решение стоит на НЕИЗВЕСТНОМ свойстве среды | сначала ОДИН эксперимент; машинерия вместо замера — лишь при непереносимости замера (порт) или разрушительности опыта | D-0105 |
+| б | число замера в норме/отчёте | рядом носитель счёта, либо не писать; сравнение — в одной метрике | D-0107 |
+| в | посимвольное утверждение (слэш/регистр/символ) | только по Read носителя; вывод поиска — не основание | D-0108 |
 
 7. **Temporary corruption is rolled back by a BYTE COPY, never by
    `git checkout`** — that idiom wipes ANOTHER session's uncommitted

@@ -402,8 +402,10 @@ MIN_TERM_LEN = 3
 
 MSG_TEMPLATE = (
     "Negative claim about to be written without a matching search/read this "
-    "session (rule 6, command hygiene): a positive control is required "
-    "before reporting absence. Unverified token(s): {tokens}"
+    "session - an unverified absence claim may be flat wrong, indistinguishable "
+    "from a miscalled tool's empty output; run a positive control of the SAME "
+    "form before reporting absence. Unverified token(s): {tokens} "
+    "(rule 6, command hygiene)"
 )
 
 

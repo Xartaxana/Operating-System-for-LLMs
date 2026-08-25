@@ -41,9 +41,16 @@ docs/tasks/2026-08-19_w3-corpus-growth-spec.md). Инструмент-измер
 
 CLI:
     python tools/corpus_growth.py [--manifest PATH] [--registry PATH]
-        [--root PATH] [--json]
+        [--root PATH] [--json] [--baseline-ts ISO]
     python tools/corpus_growth.py --check [...]
     python tools/corpus_growth.py --init-thresholds [...]
+
+--baseline-ts ISO (M2, docs/tasks/2026-08-25_wave2-misc-spec.md, F15-ii):
+    prev_entry берётся не последней записью сайдкара вообще, а
+    последней записью с ts <= --baseline-ts (граница включительна).
+    Без флага -- поведение байт-в-байт как раньше (последняя запись).
+    Ни одной подходящей записи -> prev_entry=None, как при пустом
+    сайдкаре. Невалидный ISO -> ошибка, exit 2 (не измерить ничего).
 
 Коды выхода: 0 -- прогон состоялся (в т.ч. при BREACH, Р6(A));
 1 -- ТОЛЬКО у --check при найденных дефектах формы; 2 -- IO/аргументы
@@ -409,6 +416,7 @@ def write_registry_entry(registry_path: Path, entry: Dict[str, Any]) -> Optional
 
 def build_report(
     manifest_path: Path, registry_path: Path, root: Path,
+    baseline_dt: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     thresholds_version, raw_artifacts, raw_bytes = read_manifest(manifest_path)
     valid_artifacts, form_defects = validate_entries(raw_artifacts)
@@ -422,7 +430,25 @@ def build_report(
     registry_entries, sidecar_read_warnings = read_registry(registry_path)
     warnings.extend(sidecar_read_warnings)
 
-    prev_entry = registry_entries[-1] if registry_entries else None
+    if baseline_dt is None:
+        # M2 (docs/tasks/2026-08-25_wave2-misc-spec.md): без --baseline-ts --
+        # поведение байт-в-байт как раньше -- последняя запись сайдкара.
+        prev_entry = registry_entries[-1] if registry_entries else None
+    else:
+        # M2: prev_entry -- ПОСЛЕДНЯЯ запись сайдкара с ts <= baseline-ts
+        # (граница включительна, "<="). Ни одной подходящей записи ->
+        # prev_entry остаётся None (Δ печатаются как при пустом сайдкаре).
+        prev_entry = None
+        for entry in registry_entries:
+            entry_ts = entry.get("ts")
+            if not isinstance(entry_ts, str):
+                continue
+            try:
+                entry_dt = datetime.fromisoformat(entry_ts)
+            except ValueError:
+                continue
+            if entry_dt <= baseline_dt:
+                prev_entry = entry
     base_status = "БАЗЫ НЕТ"
     prev_artifacts: Dict[str, Any] = {}
     if prev_entry is not None:
@@ -667,6 +693,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--json", action="store_true")
     p.add_argument("--check", action="store_true")
     p.add_argument("--init-thresholds", action="store_true")
+    p.add_argument("--baseline-ts", default=None,
+                    help="M2: prev_entry = последняя запись сайдкара с ts <= "
+                         "этот ISO-момент (вместо последней записи вообще)")
     return p.parse_args(argv)
 
 
@@ -694,7 +723,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(render_init_thresholds(valid_artifacts, measurements))
         return 0
 
-    report = build_report(manifest_path, registry_path, root)
+    baseline_dt: Optional[datetime] = None
+    if args.baseline_ts is not None:
+        try:
+            baseline_dt = datetime.fromisoformat(args.baseline_ts)
+        except ValueError as exc:
+            print(f"corpus_growth: --baseline-ts не ISO: {args.baseline_ts!r} ({exc})",
+                  file=sys.stderr)
+            return 2
+
+    report = build_report(manifest_path, registry_path, root, baseline_dt=baseline_dt)
 
     # O2 (критик t-538): --check -- ТОЛЬКО измерение формы, оно не пишет
     # боевой сайдкар (образец contract calibration_prepass --check-form:

@@ -6,13 +6,18 @@ tools/dispatch_gate_md.py молча переключило бы f61-резол�
 test_dispatch_gate_md.py на СЕБЯ).
 
 MODULE_UNDER_TEST переключает цель (та же конвенция F61_TARGET, что
-test_dispatch_gate_md.py уже несёт): default -> сиблинг tools/
-dispatch_gate_pop.py; MODULE_UNDER_TEST=live -> живой tools/
-dispatch_gate.py БЕЗ единой правки -- ТОЛЬКО как цель негативного
-контроля дискриминации (тесты, чьё имя несёт "discrimination":
-зелёные на сиблинге, ОБЯЗАНЫ стать красными на живом -- узел A
-сужает исключения GIVEN_PATH и расщепляет ROLE_TYPE_WARN_UNKNOWN_ROLE,
-которых на живом файле нет вовсе или которые ведут себя иначе).
+test_dispatch_gate_md.py уже несёт): пусто/не задано -> сиблинг
+tools/dispatch_gate_pop.py, ЕСЛИ он существует, иначе МОЛЧА живой
+tools/dispatch_gate.py (temporal-край, поведение неизменно);
+MODULE_UNDER_TEST=live -> живой tools/dispatch_gate.py БЕЗ единой правки
+-- ТОЛЬКО как цель негативного контроля дискриминации (тесты, чьё имя
+несёт "discrimination": зелёные на сиблинге, ОБЯЗАНЫ стать красными на
+живом -- узел A сужает исключения GIVEN_PATH и расщепляет ROLE_TYPE_
+WARN_UNKNOWN_ROLE, которых на живом файле нет вовсе или которые ведут
+себя иначе); ЛЮБОЕ ДРУГОЕ непустое значение (например MODULE_UNDER_TEST=
+sibling) -- сиблинг ЗАПРОШЕН ЯВНО, при его отсутствии ГРОМКИЙ КРАС
+(pytest.fail, называющий запрошенный путь), не тихая подмена живым (F1,
+ФИКС-РАУНД docs/tasks/2026-08-25_queue8-mechbatch-spec.md).
 
 Run (дефолт, сиблинг):
     python -m pytest tools/test_dispatch_gate_pop.py -q
@@ -48,11 +53,23 @@ MODULE_UNDER_TEST = os.environ.get("MODULE_UNDER_TEST", "").strip().lower()
 
 def _resolve_script_path() -> Path:
     # f61-форма (temporal-край, см. докстринг dispatch_gate_pop.py):
-    # default -- сиблинг, ЕСЛИ он существует, иначе живой файл.
+    # default (MODULE_UNDER_TEST пуст) -- сиблинг, ЕСЛИ он существует,
+    # иначе живой файл, МОЛЧА (поведение как сегодня, temporal-край не
+    # меняется). Сиблинг ЗАПРОШЕН ЯВНО (MODULE_UNDER_TEST задан и НЕ
+    # "live") -- при отсутствии сиблинга ГРОМКИЙ КРАС, не тихая подмена
+    # живым (F1, ФИКС-РАУНД docs/tasks/2026-08-25_queue8-mechbatch-spec.md).
+    live = TOOLS_DIR / "dispatch_gate.py"
     if MODULE_UNDER_TEST == "live":
-        return TOOLS_DIR / "dispatch_gate.py"
+        return live
     sibling = TOOLS_DIR / "dispatch_gate_pop.py"
-    return sibling if sibling.exists() else TOOLS_DIR / "dispatch_gate.py"
+    if MODULE_UNDER_TEST == "":
+        return sibling if sibling.exists() else live
+    if not sibling.exists():
+        pytest.fail(
+            f"MODULE_UNDER_TEST={MODULE_UNDER_TEST!r} requested sibling "
+            f"{sibling} but it does not exist -- no silent live fallback (F1)"
+        )
+    return sibling
 
 
 SCRIPT = _resolve_script_path()

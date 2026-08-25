@@ -3,11 +3,16 @@ gate_md.py (этап 2, партия 2, узел E, t-530 / docs/tasks/2026-08-1
 scanner-party2-spec.md). MODULE UNDER TEST переключается переменной
 окружения MODULE_UNDER_TEST (образец конвенции F61_TARGET, уже применённой
 формы tools/test_negative_lint_md.py :43-64 / tools/test_owns_gate_md.py):
-default -> сиблинг tools/mechanism_gate_md.py (region-aware);
-MODULE_UNDER_TEST=live -> живой tools/mechanism_gate.py БЕЗ единой правки
--- используется здесь ТОЛЬКО как цель негативного контроля дискриминации:
-region-специфичные assert'ы, зелёные на сиблинге, обязаны стать КРАСНЫМИ
-на живую (нерегионную) цель.
+пусто/не задано -> сиблинг tools/mechanism_gate_md.py, ЕСЛИ он
+существует, иначе МОЛЧА живой tools/mechanism_gate.py (temporal-край 5.4,
+поведение неизменно); MODULE_UNDER_TEST=live -> живой
+tools/mechanism_gate.py БЕЗ единой правки -- используется здесь ТОЛЬКО
+как цель негативного контроля дискриминации: region-специфичные
+assert'ы, зелёные на сиблинге, обязаны стать КРАСНЫМИ на живую
+(нерегионную) цель; ЛЮБОЕ ДРУГОЕ непустое значение (например
+MODULE_UNDER_TEST=sibling) -- сиблинг ЗАПРОШЕН ЯВНО, при его отсутствии
+ГРОМКИЙ КРАС (pytest.fail, называющий запрошенный путь), не тихая
+подмена живым (K1, docs/tasks/2026-08-25_queue8-mechbatch-spec.md).
 
 Модуль резолвится через importlib.util по явному пути (сиблинг и живой
 файл -- РАЗНЫЕ имена, mechanism_gate_md.py / mechanism_gate.py).
@@ -42,10 +47,24 @@ MODULE_UNDER_TEST = os.environ.get("MODULE_UNDER_TEST", "").strip().lower()
 
 
 def _resolve_script_path() -> Path:
+    # f61-форма (temporal-край 5.4): default (MODULE_UNDER_TEST пуст) --
+    # сиблинг, ЕСЛИ он существует, иначе живой файл, МОЛЧА (поведение как
+    # сегодня; после посадки байт-копией default-прогон не падает
+    # FileNotFoundError). Сиблинг ЗАПРОШЕН ЯВНО (MODULE_UNDER_TEST задан и
+    # НЕ "live") -- при отсутствии сиблинга ГРОМКИЙ КРАС, не тихая подмена
+    # живым (K1, docs/tasks/2026-08-25_queue8-mechbatch-spec.md).
+    live = TOOLS_DIR / "mechanism_gate.py"
     if MODULE_UNDER_TEST == "live":
-        return TOOLS_DIR / "mechanism_gate.py"
+        return live
     sibling = TOOLS_DIR / "mechanism_gate_md.py"
-    return sibling if sibling.exists() else TOOLS_DIR / "mechanism_gate.py"
+    if MODULE_UNDER_TEST == "":
+        return sibling if sibling.exists() else live
+    if not sibling.exists():
+        pytest.fail(
+            f"MODULE_UNDER_TEST={MODULE_UNDER_TEST!r} requested sibling "
+            f"{sibling} but it does not exist -- no silent live fallback (K1)"
+        )
+    return sibling
 
 
 SCRIPT = _resolve_script_path()

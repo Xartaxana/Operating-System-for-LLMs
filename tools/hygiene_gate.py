@@ -445,6 +445,7 @@ _collect_warn_classes -> "Командная гигиена (WARN, не блок
 additionalContext, не подменяет и не снимает deny.
 """
 
+import ast
 import json
 import os
 import re
@@ -685,9 +686,22 @@ GIT_STATEMENT_RE = re.compile(
     re.IGNORECASE,
 )
 
-MSG_CD_PREFIX = "не префиксуй cd, вызывай из корня (гигиена п.3)"
-MSG_REDIRECT_STDERR = "не добавляй 2>&1 (гигиена п.3)"
-MSG_PYTHON_DASH_C = "правки/скрипты — Edit/Write-тулом или именованным скриптом (гигиена п.4)"
+# УЗЕЛ C (посадка Lead 2026-08-25, t-607): тексты по правилу трёх —
+# что не так / что сломается / действие; провенанс хвостом.
+MSG_CD_PREFIX = (
+    "cd-префикс перед составной командой не проходит сверку по allowlist "
+    "— лишний permission-промпт или отказ команды; вызывай из корня, без cd "
+    "(гигиена п.3)"
+)
+MSG_REDIRECT_STDERR = (
+    "хвост \" 2>&1\" не проходит сверку по allowlist — лишний permission-промпт "
+    "или отказ команды; убери \" 2>&1\" из команды (гигиена п.3)"
+)
+MSG_PYTHON_DASH_C = (
+    "команда правит файл инлайн через python -c/heredoc, мимо Edit/Write "
+    "— такая правка не проходит обычный дифф-контроль и рискует незаметно "
+    "испортить файл; используй Edit/Write-тул или именованный скрипт (гигиена п.4)"
+)
 # VG-5 (2026-07-23): класс (г) промотирован WARN -> БЛОК (см. докстринг
 # раздела v3 ниже); сообщение -- ДОСЛОВНО текст спеки задачи, идёт в
 # permissionDecisionReason, а не в additionalContext. Имя константы
@@ -1335,7 +1349,9 @@ MSG_CD_NON_ROOT_WARN = (
     "деревья/экзаменационные киты/toolkit/scratchpad, либо санкционированные "
     "поддиректории вроде gateway, гигиена п.2 — альтернативы «вызывать из "
     "корня» для них нет); блокируется только явный переход В КОРЕНЬ ЭТОГО "
-    "репозитория (гигиена п.3)"
+    "репозитория. Если переход НЕ оправдан рабочим деревом — вызывай "
+    "напрямую из корня без cd; если оправдан — действие не требуется, "
+    "это WARN информационный (гигиена п.3)"
 )
 
 # =====================================================================
@@ -1558,6 +1574,383 @@ def _is_python_dash_c_certain(command: str) -> bool:
     return bool(PY_DASH_C_RE.search(masked) or PY_HEREDOC_RE.search(masked))
 
 
+# =====================================================================
+# К3.6 (2026-08-25, сужение предиката pyc) -- ТРЁХКЛАССОВАЯ семантика
+# СОДЕРЖИМОГО certain-payload'а: M (мутация ФС) / P (доказанная
+# чистота) / O (непрозрачность/сбой парсинга/пусто/сверх лимита) -- см.
+# docs/tasks/2026-08-25_pyc-narrow-spec.md и её "ПОПРАВКУ LEAD 16:35".
+#
+# ГЕЙТ ПО СЕРТАЙНТИ (ПОПРАВКА LEAD 16:35, развилка builder'а t-605,
+# противоречие спеки доказано эмпирически ДО кода -- см. отчёт):
+# классификация СЧИТАЕТСЯ ТОЛЬКО когда `_is_python_dash_c_certain` (тот
+# же сигнал, что уже решает deny/warn для класса (в) -- I2, НЕ
+# тронут) истинен; иначе `_classify_pyc_payload` возвращает "U"
+# (unclassified) -- обёртки (bash/sh/ssh/docker heredoc, bash -c/
+# sh -c/eval-кавычки, E11), heredoc-body-упоминания и кавычковые
+# "упоминания как данные" (git commit -m прозы) остаются на СТАРОМ
+# безусловном тексте `MSG_PYTHON_DASH_C` (см. `_decide_v5` ниже --
+# ЛЮБОЕ значение payload_class, КРОМЕ "P" и "O", даёт этот текст, "U"
+# в их числе). Без этого гейта наивная классификация ломала 16+ живых
+# пинов (обёрточная дыра, прозовые упоминания, switch-off-тест) --
+# builder эмпирически доказал ДО правки кода, зафиксировано в отчёте.
+#
+# ИЗВЛЕЧЕНИЕ -- по СЫРОЙ команде (спека, "ДО масок"): аргумент -c
+# (кавычковый литерал ЛИБО голый токен до пробела) и ТЕЛО
+# `python -...<<DELIM…DELIM` (та же грамматика опенер+тело+закрыватель,
+# что COMMIT_HEREDOC_RE выше -- D-0043, отдельный регекс нужен ТОЛЬКО
+# чтобы анкериться на "python -" и именовать группу тела -- НЕ вторая
+# реализация heredoc-грамматики). Несколько вхождений в одной команде
+# -- КАЖДОЕ извлекается и классифицируется отдельно, итог -- строжайший
+# класс (F6/B9/B11: M > O > P). НОЛЬ извлечённых payload'ов при
+# certain-инвокации (напр. "python -c" совсем без аргумента, heredoc
+# без закрывателя) -- класс O (E1/E11/B8).
+_PY_DASH_C_ARG_RE = re.compile(
+    r"\bpython\s+-c\s+"
+    r"(?:"
+    r'"(?P<dq>(?:[^"\\]|\\.)*)"'
+    r"|'(?P<sq>[^']*)'"
+    r"|(?P<bare>\S+)"
+    r")",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_PY_HEREDOC_EXTRACT_RE = re.compile(
+    r"\bpython\s+-\s*<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1[^\n]*"
+    r"\n(?P<body>.*?)^\2\s*$",
+    re.IGNORECASE | re.DOTALL | re.MULTILINE,
+)
+
+# F9: лимит L1 -- символов в ОДНОМ извлечённом payload'е (не в команде
+# целиком); сверх лимита -- класс O БЕЗ попытки ast.parse (E10). Замер
+# времени decide()/классификации на 100КБ/1МБ КОМАНДАХ -- числом, не
+# гейтом (см. test_pycnarrow_perf_100kb_1mb_number_not_gated в
+# tools/test_hygiene_gate.py и witness отчёта).
+PYC_PAYLOAD_LIMIT = 20_000
+
+MSG_PYTHON_DASH_C_OPAQUE = (
+    "payload python -c/heredoc непрозрачен (exec/eval/subprocess/динамика, "
+    "гигиена п.4): гейт не может доказать отсутствие записи -- вынеси код "
+    "в именованный файл (python <path>, в т.ч. scratchpad)"
+)
+
+# --- закрытые списки М/О (спека, дословно) ------------------------------
+_PATH_MUTATING_METHOD_NAMES = {
+    "write_text", "write_bytes", "unlink", "rename", "replace",
+    "mkdir", "touch", "rmdir",
+}
+_OS_MUTATING_QUALIFIED = {
+    "os.remove", "os.unlink", "os.rename", "os.replace", "os.rmdir",
+    "os.mkdir", "os.makedirs", "os.truncate", "os.chmod",
+}
+_DUMP_QUALIFIED = {"json.dump", "pickle.dump", "csv.writer"}
+_PANDAS_LIKE_METHOD_NAMES = {"to_csv", "to_excel"}
+_WRITE_METHOD_NAMES = {"write", "writelines"}
+_STDIO_DOTTED = {"sys.stdout", "sys.stderr"}
+
+_OPAQUE_BARE_NAMES = {
+    "exec", "eval", "compile", "__import__",
+    "getattr", "setattr", "globals", "locals", "vars",
+}
+_OPAQUE_ROOT_MODULES = {
+    "importlib", "subprocess", "ctypes", "marshal", "socket",
+    "urllib", "requests", "multiprocessing", "pty", "builtins",
+}
+
+
+def _dotted_call_name(node):
+    """Восстанавливает точечное имя из цепочки ast.Attribute/ast.Name
+    (напр. `os.path.remove` -> "os.path.remove"). None, если база -- НЕ
+    простая Name/Attribute-цепочка (напр. результат ДРУГОГО вызова,
+    subscript) -- см. B11 `__import__('os').remove`: базой `.remove`
+    здесь служит ВЫЗОВ `__import__('os')`, не Name -- дотted-имя не
+    строится, `.remove` НЕ засчитывается как os.remove (только
+    `__import__` даёт вклад O) -- ровно то поведение, что требует B11."""
+    parts = []
+    cur = node
+    while isinstance(cur, ast.Attribute):
+        parts.append(cur.attr)
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        parts.append(cur.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+# ПОПРАВКА LEAD 17:2x, Ось B (доп. фикс поверх названного): свободная
+# функция `open(path, mode)`/`io.open(path, mode)` несёт РЕЖИМ 2-м
+# позиционным аргументом (index 1, path -- 0-й); МЕТОДНАЯ форма
+# `X.open(mode)` (`Path(...).open('w')`, `pathlib.Path.open`,
+# произвольный файлоподобный объект) несёт РЕЖИМ 1-м аргументом
+# (index 0) -- self неявен, отдельного "path"-аргумента нет вовсе.
+# Различение -- ТОЛЬКО по РАЗРЕШЁННОМУ dotted (после алиас-карты):
+# "open"/"io.open" -- свободная функция; ЛЮБОЕ иное (в т.ч. None --
+# неразрешимая база, самый частый случай для `Path(...).open(...)`,
+# база -- ВЫЗОВ) -- методная форма. Живой репро (критик t-605,
+# 12-атаковый набор): `pathlib.Path('x').open('w')` С СОБСТВЕННОЙ
+# СТАРОЙ логикой (жёсткий index 1) получал mode_node=None (args=['w'],
+# длина 1) -> P -- РЕГРЕССНАЯ ДЫРА, закрыта здесь.
+_FREE_OPEN_DOTTED_NAMES = {"open", "io.open"}
+
+
+def _classify_open_call(node, dotted):
+    """Классификация ОДНОГО вызова `open(...)`/`X.open(...)` (E8):
+    режим -- см. `_FREE_OPEN_DOTTED_NAMES` докстринг выше за индекс
+    позиционного аргумента; ЛИБО kwarg `mode` (ОБЩИЙ для обеих форм).
+    `**kwargs`-распаковка прячет режим -> O; литеральная строка режима
+    с w/a/x/+ -> M; литеральная строка БЕЗ этих символов (напр. "r",
+    "rb") -> None (нейтрально, вклад P); НЕлитеральный режим
+    (переменная/f-string) -> O; режим отсутствует вовсе -> None (P)."""
+    if any(kw.arg is None for kw in node.keywords):
+        return "O"
+    mode_index = 1 if dotted in _FREE_OPEN_DOTTED_NAMES else 0
+    mode_node = node.args[mode_index] if len(node.args) > mode_index else next(
+        (kw.value for kw in node.keywords if kw.arg == "mode"), None
+    )
+    if mode_node is None:
+        return None
+    if isinstance(mode_node, ast.Constant) and isinstance(mode_node.value, str):
+        return "M" if any(ch in mode_node.value for ch in "wax+") else None
+    return "O"
+
+
+def _build_import_alias_map(tree) -> dict:
+    """ПОПРАВКА LEAD 17:2x, Ось A: обходит `ast.Import`/`ast.ImportFrom`
+    ВЕРХНЕГО уровня модуля (walk -- ловит их и внутри `if`/`try`/функций
+    тела payload'а) и строит ПЛОСКУЮ карту "локальное имя -> канонический
+    путь". `import os as o` -> {"o": "os"}; `import os` (без asname) ->
+    {"os": "os"} (identity, безвредно); `from os import remove` ->
+    {"remove": "os.remove"}; `from os import remove as rm` ->
+    {"rm": "os.remove"}. Относительные `from . import x` (module=None)
+    пропускаются -- канонического пути нет, разрешить нечем (честная
+    граница, не крашит)."""
+    alias_map = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    alias_map[alias.asname] = alias.name
+                else:
+                    top = alias.name.split(".")[0]
+                    alias_map[top] = top
+        elif isinstance(node, ast.ImportFrom):
+            if not node.module:
+                continue
+            for alias in node.names:
+                local = alias.asname or alias.name
+                alias_map[local] = f"{node.module}.{alias.name}"
+    return alias_map
+
+
+def _resolve_dotted(raw_dotted, alias_map):
+    """ПОПРАВКА LEAD 17:2x, Ось A: подставляет КОРЕНЬ точечной цепочки
+    через карту алиасов ДО сопоставления с M/O-списками -- `o.remove`
+    (карта {"o":"os"}) -> "os.remove"; голое `remove` (карта
+    {"remove":"os.remove"}) -> "os.remove" целиком (ImportFrom мапит
+    ИМЯ на ПОЛНЫЙ путь, не только корень). Нет записи в карте -- строка
+    не меняется (обычные имена/встроенные типы)."""
+    if raw_dotted is None:
+        return None
+    parts = raw_dotted.split(".")
+    root = parts[0]
+    if root in alias_map:
+        parts[0] = alias_map[root]
+        return ".".join(parts)
+    return raw_dotted
+
+
+def _is_known_mutating_or_opaque_name(dotted) -> bool:
+    """ПОПРАВКА LEAD 17:2x, Ось A: True, если РАЗРЕШЁННОЕ (после
+    алиас-карты) точечное имя `dotted` само по себе ссылается на `open`
+    ИЛИ на любое M/O-имя закрытых списков -- используется ТОЛЬКО для
+    детекта переприсваивания callable (`w = open`, `r = os.remove`) --
+    само присваивание НЕ вызов, но делает дальнейший вызов через `w`/
+    `r` НЕОТСЛЕЖИВАЕМЫМ этим классификатором -> непрозрачность (O),
+    НЕЗАВИСИМО от того, был ли исходный целевой класс M или O (спека:
+    "переприсваивание callable = непрозрачность")."""
+    if dotted is None:
+        return False
+    if dotted == "open":
+        return True
+    if dotted in _OPAQUE_BARE_NAMES or dotted in _OS_MUTATING_QUALIFIED or dotted in _DUMP_QUALIFIED:
+        return True
+    root = dotted.split(".", 1)[0]
+    attr_last = dotted.rsplit(".", 1)[-1]
+    if root in _OPAQUE_ROOT_MODULES or root == "shutil":
+        return True
+    if root == "os" and (attr_last in ("system", "popen") or attr_last.startswith("exec") or attr_last.startswith("spawn")):
+        return True
+    if attr_last in _PATH_MUTATING_METHOD_NAMES or attr_last in _PANDAS_LIKE_METHOD_NAMES or attr_last in _WRITE_METHOD_NAMES:
+        return True
+    return False
+
+
+def _classify_single_payload(text: str) -> str:
+    """Классифицирует ОДИН извлечённый payload -> "M"/"P"/"O" (F2:
+    `ast.parse` + обход дерева; любой сбой -> O; E10: сверх
+    PYC_PAYLOAD_LIMIT -- O БЕЗ попытки парсинга; E1/B13: пустой/из
+    пробелов -> O). Внутри ОДНОГО payload'а M и O могут сработать оба
+    (B11) -- M побеждает (F6: M > O > P).
+
+    ПОПРАВКА LEAD 17:2x (фикс-раунд по вердикту критик-гейта, БЛОКЕР):
+    критик замерил 12 живых атак, где реально пишущий код уходил в P
+    (полная тишина) -- худший экземпляр `Path('logs/routing-log.jsonl')
+    .write_text('')`. Причина: `attr` вычислялся ИЗ `dotted`, а `dotted`
+    -- None для ЦЕПОЧЕЧНЫХ получателей (`Path('x').write_text(...)` --
+    база `.write_text` это ВЫЗОВ `Path('x')`, не Name/Attribute-цепочка,
+    `_dotted_call_name` возвращает None -> attr тоже None -> ничего не
+    матчится). ФИКС (Ось B): `attr` теперь берётся из `node.func.attr`/
+    `node.func.id` НЕЗАВИСИМО от того, резолвится ли `dotted` --
+    атрибутные М-проверки (Path-методы/`.to_csv`/`.to_excel`/
+    `.write`/`.writelines`/`open`-как-атрибут) видят цепочечные
+    получатели. Исключение sys.stdout/sys.stderr для `.write`/
+    `.writelines` -- ТОЛЬКО по РАЗРЕШИМОЙ базе; неразрешимая база
+    (напр. `io.open().write(...)` -- база `.write` это ВЫЗОВ `io.open()`)
+    -> НЕ исключается, M (консервативно, спека явно требует). Плюс: Ось
+    A -- алиас-карта импортов (`_build_import_alias_map`) резолвит
+    `import os as o`/`from os import remove` ДО сопоставления с
+    качественными (не атрибутными) M/O-списками; отдельный проход по
+    `ast.Assign`/`ast.AnnAssign`/`ast.NamedExpr` ловит переприсваивание
+    callable (`w = open`) -> O."""
+    if len(text) > PYC_PAYLOAD_LIMIT:
+        return "O"
+    if not text.strip():
+        return "O"
+    try:
+        tree = ast.parse(text)
+        alias_map = _build_import_alias_map(tree)
+        has_m = False
+        has_o = False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
+                value = node.value
+                if isinstance(value, (ast.Name, ast.Attribute)):
+                    resolved_value = _resolve_dotted(_dotted_call_name(value), alias_map)
+                    if _is_known_mutating_or_opaque_name(resolved_value):
+                        has_o = True
+                continue
+            if not isinstance(node, ast.Call):
+                continue
+
+            # Ось B: attr НЕЗАВИСИМО от dotted -- переживает цепочечные
+            # получатели (база -- ВЫЗОВ, не Name/Attribute).
+            if isinstance(node.func, ast.Attribute):
+                attr = node.func.attr
+            elif isinstance(node.func, ast.Name):
+                attr = node.func.id
+            else:
+                attr = None
+            # Ось A: качественные (dotted) проверки идут через алиас-карту.
+            dotted = _resolve_dotted(_dotted_call_name(node.func), alias_map)
+            root = dotted.split(".", 1)[0] if dotted else None
+
+            if dotted in _OPAQUE_BARE_NAMES or root in _OPAQUE_ROOT_MODULES:
+                has_o = True
+                continue
+            if root == "os" and attr in ("system", "popen"):
+                has_o = True
+                continue
+            if root == "os" and attr and (attr.startswith("exec") or attr.startswith("spawn")):
+                has_o = True
+                continue
+            if dotted == "fileinput.input" and any(kw.arg == "inplace" for kw in node.keywords):
+                has_o = True
+                continue
+
+            # Ось B: attr=="open" на ЛЮБОЙ базе (закрывает Path().open('w'),
+            # io.open, pathlib.Path.open) -- не только голый builtin `open`.
+            if attr == "open":
+                verdict = _classify_open_call(node, dotted)
+                if verdict == "M":
+                    has_m = True
+                elif verdict == "O":
+                    has_o = True
+                continue
+            if attr in _PATH_MUTATING_METHOD_NAMES:
+                has_m = True
+                continue
+            if root == "os" and dotted in _OS_MUTATING_QUALIFIED:
+                has_m = True
+                continue
+            if root == "shutil":
+                has_m = True
+                continue
+            if dotted in _DUMP_QUALIFIED:
+                has_m = True
+                continue
+            if attr in _PANDAS_LIKE_METHOD_NAMES:
+                has_m = True
+                continue
+            if attr in _WRITE_METHOD_NAMES:
+                base_dotted = (
+                    _resolve_dotted(_dotted_call_name(node.func.value), alias_map)
+                    if isinstance(node.func, ast.Attribute) else None
+                )
+                # Ось B: исключение ТОЛЬКО по РАЗРЕШИМОЙ базе; None
+                # (неразрешимая -- напр. база сама ВЫЗОВ) -> НЕ исключаем
+                # (консервативно, M).
+                if base_dotted not in _STDIO_DOTTED:
+                    has_m = True
+                continue
+            if dotted == "print" or attr == "print":
+                file_kw = next((kw for kw in node.keywords if kw.arg == "file"), None)
+                if file_kw is not None and _resolve_dotted(
+                    _dotted_call_name(file_kw.value), alias_map
+                ) not in _STDIO_DOTTED:
+                    has_m = True
+                continue
+    except Exception:
+        return "O"
+    if has_m:
+        return "M"
+    if has_o:
+        return "O"
+    return "P"
+
+
+def _classify_pyc_payload(command: str, certain: bool | None = None) -> str:
+    """К3.6 (F1(A)): "M"|"P"|"O"|"U" -- НОВЫЙ сигнал `pyc_payload`
+    (см. `_collect_v5_signals` ниже; ключи `pyc`/`pyc_certain` НЕ
+    тронуты, I1). "U" (ПОПРАВКА LEAD 16:35) -- когда
+    `_is_python_dash_c_certain` ложен: классификация НЕ считается
+    вовсе, обёртки/проза/эмбеддинг остаются на старом безусловном
+    тексте (см. `_decide_v5`). Любое исключение внутри (регекс-сбой,
+    неожиданный AST-узел) -- fail-safe в сторону O, не наружу (не
+    роняет ВЕСЬ decide() в общий fail-open маркер, см. B5 "5000
+    вложенности -- O без трейсбека").
+
+    ПОПРАВКА LEAD 17:2x, Ф2: `certain` -- ОПЦИОНАЛЬНЫЙ параметр
+    (готовый результат `_is_python_dash_c_certain`, если вызывающий его
+    уже посчитал -- `_collect_v5_signals` считает ОДИН раз и передаёт
+    сюда, не считает дважды); публичная одноаргументная сигнатура
+    (вызов `_classify_pyc_payload(command)` без второго аргумента)
+    сохранена -- по умолчанию считает сам."""
+    if certain is None:
+        certain = _is_python_dash_c_certain(command)
+    if not certain:
+        return "U"
+    try:
+        payloads = []
+        for m in _PY_DASH_C_ARG_RE.finditer(command):
+            if m.group("dq") is not None:
+                payloads.append(m.group("dq"))
+            elif m.group("sq") is not None:
+                payloads.append(m.group("sq"))
+            else:
+                payloads.append(m.group("bare"))
+        for m in _PY_HEREDOC_EXTRACT_RE.finditer(command):
+            payloads.append(m.group("body"))
+        if not payloads:
+            return "O"
+        classes = [_classify_single_payload(p) for p in payloads]
+    except Exception:
+        return "O"
+    if "M" in classes:
+        return "M"
+    if "O" in classes:
+        return "O"
+    return "P"
+
+
 def _collect_v5_signals(command: str) -> dict:
     """ЕДИНАЯ точка вычисления ВСЕХ V5-сигналов -- используется И
     `_decide_v5` (сборка JSON-ответа ниже), И
@@ -1599,9 +1992,18 @@ def _collect_v5_signals(command: str) -> dict:
         (`_is_python_dash_c_certain` -- та же кавычковая маскировка,
         что и `redirect_certain`, см. её докстринг) -- ИМЕННО ОН решает
         deny/warn для класса (в), И ТОЛЬКО когда `PYC_DENY_ENABLED`
-        (см. её докстринг выше, К3.2) включена."""
+        (см. её докстринг выше, К3.2) включена.
+      - `pyc_payload` -- НОВЫЙ (К3.6, F1(A), сужение предиката pyc,
+        2026-08-25) -- "M"/"P"/"O"/"U" (`_classify_pyc_payload`, см. её
+        докстринг) -- ТОЛЬКО этот ключ используется НОВЫМ warn-текстом
+        `_decide_v5` ниже; `pyc`/`pyc_certain` НЕ переопределяются им
+        (I1). Ф2 (ПОПРАВКА LEAD 17:2x): `_is_python_dash_c_certain`
+        считается ЗДЕСЬ РОВНО ОДИН раз и передаётся в
+        `_classify_pyc_payload(command, certain=...)` -- не считается
+        дважды."""
     cd_hit = _is_cd_prefix_v5(command)
     redirect_signal = _collect_redirect_signal(command)
+    pyc_certain_value = _is_python_dash_c_certain(command)
     return {
         "journal": _is_journal_bypass(command),
         "cd": cd_hit,
@@ -1609,7 +2011,8 @@ def _collect_v5_signals(command: str) -> dict:
         "redirect": redirect_signal["present"],
         "redirect_certain": redirect_signal["certain"],
         "pyc": _is_python_dash_c(command),
-        "pyc_certain": _is_python_dash_c_certain(command),
+        "pyc_certain": pyc_certain_value,
+        "pyc_payload": _classify_pyc_payload(command, certain=pyc_certain_value),
     }
 
 
@@ -1680,6 +2083,7 @@ def _decide_v5(command: str) -> tuple[int, dict | None]:
     redirect_certain = signals["redirect_certain"]
     pyc_hit = signals["pyc"]
     pyc_certain = signals["pyc_certain"]
+    payload_class = signals["pyc_payload"]
     pyc_deny = PYC_DENY_ENABLED and pyc_certain
 
     deny_reasons = []
@@ -1699,8 +2103,16 @@ def _decide_v5(command: str) -> tuple[int, dict | None]:
         warn_reasons.append(MSG_CD_NON_ROOT_WARN)
     if redirect_present and not redirect_certain:
         warn_reasons.append(MSG_REDIRECT_STDERR)
-    if pyc_hit and not pyc_deny:
-        warn_reasons.append(MSG_PYTHON_DASH_C)
+    # К3.6 (сужение предиката pyc, F1(A)/ПОПРАВКА LEAD 16:35) --
+    # ЕДИНСТВЕННАЯ правка решателя (спека, "точка встраивания"):
+    # payload_class == "P" (certain И доказанно чист) -> тишина;
+    # payload_class == "O" -> новая константа MSG_PYTHON_DASH_C_OPAQUE;
+    # "M" и "U" (некоторая/старая семантика) -> старый текст
+    # MSG_PYTHON_DASH_C дословно (F5b).
+    if pyc_hit and not pyc_deny and payload_class != "P":
+        warn_reasons.append(
+            MSG_PYTHON_DASH_C_OPAQUE if payload_class == "O" else MSG_PYTHON_DASH_C
+        )
 
     if deny_reasons:
         context_parts = deny_reasons + warn_reasons

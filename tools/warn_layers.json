@@ -69,6 +69,19 @@
       "reachable": "subagent_type_builder"
     },
     {
+      "id": "FRESHNESS",
+      "name": "FRESHNESS",
+      "carrier": ["tools/dispatch_gate.py"],
+      "symbol": null,
+      "literal": "FRESHNESS WARN:",
+      "aliases": [],
+      "hook_event": "PreToolUse",
+      "matcher": "Task|Agent",
+      "denominator": "Z1",
+      "listed_in_check_11v": true,
+      "reachable": "dispatch_prompt_freshness_token"
+    },
+    {
       "id": "OWNS_OVERLAP",
       "name": "OWNS OVERLAP",
       "carrier": ["tools/owns_gate.py"],
@@ -176,6 +189,19 @@
       "reachable": "journal_path"
     },
     {
+      "id": "R3_ZERKALO",
+      "name": "R3-ЗЕРКАЛО",
+      "carrier": ["tools/journal_echo.py"],
+      "symbol": null,
+      "literal": "R3-ЗЕРКАЛО: line ",
+      "aliases": [],
+      "hook_event": "PostToolUse",
+      "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
+      "denominator": "Z1",
+      "listed_in_check_11v": true,
+      "reachable": "journal_path"
+    },
+    {
       "id": "JOURNAL_ECHO_BASE",
       "name": "JOURNAL ECHO",
       "carrier": ["tools/journal_echo.py"],
@@ -241,7 +267,7 @@
       "denominator": "Z1",
       "listed_in_check_11v": false,
       "reachable": "unmeasured",
-      "reason": "развилка вырожденного края не решена (Р6/п.6 очереди фикса класса), реальная населённость не измерена"
+      "reason": "Р-D1 РЕШЕНА (Lead 2026-08-25, docs/tasks/2026-08-25_queue8-closure.md): достижимая популяция слоя = любая НЕПУСТАЯ строковая команда Bash/PowerShell; вырожденный край (command отсутствует/не строка/пуста — выход до проверок) НЕ экземпляр подкласса II. Населённость этой популяцией пока не ИЗМЕРЕНА (нет measured-вида) — потому unmeasured, определение популяции зафиксировано здесь"
     }
   ]
 }

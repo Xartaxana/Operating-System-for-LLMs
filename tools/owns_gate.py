@@ -750,6 +750,15 @@ except ImportError:
         marker_immediately_followed_by_slash,
     )
 
+# K5 (docs/tasks/2026-08-25_queue8-mechbatch-spec.md): МОДУЛЬ (не
+# отдельное имя) -- decide() ниже вызывает dispatch_gate.decide(payload)
+# ДОСЛОВНО (см. её докстринг, "K5"). Тот же стиль try-package/except-
+# sibling, что WRITE_INDICATORS_RE выше уже несёт.
+try:
+    from tools import dispatch_gate  # package-style
+except ImportError:
+    import dispatch_gate  # sibling-module fallback
+
 try:
     from tools.md_regions import scan, KIND_FENCED, KIND_BLOCKQUOTE, KIND_INLINE_CODE  # package-style
 except ImportError:
@@ -998,24 +1007,94 @@ def is_path_token(tok: str) -> bool:
 
 
 BLIND_OWNS_WARN_MESSAGE = (
-    "owns объявлен, путей не разобрано \u2014 сверка пересечений слепа "
-    "на этом диспатче; проверь форму owns-строки"
+    "owns объявлен, путей не разобрано \u2014 конфликт владения путями "
+    "с другим диспатчем останется незамеченным; проверь форму owns-строки"
 )
 
 # НОВОЕ (D6, узел D): все найденные owns-маркеры -- в fenced/blockquote/
 # inline_code, ни одного в прозе -- см. докстринг модуля "QUOTED_OWNS_WARN".
 QUOTED_OWNS_WARN_MESSAGE = (
     "owns объявлен только внутри цитаты/фенса/инлайн-кода \u2014 это не "
-    "декларация владения, сверка пересечений не выполнена; перенеси "
-    "owns-строку в обычную прозу диспатча"
+    "декларация владения; конфликт владения путями с другим диспатчем "
+    "не будет обнаружен; перенеси owns-строку в обычную прозу диспатча"
 )
+
+
+# K4 (docs/tasks/2026-08-25_queue8-mechbatch-spec.md): элемент owns,
+# полученный из split_and_clean_tokens (запятая/`;`/перевод строки --
+# НЕ пробел), может быть ЦЕЛОЙ прозаической фразой -- is_path_token
+# (is_path_like_token) признаёт "глоб", если он несёт И "*", И слэш ГДЕ
+# УГОДНО в строке, БЕЗ якоря на начало -- элемент "тела `PROCESS/checks/
+# *.md`. Параллельно работают три других узла" (измеренный экземпляр
+# logs/owns_registry.jsonl:72) содержит "PROCESS/checks/*.md" ГДЕ-ТО
+# внутри и потому целиком проходит как "путь", хвост прозы -- вместе с
+# ним. Решение Lead: элемент с бэктик-спаном(ами) редуцируется к
+# СОДЕРЖИМОМУ бэктик-спанов (pathlike-ядро), прозаический остаток
+# отбрасывается (два спана в одном элементе -> два элемента); элемент
+# БЕЗ бэктиков И БЕЗ разделителей пути (`/`, `\\`) при >=3 пробельно-
+# разделённых словах -- отбрасывается как проза (эвристика для прозы,
+# которая случайно не несёт бэктик вовсе). Применяется ТОЛЬКО в
+# _paths_from_line ниже (однострочная/список-через-запятую форма) --
+# _first_token_path (продолжение, множество строк) уже безопасно (берёт
+# ПЕРВЫЙ токен строки, прозаический хвост строки игнорируется другим
+# механизмом, не нуждается в этой правке).
+#
+# F4 (критик-фикс, ФИКС-РАУНД docs/tasks/2026-08-25_queue8-mechbatch-
+# spec.md): _reduce_owns_element ОБЯЗАНА видеть RAW-сегмент -- ДО
+# _clean_token. `` ` `` -- элемент _EDGE_TRIM_CHARS/_TRAILING_TRIM_CHARS
+# (split_and_clean_tokens вызывает _clean_token НА КАЖДОМ сегменте
+# ВНУТРИ себя) -- если бэктик-спан стоит У ХВОСТА элемента (закрывающий
+# бэктик -- последний символ, опционально с точкой конца предложения
+# ПОСЛЕ него), _clean_token СНАЧАЛА срезает точку (_TRAILING_TRIM_CHARS
+# = _EDGE_TRIM_CHARS + "."), ЗАТЕМ закрывающий бэктик (тоже в
+# _EDGE_TRIM_CHARS) -- к моменту, когда _reduce_owns_element видела бы
+# результат, спан уже НЕ парный (один бэктик потерян) -- findall на
+# ПАРНЫЙ бэктик даёт [], фильтр падает в ветку "есть /" и возвращает
+# ВЕСЬ огрызок (включая уцелевший ОТКРЫВАЮЩИЙ бэктик и прозу ДО него)
+# -- ТОТ ЖЕ класс дефекта, что K4 чинил изначально, просто новым путём.
+# ФИКС: _paths_from_line ниже НЕ вызывает split_and_clean_tokens целиком
+# (общая функция, tools/owns_verify.py её тоже использует -- не трогаем,
+# non-goal) -- вместо этого разбивает remainder ТЕМ ЖЕ _TOKEN_SEPARATOR_
+# RE, прогоняет _reduce_owns_element ПО КАЖДОМУ RAW-сегменту СНАЧАЛА, и
+# ТОЛЬКО РЕЗУЛЬТАТ (уже отделённое от прозы pathlike-ядро) пропускает
+# через _cut_prose_tail/_clean_token (та же пара, что split_and_clean_
+# tokens применяла бы к целому сегменту) -- поведение сегментов БЕЗ
+# бэктика не меняется (заходят в _reduce_owns_element, возвращаются
+# списком из одного исходного raw, далее чистятся как раньше).
+_OWNS_BACKTICK_SPAN_RE = re.compile(r"`([^`]+)`")
+
+
+def _reduce_owns_element(raw: str) -> list:
+    """K4/F4: см. блок-комментарий выше. Возвращает СПИСОК (0, 1 или
+    несколько) кандидатов, полученных из ОДНОГО RAW-сегмента (ДО
+    _cut_prose_tail/_clean_token -- вызывающий код, _paths_from_line
+    ниже, обязан звать эту функцию ПЕРВОЙ, иначе _clean_token уже
+    съест хвостовой закрывающий бэктик спана, см. F4). Результат этой
+    функции всё равно проходит _cut_prose_tail/_clean_token ЗАТЕМ
+    is_path_token -- редуцированное ядро не освобождено от этих
+    проверок."""
+    spans = _OWNS_BACKTICK_SPAN_RE.findall(raw)
+    if spans:
+        return [s for s in spans if s]
+    if "/" in raw or "\\" in raw:
+        return [raw]
+    if len(raw.split()) >= 3:
+        return []  # проза без бэктика и без разделителя пути -- отброс
+    return [raw]
 
 
 def _paths_from_line(line: str, marker_end: int) -> list:
     """Общий хвост обоих проходов отбора: от конца совпадения маркера
-    срезается мусор (_strip_owns_marker_junk), остаток токенизируется и
+    срезается мусор (_strip_owns_marker_junk), остаток бьётся ТЕМ ЖЕ
+    _TOKEN_SEPARATOR_RE, что split_and_clean_tokens использует (та же
+    сепарация `;`/`,`/перевод строки) -- КАЖДЫЙ raw-сегмент СНАЧАЛА
+    пропускается через _reduce_owns_element (K4/F4, см. блок-комментарий
+    выше -- порядок ОБЯЗАН быть RAW-сегмент -> редукция -> чистка, не
+    наоборот), результат каждого прохода чистки (_cut_prose_tail затем
+    _clean_token -- та же пара, что split_and_clean_tokens применяла бы)
     фильтруется is_path_token -- см. "Рационал ДО region-aware версии"
-    выше, "ИЗВЛЕЧЕНИЕ OWNS-ПУТЕЙ", пп.2-5.
+    выше, "ИЗВЛЕЧЕНИЕ OWNS-ПУТЕЙ", пп.2-5. split_and_clean_tokens сама
+    (общая с tools/owns_verify.py) здесь НЕ вызывается -- non-goal.
 
     УЗЕЛ D ремедиации калибровки #8 (Р7, "Фантомный токен", форма 2,
     2026-08-20): ПЕРЕД любой обрезкой мусора -- если остаток СРАЗУ (без
@@ -1034,8 +1113,13 @@ def _paths_from_line(line: str, marker_end: int) -> list:
     if marker_immediately_followed_by_slash(remainder_raw):
         return []
     remainder = _strip_owns_marker_junk(remainder_raw)
-    tokens = split_and_clean_tokens(remainder)
-    return [t for t in tokens if is_path_token(t)]
+    reduced = []
+    for raw_segment in _TOKEN_SEPARATOR_RE.split(remainder):
+        for piece in _reduce_owns_element(raw_segment):  # K4/F4: RAW ПЕРВЫМ
+            cleaned = _clean_token(_cut_prose_tail(piece))
+            if cleaned:
+                reduced.append(cleaned)
+    return [t for t in reduced if is_path_token(t)]
 
 
 def _is_owns_declaration_line(line: str, marker_start: int, marker_end: int) -> bool:
@@ -1794,7 +1878,31 @@ def decide(payload: dict, registry_path: Path = None, now: datetime = None) -> t
 
     # Порядок: сверка ВЫШЕ, запись -- ПОСЛЕ (самопересечение исключено
     # структурно, см. "Рационал ДО region-aware версии" выше, "ПОРЯДОК").
-    _append_registry(registry_path, now, session_key, cwd, description, owns_paths)
+    #
+    # K5 (docs/tasks/2026-08-25_queue8-mechbatch-spec.md, ИЗМЕРЕНО
+    # 08-25T15:35, D-0105 п.6(а)): рантайм исполняет PreToolUse-хуки
+    # НЕЗАВИСИМО -- диспатч, заблокированный dispatch_gate (exit 2), НЕ
+    # запускается, но owns_gate (WARN-режим, свой exit ВСЕГДА 0) всё
+    # равно писал реестр -- строка регистрировала диспатч, которого
+    # никогда не было. Фикс: ПЕРЕД записью -- вердикт dispatch_gate.
+    # decide(payload) на ТОМ ЖЕ payload; exit 2 (блок) -> регистрацию
+    # ПРОПУСТИТЬ (сверка пересечений ВЫШЕ уже посчитана и попадёт в
+    # output этого вызова как обычно -- меняется только запись, не
+    # решение). Исключение из dispatch_gate.decide -> регистрировать
+    # (fail-open -- та же философия WARN-режима, что owns_gate несёт
+    # для собственных отказов). exit 0 (даже с непустым warn-текстом) ->
+    # регистрировать как сейчас (край (i)). Временной край R11(c):
+    # записи реестра ДО этой правки (напр. logs/owns_registry.jsonl:101)
+    # НЕ вычищаются (append-only) -- эта проверка касается ТОЛЬКО новых
+    # записей. Инвариант: собственный exit_code owns_gate ОСТАЁТСЯ 0
+    # всегда -- эта развилка решает ТОЛЬКО про регистрацию, не про
+    # возврат вовне.
+    try:
+        gate_exit_code, _ = dispatch_gate.decide(payload)
+    except Exception:
+        gate_exit_code = 0  # fail-open: регистрировать, как до этой правки
+    if gate_exit_code != 2:
+        _append_registry(registry_path, now, session_key, cwd, description, owns_paths)
 
     return 0, output
 

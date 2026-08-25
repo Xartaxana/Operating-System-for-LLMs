@@ -881,13 +881,23 @@ def test_build_tier_segment_empty_list():
 def test_build_tier_segment_mismatch_exact_format():
     ev = (2, "mismatch", "fable", {"claude-opus-4-8": 1})
     seg = journal_echo.build_tier_segment([ev])
-    assert seg == "TIER ECHO: строка 2 model='fable' vs measured claude-opus-4-8=1 MISMATCH"
+    # УЗЕЛ C (посадка 2026-08-25): формат по правилу трёх.
+    assert seg == (
+        "TIER ECHO: строка 2 заявлен ярус 'fable' MISMATCH measured "
+        "claude-opus-4-8=1 ни разу не подтверждают заявленный ярус - воркер мог "
+        "фактически идти на другой модели; сверь ярус и поправь запись или "
+        "перезапусти на нужном ярусе"
+    )
 
 
 def test_build_tier_segment_info_exact_format_no_mismatch_word():
     ev = (2, "info", "fable", {"claude-fable-1": 1, "claude-sonnet-5": 1})
     seg = journal_echo.build_tier_segment([ev])
-    assert seg == "TIER ECHO: строка 2 measured claude-fable-1=1, claude-sonnet-5=1"
+    assert seg == (
+        "TIER ECHO: строка 2 заявлен ярус 'fable' measured "
+        "claude-fable-1=1, claude-sonnet-5=1 подтверждает его лишь частично - "
+        "часть транскрипта могла идти на другой модели; сверь ярус вручную"
+    )
     assert "MISMATCH" not in seg
 
 
@@ -930,8 +940,8 @@ def test_build_tier_segment_static_literal_stays_cyrillic_in_both_modes():
     ev = (2, "mismatch", "fable", {"claude-opus-4-8": 1})
     seg_raw = journal_echo.build_tier_segment([ev], ascii_only=False)
     seg_ascii = journal_echo.build_tier_segment([ev], ascii_only=True)
-    assert seg_raw.startswith("TIER ECHO: строка 2 model=")
-    assert seg_ascii.startswith("TIER ECHO: строка 2 model=")
+    assert seg_raw.startswith("TIER ECHO: строка 2 заявлен ярус ")
+    assert seg_ascii.startswith("TIER ECHO: строка 2 заявлен ярус ")
 
 
 # ---------------------------------------------------------------------
@@ -998,7 +1008,12 @@ def test_echo_tier_dod_b_mismatch_fable_declared_opus_measured(tmp_path):
     assert result.returncode == 0
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
-    assert ctx == "TIER ECHO: строка 2 model='fable' vs measured claude-opus-4-8=1 MISMATCH"
+    assert ctx == (
+        "TIER ECHO: строка 2 заявлен ярус 'fable' MISMATCH measured "
+        "claude-opus-4-8=1 ни разу не подтверждают заявленный ярус - воркер мог "
+        "фактически идти на другой модели; сверь ярус и поправь запись или "
+        "перезапусти на нужном ярусе"
+    )
     assert ctx in result.stderr
 
 
@@ -1021,7 +1036,11 @@ def test_echo_tier_dod_v_mid_worker_informational_no_mismatch(tmp_path):
     assert result.returncode == 0
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
-    assert ctx == "TIER ECHO: строка 2 measured claude-fable-1=1, claude-sonnet-5=1"
+    assert ctx == (
+        "TIER ECHO: строка 2 заявлен ярус 'fable' measured "
+        "claude-fable-1=1, claude-sonnet-5=1 подтверждает его лишь частично - "
+        "часть транскрипта могла идти на другой модели; сверь ярус вручную"
+    )
     assert "MISMATCH" not in ctx
 
 
@@ -1030,7 +1049,8 @@ def test_echo_tier_dod_g_worker_ref_cli_skipped_silent(tmp_path):
     journal_path = _seed_committed_journal(tmp_path)
     new_line = _line(event="accepted", ts=_fresh_ts(), task_id="t-001",
                       agent="builder", by="opus", witness="tests pass", model="sonnet",
-                      worker_ref="cli:2026-07-10T08:10:00", notes="accepted via cli ref")
+                      worker_ref="cli:2026-07-10T08:10:00",
+                      notes="accepted via cli ref; critic: skipped, e2e-фикстура слоя-соседа")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path))
     assert result.returncode == 0
@@ -1043,7 +1063,8 @@ def test_echo_tier_dod_g_worker_ref_retro_skipped_silent(tmp_path):
     journal_path = _seed_committed_journal(tmp_path)
     new_line = _line(event="accepted", ts=_fresh_ts(), task_id="t-001",
                       agent="builder", by="opus", witness="tests pass", model="sonnet",
-                      worker_ref="retro:2026-07-10T08:10:00", notes="accepted via retro ref")
+                      worker_ref="retro:2026-07-10T08:10:00",
+                      notes="accepted via retro ref; critic: skipped, e2e-фикстура слоя-соседа")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path))
     assert result.returncode == 0
@@ -1055,7 +1076,8 @@ def test_echo_tier_dod_g_worker_ref_absent_skipped_silent(tmp_path):
     # DoD (г), часть 3: worker_ref отсутствует вовсе -> пропуск без warn.
     journal_path = _seed_committed_journal(tmp_path)
     obj = {"ts": _fresh_ts(), "event": "accepted", "agent": "builder",
-           "category": "implementation", "notes": "accepted, no worker_ref field",
+           "category": "implementation",
+           "notes": "accepted, no worker_ref field; critic: skipped, e2e-фикстура слоя-соседа",
            "task_id": "t-001", "by": "opus", "witness": "tests pass", "model": "sonnet"}
     new_line = json.dumps(obj, ensure_ascii=False)
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
@@ -1093,7 +1115,7 @@ def test_echo_tier_dod_e_form_defect_and_mismatch_together(tmp_path):
     ctx = hook_output["additionalContext"]
     assert "JOURNAL ECHO: 1 дефект(ов)" in ctx
     assert "'category'" in ctx
-    assert "TIER ECHO: строка 2 model='fable' vs measured claude-opus-4-8=1 MISMATCH" in ctx
+    assert "TIER ECHO: строка 2 заявлен ярус 'fable' MISMATCH measured claude-opus-4-8=1" in ctx
     # Оба сегмента склеены через "; " (спека п.3).
     assert "; TIER ECHO" in ctx
 

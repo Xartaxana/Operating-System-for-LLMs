@@ -625,6 +625,8 @@ def _case_2_owns_gate_artifact():
             "description": "sonnet: probe",
             "prompt": (
                 "Реализуй пробную фичу.\n\n"
+                "DoD: тест зелёный, witness приложен.\n"
+                "Дано: репо целиком.\n"
                 f"owns (ABSOLUTE write paths): {owns_path}\n"
             ),
         },
@@ -659,6 +661,8 @@ def _case_2a_owns_gate_overlap():
             "description": "sonnet: probe overlap",
             "prompt": (
                 "Реализуй вторую пробную фичу.\n\n"
+                "DoD: тест зелёный, witness приложен.\n"
+                "Дано: репо целиком.\n"
                 f"owns (ABSOLUTE write paths): {owns_path}\n"
             ),
         },
@@ -989,8 +993,11 @@ CASES = [
         "build": _case_3_claim_control_gate,
         "expected_exit": 0,
         "anchors": (
+            # УЗЕЛ C (посадка 2026-08-25): провенанс уехал в хвост текста —
+            # якорь держит СТАБИЛЬНЫЙ литерал реестра + новый хвост-маркер.
             "Negative claim about to be written without a matching "
-            "search/read this session (rule 6, command hygiene)",
+            "search/read this session",
+            "(rule 6, command hygiene)",
         ),
         "const_ref": ("claim_control_gate", "MSG_TEMPLATE"),
     },

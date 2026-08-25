@@ -418,7 +418,7 @@ def test_f6_decide_prose_with_bare_star_does_not_register_in_sidecar(tmp_path):
     exit_code, output = owns_gate.decide(payload, registry_path=registry, now=datetime(2026, 8, 10, 12, 0, 0))
     assert exit_code == 0
     assert output is not None
-    assert "слепа" in output["hookSpecificOutput"]["additionalContext"]
+    assert "конфликт владения" in output["hookSpecificOutput"]["additionalContext"]
     assert not registry.exists()
 
 
@@ -676,7 +676,7 @@ def test_decide_continuation_limit_hit_gives_blind_owns_warn(tmp_path):
     exit_code, output = owns_gate.decide(payload, registry_path=registry, now=datetime(2026, 7, 28, 12, 0, 0))
     assert exit_code == 0
     assert output is not None
-    assert "слепа" in output["hookSpecificOutput"]["additionalContext"]
+    assert "конфликт владения" in output["hookSpecificOutput"]["additionalContext"]
     assert not registry.exists()
 
 
@@ -746,7 +746,7 @@ def test_p3_prose_owns_word_mid_sentence_alone_gives_blind_warn_not_silence(tmp_
     exit_code, output = owns_gate.decide(payload, registry_path=registry, now=datetime(2026, 7, 28, 12, 0, 0))
     assert exit_code == 0
     assert output is not None
-    assert "слепа" in output["hookSpecificOutput"]["additionalContext"]
+    assert "конфликт владения" in output["hookSpecificOutput"]["additionalContext"]
     assert not registry.exists()
 
 
@@ -985,7 +985,7 @@ def test_decide_blind_owns_warn_when_marker_present_but_no_paths_parsed(tmp_path
     assert exit_code == 0
     assert output is not None
     ctx = output["hookSpecificOutput"]["additionalContext"]
-    assert "слепа" in ctx
+    assert "конфликт владения" in ctx
     assert not registry.exists()
 
 
@@ -1456,3 +1456,335 @@ def test_pin_quoted_owns_manifest_wholly_in_fence_still_warns_with_write_verb(tm
     assert exit_code == 0
     assert output is not None
     assert "цитаты/фенса/инлайн-кода" in output["hookSpecificOutput"]["additionalContext"]
+
+
+# ---------------------------------------------------------------------
+# K4 (docs/tasks/2026-08-25_queue8-mechbatch-spec.md): элемент owns,
+# несущий бэктик-спан, редуцируется к содержимому спана -- прозаический
+# остаток отбрасывается; элемент БЕЗ бэктиков И БЕЗ разделителей пути
+# (`/`, `\\`) при >=3 словах отбрасывается как проза. Измеренный
+# экземпляр -- logs/owns_registry.jsonl:72.
+# ---------------------------------------------------------------------
+
+
+def test_k4_measured_instance_registry72_reduces_to_backtick_core():
+    # Акцептанс-ключ (дословно): строка формы измеренного экземпляра :72
+    # даёт элемент "PROCESS/checks/*.md" и ТОЛЬКО его -- прозаический
+    # остаток "тела "/". Параллельно работают три других узла" отброшен.
+    prompt = (
+        "owns: tools/**, toolkit/**, logs/**, "
+        "тела `PROCESS/checks/*.md`. Параллельно работают три других узла\n"
+    )
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "tools/**",
+        "toolkit/**",
+        "logs/**",
+        "PROCESS/checks/*.md",
+    ]
+
+
+def test_k4_reduce_owns_element_single_backtick_span_direct():
+    assert owns_gate._reduce_owns_element(
+        "тела `PROCESS/checks/*.md`. Параллельно работают три других узла"
+    ) == ["PROCESS/checks/*.md"]
+
+
+def test_k4_reduce_owns_element_two_backtick_spans_give_two_elements():
+    # Край: два бэктик-спана в одном элементе -> два элемента.
+    assert owns_gate._reduce_owns_element("`tools/a.py` и `tools/b.py`") == [
+        "tools/a.py",
+        "tools/b.py",
+    ]
+
+
+def test_k4_reduce_owns_element_glob_with_space_inside_backticks_preserved():
+    # Край: элемент-глоб с пробелом ВНУТРИ бэктиков -- ядро сохраняется
+    # целиком (пробел не режет содержимое спана).
+    assert owns_gate._reduce_owns_element("`PROCESS/checks/* space.md`") == [
+        "PROCESS/checks/* space.md"
+    ]
+
+
+def test_k4_reduce_owns_element_no_backtick_no_separator_three_words_dropped():
+    # Проза без бэктика и без разделителя пути, >=3 слова -- отброс.
+    assert owns_gate._reduce_owns_element("просто три случайных слова") == []
+
+
+def test_k4_reduce_owns_element_no_backtick_no_separator_two_words_kept():
+    # ГРАНИЦА (правило 6а): РОВНО 2 слова -- ниже порога 3, элемент
+    # проходит без изменений (по-прежнему обязан пройти is_path_token
+    # downstream -- этот тест только про _reduce_owns_element саму).
+    assert owns_gate._reduce_owns_element("два слова") == ["два слова"]
+
+
+def test_k4_reduce_owns_element_boundary_exactly_three_words_dropped():
+    # ГРАНИЦА: РОВНО 3 слова, без бэктика, без разделителя -- отброс
+    # (порог включительно).
+    assert owns_gate._reduce_owns_element("ровно три слова") == []
+
+
+def test_k4_reduce_owns_element_no_backtick_but_has_slash_kept_even_many_words():
+    # Разделитель пути (`/`) присутствует -- элемент НЕ считается прозой,
+    # даже если несёт >=3 слова (существующее поведение is_path_token
+    # решит дальше, эта функция его не отбрасывает).
+    text = "tools/checks путь среди слов без бэктика"
+    assert owns_gate._reduce_owns_element(text) == [text]
+
+
+def test_k4_reduce_owns_element_no_backtick_no_words_at_all_regular_glob_unchanged():
+    # Регресс: обычный глоб без бэктика, без прозы -- не тронут.
+    assert owns_gate._reduce_owns_element("tools/**") == ["tools/**"]
+
+
+def test_k4_empty_owns_after_cleanup_behaves_as_empty_owns_today():
+    # Край: owns-строка -- ЧИСТАЯ проза (>=3 слова, без бэктика, без
+    # разделителя пути) -- после чистки ПУСТО, как и пустой owns сегодня
+    # (не путей не разобрано -- новая семантика не меняет ЭТОТ путь:
+    # B2/BLIND_OWNS диагностика срабатывает так же, как при "owns: bla").
+    prompt = (
+        "DoD: тест зелёный, witness приложен.\n"
+        "Дано: репо целиком.\n"
+        "owns: просто некоторая проза без пути вовсе тут.\n"
+        "Правь файлы."
+    )
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "builder", "prompt": prompt, "description": "sonnet: write"},
+        "session_id": "s-k4",
+        "cwd": "D:\\repo",
+    }
+    exit_code, output = owns_gate.decide(payload, registry_path=None, now=datetime(2026, 8, 25, 12, 0, 0))
+    assert exit_code == 0
+    assert output is not None
+    assert "конфликт владения" in output["hookSpecificOutput"]["additionalContext"]
+
+
+def test_k4_multiline_continuation_first_token_path_unaffected_by_k4():
+    # Регресс: _first_token_path (продолжение, множество строк) НЕ
+    # тронуто K4 -- прозаический хвост строки продолжения по-прежнему
+    # игнорируется её собственным (более старым) механизмом.
+    prompt = (
+        "Дано: репо целиком.\n\n"
+        "owns:\n"
+        "- D:/repo/tools/a_k4.py -- комментарий из нескольких слов подряд\n"
+        "- D:/repo/tools/b_k4.py\n"
+    )
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "D:/repo/tools/a_k4.py",
+        "D:/repo/tools/b_k4.py",
+    ]
+
+
+# ---------------------------------------------------------------------
+# K5 (docs/tasks/2026-08-25_queue8-mechbatch-spec.md): decide() гоняет
+# dispatch_gate.decide(payload) ПЕРЕД _append_registry -- заблокированный
+# (exit 2) диспатч не должен оставлять строку в реестре (рантайм
+# исполняет ВСЕ PreToolUse-хуки независимо от блока соседнего, измерено
+# 08-25T15:35, D-0105 -- logs/owns_registry.jsonl:101). Собственный
+# exit_code owns_gate ОСТАЁТСЯ 0 во всех трёх ветках ниже.
+# ---------------------------------------------------------------------
+
+_K5_BLOCKED_PROMPT = (
+    # owns-декларация с реальным путём есть, "Дано:"/given -- НЕТ --
+    # dispatch_gate блокирует (check2, "манифеста") независимо от
+    # DoD-маркера.
+    "DoD: тест зелёный, witness приложен.\n"
+    "owns (ABSOLUTE write paths): D:/repo/tools/k5_blocked_target.py\n"
+    "Правь файл по спеке."
+)
+
+
+def test_k5_blocked_dispatch_skips_registration(tmp_path):
+    registry = tmp_path / "owns_registry.jsonl"
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {
+            "subagent_type": "builder",
+            "prompt": _K5_BLOCKED_PROMPT,
+            "description": "sonnet: x",
+        },
+        "session_id": "s-k5-blocked",
+        "cwd": "D:\\repo",
+    }
+    # Позитивный контроль (правило 6 гигиены): убедиться, что этот
+    # payload ДЕЙСТВИТЕЛЬНО блокируется живым dispatch_gate -- иначе
+    # тест ниже не проверял бы то, что заявляет.
+    gate_exit_code, gate_message = owns_gate.dispatch_gate.decide(payload)
+    assert gate_exit_code == 2, gate_message
+
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=_NOW)
+    assert exit_code == 0  # owns_gate: собственный exit_code ВСЕГДА 0
+    assert not registry.exists()  # регистрация ПРОПУЩЕНА
+
+
+def test_k5_passing_dispatch_still_registers_edge_i(tmp_path):
+    # Край (i): exit 0 (даже с warn-текстом) -> регистрировать как сейчас.
+    registry = tmp_path / "owns_registry.jsonl"
+    payload = _writing_payload("D:/repo/tools/k5_allowed_target.py", session_id="s-k5-ok")
+    gate_exit_code, _ = owns_gate.dispatch_gate.decide(payload)
+    assert gate_exit_code == 0
+
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=_NOW)
+    assert exit_code == 0
+    assert registry.exists()
+    assert "k5_allowed_target.py" in registry.read_text(encoding="utf-8")
+
+
+def test_k5_dispatch_gate_decide_exception_fails_open_still_registers(monkeypatch, tmp_path):
+    # Исключение из dispatch_gate.decide -> регистрировать (fail-open,
+    # философия WARN-режима owns_gate).
+    registry = tmp_path / "owns_registry.jsonl"
+
+    def _raise(payload):
+        raise RuntimeError("boom -- dispatch_gate exploded")
+
+    monkeypatch.setattr(owns_gate.dispatch_gate, "decide", _raise)
+    payload = _writing_payload("D:/repo/tools/k5_failopen_target.py", session_id="s-k5-failopen")
+    exit_code, output = owns_gate.decide(payload, registry_path=registry, now=_NOW)
+    assert exit_code == 0
+    assert registry.exists()
+    assert "k5_failopen_target.py" in registry.read_text(encoding="utf-8")
+
+
+def test_k5_own_exit_code_always_zero_even_when_gate_blocks(tmp_path):
+    # Инвариант: собственный exit_code owns_gate ОСТАЁТСЯ 0 -- развилка
+    # решает ТОЛЬКО про регистрацию, никогда про возврат.
+    registry = tmp_path / "owns_registry.jsonl"
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {
+            "subagent_type": "builder",
+            "prompt": _K5_BLOCKED_PROMPT,
+            "description": "sonnet: x",
+        },
+        "session_id": "s-k5-invariant",
+        "cwd": "D:\\repo",
+    }
+    exit_code, _ = owns_gate.decide(payload, registry_path=registry, now=_NOW)
+    assert exit_code == 0
+
+
+def test_k5_temporal_edge_pre_fix_registry_line_not_purged(tmp_path):
+    # Временной край R11(c): запись реестра ДО этой правки (измеренный
+    # экземпляр logs/owns_registry.jsonl:101, синтетический аналог здесь)
+    # НЕ вычищается -- append-only, эта проверка касается только НОВЫХ
+    # записей. Синтетический прогон: реестр с ОДНОЙ уже существующей
+    # (гипотетически "ошибочной") строкой, ЗАТЕМ вызов decide() с
+    # заблокированным payload -- существующая строка остаётся байт-в-байт,
+    # новая -- не добавляется.
+    registry = tmp_path / "owns_registry.jsonl"
+    _write_registry_line(
+        registry, "2026-08-25T15:35:06", "pre-fix-session", "D:\\repo",
+        "sonnet: ЭКСПЕРИМЕНТ-БЛОК D-0105 — проба реестра, диспатч не должен запуститься",
+        ["D:/repo/tools/EXP_D0105_PROBE.txt"],
+    )
+    before = registry.read_text(encoding="utf-8")
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {
+            "subagent_type": "builder",
+            "prompt": _K5_BLOCKED_PROMPT,
+            "description": "sonnet: x",
+        },
+        "session_id": "s-k5-temporal",
+        "cwd": "D:\\repo",
+    }
+    exit_code, _ = owns_gate.decide(payload, registry_path=registry, now=_NOW)
+    after = registry.read_text(encoding="utf-8")
+    assert before == after  # старая строка не тронута, новая не добавлена
+
+
+# ---------------------------------------------------------------------
+# F4 (ФИКС-РАУНД, docs/tasks/2026-08-25_queue8-mechbatch-spec.md,
+# критик-фикс на K4): бэктик в _EDGE_TRIM_CHARS/_TRAILING_TRIM_CHARS
+# -- если бэктик-спан стоит У ХВОСТА элемента, _clean_token (вызванный
+# ВНУТРИ split_and_clean_tokens ДО _reduce_owns_element) срезает
+# закрывающий бэктик (и точку конца предложения, если она есть) ДО того,
+# как _reduce_owns_element успевает найти ПАРНЫЙ спан -- редукция ломается,
+# огрызок с прозой и уцелевшим ОТКРЫВАЮЩИМ бэктиком проходит is_path_token
+# целиком (тот же класс дефекта, что K4 чинил). Фикс: _reduce_owns_element
+# теперь вызывается на RAW-сегменте (до _clean_token/_cut_prose_tail).
+# Три контрольные формы критика.
+# ---------------------------------------------------------------------
+
+
+def test_f4_tail_span_with_trailing_dot_reduces_to_span_content():
+    # «спан у хвоста с точкой»: закрывающий бэктик -- предпоследний
+    # символ элемента, последний -- точка конца предложения.
+    prompt = "owns: тела `PROCESS/checks/*.md`.\n"
+    assert owns_gate.extract_owns_paths(prompt) == ["PROCESS/checks/*.md"]
+
+
+def test_f4_tail_span_without_trailing_dot_reduces_to_span_content():
+    # «спан у хвоста без точки»: закрывающий бэктик -- ПОСЛЕДНИЙ символ
+    # элемента, ничего после него вовсе.
+    prompt = "owns: тела `PROCESS/checks/*.md`\n"
+    assert owns_gate.extract_owns_paths(prompt) == ["PROCESS/checks/*.md"]
+
+
+def test_f4_path_prose_span_in_middle_still_reduces_correctly():
+    # «путь + проза + спан»: спан НЕ у хвоста (проза и до, и после) --
+    # регресс-контроль (эта форма уже работала до F4, F4 не должна её
+    # сломать).
+    prompt = "owns: смотри `PROCESS/checks/*.md` и другие файлы\n"
+    assert owns_gate.extract_owns_paths(prompt) == ["PROCESS/checks/*.md"]
+
+
+def test_f4_measured_instance_72_still_reduces_after_reorder():
+    # Регресс K4: исходный измеренный экземпляр (спан в СЕРЕДИНЕ элемента,
+    # запятая-разделённый список) не задет переупорядочиванием F4.
+    prompt = (
+        "owns: tools/**, toolkit/**, logs/**, "
+        "тела `PROCESS/checks/*.md`. Параллельно работают три других узла\n"
+    )
+    assert owns_gate.extract_owns_paths(prompt) == [
+        "tools/**",
+        "toolkit/**",
+        "logs/**",
+        "PROCESS/checks/*.md",
+    ]
+
+
+# ---------------------------------------------------------------------
+# F5 (ФИКС-РАУНД): пин-тест -- «путь + спан + проза без запятой» в ОДНОМ
+# элементе -> пустой owns, принятая цена (не D:/repo/tools/a.py, не
+# docs/x.md, не оба). Причина (задокументирована, не изобретена задним
+# числом): (1) K4 -- раз спан найден, ВЕСЬ прозаический остаток элемента
+# отбрасывается, включая бэктик-НЕ-обёрнутый "D:/repo/tools/a.py" ДО
+# спана -- он не спасается тем, что сам похож на путь, K4 не заглядывает
+# внутрь прозы за путями вне спана; (2) содержимое спана "docs/x.md" --
+# ОТНОСИТЕЛЬНЫЙ путь БЕЗ глоба ("*") -- is_path_token (is_path_like_
+# token: Windows-абс / POSIX-абс / глоб С "*" И слэшем) его НЕ признаёт.
+# Итог -- элемент даёт [] кандидатов -> owns считается НЕ разобранным ->
+# громкий отказ BLIND_OWNS_WARN (не молчание, не угадывание, какой из
+# двух путей "настоящий").
+# ---------------------------------------------------------------------
+
+
+def test_f5_pin_path_prose_span_no_comma_yields_empty_owns_accepted_cost():
+    prompt = "owns: D:/repo/tools/a.py по спеке `docs/x.md` только\n"
+    assert owns_gate.extract_owns_paths(prompt) == []
+
+
+def test_f5_pin_decide_loud_blind_owns_refusal_not_silent():
+    registry_free_payload = {
+        "tool_name": "Task",
+        "tool_input": {
+            "subagent_type": "builder",
+            "prompt": (
+                "DoD: тест зелёный, witness приложен.\n"
+                "Дано: репо целиком.\n"
+                "owns: D:/repo/tools/a.py по спеке `docs/x.md` только\n"
+                "Правь файлы."
+            ),
+            "description": "sonnet: write",
+        },
+        "session_id": "s-f5",
+        "cwd": "D:\\repo",
+    }
+    exit_code, output = owns_gate.decide(
+        registry_free_payload, registry_path=None, now=datetime(2026, 8, 25, 17, 0, 0)
+    )
+    assert exit_code == 0  # owns_gate: собственный exit_code ВСЕГДА 0
+    assert output is not None
+    assert "конфликт владения" in output["hookSpecificOutput"]["additionalContext"]  # BLIND_OWNS, громко

@@ -365,7 +365,9 @@ def test_format_notes_len_line_literal():
     line = je._format_notes_len_line((3, "delegated", 950, 800))
     assert line == (
         "NOTES LEN: line 3 event=delegated notes 950 chars > threshold 800 "
-        "(move load-bearing facts to typed fields / task carrier)"
+        "- an oversized note risks burying load-bearing "
+        "facts in prose where they will not be found later; move load-bearing "
+        "facts to typed fields / task carrier, keep only a pointer in notes"
     )
 
 

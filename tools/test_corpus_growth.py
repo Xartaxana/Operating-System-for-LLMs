@@ -754,3 +754,122 @@ def test_init_thresholds_skips_boot_mirror(tmp_path, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "boot-mirror -- порог запрещён" in out
+
+
+# ---------------------------------------------------------------------------
+# M2 (docs/tasks/2026-08-25_wave2-misc-spec.md, F15-ii): --baseline-ts --
+# prev_entry = последняя запись сайдкара с ts <= baseline-ts, а не
+# последняя запись вообще. Два сайдкар-записи с известными ts крафтятся
+# ВРУЧНУЮ (registry.write_text) -- надёжнее серии реальных прогонов,
+# у которых ts может совпасть (секундная точность datetime.now()).
+# ---------------------------------------------------------------------------
+
+def _craft_registry(registry_path: Path, entries) -> None:
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(registry_path, "w", encoding="utf-8") as fh:
+        for e in entries:
+            fh.write(json.dumps(e, ensure_ascii=False) + "\n")
+
+
+def _crafted_entry(ts: str, sha: str, bytes_: int) -> dict:
+    return {
+        "ts": ts,
+        "manifest_sha": sha,
+        "thresholds_version": 0,
+        "artifacts": {"a.md": {"bytes": bytes_, "records": 3, "bpr": bytes_ // 3, "state": "OK"}},
+        "totals": {"sum_bytes": bytes_, "assigned_k": 0, "total_n": 1, "warn_count": 0, "breach_count": 0},
+    }
+
+
+def test_m2_baseline_ts_picks_earlier_entry_not_last(tmp_path, capsys):
+    root, registry = _sandbox(tmp_path)
+    _write_file(root, "a.md", _three_records())  # 21 bytes
+    manifest = _write_manifest(root, [_art("a.md")])
+    sha = cg.manifest_sha(manifest.read_bytes())
+    _craft_registry(registry, [
+        _crafted_entry("2026-01-01T00:00:00", sha, 10),
+        _crafted_entry("2026-06-01T00:00:00", sha, 999),
+    ])
+    rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root),
+               "--baseline-ts", "2026-01-01T00:00:00", "--json"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    payload = json.loads(out)
+    assert payload["deltas"]["a.md"]["d_bytes"] == 21 - 10
+
+
+def test_m2_baseline_ts_boundary_exact_match_included(tmp_path, capsys):
+    """Граница НА: baseline-ts ровно равен ts записи -- запись включается
+    ('<=', не '<')."""
+    root, registry = _sandbox(tmp_path)
+    _write_file(root, "a.md", _three_records())
+    manifest = _write_manifest(root, [_art("a.md")])
+    sha = cg.manifest_sha(manifest.read_bytes())
+    _craft_registry(registry, [_crafted_entry("2026-01-01T00:00:00", sha, 10)])
+    rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root),
+               "--baseline-ts", "2026-01-01T00:00:00", "--json"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    payload = json.loads(out)
+    assert payload["deltas"]["a.md"]["status"] == "OK"
+    assert payload["deltas"]["a.md"]["d_bytes"] == 21 - 10
+
+
+def test_m2_baseline_ts_boundary_just_before_excluded(tmp_path, capsys):
+    """Граница ЗА: baseline-ts на секунду раньше единственной записи --
+    ни одной записи <= ts -> prev_entry=None -> delta 'новый', как при
+    пустом сайдкаре."""
+    root, registry = _sandbox(tmp_path)
+    _write_file(root, "a.md", _three_records())
+    manifest = _write_manifest(root, [_art("a.md")])
+    sha = cg.manifest_sha(manifest.read_bytes())
+    _craft_registry(registry, [_crafted_entry("2026-01-01T00:00:00", sha, 10)])
+    rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root),
+               "--baseline-ts", "2025-12-31T23:59:59", "--json"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    payload = json.loads(out)
+    assert payload["deltas"]["a.md"]["status"] == "новый"
+
+
+def test_m2_baseline_ts_no_matching_entry_prints_as_empty_sidecar(tmp_path, capsys):
+    root, registry = _sandbox(tmp_path)
+    _write_file(root, "a.md", _three_records())
+    manifest = _write_manifest(root, [_art("a.md")])
+    sha = cg.manifest_sha(manifest.read_bytes())
+    _craft_registry(registry, [_crafted_entry("2026-01-01T00:00:00", sha, 10)])
+    rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root),
+               "--baseline-ts", "1999-01-01T00:00:00"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "БАЗЫ НЕТ" in out
+
+
+def test_m2_baseline_ts_invalid_iso_exit_nonzero(tmp_path, capsys):
+    root, registry = _sandbox(tmp_path)
+    _write_file(root, "a.md", _three_records())
+    manifest = _write_manifest(root, [_art("a.md")])
+    rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root),
+               "--baseline-ts", "not-a-timestamp"])
+    err = capsys.readouterr().err
+    assert rc != 0
+    assert "--baseline-ts" in err
+
+
+def test_m2_no_flag_output_matches_default_last_entry_behavior(tmp_path, capsys):
+    """Негативный контроль идентичности (спека М2): без --baseline-ts
+    поведение как раньше -- последняя запись сайдкара выбирается базой,
+    не изменившись из-за наличия самого флага в парсере."""
+    root, registry = _sandbox(tmp_path)
+    _write_file(root, "a.md", _three_records())
+    manifest = _write_manifest(root, [_art("a.md")])
+    sha = cg.manifest_sha(manifest.read_bytes())
+    _craft_registry(registry, [
+        _crafted_entry("2026-01-01T00:00:00", sha, 10),
+        _crafted_entry("2026-06-01T00:00:00", sha, 999),
+    ])
+    rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root), "--json"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    payload = json.loads(out)
+    assert payload["deltas"]["a.md"]["d_bytes"] == 21 - 999  # последняя запись, не первая

@@ -201,10 +201,15 @@ EXAMINE_TOOLS = {"Read"}
 # grep-equivalent cmdlet, `Select-String`.
 SEARCH_TOKENS = ("grep", "rg ", "ripgrep", "find ", "fd ", "ls -1", "awk ", "select-string")
 
+# NODE C (Lead landing 2026-08-25, t-607): consequence clause added;
+# front-loaded provenance in the registry literal is a STANDING
+# EXCEPTION to C-K2 by Lead decision (queue8-closure.md) -- literal
+# byte-exact, moving provenance would cost more than it buys.
 MSG = (
-    "Search returned nothing. Rule 6 (command hygiene): an empty result is "
-    "reportable as absence ONLY after a positive control -- run the same tool "
-    "and syntax against a sample known to exist. Known miscall modes here: "
+    "Search returned nothing. Rule 6 (command hygiene): an empty result may "
+    "simply mean the tool was miscalled, not that the thing is absent -- report "
+    "absence ONLY after a positive control: run the same tool and syntax against "
+    "a sample known to exist. Known miscall modes here: "
     "\\b does not fire on Cyrillic; shell-grep -i does not case-fold Cyrillic; "
     "single-language queries miss localised data; a marker searched in file "
     "bodies may be written in varying formats -- use a structural field."

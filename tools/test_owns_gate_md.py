@@ -3,12 +3,17 @@
 spec.md). MODULE UNDER TEST переключается переменной окружения
 MODULE_UNDER_TEST (образец конвенции F61_TARGET, tools/test_f61_
 halfstate.py, и уже применённой формы tools/test_negative_lint_md.py
-:43-64): default -> сиблинг tools/owns_gate_md.py (region-aware);
-MODULE_UNDER_TEST=live -> живой tools/owns_gate.py БЕЗ единой правки --
-используется здесь ТОЛЬКО как цель негативного контроля дискриминации
-(§8 п.4 драфта партии 1, тот же принцип применён к узлу D): region-
-специфичные assert'ы, зелёные на сиблинге, обязаны стать КРАСНЫМИ на
-живую (нерегионную) цель.
+:43-64): пусто/не задано -> сиблинг tools/owns_gate_md.py, ЕСЛИ он
+существует, иначе МОЛЧА живой tools/owns_gate.py (temporal-край 5.4,
+поведение неизменно); MODULE_UNDER_TEST=live -> живой tools/owns_gate.py
+БЕЗ единой правки -- используется здесь ТОЛЬКО как цель негативного
+контроля дискриминации (§8 п.4 драфта партии 1, тот же принцип применён
+к узлу D): region-специфичные assert'ы, зелёные на сиблинге, обязаны
+стать КРАСНЫМИ на живую (нерегионную) цель; ЛЮБОЕ ДРУГОЕ непустое
+значение (например MODULE_UNDER_TEST=sibling) -- сиблинг ЗАПРОШЕН ЯВНО,
+при его отсутствии ГРОМКИЙ КРАС (pytest.fail, называющий запрошенный
+путь), не тихая подмена живым (K1, docs/tasks/
+2026-08-25_queue8-mechbatch-spec.md).
 
 Модуль резолвится через importlib.util по явному пути (сиблинг и живой
 файл -- РАЗНЫЕ имена, owns_gate_md.py / owns_gate.py) -- та же индирекция,
@@ -42,12 +47,24 @@ MODULE_UNDER_TEST = os.environ.get("MODULE_UNDER_TEST", "").strip().lower()
 
 
 def _resolve_script_path() -> Path:
-    # f61-форма (образец test_negative_lint_md.py._resolve_script_path):
-    # default -- сиблинг, ЕСЛИ он существует, иначе живой файл.
+    # f61-форма (temporal-край 5.4): default (MODULE_UNDER_TEST пуст) --
+    # сиблинг, ЕСЛИ он существует, иначе живой файл, МОЛЧА (поведение как
+    # сегодня; после посадки байт-копией default-прогон не падает
+    # FileNotFoundError). Сиблинг ЗАПРОШЕН ЯВНО (MODULE_UNDER_TEST задан и
+    # НЕ "live") -- при отсутствии сиблинга ГРОМКИЙ КРАС, не тихая подмена
+    # живым (K1, docs/tasks/2026-08-25_queue8-mechbatch-spec.md).
+    live = TOOLS_DIR / "owns_gate.py"
     if MODULE_UNDER_TEST == "live":
-        return TOOLS_DIR / "owns_gate.py"
+        return live
     sibling = TOOLS_DIR / "owns_gate_md.py"
-    return sibling if sibling.exists() else TOOLS_DIR / "owns_gate.py"
+    if MODULE_UNDER_TEST == "":
+        return sibling if sibling.exists() else live
+    if not sibling.exists():
+        pytest.fail(
+            f"MODULE_UNDER_TEST={MODULE_UNDER_TEST!r} requested sibling "
+            f"{sibling} but it does not exist -- no silent live fallback (K1)"
+        )
+    return sibling
 
 
 SCRIPT = _resolve_script_path()
@@ -309,7 +326,7 @@ def test_decide_blind_owns_warn_still_works_unquoted(tmp_path):
     exit_code, output = m.decide(_writing_payload(prompt), registry_path=registry, now=_NOW)
     assert exit_code == 0
     assert output is not None
-    assert "слепа" in output["hookSpecificOutput"]["additionalContext"]
+    assert "конфликт владения" in output["hookSpecificOutput"]["additionalContext"]
     assert not registry.exists()
 
 
@@ -384,7 +401,12 @@ def test_registry_compaction_boundary_500_lines_appends(tmp_path):
                 "ts": fresh_ts, "session_key": f"s{i}", "cwd": "D:\\repo",
                 "description": "d", "owns": [f"D:/repo/tools/f{i}.py"],
             }) + "\n")
-    prompt = "owns: D:/repo/tools/new_one.py\n"
+    # K5 (docs/tasks/2026-08-25_queue8-mechbatch-spec.md): decide() теперь
+    # прогоняет dispatch_gate.decide(payload) ПЕРЕД записью реестра -- этот
+    # прогон проверяет КОМПАКЦИЮ, не гейт манифеста, поэтому промпт несёт
+    # полный манифест (DoD+Дано+owns), чтобы dispatch_gate не заблокировал
+    # регистрацию раньше, чем тест доберётся до проверяемой логики.
+    prompt = "DoD: тест зелёный, witness приложен.\nДано: репо целиком.\nowns: D:/repo/tools/new_one.py\n"
     m.decide(_writing_payload(prompt), registry_path=registry, now=now)
     lines = [ln for ln in registry.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert len(lines) == 501  # 500 -> append (500 не строго больше 500)
@@ -400,7 +422,10 @@ def test_registry_compaction_boundary_501_lines_compacts(tmp_path):
                 "ts": fresh_ts, "session_key": f"s{i}", "cwd": "D:\\repo",
                 "description": "d", "owns": [f"D:/repo/tools/f{i}.py"],
             }) + "\n")
-    prompt = "owns: D:/repo/tools/new_one.py\n"
+    # K5 -- см. комментарий в test_registry_compaction_boundary_500_lines_
+    # appends выше: манифест полон, чтобы dispatch_gate не заблокировал
+    # регистрацию раньше проверяемой логики компакции.
+    prompt = "DoD: тест зелёный, witness приложен.\nДано: репо целиком.\nowns: D:/repo/tools/new_one.py\n"
     m.decide(_writing_payload(prompt), registry_path=registry, now=now)
     lines = [ln for ln in registry.read_text(encoding="utf-8").splitlines() if ln.strip()]
     # 501 -> компакция (перезапись целиком), но все 501 -- свежие (та же

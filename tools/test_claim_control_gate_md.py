@@ -2,12 +2,17 @@
 tools/claim_control_gate_md.py (этап 2, СПЕКА B, партия 1, t-509 / docs/
 tasks/2026-08-19_md-regions-scanner-spec.md). MODULE UNDER TEST
 переключается переменной окружения MODULE_UNDER_TEST (образец конвенции
-F61_TARGET, tools/test_f61_halfstate.py): default -> сиблинг
-tools/claim_control_gate_md.py (region-aware); MODULE_UNDER_TEST=live ->
-живой tools/claim_control_gate.py БЕЗ единой правки -- используется
-здесь ТОЛЬКО как цель негативного контроля дискриминации (§8 п.4
-драфта): region-специфичные assert'ы, зелёные на сиблинге, обязаны
-стать КРАСНЫМИ на живой (нерегионной) цели.
+F61_TARGET, tools/test_f61_halfstate.py): пусто/не задано -> сиблинг
+tools/claim_control_gate_md.py, ЕСЛИ он существует, иначе МОЛЧА живой
+tools/claim_control_gate.py (temporal-край 5.4, поведение неизменно);
+MODULE_UNDER_TEST=live -> живой tools/claim_control_gate.py БЕЗ единой
+правки -- используется здесь ТОЛЬКО как цель негативного контроля
+дискриминации (§8 п.4 драфта): region-специфичные assert'ы, зелёные на
+сиблинге, обязаны стать КРАСНЫМИ на живой (нерегионной) цели; ЛЮБОЕ
+ДРУГОЕ непустое значение (например MODULE_UNDER_TEST=sibling) -- сиблинг
+ЗАПРОШЕН ЯВНО, при его отсутствии ГРОМКИЙ КРАС (pytest.fail, называющий
+запрошенный путь), не тихая подмена живым (K1, docs/tasks/
+2026-08-25_queue8-mechbatch-spec.md).
 
 Существующий tools/test_claim_control_gate.py (батарея живого файла,
 включая t-022/F5 пины) НЕ ТРОГАЕТСЯ этим диспатчем -- прогоняется
@@ -32,13 +37,24 @@ MODULE_UNDER_TEST = os.environ.get("MODULE_UNDER_TEST", "").strip().lower()
 
 
 def _resolve_script_path() -> Path:
-    # f61-форма (правка Lead при посадке партии 1): default — сиблинг,
-    # ЕСЛИ он существует, иначе живой файл; после посадки байт-копией
-    # default-прогон не падает на FileNotFoundError.
+    # f61-форма (temporal-край 5.4): default (MODULE_UNDER_TEST пуст) --
+    # сиблинг, ЕСЛИ он существует, иначе живой файл, МОЛЧА (поведение как
+    # сегодня; после посадки байт-копией default-прогон не падает
+    # FileNotFoundError). Сиблинг ЗАПРОШЕН ЯВНО (MODULE_UNDER_TEST задан и
+    # НЕ "live") -- при отсутствии сиблинга ГРОМКИЙ КРАС, не тихая подмена
+    # живым (K1, docs/tasks/2026-08-25_queue8-mechbatch-spec.md).
+    live = TOOLS_DIR / "claim_control_gate.py"
     if MODULE_UNDER_TEST == "live":
-        return TOOLS_DIR / "claim_control_gate.py"
+        return live
     sibling = TOOLS_DIR / "claim_control_gate_md.py"
-    return sibling if sibling.exists() else TOOLS_DIR / "claim_control_gate.py"
+    if MODULE_UNDER_TEST == "":
+        return sibling if sibling.exists() else live
+    if not sibling.exists():
+        pytest.fail(
+            f"MODULE_UNDER_TEST={MODULE_UNDER_TEST!r} requested sibling "
+            f"{sibling} but it does not exist -- no silent live fallback (K1)"
+        )
+    return sibling
 
 
 SCRIPT = _resolve_script_path()

@@ -1619,15 +1619,29 @@ _SETTINGS_RELPATH = Path(".claude") / "settings.json"
 # finished line, not the only one.
 _WIRING_LINE_MAX_LEN = 300
 
-# The one command shape every hook line in .claude/settings.json actually
-# uses today (CLAUDE.md command-hygiene rule 2's canonical form): exactly
-# "python tools/<file>.py", no extra flags, forward slashes. Anything
-# else -- a different interpreter, extra arguments, a path outside
-# tools/ -- is reported as an honest "unparsed command" WARNING (spec
-# point 2б) rather than guessed at. `[^/\\]+` (not `[\w ]+`) deliberately
-# allows spaces in the filename so a path-with-spaces command is still
-# recognized and checked, not silently misparsed.
-_HOOK_COMMAND_RE = re.compile(r"^python tools/([^/\\]+\.py)$")
+# The two command shapes a hook line in .claude/settings.json is allowed
+# to take (CLAUDE.md command-hygiene rule 2's canonical form, plus the
+# Dog 14.08 $CLAUDE_PROJECT_DIR-qualified form for the OS end): (1)
+# "python tools/<file>.py" -- no extra flags, forward slashes; (2)
+# 'python "$CLAUDE_PROJECT_DIR/tools/<file>.py"' -- double quotes, the
+# literal $CLAUDE_PROJECT_DIR prefix, forward slashes. Anything else --
+# a different interpreter, extra arguments, single quotes, an
+# unqualified $CLAUDE_PROJECT_DIR with no surrounding quotes, backslashes
+# inside form (2), a path outside tools/ -- is reported as an honest
+# "unparsed command" WARNING (spec point 2б) rather than guessed at; the
+# parser does not widen beyond these two forms. `[^/\\]+` (not `[\w ]+`)
+# deliberately allows spaces in the filename so a path-with-spaces
+# command is still recognized and checked, not silently misparsed.
+#
+# Group 1 is the optional opening double-quote marker (form selector,
+# not the filename); the two conditional branches `(?(1)...)` tie the
+# quote to its matching prefix/suffix so a quote can appear only paired
+# with the $CLAUDE_PROJECT_DIR/ prefix and vice versa -- group 2 is the
+# filename, captured by the SAME group regardless of which of the two
+# forms matched.
+_HOOK_COMMAND_RE = re.compile(
+    r'^python (")?(?(1)\$CLAUDE_PROJECT_DIR/tools/|tools/)([^/\\]+\.py)(?(1)"|)$'
+)
 
 # VG-1 part A: a fact string returned by _try_hookspath_autofix() on a
 # CONFIRMED success is prefixed with this marker so wiring_lines() can
@@ -1962,7 +1976,7 @@ def harness_channel(root: Path):
             command_safe = _ascii_sanitize(command, 150)
             warnings.append(f"unparsed hook command: {command_safe}")
             continue
-        filename = m.group(1)
+        filename = m.group(2)
         if filename in seen_files:
             continue
         seen_files.add(filename)

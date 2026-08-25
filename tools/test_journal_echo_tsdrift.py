@@ -434,7 +434,9 @@ def test_format_ts_drift_line_future_exact_literal():
     line = je._format_ts_drift_line((2, "future", 125.0))
     assert line == (
         "TS DRIFT: line 2 event ts is 125s in the FUTURE "
-        "(F-29: ts must be read from the system clock immediately before writing)"
+        "- ordering/audit by ts for this line is now unreliable; do not edit "
+        "the past line, note the drift in the NEXT event's notes and read ts "
+        "fresh from the clock next time (F-29)"
     )
 
 

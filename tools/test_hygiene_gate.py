@@ -145,15 +145,24 @@ def test_decide_redirect_stderr_triggers():
     assert hygiene_gate.MSG_REDIRECT_STDERR in ctx
 
 
+# F5(A) (сужение предиката pyc, 2026-08-25): фикстура была `print(1)` --
+# доказанно ЧИСТЫЙ payload, при новой трёхклассовой классификации P ->
+# ТИШИНА, что убило бы сам предмет пина ("python -c триггерит warn").
+# Переведена на мутирующий payload (класс M), текст MSG_PYTHON_DASH_C
+# НЕ меняется (F5b) -- см. отчёт builder'а t-605/спеку "ПОПРАВКА LEAD
+# 16:35" за полный разбор.
 def test_decide_python_dash_c_triggers():
-    exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1)"'))
+    command = 'python -c "open(\'x.txt\',\'w\').write(\'x\')"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     ctx = output["hookSpecificOutput"]["additionalContext"]
     assert hygiene_gate.MSG_PYTHON_DASH_C in ctx
 
 
+# F5(A): та же причина, heredoc-форма -- фикстура на мутирующий payload.
 def test_decide_python_heredoc_triggers():
-    exit_code, output = hygiene_gate.decide(_bash_payload("python - <<EOF\nprint(1)\nEOF"))
+    command = "python - <<EOF\nopen('x.txt','w').write('x')\nEOF"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     ctx = output["hookSpecificOutput"]["additionalContext"]
     assert hygiene_gate.MSG_PYTHON_DASH_C in ctx
@@ -418,6 +427,13 @@ def test_vg5_block_python_open_append_mode():
     assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
 
 
+# F5(A)-родственная правка (сужение предиката pyc, 2026-08-25, НЕ
+# входит в буквальную четвёрку F5(A), см. отчёт builder'а t-605 п.5) --
+# ОЖИДАНИЕ меняется, фикстура НЕ трогается (смысл пина -- "open
+# read-mode -- не форма записи", менять сам payload на мутирующий
+# исказил бы именно этот предмет): payload теперь ДОКАЗАННО чистый (P)
+# для класса (в) тоже -- итог ПОЛНАЯ тишина (сильнее прежнего пина --
+# подтверждает бездействие И класса (г), И класса (в) одновременно).
 def test_vg5_python_open_read_mode_does_not_block_via_open_indicator():
     # open(path,'r') -- чтение, не форма записи; substring "routing-log"
     # есть, но ни один write-индикатор (redirect/printf/echo/sed-i/tee/
@@ -425,10 +441,7 @@ def test_vg5_python_open_read_mode_does_not_block_via_open_indicator():
     command = "python -c \"print(open('logs/routing-log.jsonl','r').read())\""
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
-    # python -c сам по себе -- независимый WARN-класс (в), не блок.
-    assert output is not None
-    assert "permissionDecision" not in output["hookSpecificOutput"]
-    assert hygiene_gate.MSG_PYTHON_DASH_C in output["hookSpecificOutput"]["additionalContext"]
+    assert output is None
 
 
 def test_vg5_block_tee():
@@ -1162,13 +1175,18 @@ def test_c_heredoc_dash_variant_delimiter_journal_words_not_blocked():
     assert output is None
 
 
+# F5(A)-родственная правка (сужение предиката pyc, 2026-08-25, найдена
+# ПОЛНЫМ прогоном узкого набора после правок девятки, не входит в
+# буквальную девятку -- см. отчёт builder'а t-605 доп.): `print(1)` ->
+# P -> тишина, ломало бы предмет пина ("heredoc всё ещё ловится
+# классом в") -- фикстура на мутирующий payload сохраняет "ловится".
 def test_c_python_heredoc_still_caught_class_v_regress():
     # python - <<EOF -- НЕ git commit, класс (в) должен по-прежнему
     # ловить: COMMIT_HEREDOC_RE применяется ТОЛЬКО под гардом
     # GIT_COMMIT_RE (см. _strip_commit_messages) -- python-heredoc её
     # не проходит и не задет этой правкой.
     exit_code, output = hygiene_gate.decide(
-        _bash_payload("python - <<EOF\nprint(1)\nEOF")
+        _bash_payload("python - <<EOF\nopen('x.txt','w').write('x')\nEOF")
     )
     assert exit_code == 0
     ctx = output["hookSpecificOutput"]["additionalContext"]
@@ -1400,8 +1418,12 @@ def test_echo_json_v2_regress_evidence_exit0_no_stdout():
 # MSG_CD_NON_ROOT_WARN, не MSG_CD_PREFIX; " 2>&1" здесь ОПРЕДЕЛЁННЫЙ (вне
 # кавычек -c-аргумента, heredoc нет) -> реально ДЕНАЕТ теперь (не только
 # WARN); python -c остаётся отдельным WARN (класс в никогда не денает).
+# F5(A) (сужение предиката pyc, 2026-08-25): фикстура `print(1)` была
+# чистая (класс P -> pyc-строка исчезла бы из ctx) -- переведена на
+# мутирующий payload, чтобы сохранить предмет пина ("все сработавшие
+# классы перечислены в additionalContext").
 def test_decide_multiple_classes_all_listed():
-    command = 'cd gateway && python -c "print(1)" 2>&1'
+    command = 'cd gateway && python -c "open(\'x.txt\',\'w\').write(\'x\')" 2>&1'
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
@@ -1572,8 +1594,17 @@ def test_adversarial_very_long_command_no_crash():
     assert result.stderr == ""
 
 
+# F5(A)-родственная правка (сужение предиката pyc, 2026-08-25, НЕ
+# входит в буквальную четвёрку F5(A), см. отчёт builder'а t-605 п.6):
+# исходный payload (`print('he said \"hi\" 2>&1')`) -- доказанно
+# чистый (P), под новой классификацией decide() вернул бы ПОЛНУЮ
+# тишину -- `json.loads(result.stdout)` упал бы на пустой строке.
+# Фикстура переведена на мутирующий payload (класс M), нарощенная
+# ТЕМ ЖЕ вложенно-кавычковым куском -- предмет пина ("вложенные
+# кавычки не роняют subprocess") сохранён, additionalContext по-прежнему
+# парсится и несёт MSG_PYTHON_DASH_C.
 def test_adversarial_nested_quotes_no_crash():
-    command = """python -c "print('he said \\"hi\\" 2>&1')" """
+    command = """python -c "print('he said \\"hi\\" 2>&1'); open('x.txt','w').write('x')" """
     payload = _bash_payload(command)
     result = _run_hook(json.dumps(payload), text=True, encoding="utf-8")
     assert result.returncode == 0
@@ -1606,13 +1637,26 @@ def test_adversarial_null_bytes_in_json_string_no_crash():
 # обновлены, чтобы не ссылаться на удалённый механизм.
 
 
+# F5(A)-родственная правка (сужение предиката pyc, 2026-08-25, НЕ
+# входит в буквальную четвёрку F5(A), явно названа координатором в
+# развилке t-605): исходный payload -- доказанно чистый (P) -> pyc-
+# строка исчезла бы из ctx, ослабляя предмет пина. Фикстура переведена
+# на мутирующий payload -- запись в ДРУГОЙ (не журнальный) файл
+# "x.txt" -- сохраняет И предмет пина (класс в снова warn), И его
+# ядро (класс г НЕ триггерит на "routing-log.jsonl" просто упомянутом
+# как проза БЕЗ формы записи ПО ЭТОМУ target'у) -- даже строже
+# прежнего: теперь видно, что РЕАЛЬНАЯ запись рядом (в другой файл) не
+# путает журнальный класс.
 def test_v5_python_c_body_mentioning_journal_path_as_prose_not_classified(monkeypatch):
     # Чистая проза внутри -c, упоминающая путь журнала, БЕЗ формы записи
     # (`>`/printf/echo/sed -i/tee/open-write/PS-командлет) -- журнальный
     # класс требует ОБЕИХ (target И форма) в одном statement (_is_journal_
     # bypass), только упоминания пути мало. cd/2>&1 тут вовсе нет в тексте.
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
-    command = 'python -c "print(\'see routing-log.jsonl for details\')"'
+    command = (
+        "python -c \"print('see routing-log.jsonl for details'); "
+        "open('x.txt','w').write('x')\""
+    )
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
@@ -1623,18 +1667,52 @@ def test_v5_python_c_body_mentioning_journal_path_as_prose_not_classified(monkey
     assert hygiene_gate.MSG_JOURNAL_BLOCK not in hso["additionalContext"]
 
 
+# ПОПРАВКА LEAD 17:2x, Ф1: ИСХОДНАЯ (до мутации) фикстура теста выше
+# возвращается СОСЕДНИМ тестом -- честно, с ожиданием ПОЛНОЙ тишины
+# (payload доказанно чист (P), журнальный класс и без того молчал --
+# упоминание пути БЕЗ формы записи). Оба теста -- РАЗНЫЕ, законные
+# пины: этот -- "чистое упоминание, класс в ТОЖЕ молчит", предыдущий
+# (мутированный) -- "упоминание + РЕАЛЬНАЯ запись в ДРУГОЙ файл,
+# класс (г) не путается, класс (в) warn".
+def test_v5_python_c_body_mentioning_journal_path_as_prose_fully_silent_when_pure(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = 'python -c "print(\'see routing-log.jsonl for details\')"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+# F5(A)-родственная правка -- та же причина/форма правки, что у теста
+# выше (heredoc-двойник, координатор явно назвал его в развилке t-605).
 def test_v5_python_c_heredoc_body_mentioning_journal_path_as_prose_not_classified(monkeypatch):
     # То же для heredoc-формы.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    command = (
+        "python - <<EOF\n"
+        "print('see routing-log.jsonl for details')\n"
+        "open('x.txt','w').write('x')\n"
+        "EOF"
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+    assert hygiene_gate.MSG_CD_PREFIX not in hso["additionalContext"]
+    assert hygiene_gate.MSG_REDIRECT_STDERR not in hso["additionalContext"]
+    assert hygiene_gate.MSG_JOURNAL_BLOCK not in hso["additionalContext"]
+
+
+# ПОПРАВКА LEAD 17:2x, Ф1: heredoc-двойник исходной (до мутации)
+# фикстуры -- та же причина, что у теста выше.
+def test_v5_python_c_heredoc_body_mentioning_journal_path_as_prose_fully_silent_when_pure(
+    monkeypatch,
+):
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     command = "python - <<EOF\nprint('see routing-log.jsonl for details')\nEOF"
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
-    hso = output["hookSpecificOutput"]
-    assert "permissionDecision" not in hso
-    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
-    assert hygiene_gate.MSG_CD_PREFIX not in hso["additionalContext"]
-    assert hygiene_gate.MSG_REDIRECT_STDERR not in hso["additionalContext"]
-    assert hygiene_gate.MSG_JOURNAL_BLOCK not in hso["additionalContext"]
+    assert output is None
 
 
 def test_v5_real_cd_root_denies_regardless_of_quoted_text_elsewhere(monkeypatch):
@@ -1655,12 +1733,20 @@ def test_v5_real_cd_root_denies_regardless_of_quoted_text_elsewhere(monkeypatch)
     assert hygiene_gate.MSG_REDIRECT_STDERR not in hso["additionalContext"]
 
 
+# F5(A)-родственная правка (сужение предиката pyc, 2026-08-25, найдена
+# полным прогоном, не входит в буквальную девятку -- см. отчёт
+# builder'а t-605 доп.): фикстура -- РЕАЛЬНОЕ heredoc-тело собственного
+# python-heredoc'а (certain=True), а его содержимое -- прозовое
+# предложение, НЕ валидный Python (`ast.parse` падает) -- по новой
+# классификации это класс O, текст -- MSG_PYTHON_DASH_C_OPAQUE, не
+# старый MSG_PYTHON_DASH_C. Предмет пина (сообщение появляется РОВНО
+# ОДИН раз, не дублируется) сохранён -- просто на актуальном тексте.
 def test_v5_python_dash_c_message_appears_once_even_with_nested_mention(monkeypatch):
     # `_is_python_dash_c` -- булев флаг (не счётчик) -- сборка ответа
-    # добавляет MSG_PYTHON_DASH_C в контекст НЕ БОЛЕЕ одного раза,
-    # независимо от того, сколько раз паттерн "python -c" фактически
-    # встречается в сыром тексте команды (напр. один раз как реальный
-    # опенер, ещё раз как упоминание внутри heredoc-тела).
+    # добавляет НОВЫЙ warn-текст класса (в) в контекст НЕ БОЛЕЕ одного
+    # раза, независимо от того, сколько раз паттерн "python -c"
+    # фактически встречается в сыром тексте команды (напр. один раз как
+    # реальный опенер, ещё раз как упоминание внутри heredoc-тела).
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     command = (
         "python - <<EOF\n"
@@ -1672,7 +1758,7 @@ def test_v5_python_dash_c_message_appears_once_even_with_nested_mention(monkeypa
     hso = output["hookSpecificOutput"]
     assert "permissionDecision" not in hso
     ctx = hso["additionalContext"]
-    assert ctx.count(hygiene_gate.MSG_PYTHON_DASH_C) == 1
+    assert ctx.count(hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE) == 1
 
 
 # --- ЧАСТЬ 2: блоки cd/Set-Location, 2>&1, gateway-исключение (B4) -----
@@ -1911,22 +1997,34 @@ def test_f2_redirect_denies_when_no_quotes_no_heredoc(monkeypatch):
     assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
 
 
+# F5(A)-родственная правка (сужение предиката pyc, 2026-08-25, найдена
+# полным прогоном, не входит в буквальную девятку -- см. отчёт
+# builder'а t-605 доп.): payload `print('ran 2>&1 here')` -- доказанно
+# ЧИСТЫЙ (P) -- под новой классификацией класс (в) ТОЖЕ молчит (был
+# "отдельный, независимый WARN" в прежнем дизайне, комментарий ниже
+# оставлен как ИСТОРИЯ прежнего поведения). ОЖИДАНИЕ усилено до ПОЛНОЙ
+# тишины -- фикстура не меняется (payload и так уже был чист, менять
+# его на мутирующий стёр бы саму суть "2>&1 внутри кавычек не денит").
 def test_f2_redirect_fully_silent_when_quoted(monkeypatch):
     # Координатор, проба определённости, дословно: `python -c "print('ran
     # 2>&1 here')"` -- ТИШИНА (не warn, не deny) -- " 2>&1" ЦЕЛИКОМ внутри
     # кавычек -c-аргумента, `_mask_quoted_segments` маскирует его прежде
     # проверки; класс 2>&1 НЕ срабатывает вовсе (класс (в) python -c/heredoc
-    # -- ОТДЕЛЬНЫЙ, независимый WARN, он остаётся).
+    # -- раньше был ОТДЕЛЬНЫЙ, независимый WARN; теперь payload доказанно
+    # чист (P) -- тоже молчит, итог ПОЛНАЯ тишина).
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     command = "python -c \"print('ran 2>&1 here')\""
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
-    hso = output["hookSpecificOutput"]
-    assert "permissionDecision" not in hso
-    assert hygiene_gate.MSG_REDIRECT_STDERR not in hso["additionalContext"]
-    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+    assert output is None
 
 
+# F5(A)-родственная правка (сужение предиката pyc, 2026-08-25, найдена
+# полным прогоном, не входит в буквальную девятку -- см. отчёт
+# builder'а t-605 доп.): ДВА certain-вызова -- payload "a" парсится,
+# чист (P); payload "b 2>&1" -- НЕ валидный Python (`ast.parse` падает)
+# -> O. Строжайший класс побеждает (F6/E7: M > O > P) -> итог O, текст
+# -- MSG_PYTHON_DASH_C_OPAQUE, не старый MSG_PYTHON_DASH_C.
 def test_f2_redirect_fully_silent_when_quoted_chain(monkeypatch):
     # Координатор, проба определённости, дословно: критик получал ложный
     # DENY на этой цепочке ДО фикса -- ОБА " 2>&1" здесь ВНУТРИ кавычек
@@ -1939,7 +2037,7 @@ def test_f2_redirect_fully_silent_when_quoted_chain(monkeypatch):
     hso = output["hookSpecificOutput"]
     assert "permissionDecision" not in hso
     assert hygiene_gate.MSG_REDIRECT_STDERR not in hso["additionalContext"]
-    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE in hso["additionalContext"]
 
 
 def test_f2_redirect_warns_when_heredoc_present_unquoted(monkeypatch):
@@ -1984,7 +2082,12 @@ def test_f2_redirect_warn_uses_verbatim_v4_text(monkeypatch):
     command = "python - <<'PY'\nbody\nPY\nx 2>&1"
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
-    assert hygiene_gate.MSG_REDIRECT_STDERR == "не добавляй 2>&1 (гигиена п.3)"
+    # УЗЕЛ C (посадка 2026-08-25): текст переписан по правилу трёх; предмет
+    # пина прежний — V4 и V5 делят ОДНУ константу.
+    assert hygiene_gate.MSG_REDIRECT_STDERR == (
+        "хвост \" 2>&1\" не проходит сверку по allowlist — лишний permission-промпт "
+        "или отказ команды; убери \" 2>&1\" из команды (гигиена п.3)"
+    )
     assert hygiene_gate.MSG_REDIRECT_STDERR in output["hookSpecificOutput"]["additionalContext"]
 
 
@@ -2147,10 +2250,13 @@ def test_b6_redirect_inside_commit_message_not_trigger(monkeypatch, v5):
 # зависел от маскировки/write-намерения вовсе.
 
 
+# F5(A) (сужение предиката pyc, 2026-08-25): `print(1)` -> P -> тишина,
+# ломало бы сам предмет пина -- фикстура на мутирующий payload.
 def test_v5_python_c_always_warn_never_denies_class_v_removed(monkeypatch):
     # Класс (в) НИКОГДА не денает после удаления части 3 -- ровно V4-роль.
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
-    exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1)"'))
+    command = 'python -c "open(\'x.txt\',\'w\').write(\'x\')"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
     assert "permissionDecision" not in hso
@@ -2512,12 +2618,17 @@ def test_p6_heredoc_opener_deny(monkeypatch):
     assert hso["permissionDecisionReason"] == hygiene_gate.MSG_PYTHON_DASH_C_BLOCK
 
 
+# F5(A)-родственная правка (сужение предиката pyc, 2026-08-25, явно
+# названа координатором в развилке t-605: "switch-off тест пинит
+# «warn-не-deny» -- ему мутирующая фикстура"): `print(1)` -> P -> pyc-
+# warn исчез бы, ломая проверку "остаётся WARN, не deny".
 def test_p6_switch_off_stays_warn_even_under_v5(monkeypatch):
     # К3.2 регресс: V5 включён, выключатель НЕТ -- прежнее поведение
     # (WARN, MSG_PYTHON_DASH_C, без permissionDecision).
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", False)
-    exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1)"'))
+    command = 'python -c "open(\'x.txt\',\'w\').write(\'x\')"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
     assert "permissionDecision" not in hso
@@ -2950,3 +3061,536 @@ def test_p6_wrapper_control_real_dash_c_still_denies(monkeypatch):
     exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1)"'))
     assert exit_code == 0
     assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# =========================================================================
+# СУЖЕНИЕ ПРЕДИКАТА pyc (2026-08-25, К3.6) -- новая трёхклассовая (плюс
+# "U") семантика СОДЕРЖИМОГО certain-payload'а. См.
+# docs/tasks/2026-08-25_pyc-narrow-spec.md + её "ПОПРАВКУ LEAD 16:35".
+# Имена (закрыто дизайнером): ключ `pyc_payload`, функция
+# `_classify_pyc_payload`, константа `MSG_PYTHON_DASH_C_OPAQUE`.
+# =========================================================================
+
+
+def _payload_class(command: str) -> str:
+    return hygiene_gate._classify_pyc_payload(command)
+
+
+# --- A1-A6: акцептанс -----------------------------------------------------
+
+
+def test_pycnarrow_a1_pure_arithmetic_expression_silent():
+    exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1+1)"'))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_pycnarrow_a1_pure_json_read_silent():
+    command = 'python -c "import json; print(json.load(open(\'x.json\')))"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_pycnarrow_a2_mutation_warns_old_text():
+    command = "python -c \"open('x.txt','w').write('x')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE not in hso["additionalContext"]
+
+
+def test_pycnarrow_a3_opaque_subprocess_warns_new_text_only():
+    command = 'python -c "import subprocess; subprocess.run([\'ls\'])"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    ctx = hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE in ctx
+    # M-текст -- НЕ подстрока OPAQUE-текста, замена, не добавка (F6).
+    assert hygiene_gate.MSG_PYTHON_DASH_C not in ctx
+
+
+# A4: "новый тест асимметрии" -- чистый payload при PYC_DENY_ENABLED=True
+# всё равно денает (I2: deny-путь не читает pyc_payload вовсе -- deny
+# зависит ТОЛЬКО от pyc_certain, F4(A) принята явно).
+def test_pycnarrow_a4_asymmetry_pure_payload_still_denies_when_switch_on(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = 'python -c "print(1+1)"'
+    assert _payload_class(command) == "P"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_PYTHON_DASH_C_BLOCK
+
+
+def test_pycnarrow_a6_v4_path_unaffected_by_new_classification(monkeypatch):
+    # V5_ENABLED=False -- И4 (V4 путь байт-в-байт): чистый payload
+    # по-прежнему безусловно warn старым текстом, payload_class
+    # игнорируется целиком (_decide_v4 его не читает).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", False)
+    command = 'python -c "print(1+1)"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+# --- E1/E11/B8: пусто/неизвлечённый payload -> O ---------------------------
+
+
+def test_pycnarrow_e1_bare_dash_c_no_argument_opaque():
+    assert _payload_class("python -c") == "O"
+
+
+def test_pycnarrow_e1_empty_quoted_argument_opaque():
+    assert _payload_class('python -c ""') == "O"
+
+
+def test_pycnarrow_e1_empty_heredoc_opaque():
+    assert _payload_class("python - <<EOF\nEOF") == "O"
+
+
+def test_pycnarrow_b8_heredoc_without_closer_opaque():
+    # Героdoc без закрывателя -- extraction не находит ни одного
+    # payload'а (regex требует закрывающую строку-делимитер).
+    command = "python - <<EOF\nprint(1)\n"
+    assert hygiene_gate._is_python_dash_c_certain(command) is True
+    assert _payload_class(command) == "O"
+
+
+# --- E3/E6/B10: строковый литерал/комментарий -- не код -> P --------------
+
+
+def test_pycnarrow_e3_w_inside_string_literal_pure():
+    assert _payload_class("python -c \"x = 'w'\"") == "P"
+
+
+def test_pycnarrow_e6_comment_only_pure():
+    assert _payload_class('python -c "# just a comment"') == "P"
+
+
+def test_pycnarrow_b10_mutation_mentioned_in_string_literal_pure():
+    # "open(f,'w')" -- ТЕКСТ (аргумент print), не РЕАЛЬНЫЙ вызов open().
+    command = "python -c \"print('mentions open(f, mode w) as text')\""
+    assert _payload_class(command) == "P"
+
+
+# --- E5: регистрозависимость (легально, NameError в Python) ---------------
+
+
+def test_pycnarrow_e5_uppercase_open_not_recognized_pure():
+    assert _payload_class("python -c \"OPEN('x','w')\"") == "P"
+
+
+def test_pycnarrow_e5_pyc_key_survives_uppercase_python_dash_c():
+    # Ключ `pyc` (широкий, I1) -- регистронезависим, НЕ тронут этой
+    # задачей; классификация СОДЕРЖИМОГО -- отдельный, регистрозависимый
+    # вопрос (см. тест выше).
+    signals = hygiene_gate._collect_v5_signals('PYTHON -C "OPEN(\'x\',\'w\')"')
+    assert signals["pyc"] is True
+
+
+# --- E7/B9/B11: несколько вызовов/вкладов -- строжайший класс -------------
+
+
+def test_pycnarrow_e7_two_calls_different_classes_strictest_wins():
+    command = 'python -c "print(1)" ; python -c "open(\'x\',\'w\')"'
+    assert _payload_class(command) == "M"
+
+
+def test_pycnarrow_b9_two_mutating_calls_one_warn_line():
+    command = "python -c \"open('a','w').write('x'); open('b','w').write('y')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    ctx = output["hookSpecificOutput"]["additionalContext"]
+    assert ctx.count(hygiene_gate.MSG_PYTHON_DASH_C) == 1
+
+
+def test_pycnarrow_b11_dunder_import_os_remove_opaque():
+    # __import__('os').remove -- база `.remove` это ВЫЗОВ, не Name --
+    # dotted-имя не строится, `.remove` НЕ засчитывается как os.remove;
+    # вклад O даёт ТОЛЬКО сам __import__(...).
+    assert _payload_class("python -c \"__import__('os').remove('f')\"") == "O"
+
+
+def test_pycnarrow_b11_mutation_plus_opaque_together_mutation_wins():
+    command = "python -c \"import subprocess; open('x','w').write('y')\""
+    assert _payload_class(command) == "M"
+
+
+# --- E8: open() -- полная матрица режимов ----------------------------------
+
+
+def test_pycnarrow_e8_open_no_mode_pure():
+    assert _payload_class("python -c \"open('x').read()\"") == "P"
+
+
+def test_pycnarrow_e8_open_r_mode_pure():
+    assert _payload_class("python -c \"open('x','r').read()\"") == "P"
+
+
+def test_pycnarrow_e8_open_w_mode_mutation():
+    assert _payload_class("python -c \"open('x','w')\"") == "M"
+
+
+def test_pycnarrow_e8_open_a_mode_mutation():
+    assert _payload_class("python -c \"open('x','a')\"") == "M"
+
+
+def test_pycnarrow_e8_open_x_mode_mutation():
+    assert _payload_class("python -c \"open('x','x')\"") == "M"
+
+
+def test_pycnarrow_e8_open_rplus_mode_mutation():
+    assert _payload_class("python -c \"open('x','r+')\"") == "M"
+
+
+def test_pycnarrow_e8_open_mode_variable_opaque():
+    assert _payload_class("python -c \"m='w'; open('x', m)\"") == "O"
+
+
+def test_pycnarrow_e8_open_kwargs_unpack_opaque():
+    assert _payload_class("python -c \"d={'mode':'w'}; open('x', **d)\"") == "O"
+
+
+def test_pycnarrow_e8_open_mode_kwarg_w_mutation():
+    assert _payload_class("python -c \"open('x', mode='w')\"") == "M"
+
+
+# --- E9/B7: не-Python / незакрытая кавычка -- сбой парсера -> O -----------
+
+
+def test_pycnarrow_e9_non_python_content_opaque():
+    assert _payload_class('python -c "this is not { python : code"') == "O"
+
+
+def test_pycnarrow_b7_unclosed_quote_opaque():
+    assert _payload_class('python -c "print(\'unclosed') == "O"
+
+
+# --- E10/B1/B2: лимит L1 -- ГРАНИЦА и ЗА ней (правило 6а) ------------------
+
+
+def test_pycnarrow_b1_payload_exactly_l1_parses():
+    body = "x = 1" + " " * (hygiene_gate.PYC_PAYLOAD_LIMIT - len("x = 1"))
+    assert len(body) == hygiene_gate.PYC_PAYLOAD_LIMIT
+    command = f'python -c "{body}"'
+    assert _payload_class(command) == "P"
+
+
+def test_pycnarrow_b2_payload_l1_plus_one_opaque_no_parse():
+    body = "x" * (hygiene_gate.PYC_PAYLOAD_LIMIT + 1)
+    command = f'python -c "{body}"'
+    assert _payload_class(command) == "O"
+
+
+# --- B4/B5: глубина вложенности -- ГРАНИЦА и ЗА ней ------------------------
+
+
+def test_pycnarrow_b4_nesting_depth_50_pure():
+    payload = "(" * 50 + "1" + ")" * 50
+    assert _payload_class(f'python -c "{payload}"') == "P"
+
+
+def test_pycnarrow_b5_nesting_depth_5000_no_traceback_opaque():
+    payload = "(" * 5000 + "1" + ")" * 5000
+    # "без трейсбека" -- сам вызов не должен поднять исключение наружу.
+    result = _payload_class(f'python -c "{payload}"')
+    assert result == "O"
+
+
+# --- B3: 1МБ команда -- exit 0, время приложено числом --------------------
+
+
+def test_pycnarrow_b3_1mb_command_exit0():
+    command = 'python -c "print(\'' + ("a" * 1_000_000) + "')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    # Payload (без учёта кавычек) > PYC_PAYLOAD_LIMIT -> O, без парсинга.
+    assert output["hookSpecificOutput"]["additionalContext"].count(
+        hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE
+    ) == 1
+
+
+# A8: замер времени 100КБ/1МБ -- ЧИСЛОМ, порогом НЕ гейтится (щедрый
+# потолок ниже -- регресс-предохранитель на катастрофический скачок,
+# не строгий perf-гейт; фактическое число -- в witness отчёта builder'а).
+#
+# ПОПРАВКА LEAD 17:2x, Ф3 (ОГОВОРКА, честно, не молчанием): число этого
+# теста относится к ДОБРОКАЧЕСТВЕННОЙ форме -- ОДИН настоящий payload
+# на 100КБ/1МБ. Критик-гейт зафиксировал ОТДЕЛЬНУЮ, ПРЕДСУЩЕСТВУЮЩУЮ
+# квадратичность извлечения на АДВЕРСАРИАЛЬНОЙ форме "повторённые
+# опенеры БЕЗ закрывателя" (много `python -c`/heredoc-подобных токенов
+# подряд, каждый без своего аргумента/закрывающей строки) -- НЕ чинится
+# этим раундом (Ф3 явно: "квадратичность НЕ чинить"); носитель очереди
+# -- docs/tasks/2026-08-25_queue8-closure.md (не в owns этой задачи,
+# billerd не пишет туда сам -- пункт для Lead/координатора).
+def test_pycnarrow_perf_100kb_1mb_number_not_gated():
+    cmd_100kb = 'python -c "print(\'' + ("a" * 100_000) + "')\""
+    t0 = time.perf_counter()
+    hygiene_gate.decide(_bash_payload(cmd_100kb))
+    elapsed_100kb = time.perf_counter() - t0
+
+    cmd_1mb = 'python -c "print(\'' + ("a" * 1_000_000) + "')\""
+    t0 = time.perf_counter()
+    hygiene_gate.decide(_bash_payload(cmd_1mb))
+    elapsed_1mb = time.perf_counter() - t0
+
+    assert elapsed_100kb < 2.0, f"pyc_payload classify 100KB: {elapsed_100kb:.4f}s"
+    assert elapsed_1mb < 2.0, f"pyc_payload classify 1MB: {elapsed_1mb:.4f}s"
+
+
+# --- B6: юникод (эмодзи/греческий) -> P ------------------------------------
+
+
+def test_pycnarrow_b6_emoji_and_greek_pure():
+    command = "python -c \"print('αβ\U0001F600')\""
+    assert _payload_class(command) == "P"
+
+
+# --- B12: null-байты в stdin -- subprocess-уровень, exit 0 без падения ----
+
+
+def test_pycnarrow_b12_null_bytes_stdin_no_crash():
+    result = _run_hook(b"\xff\xfe not json \x00")
+    assert result.returncode == 0
+    assert result.stdout.strip() == b""
+
+
+# --- B13: payload из пробелов -> O -----------------------------------------
+
+
+def test_pycnarrow_b13_whitespace_only_payload_opaque():
+    assert _payload_class('python -c "   "') == "O"
+
+
+# --- B14: журнал + pyc одновременно, payload чист -- журнал НЕ изменён,
+# pyc-строки нет ----------------------------------------------------------
+
+
+def test_pycnarrow_b14_journal_block_plus_clean_pyc_payload_no_pyc_line():
+    command = (
+        "echo x >> logs/routing-log.jsonl; python -c \"print(1+1)\""
+    )
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+    ctx = hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C not in ctx
+    assert hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE not in ctx
+
+
+# --- "U" (ПОПРАВКА LEAD 16:35): certain=False -- классификация НЕ
+# считается, старый безусловный текст -----------------------------------
+
+
+def test_pycnarrow_u_uncertain_form_not_classified():
+    command = 'git commit -m "run python -c to test this"'
+    assert hygiene_gate._is_python_dash_c_certain(command) is False
+    assert _payload_class(command) == "U"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+# --- I1/E15: ключ `pyc` (широкий) и измеритель -- НЕ переопределены -------
+
+
+def test_pycnarrow_i1_pyc_key_unchanged_true_for_pure_payload():
+    # Доказанно чистый (P) payload -- widely-signal `pyc` остаётся True
+    # (I1: "всё, что давало pyc=True, даёт и после").
+    command = 'python -c "print(1+1)"'
+    signals = hygiene_gate._collect_v5_signals(command)
+    assert signals["pyc"] is True
+    assert signals["pyc_payload"] == "P"
+
+
+def test_pycnarrow_i1_measurer_reads_pyc_not_pyc_payload():
+    import permission_audit
+
+    command = 'python -c "print(1+1)"'
+    assert permission_audit.classify_hygiene(command) == ["python -c/heredoc"]
+
+
+# --- негативный контроль трёх классов (по одной команде M/P/O, включая
+# ту, что ОБЯЗАНА молчать) -- witness ----------------------------------
+
+
+def test_pycnarrow_negative_control_m_class_warns_old_text():
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("python -c \"open('x.txt','w').write('x')\"")
+    )
+    assert exit_code == 0
+    assert hygiene_gate.MSG_PYTHON_DASH_C in output["hookSpecificOutput"]["additionalContext"]
+
+
+def test_pycnarrow_negative_control_p_class_fully_silent():
+    exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1+1)"'))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_pycnarrow_negative_control_o_class_warns_new_text():
+    command = 'python -c "import subprocess; subprocess.run([\'ls\'])"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    ctx = output["hookSpecificOutput"]["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE in ctx
+
+
+# =========================================================================
+# ПОПРАВКА LEAD 17:2x -- фикс-раунд по вердикту критик-гейта (БЛОКЕР):
+# реально пишущий код уходил в P (тишина) на алиасах импортов,
+# from-импортах, цепочечных получателях и переприсваивании callable.
+# Двенадцать замеренных атак -- КАЖДАЯ пином поимённо: вердикт ОБЯЗАН
+# быть M или O (WARN), НИ ОДНА не молчит.
+# =========================================================================
+
+
+def _assert_never_silent(command: str, expected_class: str) -> None:
+    assert _payload_class(command) == expected_class
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is not None, f"АТАКА ПРОШЛА МОЛЧА (регресс): {command}"
+    assert "permissionDecision" not in output["hookSpecificOutput"]
+
+
+# --- Ось A: алиасы импортов (import X as Y) -----------------------------
+
+
+def test_pycnarrow_alias_1_import_as_qualified_os_remove_mutation():
+    command = "python -c \"import os as o; o.remove('f.txt')\""
+    _assert_never_silent(command, "M")
+
+
+def test_pycnarrow_alias_2_import_as_qualified_shutil_rmtree_mutation():
+    command = "python -c \"import shutil as sh; sh.rmtree('d')\""
+    _assert_never_silent(command, "M")
+
+
+def test_pycnarrow_alias_3_import_as_qualified_subprocess_opaque():
+    command = "python -c \"import subprocess as sp; sp.run(['ls'])\""
+    _assert_never_silent(command, "O")
+
+
+# --- Ось A: from-импорты (from X import Y [as Z]) ------------------------
+
+
+def test_pycnarrow_alias_4_from_import_bare_name_mutation():
+    command = "python -c \"from os import remove; remove('f.txt')\""
+    _assert_never_silent(command, "M")
+
+
+def test_pycnarrow_alias_5_from_import_asname_mutation():
+    command = "python -c \"from os import remove as rm; rm('f.txt')\""
+    _assert_never_silent(command, "M")
+
+
+def test_pycnarrow_alias_6_from_import_opaque_name_opaque():
+    command = "python -c \"from subprocess import run; run(['ls'])\""
+    _assert_never_silent(command, "O")
+
+
+# --- Ось B: цепочечные получатели (база вызова -- САМА вызов) ------------
+
+
+def test_pycnarrow_chained_receiver_1_path_write_text_mutation():
+    command = "python -c \"from pathlib import Path; Path('x.txt').write_text('x')\""
+    _assert_never_silent(command, "M")
+
+
+# Худший экземпляр критик-гейта, дословно.
+def test_pycnarrow_chained_receiver_2_worst_case_journal_path_write_text_mutation():
+    command = (
+        "python -c \"from pathlib import Path; "
+        "Path('logs/routing-log.jsonl').write_text('')\""
+    )
+    _assert_never_silent(command, "M")
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert hygiene_gate.MSG_PYTHON_DASH_C in output["hookSpecificOutput"]["additionalContext"]
+
+
+def test_pycnarrow_chained_receiver_3_pathlib_path_open_w_mutation():
+    # Методная форма open(mode) -- режим ПЕРВЫМ (не вторым) аргументом,
+    # self неявен (см. _FREE_OPEN_DOTTED_NAMES докстринг).
+    command = "python -c \"import pathlib; pathlib.Path('x').open('w')\""
+    _assert_never_silent(command, "M")
+
+
+def test_pycnarrow_chained_receiver_4_io_open_write_mutation():
+    command = "python -c \"import io; io.open('x','w').write('y')\""
+    _assert_never_silent(command, "M")
+
+
+def test_pycnarrow_chained_receiver_5_pandas_dataframe_to_csv_mutation():
+    command = "python -c \"import pandas as pd; pd.DataFrame().to_csv('x.csv')\""
+    _assert_never_silent(command, "M")
+
+
+# --- Ось A: переприсваивание callable (w = open; w(p, 'w')) --------------
+
+
+def test_pycnarrow_reassign_1_open_then_call_opaque():
+    command = "python -c \"w = open; w('p', 'w')\""
+    _assert_never_silent(command, "O")
+
+
+def test_pycnarrow_reassign_2_os_remove_then_call_opaque():
+    command = "python -c \"import os; r = os.remove; r('f')\""
+    _assert_never_silent(command, "O")
+
+
+# --- негативный контроль: переприсваивание НЕ callable-имени -- не O -----
+
+
+def test_pycnarrow_reassign_control_non_mo_name_not_flagged_pure():
+    # `x = 5` -- НЕ ссылается на open/M/O-имя -- НЕ должно давать O.
+    command = 'python -c "x = 5; print(x)"'
+    assert _payload_class(command) == "P"
+
+
+# --- E8 регресс на методной форме open(mode) (Ось B доп.-фикс) -----------
+
+
+def test_pycnarrow_e8_method_open_no_mode_pure():
+    command = "python -c \"import pathlib; pathlib.Path('x').open()\""
+    assert _payload_class(command) == "P"
+
+
+def test_pycnarrow_e8_method_open_r_mode_pure():
+    command = "python -c \"import pathlib; pathlib.Path('x').open('r')\""
+    assert _payload_class(command) == "P"
+
+
+# --- Ф1/Ф2/Ф3 -- подтверждения фикс-раунда -------------------------------
+
+
+def test_pycnarrow_f2_certain_computed_once_signal_matches_direct_call():
+    # Ф2: результат через `_collect_v5_signals` (готовый certain,
+    # переданный параметром) совпадает с прямым вызовом без параметра.
+    command = "python -c \"open('x.txt','w').write('x')\""
+    signals = hygiene_gate._collect_v5_signals(command)
+    assert signals["pyc_payload"] == hygiene_gate._classify_pyc_payload(command)
+
+
+def test_pycnarrow_u_group_and_deny_bodies_still_green_after_fix_round():
+    # Контроль DoD фикс-раунда: U-группа (обёртки/проза) и deny-тела
+    # ПО-ПРЕЖНЕМУ зелены без правки -- пробный смок здесь, полное
+    # покрытие -- существующие test_p6_wrapper_*/test_p6_mention_inside_*/
+    # A4-список (весь узкий прогон -- witness отчёта).
+    command = 'git commit -m "run python -c to test this"'
+    assert hygiene_gate._classify_pyc_payload(command) == "U"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert hygiene_gate.MSG_PYTHON_DASH_C in output["hookSpecificOutput"]["additionalContext"]

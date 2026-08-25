@@ -409,11 +409,11 @@ def test_check_dead_literal_exit1_verbatim_defect_marker(tmp_path):
 
 def test_check_real_repo_registry_is_clean():
     """Интеграционный позитив: БОЕВОЙ tools/warn_layers.json read-only
-    против БОЕВОГО дерева -- все 18 литералов живы (перепроверено
-    чтением при постройке узла)."""
+    против БОЕВОГО дерева -- все 19 литералов живы (перепроверено
+    чтением при постройке узла FRESHNESS, 2026-08-25 -- было 18)."""
     text, code = wd.run_check(wd.DEFAULT_REGISTRY, REPO_ROOT, transcripts_dir=None)
     assert code == 0, text
-    assert "слоёв в реестре: 18 (валидных: 18)" in text
+    assert "слоёв в реестре: 20 (валидных: 20)" in text
 
 
 def test_check_source_empty_is_defect(tmp_path):
@@ -1278,6 +1278,86 @@ def test_pop_search_tool_or_pattern_read_never_reachable():
     но НЕ член SEARCH_TOOLS и не несёт `command` -- никогда достижим."""
     assert wd._population_search_tool_or_pattern("Read", {}) is False
     assert wd._population_search_tool_or_pattern("Read", {"command": "grep foo"}) is False
+
+
+# --- узел FRESHNESS (docs/tasks/2026-08-25_freshness-layer-spec.md, Ф5b):
+# dispatch_prompt_freshness_token -- новый вид населённости, ИМПОРТ трёх
+# регексов из dispatch_gate. -------------------------------------------
+
+def test_pop_freshness_token_class_v_relative_anchor_true():
+    assert wd._population_dispatch_prompt_freshness_token(
+        "Task", {"prompt": "tools/dispatch_gate.py:9999999"}
+    ) is True
+
+
+def test_pop_freshness_token_class_v_absolute_anchor_true():
+    assert wd._population_dispatch_prompt_freshness_token(
+        "Agent", {"prompt": r"D:\repo\tools\x.py:100"}
+    ) is True
+
+
+def test_pop_freshness_token_class_a_check_token_true():
+    assert wd._population_dispatch_prompt_freshness_token(
+        "Task", {"prompt": "чек 13(б)"}
+    ) is True
+
+
+def test_pop_freshness_token_no_candidate_false():
+    assert wd._population_dispatch_prompt_freshness_token(
+        "Task", {"prompt": "ничего похожего тут нет"}
+    ) is False
+
+
+def test_pop_freshness_token_wrong_tool_name_false():
+    assert wd._population_dispatch_prompt_freshness_token(
+        "Bash", {"prompt": "tools/dispatch_gate.py:9999999"}
+    ) is False
+
+
+def test_pop_freshness_token_missing_or_nonstring_prompt_false():
+    assert wd._population_dispatch_prompt_freshness_token("Task", {}) is False
+    assert wd._population_dispatch_prompt_freshness_token("Task", {"prompt": None}) is False
+
+
+def test_pop_freshness_token_is_superset_of_actual_warn_battery():
+    """Ф5b -- ИНВАРИАНТ, не просто пример: предикат обязан быть
+    НАДМНОЖЕСТВОМ фактического условия freshness_warn() (иначе ДЕФЕКТ
+    ПРЕДИКАТА, calls > achievable, exit 1) -- батарея прогоняет и
+    квотированные, и подавленные (owns/run-line), и молчащие случаи:
+    ВЕЗДЕ, где freshness_warn() дал непустой варн, предикат обязан
+    вернуть True; обратное (предикат True, варн "") -- ЛЕГАЛЬНО
+    (предикат сознательно шире)."""
+    import dispatch_gate as _dg
+
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    prompts = [
+        "tools/dispatch_gate.py:9999999",
+        "чек 77(а)",
+        "чек 13(я)",
+        "чек 13(a)",
+        "```\ntools/dispatch_gate.py:9999999\n```\n",  # квотировано -- варн пуст
+        "Прогон: python tools/dispatch_gate.py:9999999 -q",  # подавлено -- варн пуст
+        "tools/dispatch_gate.py:10",  # в пределах -- варн пуст
+        "чек 13(б)",  # существует -- варн пуст
+    ]
+    for prompt in prompts:
+        payload = {
+            "tool_name": "Task",
+            "tool_input": {"subagent_type": "builder", "prompt": prompt},
+            "cwd": repo_root,
+        }
+        warn = _dg.freshness_warn(payload)
+        achievable = wd._population_dispatch_prompt_freshness_token(
+            "Task", {"prompt": prompt}
+        )
+        if warn:
+            assert achievable is True, (prompt, warn)
+
+
+# --- Ф6b: POPULATION_RULE_VERSION -- пин на новое значение узла --------
+
+def test_population_rule_version_bumped_to_2():
+    assert wd.POPULATION_RULE_VERSION == 2
 
 
 # --- layer_population / доля (Б-К1..Б-К3) -- см. также test_bk1_/test_bk3_/

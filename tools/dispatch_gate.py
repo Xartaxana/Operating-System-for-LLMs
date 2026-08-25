@@ -789,8 +789,50 @@ AGENTS_DIR = Path(__file__).resolve().parents[1] / ".claude" / "agents"
 DOD_MARKERS_RE = re.compile(
     r"\bDoD\b|критери[ия] приёмки|\bwitness\b|проверочн\w+ прогон", re.IGNORECASE
 )
+# F2 (ФИКС-РАУНД, docs/tasks/2026-08-25_queue8-mechbatch-spec.md): "внеси"
+# переведена из голой альтернативы в СВЯЗАННУЮ форму, идентичную "добавь"
+# (≤60 симв., без перевода строки, до файлового объекта). Объект --
+# закрытый список из восьми слов ИЛИ путь-подобный токен (сегмент со
+# слэшем/бэкслэшем, оканчивающийся расширением, напр. "tools/x.py") --
+# ВТОРАЯ форма нужна ИМЕННО для "внеси", акцептанс-ключ критика "внеси
+# правку в tools/x.py" не несёт ни одного из восьми слов, только реальный
+# путь. Обеим формам ("добавь"/"внеси") -- негативная защита ОТ ложного
+# срабатывания на ТЕКСТЕ ВОЗВРАТА воркера: если файловый объект стоит
+# СРАЗУ после "в (отчёт|дайджест|доклад|ответ)" -- это цель-возврат
+# (доклад координатору), не запись в ФС -- НЕ матч (контрольные фразы
+# критика: "внеси в отчёт число зелёных тестов", "добавь в отчёт запись
+# о результате", "добавь в дайджест путь к носителю" -- ни одна не
+# матчит). "посади" остаётся голой альтернативой (не тронута).
+_WRITE_FILE_OBJECT_ALT = (
+    r"(?:файл|файла|строку|строки|запись|блок|секцию|раздел|путь)\b"
+    r"|[\w.\-]*[/\\][\w./\\-]*\.[A-Za-z0-9]{1,10}\b"
+)
+# ФИКС-РАУНД Ф1 (критик-гейт t-606, ЖИВЫЕ ложные БЛОКИ): охрана
+# расширена в ДВУХ измерениях -- (1) ПАДЕЖ цели-возврата (окончания
+# е/а/у/ом/ы/ах/ов/ами -- отчёт-Е, дайджест-Е, доклад-ОМ и т.п.),
+# (2) ДО ДВУХ промежуточных слов МЕЖДУ "в" и целью ("в свой отчёт") И
+# МЕЖДУ целью и файловым объектом ("в ответ ссылку на docs/x.md", "в
+# доклад краткий путь") -- живые ложные блоки критика: "добавь в отчёте
+# строку про результат", "добавь в дайджесте запись", "добавь в ответ
+# ссылку на docs/x.md", "внеси в доклад краткий путь", "внеси в свой
+# отчёт запись" -- ни один из пяти НЕ матчил старую форму (падеж/разрыв
+# ломали "\s+" жёсткую смежность) и потому лился в БЛОК живого хука на
+# чистом тексте возврата координатору.
+_WRITE_RETURN_TARGET_NOUN = r"(?:отчёт|дайджест|доклад|ответ)(?:е|а|у|ом|ы|ах|ов|ами)?\b"
+_WRITE_FILLER_WORD = r"[^\s()]+"
+_WRITE_RETURN_TARGET_GUARD = (
+    r"в(?:\s+" + _WRITE_FILLER_WORD + r"){0,2}\s+" + _WRITE_RETURN_TARGET_NOUN
+    + r"(?:\s+" + _WRITE_FILLER_WORD + r"){0,2}\s+(?:" + _WRITE_FILE_OBJECT_ALT + r")"
+)
+_WRITE_CONNECTED_VERB_RE = (
+    r"\b(?:добавь|внеси)\b"
+    r"(?![^\n]{0,60}?" + _WRITE_RETURN_TARGET_GUARD + r")"
+    r"[^\n]{0,60}?\b(?:" + _WRITE_FILE_OBJECT_ALT + r")"
+)
 WRITE_INDICATORS_RE = re.compile(
-    r"\bзапиши\b|\bсоздай файл\b|\bправь\b|\bизмени файл\b", re.IGNORECASE
+    r"\bзапиши\b|\bсоздай файл\b|\bправь\b|\bизмени файл\b|\bпосади\b"
+    r"|" + _WRITE_CONNECTED_VERB_RE,
+    re.IGNORECASE,
 )
 MANIFEST_GIVEN_RE = re.compile(r"\bдано\b|\bgiven\b", re.IGNORECASE)
 MANIFEST_OWNS_RE = re.compile(r"owns", re.IGNORECASE)
@@ -1647,16 +1689,65 @@ def _is_template_token(tok: str) -> bool:
     return False
 
 
-def _filter_given_candidates(prompt: str, candidates: list) -> list:
+def _split_backtick_body(tok: str) -> list:
+    """K3 (docs/tasks/2026-08-25_queue8-mechbatch-spec.md): носитель --
+    ВЫХОДНОЙ шаг _filter_given_candidates ниже (GIVEN_*_RE извлечения
+    сами НЕ трогаются, позиционный инвариант узла A сохраняется). Тело
+    извлечённого GIVEN-регексами кандидата может содержать буквальный
+    бэктик (` ` `), когда между двумя бэктик-обёрнутыми путями нет
+    пробельного разделителя -- _GIVEN_PATH_BODY_CHAR исключает `\\s`, но
+    НЕ исключает `` ` `` -- греди-квантификатор {0,300} склеивает оба
+    пути (и всё между ними) в ОДИН кандидат-токен. Фикс: тело, содержащее
+    бэктик, режется по бэктикам; непустые сегменты возвращаются как
+    отдельные пути. Края: тело из одних бэктиков -> пустой список (все
+    части split пустые); одиночный бэктик на конце -> хвостовая пустая
+    часть отбрасывается (срезается); тело без бэктика -> список из
+    одного исходного тела (регресс существующих 243 тестов -- вызывающий
+    код применяет эту функцию ТОЛЬКО когда "`" уже найден в tok)."""
+    return [part for part in tok.split("`") if part]
+
+
+def _filter_given_candidates(prompt: str, candidates: list, patterns=None, deploy_markers=None) -> list:
     """ЕДИНАЯ точка фильтрации Р1 + узел A (форма а/б/в1/в2) -- вызывается
     ПОСЛЕ извлечения кандидатов (bare ИЛИ регионально-осведомлённого), ДО
     проверки существования (позиционный инвариант, не сдвинут). НИ ОДНО
     правило не может ДОБАВИТЬ токен в missing -- только исключить из
     проверки (А-К5).
 
-    Порядок применения ниже НЕ влияет на результат (Р1 и правила узла A
-    -- НЕЗАВИСИМАЯ конъюнкция множеств, коммутативность проверена тестом
-    test_a_filter_commutative_regardless_of_check_order):
+    ФИКС-РАУНД FRESHNESS Б1 (критик-гейт t-606, 2026-08-25): *patterns*
+    и *deploy_markers* -- НОВЫЕ опциональные параметры, дефолт None ->
+    ПРЕЖНЕЕ поведение байт-в-байт (given-пара регексов, живой
+    _load_deploy_markers()) -- given_path_warn/find_missing_given_paths
+    НЕ переданы новым аргументом, значит НЕ ЗАТРОНУТЫ. Мотив: freshness
+    (класс в, logs-префикс) передаёт СВОИ регексы-сканеры (given-регексы
+    "logs" не несут -- их популяция чужая, узел не её трогает) -- БЕЗ
+    этого параметра exemption-множества ниже (given_tokens/owns_declared/
+    .../deploy_outside_paragraph) считались given-регексами и НИКОГДА не
+    находили logs-кандидата ни в одном вхождении, отчего Р1-ветка молча
+    исключала ЛЮБОЙ logs-путь из проверки (deploy_outside_paragraph
+    пуст -- "не найден снаружи маркерного абзаца" ложно читалось как
+    "внутри", хотя маркера не было вовсе). freshness класса (а) передаёт
+    ТРЕТИЙ регекс (FRESHNESS_CHECK_TOKEN_RE) и РАСШИРЕННЫЙ deploy_markers
+    (кит/toolkit, Б2) -- populяция (в) им не трогается (свой вызов, свой
+    словарь).
+
+    K3 (докстринг _split_backtick_body выше) -- ПОСЛЕДНИЙ шаг, ПОСЛЕ
+    решения об исключении: exemption-множества ниже (given_tokens/
+    owns_declared/non_goals_confined/run_line_confined/
+    deploy_outside_paragraph) вычисляются ПОВТОРНЫМ regex-сканом
+    prompt тем же `patterns`, ключ -- буквальный ТЕКСТ regex-совпадения
+    (склеенный кандидат целиком, если он склеен) -- сегмент, разрезанный
+    ПО бэктику, никогда не встретится как отдельный ключ в этих
+    множествах (это НЕ regex-совпадение, а его часть). Поэтому решение
+    "исключить/оставить" принимается на ЦЕЛОМ (возможно склеенном)
+    кандидате СНАЧАЛА, как и раньше, и ТОЛЬКО кандидат, прошедший все
+    проверки без исключения, режется на бэктик-сегменты В КОНЦЕ, перед
+    append в result -- разрезание не может вернуть в проверку токен,
+    который exemption уже вывела из missing (А-К5 не нарушен).
+
+    Порядок применения правил ниже НЕ влияет на результат (Р1 и правила
+    узла A -- НЕЗАВИСИМАЯ конъюнкция множеств, коммутативность проверена
+    тестом test_a_filter_commutative_regardless_of_check_order):
 
       1. А-К3 (шаблон имени) -- БЕЗУСЛОВНО, ПЕРВЫМ, given НЕ выкупает.
       2. given-выкуп (А-К6) -- токен, названный в given, минует 3-5.
@@ -1665,8 +1756,12 @@ def _filter_given_candidates(prompt: str, candidates: list) -> list:
       5. А-К2 (строка прогона, форма б).
       6. Р1 (чужой деплой, УЗЕЛ D ремедиации калибровки #8) -- НЕ
          тронут этим диспатчем, только к относительным кандидатам
-         (абсолютные вне cwd уже отсеяны выше по стеку _is_under_root)."""
-    patterns = (GIVEN_ABS_WIN_PATH_RE, GIVEN_REPO_REL_PATH_RE)
+         (абсолютные вне cwd уже отсеяны выше по стеку _is_under_root).
+      7. K3 (разрезание по бэктику) -- ВЫХОДНОЙ шаг, см. докстринг выше."""
+    if patterns is None:
+        patterns = (GIVEN_ABS_WIN_PATH_RE, GIVEN_REPO_REL_PATH_RE)
+    if deploy_markers is None:
+        deploy_markers = _load_deploy_markers()
 
     templated = {tok for tok, _ in candidates if _is_template_token(tok)}  # А-К3
 
@@ -1677,8 +1772,8 @@ def _filter_given_candidates(prompt: str, candidates: list) -> list:
     run_line_confined = _tokens_all_after_launch_word(prompt, patterns)  # А-К2
 
     deploy_outside_paragraph = _tokens_outside_deploy_paragraph(
-        prompt, _load_deploy_markers(), patterns
-    )  # Р1 -- НЕ тронут узлом A
+        prompt, deploy_markers, patterns
+    )  # Р1 -- НЕ тронут узлом A (форма); ИСТОЧНИК словаря теперь параметр
 
     result = []
     for tok, is_abs in candidates:
@@ -1693,7 +1788,25 @@ def _filter_given_candidates(prompt: str, candidates: list) -> list:
                 continue  # А-К2
         if not is_abs and tok not in deploy_outside_paragraph:
             continue  # Р1 (сужено t-554): каждое вхождение -- в абзаце маркера деплоя
-        result.append((tok, is_abs))
+        if "`" in tok:  # K3: разрезать ТОЛЬКО прошедший все проверки кандидат
+            for part in _split_backtick_body(tok):
+                # F3 (ФИКС-РАУНД, docs/tasks/2026-08-25_queue8-mechbatch-
+                # spec.md): сегмент, полученный разрезом по бэктику, обязан
+                # ЦЕЛИКОМ (fullmatch, не search) совпасть с одним из двух
+                # GIVEN-регексов извлечения -- иначе это связка/мусор
+                # ("и" между двумя путями без пробела), не путь: она НЕ
+                # входит ни в result (не влияет на GIVEN-PATH WARN текст),
+                # ни в порог GIVEN_PATH_WARN_SUMMARY_THRESHOLD (10). Точка
+                # разреза (после exemption, см. докстринг выше) НЕ сдвинута
+                # -- fullmatch добавлен КАК ФИЛЬТР на уже разрезанный
+                # результат, критик подтвердил позицию разреза отдельно.
+                # ФИКС-РАУНД Б1: fullmatch -- ПРОТИВ *patterns* (параметр),
+                # не хардкод given-регексов -- иначе freshness-кандидаты со
+                # своим regex-набором теряли бы этот путь молча.
+                if any(p.fullmatch(part) for p in patterns):
+                    result.append((part, is_abs))
+        else:
+            result.append((tok, is_abs))
     return result
 
 
@@ -2124,6 +2237,507 @@ def write_quoted_warn(payload: dict) -> str:
         return ""
 
 
+# ======================================================================
+# УЗЕЛ FRESHNESS (docs/tasks/2026-08-25_freshness-layer-spec.md, t-599,
+# решения Lead Ф1-Ф15): машинный слой п.5 пятипунктового чеклиста R11
+# (D-0096), промоция R11(n). Первый инкремент несёт ДВА класса (Ф1b):
+# (в) якорь "<путь>.<ext>:N[-M]" указывает ЗА конец реального файла
+# (M3); (а) ссылка "чек NN(х)" на несуществующий подпункт/номер
+# PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md (M1/M2), либо гомоглиф --
+# латинская буква вместо кириллической (M4). Классы (б) цитаты и (г)
+# идентификаторы -- НЕ этот инкремент (Ф1b).
+#
+# К2 (позиционный инвариант): decide() НЕ ТРОНУТА ни байтом этим узлом.
+# К6: региональная осведомлённость -- ЕДИНЫЙ _safe_scan()/_is_quoted()
+# (см. узел C выше); ОТЛИЧИЕ от given_path_warn -- НЕТ И-0 bare-
+# фоллбека: _safe_scan() is None -> слой молчит ЦЕЛИКОМ (решение Lead,
+# спека ЛИМИТЫ/К6), given_path_warn же откатывается на bare-регекс.
+# ======================================================================
+
+FRESHNESS_WARN_PREFIX = "FRESHNESS WARN:"
+
+# Свои (не given) регексы -- К СОСТАВ спеки: логи ВКЛЮЧЕНЫ в префикс
+# класса (в) (given-регексы logs НЕ несут -- их популяция чужая, не
+# трогается). Тело пути -- та же форма, что _GIVEN_PATH_BODY_CHAR
+# (исключает пробел/кавычки/угловые скобки/трубу/звёздочку/фигурные
+# скобки/доллар/запятую/точку с запятой/перевод строки), СВОЯ константа
+# (не импорт given-регекса) -- узел не трогает чужую populяцию.
+_FRESHNESS_PATH_BODY_CHAR = r'[^\s"\'<>|?*{}$,;\n]'
+_FRESHNESS_REPO_REL_PREFIX = r"(?:tools|gateway|PROCESS|docs|logs|\.claude|\.githooks)"
+
+# Якорное двоеточие -- ПОСЛЕ обязательного .ext (СОСТАВ спеки); L5/L6
+# (лимиты строк/номера чека) встроены прямо в квантификаторы \d{1,7}/
+# \d{1,2} -- 8-значный номер строки / 3-значный номер чека структурно
+# НЕ извлекаются (граница проверена тестами НА/ЗА).
+FRESHNESS_LINE_ANCHOR_RE = re.compile(
+    r"(?<![\w/\\])(?P<path>"
+    + _FRESHNESS_REPO_REL_PREFIX
+    + r"/"
+    + _FRESHNESS_PATH_BODY_CHAR
+    + r"{0,300}\.[A-Za-z0-9]{1,10})"
+    + r":(?P<n>\d{1,7})(?:-(?P<m>\d{1,7}))?\b"
+)
+
+FRESHNESS_LINE_ANCHOR_ABS_RE = re.compile(
+    r"(?<!\w)(?P<path>[A-Za-z]:[\\/]"
+    + _FRESHNESS_PATH_BODY_CHAR
+    + r"{0,300}\.[A-Za-z0-9]{1,10})"
+    + r":(?P<n>\d{1,7})(?:-(?P<m>\d{1,7}))?\b"
+)
+
+# Класс (а): якорное слово (Ф2а: чек/чека/чеку/чеке/чеки/check/CHK,
+# РЕГИСТРОНЕЗАВИСИМО -- inline-флаг (?i:...) СКОУПЛЕН только на группу
+# альтернатив, не на весь паттерн) + <=3 пробельных/табов + 1-2 цифры +
+# опц. пробелы/табы + буква СТРОГО в скобках, буква ТОЛЬКО строчная
+# кириллица/латиница ([а-яa-z]) -- голая форма "13(а)" без якорного
+# слова НЕ извлекается (Ф2а). ФИКС-РАУНД Ф2 (критик-гейт t-606): ЛЕВАЯ
+# ГРАНИЦА СЛОВА -- (?<![^\W\d_]) -- фиксированная ширина (ОДИН символ,
+# легально для lookbehind), блокирует "чек" как СУФФИКС другого слова
+# ("строЧЕК" -- предыдущий символ "о", буква -> lookbehind рвёт матч);
+# начало строки/пробел/пунктуация/цифра ПЕРЕД якорным словом -- матчит
+# (нечего сравнивать/не буква). Живой ложный позитив критика: "число
+# строчек 30(щ)" матчило "чек" внутри "стро|чек" ДО этого фикса.
+FRESHNESS_CHECK_TOKEN_RE = re.compile(
+    r"(?<![^\W\d_])(?i:чек(?:а|у|е|и)?|check|CHK)[ \t]{0,3}"
+    r"(?P<check_no>\d{1,2})[ \t]*\((?P<letter>[а-яa-z])\)"
+)
+
+_FRESHNESS_SUMMARY_THRESHOLD = 20  # Ф8а: 20/21, ПОКЛАССОВО
+_FRESHNESS_MAX_FILE_BYTES = 2 * 1024 * 1024  # L2 (оценка, не замер)
+_FRESHNESS_MAX_FILES_PER_CALL = 8  # L4 (оценка, не замер)
+_FRESHNESS_MAX_PROMPT_CHARS = 300_000  # L3 (оценка, не замер)
+
+_FRESHNESS_LATIN_LETTERS = frozenset("abcdefghijklmnopqrstuvwxyz")
+
+# ФИКС-РАУНД Б1 (критик-гейт t-606): "голые" (без якорного :N[-M])
+# формы обоих регексов класса (в) -- НУЖНЫ ОТДЕЛЬНО от FRESHNESS_LINE_
+# ANCHOR_RE/_ABS_RE (которые ТРЕБУЮТ анкер) для _filter_given_
+# candidates()'ового exemption-сканирования (owns/given/non-goals/run-
+# line/деплой строки НЕ несут анкер ":N" -- given/owns-декларация
+# "owns: logs/routing-log.jsonl" не матчится анкерным регексом вовсе).
+# Тот же префикс-набор, что FRESHNESS_LINE_ANCHOR_RE (logs включён,
+# given-регексы logs НЕ несут -- ИМЕННО поэтому передача ЖИВЫХ given-
+# регексов в _filter_given_candidates душила ЛЮБОЙ logs-кандидат: ни
+# одно вхождение никогда не находилось, deploy_outside_paragraph
+# оставался пуст -- Р1-ветка молча исключала ВСЕ logs-пути).
+_FRESHNESS_BARE_REL_PATH_RE = re.compile(
+    r"(?<![\w/\\])"
+    + _FRESHNESS_REPO_REL_PREFIX
+    + r"/"
+    + _FRESHNESS_PATH_BODY_CHAR
+    + r"{0,300}\.[A-Za-z0-9]{1,10}\b"
+)
+_FRESHNESS_BARE_ABS_PATH_RE = re.compile(
+    r"(?<!\w)[A-Za-z]:[\\/]"
+    + _FRESHNESS_PATH_BODY_CHAR
+    + r"{0,300}\.[A-Za-z0-9]{1,10}\b"
+)
+
+# ФИКС-РАУНД Б2 (критик-гейт t-606): деплой-маркеры КЛАССА (а) --
+# РАСШИРЕНИЕ живого _load_deploy_markers() словами "кит"/"toolkit"
+# (носитель кит-ссылок -- существующая деплой-механика delegation.
+# config.yaml их НЕ знает как деплой). Путь-часть "" -- намеренно
+# пуста (_tokens_outside_deploy_paragraph пропускает пустой путь,
+# работает только НАЗВАНИЕ-регекс \bкит\b/\btoolkit\b). ТОЛЬКО класс
+# (а) -- популяция класса (в) (_freshness_apply_owns_suppression ниже)
+# этот словарь не получает, живой _load_deploy_markers() как был.
+_FRESHNESS_CLASS_A_EXTRA_DEPLOY_MARKERS = {"кит": "", "toolkit": ""}
+
+
+def _freshness_class_a_deploy_markers() -> dict:
+    merged = dict(_load_deploy_markers())
+    merged.update(_FRESHNESS_CLASS_A_EXTRA_DEPLOY_MARKERS)
+    return merged
+
+_FRESHNESS_PROTOCOL_PATH = (
+    Path(__file__).resolve().parents[1] / "PROCESS" / "WEEKLY_CALIBRATION_PROTOCOL.md"
+)
+_FRESHNESS_TOP_ANCHOR_RE = re.compile(r"<!--CHK\s+(\d{1,3})\|")
+
+
+def _freshness_load_protocol_text() -> str:
+    """Ф7а: файла нет вовсе -> "" (молчание, GIVEN_PATH уже сказал бы о
+    самом протоколе, если он назван given-путём). Пуст/нечитаем ->
+    тоже "" (спека, ПУСТЫЕ/ОТСУТСТВУЮЩИЕ)."""
+    try:
+        text = _FRESHNESS_PROTOCOL_PATH.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return text if text.strip() else ""
+
+
+def _freshness_check_exists(protocol_text: str, check_no: str) -> bool:
+    return re.search(r"<!--CHK\s+" + re.escape(check_no) + r"\|", protocol_text) is not None
+
+
+def _freshness_o1_found(protocol_text: str, check_no: str, letter: str) -> bool:
+    """O1: якорь <!--CHK NN(х)|...-->."""
+    pattern = r"<!--CHK\s+" + re.escape(check_no) + r"\(" + re.escape(letter) + r"\)\|"
+    return re.search(pattern, protocol_text) is not None
+
+
+def _freshness_o2_found(protocol_text: str, check_no: str, letter: str) -> bool:
+    """O2: литерал NN(х) где угодно в тексте. Лукбихайнд не-цифра защищает
+    от подстрочной коллизии (11(в) внутри 111(в))."""
+    pattern = r"(?<!\d)" + re.escape(check_no) + r"\(" + re.escape(letter) + r"\)"
+    return re.search(pattern, protocol_text) is not None
+
+
+def _freshness_check_region(protocol_text: str, check_no: str):
+    """(start, end) региона чека NN -- от начала якоря CHK NN| до начала
+    СЛЕДУЮЩЕГО ВЕРХНЕГО (без буквы) якоря либо до конца текста."""
+    m = re.search(r"<!--CHK\s+" + re.escape(check_no) + r"\|", protocol_text)
+    if m is None:
+        return None
+    start = m.start()
+    nxt = _FRESHNESS_TOP_ANCHOR_RE.search(protocol_text, m.end())
+    end = nxt.start() if nxt else len(protocol_text)
+    return start, end
+
+
+def _freshness_o3_found(protocol_text: str, check_no: str, letter: str) -> bool:
+    """O3: вхождение "(х)" в регионе чека NN (без обязательного повтора
+    номера NN рядом -- ловит перечни вида "(а) .../(б) ...")."""
+    region = _freshness_check_region(protocol_text, check_no)
+    if region is None:
+        return False
+    start, end = region
+    return f"({letter})" in protocol_text[start:end]
+
+
+def _freshness_existing_letters(protocol_text: str, check_no: str) -> list:
+    """М1 "перечень факта" -- буквы, реально встреченные как NN(х) в
+    протоколе (О1-анкеры и О2-прозовые упоминания оба содержат эту
+    подстроку), первые 8 в порядке появления."""
+    pattern = re.compile(r"(?<!\d)" + re.escape(check_no) + r"\(([а-яa-z])\)")
+    letters: list = []
+    seen: set = set()
+    for m in pattern.finditer(protocol_text):
+        letter = m.group(1)
+        if letter not in seen:
+            seen.add(letter)
+            letters.append(letter)
+        if len(letters) >= 8:
+            break
+    return letters
+
+
+def _freshness_m1_message(check_no: str, letter: str, existing_letters: list) -> str:
+    if existing_letters:
+        fact = f"в чеке {check_no} реально есть: {', '.join(existing_letters)}"
+    else:
+        fact = f"в чеке {check_no} подпунктов с буквами не найдено вовсе"
+    return (
+        f"{FRESHNESS_WARN_PREFIX} подпункт {check_no}({letter}) не найден в "
+        f"чек-листе калибровки — диспатч сверится не с тем критерием и "
+        f"промолчит там, где должен спросить; {fact} — открой протокол, "
+        f"подставь фактическую букву (D-0096 п.5)"
+    )
+
+
+def _freshness_m2_message(check_no: str) -> str:
+    return (
+        f"{FRESHNESS_WARN_PREFIX} чека {check_no} нет в протоколе калибровки "
+        f"вовсе — ошибка в НОМЕРЕ, не в букве: ссылка ведёт в пустоту, сверка "
+        f"критерия сорвётся молча — открой протокол и подставь верный номер "
+        f"чека (D-0096 п.5)"
+    )
+
+
+def _freshness_m3_message(token_display: str, line_count: int, bound: int) -> str:
+    return (
+        f"{FRESHNESS_WARN_PREFIX} якорь {token_display} указывает за конец "
+        f"файла (в нём {line_count} строк) — строка сдвинулась или пропала, "
+        f"приёмка откроет не то место и заверит мимо содержимого — перечитай "
+        f"носитель, обнови номер либо сними его, оставив путь (D-0096 п.5)"
+    )
+
+
+def _freshness_m4_message(check_no: str, letter: str) -> str:
+    return (
+        f"{FRESHNESS_WARN_PREFIX} буква в {check_no}({letter}) — латиница, а "
+        f"протокол кириллический — токен не найдётся НИ ГРЕПОМ, НИ ГЛАЗОМ: "
+        f"сверка молча пройдёт мимо подпункта — замени символ на "
+        f"кириллический аналог (D-0096 п.5)"
+    )
+
+
+def _freshness_line_anchor_candidates_region_aware(prompt: str, scan_result) -> list:
+    """К6/К9: (path, is_abs, n, m) для токенов с >=1 вхождением ВНЕ
+    цитаты, дедуп по (normcase(path), n, m) -- та же полярность/форма,
+    что extract_given_candidates_region_aware."""
+    order = []
+    seen = {}
+    for pattern, is_abs in (
+        (FRESHNESS_LINE_ANCHOR_ABS_RE, True),
+        (FRESHNESS_LINE_ANCHOR_RE, False),
+    ):
+        for m in pattern.finditer(prompt):
+            path = m.group("path")
+            n = int(m.group("n"))
+            m_raw = m.group("m")
+            mm = int(m_raw) if m_raw is not None else None
+            key = (os.path.normcase(path), n, mm)
+            quoted = _is_quoted(_region_at(scan_result, m.start()))
+            if key not in seen:
+                seen[key] = {
+                    "path": path, "is_abs": is_abs, "n": n, "m": mm,
+                    "any_unquoted": not quoted,
+                }
+                order.append(key)
+            elif not quoted:
+                seen[key]["any_unquoted"] = True
+    return [seen[k] for k in order if seen[k]["any_unquoted"]]
+
+
+def _freshness_apply_owns_suppression(prompt: str, candidates: list) -> list:
+    """ВРЕМЕННОЙ КРАЙ (спека): якорь на файл, который диспатч САМ
+    создаёт (путь в owns), подавляется ПЕРЕИСПОЛЬЗОВАНИЕМ owns-фильтра
+    _filter_given_candidates (узел A, given/owns/non-goals/run-line/
+    deploy-исключения) -- ВТОРАЯ реализация owns-парсинга не пишется.
+
+    ФИКС-РАУНД Б1 (критик-гейт t-606): *patterns* -- СВОИ (freshness)
+    "голые" регексы (_FRESHNESS_BARE_ABS_PATH_RE/_FRESHNESS_BARE_REL_
+    PATH_RE, logs включён), НЕ given-пара -- см. докстринг _filter_
+    given_candidates за разбор дохлой ветки logs/. deploy_markers --
+    ДЕФОЛТ (None -> живой _load_deploy_markers()) -- Б2-расширение
+    кит/toolkit только у класса (а), сюда не передаётся."""
+    if not candidates:
+        return []
+    pairs = [(c["path"], c["is_abs"]) for c in candidates]
+    allowed = set(_filter_given_candidates(
+        prompt, pairs, patterns=(_FRESHNESS_BARE_ABS_PATH_RE, _FRESHNESS_BARE_REL_PATH_RE)
+    ))
+    return [c for c in candidates if (c["path"], c["is_abs"]) in allowed]
+
+
+def _freshness_class_v_hits(prompt: str, scan_result, repo_root: str) -> list:
+    """К7: варн только когда файл существует, читается, строк < max(N,M).
+    L2 (2 МиБ/файл) / L4 (8 файлов/вызов, сверх -- молчание, без
+    упоминания непроверенных). Ф3 (ФИКС-РАУНД, кэш на вызов): line_count
+    считается РОВНО один раз на файл -- повторные якоря на тот же файл
+    (разные N/M) переиспользуют закэшированное число строк, не открывают
+    файл заново; L4-бюджет по-прежнему считает РАЗЛИЧНЫЕ файлы, не
+    повторные обращения к уже учтённому."""
+    candidates = _freshness_line_anchor_candidates_region_aware(prompt, scan_result)
+    candidates = _freshness_apply_owns_suppression(prompt, candidates)
+    if not candidates:
+        return []
+    checked_files: set = set()
+    line_count_cache: dict = {}  # Ф3: {file_key: line_count}
+    hits = []
+    for cand in candidates:
+        path, is_abs, n, m = cand["path"], cand["is_abs"], cand["n"], cand["m"]
+        if is_abs:
+            if not _is_under_root(path, repo_root):
+                continue
+            full_path = path
+        else:
+            full_path = os.path.join(repo_root, path)
+        file_key = os.path.normcase(os.path.normpath(full_path))
+
+        if file_key in line_count_cache:
+            line_count = line_count_cache[file_key]
+        else:
+            if not os.path.isfile(full_path):
+                continue  # молчание: не существует / это каталог
+            if file_key not in checked_files:
+                if len(checked_files) >= _FRESHNESS_MAX_FILES_PER_CALL:
+                    continue  # L4 -- новый файл сверх бюджета
+                checked_files.add(file_key)
+            try:
+                if os.path.getsize(full_path) > _FRESHNESS_MAX_FILE_BYTES:
+                    continue  # L2
+                with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+            except OSError:
+                continue
+            line_count = len(text.splitlines())
+            line_count_cache[file_key] = line_count
+
+        bound = max(n, m) if m is not None else n
+        if line_count < bound:
+            token_display = f"{path}:{n}" + (f"-{m}" if m is not None else "")
+            hits.append((token_display, line_count, bound))
+    return hits
+
+
+def _freshness_format_class_v(hits: list) -> str:
+    if not hits:
+        return ""
+    if len(hits) <= _FRESHNESS_SUMMARY_THRESHOLD:
+        return "\n\n".join(_freshness_m3_message(*h) for h in hits)
+    head = ", ".join(h[0] for h in hits[:3])
+    return (
+        f"{FRESHNESS_WARN_PREFIX} {len(hits)} якорей файл:строка указывают "
+        f"за конец носителя — строки сдвинулись или пропали, приёмка "
+        f"откроет не то место; первые 3: {head} — перечитай носители, "
+        f"обнови номера либо сними их, оставив пути (D-0096 п.5)"
+    )
+
+
+def _freshness_class_a_suppressed_raw_texts(prompt: str) -> set:
+    """Б2 (ФИКС-РАУНД, критик-гейт t-606): класс (а) получает ТЕ ЖЕ
+    подавления, что класс (в) -- owns/non-goals/строка-прогона/абзац
+    деплоя -- переиспользуя _filter_given_candidates с ЧУЖИМ (не given)
+    паттерном FRESHNESS_CHECK_TOKEN_RE; деплой-словарь класса (а)
+    РАСШИРЕН словами "кит"/"toolkit" (_freshness_class_a_deploy_markers)
+    -- ТОЛЬКО этого вызова. Возвращает МНОЖЕСТВО буквальных текстов
+    совпадений (m.group(0)), которые НЕ подавлены -- т.е. "выжившие".
+    Вызывается ОДИН раз на весь промпт (сеты given/owns/... строятся
+    внутри _filter_given_candidates РОВНО один раз, не за-кандидат)."""
+    raw_texts = [m.group(0) for m in FRESHNESS_CHECK_TOKEN_RE.finditer(prompt)]
+    if not raw_texts:
+        return set()
+    survived = _filter_given_candidates(
+        prompt,
+        [(t, False) for t in raw_texts],
+        patterns=(FRESHNESS_CHECK_TOKEN_RE,),
+        deploy_markers=_freshness_class_a_deploy_markers(),
+    )
+    return {t for t, _ in survived}
+
+
+def _freshness_check_token_candidates_region_aware(prompt: str, scan_result) -> list:
+    """К6/К9: (check_no, letter) для пар с >=1 вхождением ВНЕ цитаты И
+    ВНЕ Б2-подавления (owns/non-goals/run-line/деплой+кит/toolkit) --
+    оба условия проверяются НА КАЖДОМ вхождении отдельно, пара
+    квалифицируется, если хотя бы одно вхождение прошло ОБА фильтра."""
+    suppressed_survivors = _freshness_class_a_suppressed_raw_texts(prompt)
+    order = []
+    seen = {}
+    for m in FRESHNESS_CHECK_TOKEN_RE.finditer(prompt):
+        if m.group(0) not in suppressed_survivors:
+            continue  # Б2: owns/non-goals/run-line/деплой(+кит/toolkit)
+        check_no = m.group("check_no")
+        letter = m.group("letter")
+        key = (check_no, letter)
+        quoted = _is_quoted(_region_at(scan_result, m.start()))
+        if key not in seen:
+            seen[key] = not quoted
+            order.append(key)
+        elif not quoted:
+            seen[key] = True
+    return [k for k in order if seen[k]]
+
+
+def _freshness_class_a_hits(prompt: str, scan_result):
+    """К8: варн только когда буква не найдена НИ ОДНИМ из трёх оракулов
+    (оракул строится один раз на вызов -- protocol_text читается один
+    раз, переиспользуется для всех пар). Ф5 (ФИКС-РАУНД, критик-гейт
+    t-606): ПОРЯДОК ВЕТОК -- СНАЧАЛА существование чека (нет -> M2),
+    латиница (Ф4b, M4) -- ТОЛЬКО для СУЩЕСТВУЮЩЕГО чека (ошибка в
+    номере важнее ошибки в букве: чек не существует -- гомоглиф не
+    имеет смысла обсуждать). Ф3 (кэш на вызов): {(чек, буква): вердикт}
+    -- защита от повторного вычисления оракула для одной пары (текущий
+    дедуп по (check_no, letter) уже не даёт повторов внутри одного
+    вызова -- кэш здесь СТРАХУЕТ инвариант явно, а не полагается на
+    побочный эффект дедупа выше)."""
+    candidates = _freshness_check_token_candidates_region_aware(prompt, scan_result)
+    if not candidates:
+        return [], ""
+    protocol_text = _freshness_load_protocol_text()
+    if not protocol_text or "<!--CHK" not in protocol_text:
+        return [], ""  # протокола нет/пуст/оракул пуст -- молчание целиком
+    verdict_cache: dict = {}  # Ф3: {(check_no, letter): "M1"/"M2"/"M4"/None}
+    hits = []
+    for check_no, letter in candidates:
+        key = (check_no, letter)
+        if key in verdict_cache:
+            kind = verdict_cache[key]
+        else:
+            if not _freshness_check_exists(protocol_text, check_no):
+                kind = "M2"  # Ф5: номер важнее буквы
+            elif letter in _FRESHNESS_LATIN_LETTERS:
+                kind = "M4"  # Ф5: латиница -- ТОЛЬКО для существующего чека
+            elif (
+                _freshness_o1_found(protocol_text, check_no, letter)
+                or _freshness_o2_found(protocol_text, check_no, letter)
+                or _freshness_o3_found(protocol_text, check_no, letter)
+            ):
+                kind = None  # найдено хоть одним оракулом -- тишина
+            else:
+                kind = "M1"
+            verdict_cache[key] = kind
+        if kind is not None:
+            hits.append((kind, check_no, letter))
+    return hits, protocol_text
+
+
+def _freshness_format_class_a(hits: list, protocol_text: str) -> str:
+    if not hits:
+        return ""
+    if len(hits) <= _FRESHNESS_SUMMARY_THRESHOLD:
+        parts = []
+        for kind, check_no, letter in hits:
+            if kind == "M4":
+                parts.append(_freshness_m4_message(check_no, letter))
+            elif kind == "M2":
+                parts.append(_freshness_m2_message(check_no))
+            else:
+                letters = _freshness_existing_letters(protocol_text, check_no)
+                parts.append(_freshness_m1_message(check_no, letter, letters))
+        return "\n\n".join(parts)
+    head = ", ".join(f"{c}({l})" for _, c, l in hits[:3])
+    return (
+        f"{FRESHNESS_WARN_PREFIX} {len(hits)} ссылок на подпункты чек-листа "
+        f"не подтверждены — приёмка сверится не с тем критерием и промолчит "
+        f"там, где должна спросить; первые 3: {head} — открой протокол "
+        f"PROCESS/WEEKLY_CALIBRATION_PROTOCOL.md и сверь номер чека и букву "
+        f"подпункта (D-0096 п.5)"
+    )
+
+
+def freshness_warn(payload: dict) -> str:
+    """К1: форма как given_path_warn -- чистая, "" = нечего, наружу не
+    бросает. К4: не Task/Agent -- молчание без чтения диска. К5:
+    предфильтр -- ни одного кандидата класса (в)/(а) -> "" ДО файловой
+    системы. К6: региональный сканер недоступен -> слой молчит ЦЕЛИКОМ
+    (см. докстринг узла выше -- НЕТ И-0 bare-фоллбека, отличие от W1)."""
+    if not isinstance(payload, dict):
+        return ""
+    tool_name = payload.get("tool_name")
+    if tool_name not in ("Task", "Agent"):
+        return ""
+    tool_input = payload.get("tool_input") or {}
+    if not isinstance(tool_input, dict):
+        return ""
+    prompt = tool_input.get("prompt")
+    if not isinstance(prompt, str) or not prompt:
+        return ""
+    if len(prompt) > _FRESHNESS_MAX_PROMPT_CHARS:
+        return ""  # L3 -- слой молчит целиком без чтения диска
+
+    has_v = bool(FRESHNESS_LINE_ANCHOR_ABS_RE.search(prompt)) or bool(
+        FRESHNESS_LINE_ANCHOR_RE.search(prompt)
+    )
+    has_a = bool(FRESHNESS_CHECK_TOKEN_RE.search(prompt))
+    if not has_v and not has_a:
+        return ""  # К5
+
+    scan_result = _safe_scan(prompt)
+    if scan_result is None:
+        return ""  # К6
+
+    repo_root = payload.get("cwd")
+    if not isinstance(repo_root, str) or not repo_root:
+        repo_root = os.getcwd()
+
+    parts = []
+    if has_v:
+        v_msg = _freshness_format_class_v(
+            _freshness_class_v_hits(prompt, scan_result, repo_root)
+        )
+        if v_msg:
+            parts.append(v_msg)
+    if has_a:
+        a_hits, protocol_text = _freshness_class_a_hits(prompt, scan_result)
+        a_msg = _freshness_format_class_a(a_hits, protocol_text)
+        if a_msg:
+            parts.append(a_msg)
+    return "\n\n".join(parts)
+
+
 def _reconfigure_stderr_utf8():
     try:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -2243,10 +2857,15 @@ def main() -> int:
         warn_write_quoted = write_quoted_warn(payload)
     except Exception:
         warn_write_quoted = ""
+    try:
+        warn_freshness = freshness_warn(payload)
+    except Exception:
+        warn_freshness = ""
 
     # C6: порядок given-path/role-type НЕ тронут (given первым); новые
     # слои этого узла -- В ХВОСТ существующего списка (критик-фикс 2:
-    # write_quoted_warn -- САМЫЙ новый слой, в самый хвост).
+    # write_quoted_warn -- САМЫЙ новый слой, в самый хвост). Узел
+    # FRESHNESS (Ф13а): вызов -- ХВОСТ warn_parts, после warn_write_quoted.
     warn_parts = [
         w
         for w in (
@@ -2255,6 +2874,7 @@ def main() -> int:
             warn_dod_quoted,
             warn_manifest_quoted,
             warn_write_quoted,
+            warn_freshness,
         )
         if w
     ]

@@ -337,3 +337,105 @@ def test_api_contour_summary_groups_by_kind(db):
     assert a["total_cost"] == pytest.approx(0.06)
     kinds = {k: (n, c) for k, n, c in a["kinds"]}
     assert kinds["synthetic"][0] == 2
+
+
+# ---------------------------------------------------------------------
+# M3 (docs/tasks/2026-08-25_wave2-misc-spec.md, F15-iii): --window-start/
+# --window-end сужают выборку PRE/ROUTED/контрфакта; --routed-start
+# остаётся базой сравнения; API-контур ("вся история") окном не режется.
+# ---------------------------------------------------------------------
+
+def test_m3_window_narrows_routed_selection(db, tmp_path, capsys):
+    _cc(db, "2026-07-09T10:00:00", "claude-sonnet-5", 0, cost=5.0)
+    _cc(db, "2026-08-01T10:00:00", "claude-sonnet-5", 0, cost=7.0)
+    db.commit()
+    print_report(str(tmp_path / "t.db"), "2026-07-08", config_text=CONFIG_OPUS,
+                 window_start="2026-07-08", window_end="2026-07-15")
+    out = capsys.readouterr().out
+    assert "$5.00" in out  # только событие внутри окна учтено
+    assert "$12.00" not in out  # оба события НЕ суммированы
+    assert "ОКНО: 2026-07-08 .. 2026-07-15" in out
+
+
+def test_m3_window_narrows_counterfactual_selection(db):
+    _cc(db, "2026-07-09T10:00:00", "claude-haiku-4-5-20251001", 1,
+        i=1000, o=100, cost=0.002, agent="scout")
+    _cc(db, "2026-08-01T10:00:00", "claude-haiku-4-5-20251001", 1,
+        i=1000, o=100, cost=0.003, agent="scout")
+    c_no_window = counterfactual_summary(db, "ts >= ?", ("2026-07-08",),
+                                          config_text=CONFIG_OPUS)
+    assert c_no_window["detail"][0]["turns"] == 2  # без окна -- оба события
+    c_windowed = counterfactual_summary(
+        db, "ts >= ? and ts >= ? and ts < ?",
+        ("2026-07-08", "2026-07-08", "2026-07-15"), config_text=CONFIG_OPUS)
+    assert c_windowed["detail"][0]["turns"] == 1  # окно исключило августовское событие
+
+
+def test_m3_routed_start_base_unchanged_by_window(db, tmp_path, capsys):
+    """Семантика контрфакта (--routed-start как база сравнения) не
+    меняется окном -- заголовок ROUTED всё ещё считается от routed-start,
+    не от window-start."""
+    _cc(db, "2026-07-09T10:00:00", "claude-sonnet-5", 0, cost=5.0)
+    db.commit()
+    print_report(str(tmp_path / "t.db"), "2026-07-08", config_text=CONFIG_OPUS,
+                 window_start="2026-07-01", window_end="2026-08-01")
+    out = capsys.readouterr().out
+    assert "ROUTED (>= 2026-07-08)" in out
+
+
+def test_m3_empty_window_zero_not_crash(db, tmp_path, capsys):
+    """Край: пустое окно -> нули, не падение (window_start==window_end,
+    полуоткрытый интервал [start, end) пуст по построению)."""
+    _cc(db, "2026-07-09T10:00:00", "claude-sonnet-5", 0, cost=5.0)
+    db.commit()
+    print_report(str(tmp_path / "t.db"), "2026-07-08", config_text=CONFIG_OPUS,
+                 window_start="2026-07-09", window_end="2026-07-09")
+    out = capsys.readouterr().out
+    assert "$0.00" in out
+
+
+def test_m3_window_start_gt_window_end_cli_exit_nonzero(capsys):
+    """Край: window-start > window-end -> ошибка, exit != 0."""
+    code = sr.main(["--db", "unused.db", "--routed-start", "2026-07-08",
+                     "--window-start", "2026-08-01", "--window-end", "2026-07-01"])
+    err = capsys.readouterr().err
+    assert code != 0
+    assert "--window-start" in err
+
+
+def test_m3_only_window_start_legal_half_open(db, tmp_path, capsys):
+    """Край: только один из двух флагов -- законно (полуоткрытое окно)."""
+    _cc(db, "2026-07-09T10:00:00", "claude-sonnet-5", 0, cost=5.0)
+    _cc(db, "2026-08-01T10:00:00", "claude-sonnet-5", 0, cost=7.0)
+    db.commit()
+    print_report(str(tmp_path / "t.db"), "2026-07-08", config_text=CONFIG_OPUS,
+                 window_start="2026-07-20")
+    out = capsys.readouterr().out
+    assert "$7.00" in out  # только августовское событие (после window-start)
+    assert "$5.00" not in out
+
+
+def test_m3_only_window_end_legal_half_open(db, tmp_path, capsys):
+    _cc(db, "2026-07-09T10:00:00", "claude-sonnet-5", 0, cost=5.0)
+    _cc(db, "2026-08-01T10:00:00", "claude-sonnet-5", 0, cost=7.0)
+    db.commit()
+    print_report(str(tmp_path / "t.db"), "2026-07-08", config_text=CONFIG_OPUS,
+                 window_end="2026-07-20")
+    out = capsys.readouterr().out
+    assert "$5.00" in out  # только июльское событие (до window-end)
+    assert "$7.00" not in out
+
+
+def test_m3_no_flags_output_byte_identical_to_pre_patch(db, tmp_path, capsys):
+    """Негативный контроль идентичности (спека М3): без обоих оконных
+    флагов -- вывод байт-в-байт как раньше."""
+    _cc(db, "2026-07-09T10:00:00", "claude-haiku-4-5-20251001", 1,
+        i=1000, o=100, cost=0.002, agent="scout")
+    db.commit()
+    print_report(str(tmp_path / "t.db"), "2026-07-08", config_text=CONFIG_OPUS)
+    out_no_flags = capsys.readouterr().out
+    print_report(str(tmp_path / "t.db"), "2026-07-08", config_text=CONFIG_OPUS,
+                 window_start=None, window_end=None)
+    out_explicit_none = capsys.readouterr().out
+    assert out_no_flags == out_explicit_none
+    assert "ОКНО:" not in out_no_flags

@@ -1266,7 +1266,9 @@ def test_build_witness_segment_loud_exact_format():
     ev = ("warn_loud", 2, "pytest tools/x.py -q", "2026-07-21T10:00:00.000000")
     seg = we.build_witness_segment([ev])
     assert seg == ("WITNESS ECHO: line 2 contradiction - command 'pytest tools/x.py -q' "
-                    "recorded RED in session track (last red at 2026-07-21T10:00:00.000000)")
+                    "recorded RED in session track at 2026-07-21T10:00:00.000000 "
+                    "- this line's accepted witness may not be trustworthy; re-run the "
+                    "command and confirm it is green before relying on this acceptance")
 
 
 def test_build_witness_segment_loud_sanitizes_ts_control_chars():
@@ -1300,7 +1302,9 @@ def test_build_witness_segment_soft_exact_format():
     ev = ("warn_soft", 3)
     seg = we.build_witness_segment([ev])
     assert seg == ("WITNESS ECHO: line 3 witness command(s) not observed in session track "
-                    "(batch/cross-session/retro acceptance legitimate - verify manually)")
+                    "- this acceptance cannot be confirmed automatically; verify "
+                    "manually that the witness is legitimate (batch/cross-session/retro "
+                    "acceptance is a valid reason)")
 
 
 def test_build_witness_segment_exactly_five_boundary_no_more_suffix():
@@ -1341,8 +1345,10 @@ def test_build_witness_segment_stale_exact_format_with_last_green():
     assert seg == (
         "WITNESS ECHO: line 4 track staleness - last code edit at "
         "2026-07-21T11:00:00.000000 is after the last green run "
-        "(last green: 2026-07-21T10:00:00.000000) - witness not confirmed "
-        "by a green run after the last edit")
+        "(last green: 2026-07-21T10:00:00.000000) "
+        "- the witness predates the latest code change and may no "
+        "longer match it; re-run the witness command after this edit and confirm "
+        "it is green")
 
 
 def test_build_witness_segment_stale_no_green_run_shows_none_literal():
@@ -1429,7 +1435,8 @@ def test_e2e_green_witness_silent(tmp_path):
         _run_entry("2026-07-10T08:05:00.000000", "python -m pytest tools/ gateway/ -q", "green"),
     ])
     new_line = _accepted_line(ts=_fresh_ts(),
-                               witness="python -m pytest tools/ gateway/ -q -> 930 passed")
+                               witness="python -m pytest tools/ gateway/ -q -> 930 passed",
+                               notes="accepted; critic: skipped, e2e-фикстура слоя-соседа")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
     assert result.returncode == 0
@@ -1461,7 +1468,8 @@ def test_e2e_retro_no_warn_even_with_red_track(tmp_path):
     ])
     new_line = _accepted_line(ts=_fresh_ts(),
                                witness="python -m pytest tools/ gateway/ -q -> 3 failed",
-                               notes="retroactive fix of missed accepted event")
+                               notes="retroactive fix of missed accepted event; "
+                                     "critic: skipped, e2e-фикстура слоя-соседа")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
     assert result.returncode == 0
@@ -1473,7 +1481,8 @@ def test_e2e_missing_track_silent_note_not_exception(tmp_path):
     journal_path = _seed_committed_journal(tmp_path)
     # НЕТ .claude/dod_track вовсе.
     new_line = _accepted_line(ts=_fresh_ts(),
-                               witness="python -m pytest tools/ gateway/ -q -> 930 passed")
+                               witness="python -m pytest tools/ gateway/ -q -> 930 passed",
+                               notes="accepted; critic: skipped, e2e-фикстура слоя-соседа")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
     assert result.returncode == 0
@@ -1487,7 +1496,8 @@ def test_e2e_malformed_track_silent_note_not_exception(tmp_path):
     track_dir.mkdir(parents=True)
     (track_dir / "sess-1.json").write_text("{not valid json at all", encoding="utf-8")
     new_line = _accepted_line(ts=_fresh_ts(),
-                               witness="python -m pytest tools/ gateway/ -q -> 930 passed")
+                               witness="python -m pytest tools/ gateway/ -q -> 930 passed",
+                               notes="accepted; critic: skipped, e2e-фикстура слоя-соседа")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
     assert result.returncode == 0
@@ -1629,7 +1639,8 @@ def test_e2e_not_stale_green_after_last_edit_silent(tmp_path):
                                     "python -m pytest tools/ gateway/ -q", "green")],
                  edits=[_edit_entry("2026-07-10T08:04:00.000000")])
     new_line = _accepted_line(ts=_fresh_ts(),
-                               witness="python -m pytest tools/ gateway/ -q -> 930 passed")
+                               witness="python -m pytest tools/ gateway/ -q -> 930 passed",
+                               notes="accepted; critic: skipped, e2e-фикстура слоя-соседа")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
     assert result.returncode == 0
@@ -1645,7 +1656,8 @@ def test_e2e_retro_suppresses_staleness_warn(tmp_path):
                  edits=[_edit_entry("2026-07-10T08:04:00.000000")])
     new_line = _accepted_line(ts=_fresh_ts(),
                                witness="python -m pytest tools/ gateway/ -q -> 930 passed",
-                               notes="retroactive fix of missed accepted event")
+                               notes="retroactive fix of missed accepted event; "
+                                     "critic: skipped, e2e-фикстура слоя-соседа")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
     assert result.returncode == 0
@@ -1704,7 +1716,8 @@ def test_e2e_live_scenario_journal_write_itself_not_false_stale(tmp_path):
                      _edit_entry("2026-07-10T08:04:00.000000", file_path="logs/routing-log.jsonl"),
                  ])
     new_line = _accepted_line(ts=_fresh_ts(),
-                               witness="python -m pytest tools/ gateway/ -q -> 930 passed")
+                               witness="python -m pytest tools/ gateway/ -q -> 930 passed",
+                               notes="accepted; critic: skipped, e2e-фикстура слоя-соседа")
     journal_path.write_text(HEAD_TEXT + new_line + "\n", encoding="utf-8")
     result = _run_hook(_post_tool_use_payload(journal_path, cwd=tmp_path))
     assert result.returncode == 0

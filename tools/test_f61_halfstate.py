@@ -7,9 +7,14 @@
    должен быть КРАСНЫМ на дискриминирующих тестах, класс F-61 ещё не
    починен там).
  - F61_TARGET не задан (default) -> сиблинг tools/<name>_f61.py, если
-   он существует, иначе живой файл (см. _resolve_module_path) --
+   он существует, иначе МОЛЧА живой файл (см. _resolve_module_path) --
    RERUNNABLE кем угодно без правки кода, дух "сильнее негативного
    контроля" (t-469/t-470).
+ - F61_TARGET на любое ДРУГОЕ непустое значение -> сиблинг ЗАПРОШЕН
+   ЯВНО; при его отсутствии -- ГРОМКИЙ КРАС (pytest.fail, называющий
+   запрошенный путь), НЕ тихая подмена живым (F1, ФИКС-РАУНД
+   docs/tasks/2026-08-25_queue8-mechbatch-spec.md, тот же класс, что
+   K1 узла t-601 уже чинил в MODULE_UNDER_TEST-файлах).
 Модуль резолвится и импортируется через importlib.util (не
 sys.path-игру, не хардкод боевого пути в SCRIPT-константе,
 sibling-first индирекция -- принятая находка sonnet-контроля t-470:
@@ -80,14 +85,27 @@ def _resolve_module_path(base_name: str) -> "tuple[Path, bool]":
     всегда False, батарея проверяет починенное поведение на живом
     пути. Прежняя семантика (is_live по факту загрузки живого)
     ошибочно ждала старого поведения от починенного файла —
-    дефект батареи против требования «зелена во всех трёх мирах»."""
+    дефект батареи против требования «зелена во всех трёх мирах».
+
+    F1 (ФИКС-РАУНД, docs/tasks/2026-08-25_queue8-mechbatch-spec.md,
+    _resolve_module_path -- ПЕРВОИСТОЧНИК конвенции, тот же класс, что
+    уже чинился в пяти MODULE_UNDER_TEST-файлах узла K1): default
+    (F61_TARGET пуст) -- сиблинг, ЕСЛИ он есть, иначе живой, МОЛЧА (мир
+    3, поведение неизменно). F61_TARGET ЗАПРОШЕН ЯВНО (задан и НЕ
+    "live") -- при отсутствии сиблинга ГРОМКИЙ КРАС, не тихая подмена
+    живым."""
     live = TOOLS_DIR / f"{base_name}.py"
     sibling = TOOLS_DIR / f"{base_name}_f61.py"
     if F61_TARGET == "live":
         return live, sibling.exists()
-    if sibling.exists():
-        return sibling, False
-    return live, False
+    if F61_TARGET == "":
+        return (sibling, False) if sibling.exists() else (live, False)
+    if not sibling.exists():
+        pytest.fail(
+            f"F61_TARGET={F61_TARGET!r} requested sibling {sibling} but it "
+            f"does not exist -- no silent live fallback (F1)"
+        )
+    return sibling, False
 
 
 _MODULE_CACHE: dict = {}
