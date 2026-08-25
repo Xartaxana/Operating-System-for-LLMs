@@ -537,7 +537,11 @@ def test_echo_git_mode_multiple_defects_count_and_more_suffix(tmp_path):
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
     assert "JOURNAL ECHO: 4 дефект(ов) в новых строках:" in ctx
-    assert "+1 more" in ctx
+    # Посадка Lead 2026-08-25 (MAX_BASE_BYTES): голова режется и по
+    # байтам — с длинными текстами валидатора (V-1) в голове может
+    # остаться меньше MAX_HEAD_MESSAGES; предмет пина — счёт 4 и
+    # наличие more-суффикса, не точное число свёрнутых.
+    assert " more" in ctx
 
 
 def test_echo_standalone_fallback_non_git_dir_catches_defect(tmp_path):

@@ -216,6 +216,18 @@ def _write_broken_copy_cwd_from_process(tmp_path):
     tools_dir.mkdir(parents=True)
     broken_path = tools_dir / "critic_snapshot.py"
     broken_path.write_text(broken_src, encoding="utf-8")
+    # Ф10 (критик волны "fit_with_fixes", ОТКАТ временной М2-1-правки
+    # этого хелпера): импорт dispatch_gate в critic_snapshot.py больше
+    # НЕ на уровне модуля -- он ЛОКАЛЬНЫЙ, внутри main(), в try/except
+    # ВМЕСТЕ с вызовом decide(). Изолированная копия БЕЗ соседнего
+    # dispatch_gate.py больше не падает на импорте -- она берёт
+    # FAIL-OPEN ветку (gate_exit_code=0, "не заблокирован") и идёт
+    # ДАЛЬШЕ обычным путём, что для ЭТОГО теста (предмет -- мутация
+    # cwd, не наличие dispatch_gate) -- РОВНО то же наблюдаемое
+    # поведение, что и с соседом. Копия dispatch_gate.py больше не
+    # нужна -- см. отдельный test_f10_missing_dispatch_gate_sibling_
+    # fail_open_snapshot_written за прямое доказательство fail-open
+    # ветки на ЭТОМ КОНКРЕТНОМ сценарии "соседа вовсе нет".
     return broken_path
 
 
@@ -435,3 +447,216 @@ def test_failure_document_no_prev_fields_when_prior_was_itself_a_failure(
 
     doc = json.loads(snap.read_text(encoding="utf-8"))
     assert set(doc.keys()) == {"error", "error_ts"}
+
+
+# ---------------------------------------------------------------------
+# М2-1 (docs/tasks/2026-08-25_kopilka-wave-spec.md, "БИЛДЕР М2", K5-
+# паттерн аналог tools/owns_gate.py, F7 вердикта t-601): диспатч,
+# заблокированный dispatch_gate (exit 2 на ТОМ ЖЕ payload) -- снимок НЕ
+# пишется, предыдущий снимок остаётся байт-в-байт нетронутым. Три
+# теста: блок->снимок цел (старый), пропуск (не заблокирован)->новый
+# записан, исключение из dispatch_gate.decide->записан (fail-open).
+# ---------------------------------------------------------------------
+
+
+def _blocked_critic_payload(cwd: Path) -> dict:
+    """subagent_type=="critic" (снимок вообще рассматривает этот вызов),
+    но description БЕЗ model-префикса -- реальный dispatch_gate.decide()
+    на этом payload даёт (2, ...) -- см. LABEL_MODEL_PREFIX_RE в
+    tools/dispatch_gate.py (проверено эмпирически перед написанием этого
+    теста: python -c с этим же payload'ом дал (2, ...))."""
+    return {
+        "tool_name": "Task",
+        "tool_input": {
+            "subagent_type": "critic",
+            "description": "no-model-prefix-label",
+            "prompt": "irrelevant",
+        },
+        "cwd": str(cwd),
+    }
+
+
+def test_m2_1_blocked_dispatch_leaves_prior_snapshot_byte_identical(tmp_path):
+    (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
+
+    # 1) штатный успешный вызов -- создаёт РЕАЛЬНЫЙ снимок с известным
+    # содержимым (снимок -- источник истины "старый").
+    result = _run_hook(_critic_payload(tmp_path), cwd=tmp_path)
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    snap = tmp_path / ".claude" / "critic_snapshot.json"
+    before_bytes = snap.read_bytes()
+    assert b"tree_hash" in before_bytes
+
+    # 2) диспатч, который dispatch_gate.decide() реально БЛОКИРУЕТ (exit
+    # 2) -- снимок не должен ни на байт поменяться.
+    result2 = _run_hook(_blocked_critic_payload(tmp_path), cwd=tmp_path)
+    assert result2.returncode == 0, (
+        "собственный exit critic_snapshot должен остаться 0 даже на "
+        "блок-ветке: " + result2.stderr.decode("utf-8", errors="replace")
+    )
+
+    after_bytes = snap.read_bytes()
+    assert after_bytes == before_bytes, (
+        "заблокированный диспатч переписал снимок -- край (i) М2-1 "
+        "нарушен: старый снимок обязан остаться байт-в-байт нетронутым"
+    )
+
+
+def test_m2_1_non_blocked_dispatch_still_writes_new_snapshot(tmp_path):
+    """Контроль (позитивная сторона пары): payload с ПРАВИЛЬНЫМ
+    model-префиксом в description -- dispatch_gate.decide() НЕ блокирует
+    (0, '') -- снимок пишется КАК ОБЫЧНО (ts у второго вызова обязан
+    отличаться от ts первого -- перезапись реально произошла)."""
+    (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {
+            "subagent_type": "critic",
+            "description": "sonnet: review the diff",
+            "prompt": "irrelevant",
+        },
+        "cwd": str(tmp_path),
+    }
+
+    result = _run_hook(payload, cwd=tmp_path)
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    snap = tmp_path / ".claude" / "critic_snapshot.json"
+    first_ts = json.loads(snap.read_text(encoding="utf-8"))["ts"]
+
+    result2 = _run_hook(payload, cwd=tmp_path)
+    assert result2.returncode == 0, result2.stderr.decode("utf-8", errors="replace")
+    second_doc = json.loads(snap.read_text(encoding="utf-8"))
+    assert "tree_hash" in second_doc
+    assert second_doc["ts"] != first_ts, (
+        "не-заблокированный диспатч не перезаписал снимок -- регресс "
+        "штатного пути М2-1"
+    )
+
+
+# ---------------------------------------------------------------------
+# Ф10 (критик волны "fit_with_fixes", продолжение М2-1): импорт
+# dispatch_gate перенесён с уровня модуля ВНУТРЬ main(), локально,
+# ПОСЛЕ ранних выходов -- отказ ИМПОРТА (не только отказ decide())
+# теперь тоже под fail-open. Оба сценария отказа -- ИМПОРТ и decide() --
+# проверяются subprocess'ом на ИЗОЛИРОВАННОЙ копии critic_snapshot.py
+# (НЕ через monkeypatch модуля-атрибута -- после переноса импорта
+# внутрь функции `cs.dispatch_gate` БОЛЬШЕ НЕ существует как атрибут
+# модуля critic_snapshot, монкипатчить нечего; subprocess -- РЕАЛЬНАЯ,
+# а не сымитированная форма отказа импорта, к тому же ТА ЖЕ форма, что
+# critic явно запросил в witness).
+# ---------------------------------------------------------------------
+
+
+def _write_isolated_copy(tmp_path, dirname: str, with_dispatch_gate: bool, broken_decide: bool = False):
+    """Копия critic_snapshot.py (БЕЗ мутаций -- байт-в-байт) в
+    изолированный tools/-каталог. with_dispatch_gate=False -- сосед
+    вовсе отсутствует (реальный ImportError на обеих формах импорта --
+    ни package `tools`, ни sibling-модуль недоступны на sys.path
+    subprocess'а, чей script-каталог -- единственный релевантный
+    элемент). with_dispatch_gate=True, broken_decide=True -- сосед
+    присутствует, но его decide() безусловно бросает исключение (другая
+    точка отказа -- не импорт, а сам вызов)."""
+    repo_root = tmp_path / dirname
+    tools_dir = repo_root / "tools"
+    tools_dir.mkdir(parents=True)
+    (tools_dir / "critic_snapshot.py").write_text(
+        SCRIPT.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    if with_dispatch_gate:
+        dg_src = (SCRIPT.parent / "dispatch_gate.py").read_text(encoding="utf-8")
+        if broken_decide:
+            dg_src += (
+                "\n\n# Ф10 test probe: decide() unconditionally raises.\n"
+                "def decide(payload):\n"
+                '    raise RuntimeError("simulated dispatch_gate.decide failure")\n'
+            )
+        (tools_dir / "dispatch_gate.py").write_text(dg_src, encoding="utf-8")
+    return tools_dir / "critic_snapshot.py"
+
+
+def test_f10_missing_dispatch_gate_sibling_fail_open_snapshot_written(tmp_path):
+    """Witness, буквально запрошенный критиком: прогон critic_snapshot
+    БЕЗ соседа-модуля dispatch_gate.py -> rc 0, снимок fail-open
+    пишется (обычный успешный снимок, tree_hash присутствует -- ИМПОРТ
+    провалился, gate_exit_code трактуется как 0 -- "не заблокирован")."""
+    script = _write_isolated_copy(tmp_path, "isolated_no_sibling", with_dispatch_gate=False)
+    work_cwd = tmp_path / "work_no_sibling"
+    work_cwd.mkdir()
+    (work_cwd / "a.txt").write_text("hello", encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        input=json.dumps(_critic_payload(work_cwd), ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(work_cwd),
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+    snap = work_cwd / ".claude" / "critic_snapshot.json"
+    assert snap.exists()
+    doc = json.loads(snap.read_text(encoding="utf-8"))
+    assert "tree_hash" in doc, (
+        "отсутствие соседа dispatch_gate.py (ImportError) должно "
+        "fail-open писать обычный снимок, не блокировать запись"
+    )
+
+
+def test_f10_non_critic_dispatch_never_needs_sibling_import_at_all(tmp_path):
+    """Структурное доказательство стоимостного аргумента Ф10 (не
+    таймингом -- флаки, а НАБЛЮДАЕМЫМ фактом): БЕЗ соседа dispatch_gate.py
+    ВООБЩЕ, не-критик диспатч (subagent_type="builder") проходит
+    успешно -- ранний выход (subagent_type != "critic") случается ДО
+    строки импорта, значит некритические диспатчи (подавляющее
+    большинство) НИКОГДА не платят цену импорта -- если бы платили,
+    здесь была бы ImportError (соседа нет вовсе), которую main() либо
+    не поймал бы (при коде ДО Ф10 -- импорт на уровне модуля, ловится
+    даже раньше main()), либо поймал бы, но тест всё равно НЕ доказывал
+    бы "не нужен вовсе" -- он доказывал бы только "fail-open сработал"."""
+    script = _write_isolated_copy(tmp_path, "isolated_non_critic", with_dispatch_gate=False)
+    work_cwd = tmp_path / "work_non_critic"
+    work_cwd.mkdir()
+
+    payload = {
+        "tool_name": "Task",
+        "tool_input": {"subagent_type": "builder"},
+        "cwd": str(work_cwd),
+    }
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(work_cwd),
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    assert not (work_cwd / ".claude" / "critic_snapshot.json").exists()
+
+
+def test_f10_dispatch_gate_decide_raises_fail_open_snapshot_written(tmp_path):
+    """Вторая точка отказа (не импорт -- сам вызов decide()): сосед
+    ЕСТЬ, но его decide() безусловно бросает исключение -- та же
+    fail-open ветка (общий except вокруг И импорта, И вызова)."""
+    script = _write_isolated_copy(
+        tmp_path, "isolated_broken_decide", with_dispatch_gate=True, broken_decide=True
+    )
+    work_cwd = tmp_path / "work_broken_decide"
+    work_cwd.mkdir()
+    (work_cwd / "a.txt").write_text("hello", encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        input=json.dumps(_critic_payload(work_cwd), ensure_ascii=False).encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(work_cwd),
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+
+    snap = work_cwd / ".claude" / "critic_snapshot.json"
+    assert snap.exists()
+    doc = json.loads(snap.read_text(encoding="utf-8"))
+    assert "tree_hash" in doc, (
+        "decide() бросающий исключение должен fail-open писать обычный "
+        "снимок, не блокировать запись"
+    )

@@ -529,14 +529,22 @@ def check_append_only(staged_lines: list[str], head_lines: list[str]):
     строки не изменены и не удалены). Возвращает (ok, message)."""
     if len(staged_lines) < len(head_lines):
         return False, (
-            f"append-only: staged содержит МЕНЬШЕ строк ({len(staged_lines)}) "
-            f"чем HEAD ({len(head_lines)}) -- существующие строки удалены"
+            f"append-only: staged содержит МЕНЬШЕ строк ({len(staged_lines)}) чем "
+            f"HEAD ({len(head_lines)}) -- часть уже принятых строк журнала пропала; "
+            "история диспатчей необратимо теряется, ссылки accepted/rejected на "
+            "удалённые события повисают в воздухе -- верни в staged все строки "
+            "HEAD как префикс без изменений и добавляй новые события только в "
+            "конец (правило 1, append-only)"
         )
     for i, head_line in enumerate(head_lines):
         if staged_lines[i] != head_line:
             return False, (
-                f"append-only: строка {i + 1} расходится с HEAD -- "
-                "существующие строки нельзя менять, только добавлять в конец"
+                f"append-only: строка {i + 1} расходится с версией HEAD -- "
+                "существующая запись правится задним числом; журнал перестаёт "
+                "быть неопровержимым логом принятых решений (D-0076), приёмки и "
+                f"эскалации теряют опору на факт, который они цитировали -- "
+                f"верни строку {i + 1} к виду HEAD и внеси правку НОВОЙ строкой "
+                "в конец, не трогая старую (правило 1, append-only)"
             )
     return True, ""
 
@@ -589,9 +597,12 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict,
         # by вовсе -- дыра AO3 07-24 закрыта здесь.
         return (
             f"D-0058: by={by!r} не является известным ярусом "
-            f"({sorted(TIER_ORDER)}) — basis не может легализовать приёмку "
-            f"от неизвестного принимающего (энум-проверка формы предшествует "
-            f"семантике матрицы; порт AO3-фикса 30e79c8)"
+            f"({sorted(TIER_ORDER)}) -- неизвестно, какой ярус координатора "
+            "принимает работу, и НИКАКОЙ basis не может легализовать приёмку "
+            "от неизвестного принимающего -- "
+            f"впиши в 'by' один из известных ярусов {sorted(TIER_ORDER)} "
+            "(энум-проверка формы предшествует семантике матрицы; порт "
+            "AO3-фикса 30e79c8)"
         )
     agent_tier_name = AGENT_TIER[agent]
     agent_tier = TIER_ORDER[agent_tier_name]
@@ -611,15 +622,22 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict,
     if basis == JUDGE_BASIS_VALUE:
         if obj.get("category") not in LEAF_CATEGORIES:
             return (
-                f"R13/D-0087: basis \"judge\" is legal only for leaf-class "
-                f"dispatches (recon/implementation), got category={obj.get('category')!r}"
+                f"category={obj.get('category')!r} -- не лист-класс (basis "
+                "\"judge\" is legal only for leaf-class dispatches: "
+                "recon/implementation); калиброванный судья не откалиброван "
+                "оценивать не-исполнительскую работу, приёмка осталась бы без "
+                "критик-суждения над архитектурой/спекой -- смени basis на "
+                "'critic'/'queued-to-lead' по паре (by, agent), либо исправь "
+                "category, если работа реально лист-класса (R13/D-0087)"
             )
         if agent not in ("scout", "builder"):
             return (
-                f"R13/D-0087: basis \"judge\" is legal only for agent∈"
-                f"{{scout,builder}} (leaf-class EXECUTORS) -- agent={agent!r} "
-                f"is not eligible for judge acceptance regardless of category "
-                f"(specs and reviews stay outside the judge's remit by policy)"
+                f"agent={agent!r} вне {{scout,builder}} -- basis \"judge\" is "
+                "legal only for agent∈{scout,builder} (leaf-class EXECUTORS); "
+                "судья, приняв designer/critic-класс результат, обошёл бы "
+                "обязательный критик-гейт спек и ревью -- смени basis на "
+                "'critic'/'queued-to-lead' по паре (by, agent), judge на этот "
+                "agent не легален независимо от category (R13/D-0087)"
             )
         return None
 
@@ -637,10 +655,12 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict,
     # haiku-by от floor, ветка 3b его больше не перехватывает.
     if by_tier is not None and by_tier < TIER_ORDER["sonnet"]:
         return (
-            f"D-0058: by={by!r} -- ярус ниже sonnet, координация не "
-            f"предусмотрена ни при каком basis={basis!r} (Role != tier "
-            f"matrix: 'below Sonnet: no coordination is provided for'); "
-            f"agent={agent!r} не может быть принят этим by"
+            f"D-0058: by={by!r} -- ярус ниже sonnet, координация здесь не "
+            f"предусмотрена ни при каком basis={basis!r} (Role != tier matrix: "
+            "'below Sonnet: no coordination is provided for'); приёмка от "
+            f"нефункционирующего координатора легализовала бы agent={agent!r} "
+            "без реального надзора яруса -- подними by до координатора минимум "
+            "sonnet, либо проведи приёмку через judge на лист-класс"
         )
 
     # (3b, D-0099, была "1b"/"а2", 2026-08-04, B2 переставлена ПОСЛЕ floor
@@ -673,11 +693,12 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict,
             return None
         return (
             f"D-0058: agent={agent!r} (ярус {agent_tier_name}) принят с "
-            f"basis='critic', но критик (opus) не строго выше яруса "
-            f"исполнителя -- basis='critic' не поднимает приёмку выше "
-            f"собственного opus-яруса; легальный путь для agent={agent!r} "
-            f"-- by строго выше opus (by='fable'), либо "
-            f"basis='queued-to-lead' при by∈{{sonnet,opus}}"
+            "basis='critic', но критик (opus) не строго выше яруса "
+            "исполнителя -- запись легализовала бы приёмку, которую эта же "
+            "строка матрицы запрещает, обнуляя гарантию критик-гейта для "
+            f"верхне-среднего яруса -- легальный путь для agent={agent!r}: "
+            "by строго выше opus (by='fable'), либо basis='queued-to-lead' "
+            "при by∈{sonnet,opus}"
         )
 
     # (5) basis=="queued-to-lead" -- легален КЛАССУ верхне-среднего
@@ -689,23 +710,38 @@ def _matrix_d0058_violation(event: str, agent, by: str, obj: dict,
         if agent in QUEUED_TO_LEAD_AGENTS and by in ("sonnet", "opus"):
             return None
         return (
-            f"D-0058: agent={agent!r} принят by={by!r} с "
-            f"basis='queued-to-lead' -- для {agent!r}-класса у "
-            f"{by!r}-координатора легален только basis='critic' (или "
-            f"judge на leaf-implementation, если category -- лист-класс, "
-            f"и agent∈{{scout,builder}}); очередь (queued-to-lead) "
-            f"доступна только классу {sorted(QUEUED_TO_LEAD_AGENTS)}"
+            f"D-0058: agent={agent!r} принят by={by!r} с basis='queued-to-lead' "
+            f"-- для {agent!r}-класса у {by!r}-координатора эта очередь не "
+            "легальна; приёмка sonnet-класса (builder) результата через очередь "
+            "к Lead повторила бы утечку AO3 07-24 (критик-гейт исполнителя "
+            "обойдён) -- легален только basis='critic' (или judge на "
+            "leaf-implementation при agent∈{scout,builder}); очередь "
+            f"(queued-to-lead) доступна только классу {sorted(QUEUED_TO_LEAD_AGENTS)}"
         )
 
     # (6) прочее -- общий D-0058 отказ.
     return (
-        f"D-0058: agent={agent!r} принят by={by!r} (не строго выше яруса "
-        f"исполнителя) и нет валидного basis (нужно critic/queued-to-lead "
-        f"по паре, либо judge на лист-класс -- category ∈ "
-        f"recon/implementation, R13/D-0087)"
+        f"D-0058: agent={agent!r} принят by={by!r} -- не строго выше яруса "
+        "исполнителя, и basis не относится ни к 'critic', ни к "
+        "'queued-to-lead', ни к легальному 'judge' на лист-класс; приёмка без "
+        "координатора выше яруса исполнителя и без критик-обоснования обходит "
+        "весь контур D-0058 -- впиши basis='critic' (agent строго ниже opus) "
+        "или 'queued-to-lead' (agent∈{critic,designer}, by∈{sonnet,opus}), "
+        "либо judge на category∈{recon,implementation} с agent∈{scout,builder} "
+        "(R13/D-0087)"
     )
 
 
+# V-1 (2026-08-25, docs/tasks/2026-08-25_kopilka-wave-spec.md, R9-находка
+# t-607): каждый BLOCK-текст нарушения в этом модуле (check_append_only,
+# _matrix_d0058_violation, validate_new_lines) переписан по правилу трёх --
+# (1) что неверно, (2) что от этого сломается (последствие для журнала/
+# гейта, не просто повтор факта), (3) каким действием закрывается
+# (глагол-императив, обращённый к автору строки); провенанс (номер правила
+# этого файла, D-NNN/F-NN/R-код) -- хвостом, не вместо действия. Смысл
+# самих правил НЕ менялся -- только форма их текста отказа; тесты
+# tools/test_journal_validator.py обновлены на новые подстроки-пины с
+# сохранением предмета каждого пина (см. отчёт билдера).
 def validate_new_lines(new_lines: list[str], head_lines: list[str],
                         now: datetime.datetime,
                         config_text: str | None = None) -> list[str]:
@@ -722,10 +758,20 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
         try:
             obj = json.loads(line)
         except (json.JSONDecodeError, TypeError) as e:
-            violations.append(f"line {line_no}: невалидный JSON ({e})")
+            violations.append(
+                f"line {line_no}: невалидный JSON ({e}) -- строку нельзя "
+                "разобрать ни в одно событие, все проверки правил 2-11 для "
+                "неё невозможны -- почини JSON построчно (один валидный "
+                "объект на строку)"
+            )
             continue
         if not isinstance(obj, dict):
-            violations.append(f"line {line_no}: не JSON-объект")
+            violations.append(
+                f"line {line_no}: распарсилось не в JSON-объект (словарь) -- "
+                "списки/строки/числа не несут типизированных полей "
+                "event/agent/notes, все проверки правил 2-11 неприменимы -- "
+                "перепиши строку JSON-объектом с обязательными полями"
+            )
             continue
 
         event = obj.get("event")
@@ -738,61 +784,137 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
         notes = obj.get("notes")
 
         if not isinstance(ts, str) or not ts:
-            violations.append(f"{tag}: отсутствует/невалидно обязательное поле 'ts'")
+            violations.append(
+                f"{tag}: поле 'ts' отсутствует/невалидно -- без него монотонность "
+                "(правило 10) и предел F-29 не проверяемы, событие не "
+                "встраивается в хронологию журнала -- впиши ts в ISO-формате без "
+                "таймзоны, взятый с системных часов в момент записи (правило 2)"
+            )
         if not isinstance(event, str) or not event:
-            violations.append(f"{tag}: отсутствует/невалидно обязательное поле 'event'")
+            violations.append(
+                f"{tag}: поле 'event' отсутствует/невалидно -- без него строка "
+                "не относится ни к одному ENUM-событию, и все проверки по event "
+                "(model/task_id/witness/матрица D-0058) молча пропускаются -- "
+                f"впиши event из {sorted(EVENTS)} (правило 2)"
+            )
         if not isinstance(agent, str) or not agent:
-            violations.append(f"{tag}: отсутствует/невалидно обязательное поле 'agent'")
+            violations.append(
+                f"{tag}: поле 'agent' отсутствует/невалидно -- без него "
+                "неизвестно, чей результат приняли/отклонили, и матрица "
+                "D-0058/AGENT_TIER не может решить, легальна ли приёмка -- "
+                "впиши agent (кто выполнял работу) (правило 2)"
+            )
         if not isinstance(category, str) or not category:
-            violations.append(f"{tag}: отсутствует/невалидно обязательное поле 'category'")
+            violations.append(
+                f"{tag}: поле 'category' отсутствует/невалидно -- без него "
+                "нельзя отличить лист-класс (recon/implementation) от прочих "
+                "категорий, и basis='judge' не проверяем (R13/D-0087) -- "
+                "впиши category (правило 2)"
+            )
         if not isinstance(notes, str) or not notes.strip():
-            violations.append(f"{tag}: отсутствует/пустое обязательное поле 'notes'")
+            violations.append(
+                f"{tag}: поле 'notes' отсутствует/пустое -- без него у события "
+                "нет ни одной записанной причины (в журнале нет отдельного "
+                "поля 'reason' -- CLAUDE.md «Журнал»), решение остаётся "
+                "необъяснимым при разборе -- впиши непустой notes (правило 2)"
+            )
 
         if isinstance(event, str) and event and event not in EVENTS:
-            violations.append(f"{tag}: 'event' не из enum ({event!r})")
+            violations.append(
+                f"{tag}: 'event'={event!r} не из enum ({sorted(EVENTS)}) -- "
+                "незнакомое событие не попадает ни под одну из проверок правил "
+                "3-11, гейт молча пропустит его требования -- исправь event на "
+                "одно из перечисленных (правило 3)"
+            )
 
         if event in MODEL_REQUIRED_EVENTS:
             model = obj.get("model")
             if not isinstance(model, str) or not model:
-                violations.append(f"{tag}: 'model' обязателен для event={event}")
+                violations.append(
+                    f"{tag}: поле 'model' обязателен для event={event} -- без "
+                    "него R7 (визуальный лейбл диспатча) и D-0083 (сверка "
+                    "модели) не могут проверить, каким ярусом реально выполнена "
+                    "работа -- впиши model (правило 4)"
+                )
 
         if event in TASK_ID_REQUIRED_EVENTS:
             if not isinstance(task_id, str) or not task_id:
-                violations.append(f"{tag}: 'task_id' обязателен для event={event}")
+                violations.append(
+                    f"{tag}: поле 'task_id' обязателен для event={event} -- "
+                    "без него событие не привязывается ни к какой задаче, "
+                    "closes:/defect_found/accepted не смогут на него сослаться "
+                    "-- впиши task_id в формате t-NNN (правило 5)"
+                )
             elif not TASK_ID_RE.match(task_id):
-                violations.append(f"{tag}: task_id {task_id!r} не соответствует формату t-NNN (3+ цифр)")
+                violations.append(
+                    f"{tag}: task_id {task_id!r} не соответствует формату t-NNN "
+                    "(3+ цифр) -- нестандартный id не участвует в сверке "
+                    "новизны/max+1 и в поиске «существует ли task_id выше по "
+                    "файлу», провоцируя коллизии нумерации -- впиши id вида "
+                    "t-NNN (правило 5)"
+                )
 
         if event == "rejected":
             attempt = obj.get("attempt")
             if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt < 1:
-                violations.append(f"{tag}: 'attempt' обязан быть целым >=1")
+                violations.append(
+                    f"{tag}: поле 'attempt' обязан быть целым >=1 -- без "
+                    "номера попытки R6 (эскалация после двух rejected) не "
+                    "может посчитать провалы задачи -- впиши attempt целым, "
+                    "начиная с 1 (правило 6)"
+                )
             failure_class = obj.get("failure_class")
             if failure_class not in FAILURE_CLASSES:
                 violations.append(
-                    f"{tag}: 'failure_class' обязан быть одним из {sorted(FAILURE_CLASSES)}"
+                    f"{tag}: поле 'failure_class' обязан быть одним из "
+                    f"{sorted(FAILURE_CLASSES)} -- без класса причины отказа "
+                    "нельзя отличить дефект спеки от нехватки инструмента при "
+                    "разборе рецидива -- впиши failure_class из перечня "
+                    "(правило 6)"
                 )
 
         if event == "accepted" and agent == "builder":
             witness = obj.get("witness")
             if not isinstance(witness, str) or not witness.strip():
-                violations.append(f"{tag}: 'witness' обязателен (непустая строка) для accepted+agent=builder")
+                violations.append(
+                    f"{tag}: поле 'witness' обязателен (непустая строка) для "
+                    "accepted+agent=builder -- без него приёмка воркер-диффа "
+                    "не несёт дословный вывод проверочного прогона (R2), и "
+                    "accepted превращается в пересказ вместо доказательства "
+                    "-- впиши witness (правило 7)"
+                )
 
         if event == "delegated":
             worker_ref = obj.get("worker_ref")
             if not isinstance(worker_ref, str) or not worker_ref.strip():
                 violations.append(
-                    f"{tag}: 'worker_ref' обязателен (непустая строка) для delegated (D-0076)"
+                    f"{tag}: поле 'worker_ref' обязателен (непустая строка) "
+                    "для delegated (D-0076) -- без хэндла воркера следующая "
+                    "сессия не найдёт, кто и где выполняет диспатч, фантомный "
+                    "delegated неотличим от реального (родня F-29) -- впиши "
+                    "worker_ref (правило 5b)"
                 )
 
         if event == "defect_found":
             ref = obj.get("ref")
             if not isinstance(ref, str) or not ref:
-                violations.append(f"{tag}: 'ref' обязателен (непустой) для defect_found")
+                violations.append(
+                    f"{tag}: поле 'ref' обязателен (непустой) для "
+                    "defect_found -- без ссылки на исходный accepted нельзя "
+                    "понять, чей поздний дефект это (D-0060: reopen запрещён, "
+                    "defect_found -- легальный путь) -- впиши ref = task_id "
+                    "принятой работы (правило 8)"
+                )
 
         if event in ("accepted", "rejected"):
             by = obj.get("by")
             if not isinstance(by, str) or not by:
-                violations.append(f"{tag}: 'by' обязателен (непустой) для {event} (матрица D-0058)")
+                violations.append(
+                    f"{tag}: поле 'by' обязателен (непустой) для {event} -- "
+                    "без принимающего яруса матрица D-0058 не может решить, "
+                    "легальна ли приёмка/отказ -- впиши by (кто принял/"
+                    "отклонил) (правило 11, D-0058)"
+                )
             else:
                 mv = _matrix_d0058_violation(event, agent, by, obj, config_text)
                 if mv:
@@ -806,13 +928,22 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
                 actual = int(TASK_ID_RE.match(task_id).group(1))
                 if actual != expected:
                     violations.append(
-                        f"{tag}: новизна task_id нарушена -- ожидался t-{expected:03d} (max+1), получен {task_id}"
+                        f"{tag}: новизна task_id нарушена -- ожидался t-{expected:03d} "
+                        f"(max+1), получен {task_id} -- пропуск номера рвёт "
+                        "последовательность задач, следующая сессия перечитает "
+                        "хвост журнала и получит несовпадающий max -- перечитай "
+                        "хвост журнала перед выдачей и присвой ровно max+1 "
+                        "(правило 9а)"
                     )
             elif task_id in closed_tasks:
                 # (г) reopen запрещён -- коллизия = две задачи (D-0060).
                 violations.append(
-                    f"{tag}: delegated на ЗАКРЫТУЮ задачу {task_id!r} (выше уже есть accepted) -- "
-                    "reopen запрещён, коллизия считается двумя задачами (D-0060)"
+                    f"{tag}: delegated на ЗАКРЫТУЮ задачу {task_id!r} (выше уже "
+                    "есть accepted) -- переоткрытие принятой задачи стирает "
+                    "границу между её старым и новым смыслом, коллизия "
+                    "становится неотличима от новой задачи под старым номером "
+                    f"-- заведи НОВЫЙ task_id для новой работы, {task_id!r} "
+                    "reopen запрещён (D-0060)"
                 )
             else:
                 prior_agents = delegated_agents.get(task_id, set())
@@ -846,8 +977,11 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
                         else:
                             violations.append(
                                 f"{tag}: replaces_worker={replaces_handle!r} не встречается ни в "
-                                f"одном предыдущем delegated task_id={task_id!r} -- фиктивная "
-                                "замена запрещена (правило 9в2)"
+                                f"одном предыдущем delegated task_id={task_id!r} -- хэндл выдуман "
+                                "или взят с чужой задачи, замена умершего воркера, которую он "
+                                "должен подтвердить, непроверяема -- сошлись на РЕАЛЬНЫЙ "
+                                "worker_ref прежнего delegated этой же задачи, фиктивная замена "
+                                "запрещена (правило 9в2)"
                             )
                     else:
                         # (в) не выполнены условия ретрая, маркера замены нет -> (г) дубль-паттерн t-029.
@@ -860,33 +994,48 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
                         # этого гейта читает человек в момент отказа -- тот же мотив, что и у кодировки.
                         if not valid_attempt:
                             reason = (
-                                "поле 'attempt' отсутствует или невалидно (обязано быть целым >=2 "
-                                "для повторного delegated по существующему открытому task_id) -- "
-                                "остальные условия (наличие/чуждость rejected, сигнал новой версии) "
-                                "не проверяются, пока сам attempt некорректен"
+                                "поле 'attempt' отсутствует или невалидно -- обязано быть целым "
+                                ">=2 для повторного delegated по существующему открытому task_id, "
+                                "иначе ретрай неотличим от случайного дубля t-029 -- впиши "
+                                "attempt>=2 (остальные условия -- наличие/чуждость rejected, "
+                                "сигнал новой версии -- не проверяются, пока сам attempt "
+                                "некорректен)"
                             )
                         elif foreign_rejected:
                             reason = (
                                 "на task_id есть rejected, но НЕ agent'а, который входит повторно "
-                                "(\"чужой\" rejected, правило 9в-ii) -- легален только если ПОСЛЕ "
-                                "последнего delegated ЭТОГО agent появился сигнал новой версии "
-                                "(новый delegated другого agent / rejected agent=lead / escalated "
-                                "на этот task_id); сигнала нет, либо он из более раннего раунда и "
-                                "протух -- дыра B3 (порт AO3 AT-BUG-034)"
+                                "(\"чужой\" rejected, правило 9в-ii), и после последнего delegated "
+                                "ЭТОГО agent нет сигнала новой версии (новый delegated другого "
+                                "agent / rejected agent=lead / escalated на этот task_id) -- без "
+                                "такого сигнала повторный вход неотличим от самолегализации "
+                                "ревьюера без переделки исполнителя (дыра B3, порт AO3 "
+                                "AT-BUG-034) -- дождись свежего сигнала новой версии ПОСЛЕ своего "
+                                "последнего delegated, либо не входи повторно"
                             )
                         else:
-                            reason = "attempt валиден, но rejected для этого task_id нет вовсе (ни своего, ни чужого)"
+                            reason = (
+                                "attempt валиден, но rejected для этого task_id нет вовсе (ни "
+                                "своего, ни чужого) -- без rejected нет основания для ретрая, "
+                                "повторный delegated неотличим от случайного дубля t-029 -- "
+                                "сначала получи rejected (свой или чужой), либо заведи новую "
+                                "задачу"
+                            )
                         violations.append(
-                            f"{tag}: повторный delegated тем же agent={agent!r} по task_id={task_id!r} "
-                            f"{reason} -- запрещённый дубль "
-                            "(класс t-029, D-0060); легальная альтернатива -- маркер "
+                            f"{tag}: повторный delegated тем же agent={agent!r} по "
+                            f"task_id={task_id!r} -- {reason} -- запрещённый дубль (класс "
+                            "t-029, D-0060), рвущий отслеживание, кто реально выполняет "
+                            "задачу -- легальная альтернатива -- маркер "
                             "'replaces_worker:<прежний worker_ref>' в notes при замене умершего "
                             "воркера без вердикта (правило 9в2)"
                         )
         elif event in ("accepted", "rejected", "escalated", "defect_found") and valid_tid:
             if task_id not in seen_task_ids:
                 violations.append(
-                    f"{tag}: task_id {task_id!r} не ссылается ни на что существующее выше в файле"
+                    f"{tag}: task_id {task_id!r} не ссылается ни на что существующее выше в "
+                    "файле -- событие привязано к несуществующей задаче, диспатч без "
+                    "delegated разрывает цепочку правила 9 -- впиши task_id уже "
+                    "встреченного выше delegated, либо сначала заведи его новым delegated "
+                    "(правило 9)"
                 )
 
         _harvest_line_into(line_no - 1, event, task_id, agent, obj.get("worker_ref"), delegated_agents,
@@ -895,16 +1044,29 @@ def validate_new_lines(new_lines: list[str], head_lines: list[str],
 
         parsed_ts = parse_ts(ts) if isinstance(ts, str) else None
         if isinstance(ts, str) and ts and parsed_ts is None:
-            violations.append(f"{tag}: ts {ts!r} не ISO-формат без таймзоны")
+            violations.append(
+                f"{tag}: ts {ts!r} не ISO-формат без таймзоны -- монотонность "
+                "(правило 10) и предел F-29 не считаются от нечитаемой метки -- "
+                "впиши ts вида YYYY-MM-DDTHH:MM:SS[.ffffff] без 'Z'/смещения "
+                "(правило 10)"
+            )
         if parsed_ts is not None:
             if last_ts is not None and parsed_ts < last_ts:
                 violations.append(
-                    f"{tag}: ts не монотонен -- {parsed_ts.isoformat()} раньше предыдущего {last_ts.isoformat()}"
+                    f"{tag}: ts не монотонен -- {parsed_ts.isoformat()} раньше "
+                    f"предыдущего {last_ts.isoformat()} -- порядок строк "
+                    "перестаёт совпадать с порядком событий во времени, приёмка "
+                    "стала бы читаться как случившаяся раньше своего диспатча -- "
+                    "пиши ts с системных часов В МОМЕНТ записи, не раньше "
+                    "последней уже принятой строки (правило 10)"
                 )
             if parsed_ts > now_limit:
                 violations.append(
-                    f"{tag}: ts {ts!r} позже now+10мин ({now_limit.isoformat()}) -- "
-                    "повествовательное будущее (F-29)"
+                    f"{tag}: ts {ts!r} позже now+10мин ({now_limit.isoformat()}) "
+                    "-- метка написана из повествования «в будущем», а не с "
+                    "системных часов, хронология журнала перестаёт быть "
+                    "проверяемым фактом -- перечитай системные часы "
+                    "НЕПОСРЕДСТВЕННО перед записью и впиши текущий ts (F-29)"
                 )
             last_ts = parsed_ts
 

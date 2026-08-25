@@ -433,8 +433,10 @@ GIVEN_REPO_REL_PATH_RE): два вида локальных путей --
      инженерное решение (спека их не называет явно) против жадного
      переползания через "path1.py,path2.py" без пробела в ОДНО ложное
      совпадение.
- (б) репо-относительный путь: ТОЛЬКО с одним из шести префиксов
-     (tools|gateway|PROCESS|docs|\.claude|\.githooks) и расширением
+ (б) репо-относительный путь: ТОЛЬКО с одним из префиксов
+     (tools|gateway|PROCESS|docs|logs|\.claude|\.githooks -- "logs"
+     добавлен V-2, 2026-08-25, docs/tasks/2026-08-25_kopilka-wave-spec.md,
+     находка №4 t-599) и расширением
      файла -- каталоги/голые имена не матчатся структурно (регекс
      требует `\.ext` в хвосте). Отрицательный lookbehind
      `(?<![\w/\\])` перед префиксом закрывает ДВЕ вещи разом: (1) не
@@ -1265,7 +1267,15 @@ GIVEN_ABS_WIN_PATH_RE = re.compile(
     r"(?<!\w)[A-Za-z]:[\\/]" + _GIVEN_PATH_BODY_CHAR + r"{0,300}\.[A-Za-z0-9]{1,10}\b"
 )
 
-_GIVEN_REPO_REL_PREFIX = r"(?:tools|gateway|PROCESS|docs|\.claude|\.githooks)"
+# V-2 (2026-08-25, docs/tasks/2026-08-25_kopilka-wave-spec.md, находка №4
+# t-599): "logs" добавлен в префикс-набор -- logs/routing-log.jsonl, самый
+# цитируемый носитель фактов (журнал маршрутизации), раньше НЕ проверялся
+# given-слоем даже на существование, потому что не входил в этот regex
+# вовсе (given_path_warn просто не видел его как кандидата). Тот же
+# префикс-набор, что _FRESHNESS_REPO_REL_PREFIX (ниже, logs уже был там
+# ДО этой правки) -- FRESHNESS-регексы этой правкой не задеты, они и так
+# несут logs с прошлого раунда.
+_GIVEN_REPO_REL_PREFIX = r"(?:tools|gateway|PROCESS|docs|logs|\.claude|\.githooks)"
 GIVEN_REPO_REL_PATH_RE = re.compile(
     r"(?<![\w/\\])"
     + _GIVEN_REPO_REL_PREFIX

@@ -3328,10 +3328,16 @@ def test_pycnarrow_b3_1mb_command_exit0():
 # на 100КБ/1МБ. Критик-гейт зафиксировал ОТДЕЛЬНУЮ, ПРЕДСУЩЕСТВУЮЩУЮ
 # квадратичность извлечения на АДВЕРСАРИАЛЬНОЙ форме "повторённые
 # опенеры БЕЗ закрывателя" (много `python -c`/heredoc-подобных токенов
-# подряд, каждый без своего аргумента/закрывающей строки) -- НЕ чинится
-# этим раундом (Ф3 явно: "квадратичность НЕ чинить"); носитель очереди
-# -- docs/tasks/2026-08-25_queue8-closure.md (не в owns этой задачи,
-# billerd не пишет туда сам -- пункт для Lead/координатора).
+# подряд, каждый без своего аргумента/закрывающей строки) -- этим
+# раундом (Ф3) НЕ ЧИНИЛОСЬ; носитель очереди --
+# docs/tasks/2026-08-25_queue8-closure.md. ОБНОВЛЕНИЕ (М2-3,
+# docs/tasks/2026-08-25_kopilka-wave-spec.md, "БИЛДЕР М2"): ЭТОТ путь
+# (`_is_python_dash_c_certain`) закрыт -- см. `MAX_HEREDOC_OPENERS` и
+# батарею test_m2_3_* ниже (сразу за секцией "U"). НЕ утверждаю, что
+# ВСЯ квадратичность COMMIT_HEREDOC_RE в файле закрыта этим -- сосед по
+# тому же регексу (`_strip_commit_messages` <- `_is_journal_bypass`)
+# оставался жив ДО отдельного фикса Ф1 (критик волны
+# "fit_with_fixes") -- см. батарею test_f1_* рядом с test_m2_3_*.
 def test_pycnarrow_perf_100kb_1mb_number_not_gated():
     cmd_100kb = 'python -c "print(\'' + ("a" * 100_000) + "')\""
     t0 = time.perf_counter()
@@ -3402,6 +3408,190 @@ def test_pycnarrow_u_uncertain_form_not_classified():
     hso = output["hookSpecificOutput"]
     assert "permissionDecision" not in hso
     assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+# ---------------------------------------------------------------------
+# М2-3 (docs/tasks/2026-08-25_kopilka-wave-spec.md, "БИЛДЕР М2", Ф3
+# вердикта критика t-605): квадратичность формы "повторённые опенеры
+# `python - <<DELIM` БЕЗ закрывателя" -- MAX_HEREDOC_OPENERS-предфильтр.
+# Граница НА (=64, ещё дорогой путь, ожидаемо быстро) и ЗА (>64, ранний
+# выход certain=False) + перф-числа приложены в assert-сообщении (число
+# видно в выводе pytest -q при -rA/failure, а также печатается явно
+# ниже через отдельный print, попадающий в witness при -s).
+# ---------------------------------------------------------------------
+
+
+def _unterminated_heredoc_openers(n: int, filler_len: int = 200) -> str:
+    """n РАЗЛИЧНЫХ (уникальный делимитер на каждый) `python - <<DELIM_i`
+    опенеров БЕЗ единого закрывателя -- ни один регекс-проход НЕ находит
+    закрывающую строку ни для одного опенера (живая репро-форма Ф3)."""
+    filler = "x" * filler_len
+    parts = [f"python - <<DELIM_{i}\n{filler}" for i in range(n)]
+    return "\n".join(parts)
+
+
+def test_m2_3_boundary_at_64_openers_is_certain_and_fast():
+    """НА границе (n == MAX_HEREDOC_OPENERS == 64): предфильтр НЕ
+    срабатывает (`count("<<") > 64` ложно на РОВНО 64) -- дорогой путь
+    исполняется как раньше, инвариант "существующее поведение при n<=64
+    не меняется" -- и всё ещё быстро (боевой репро-размер тут маленький,
+    ~13КБ)."""
+    assert hygiene_gate.MAX_HEREDOC_OPENERS == 64
+    command = _unterminated_heredoc_openers(64)
+    t0 = time.perf_counter()
+    certain = hygiene_gate._is_python_dash_c_certain(command)
+    elapsed = time.perf_counter() - t0
+    print(f"M2-3 perf: n=64 openers ({len(command)} bytes) -> {elapsed:.4f}s")
+    assert certain is True  # опенеры -- РЕАЛЬНЫЕ python-heredoc-опенеры
+    assert elapsed < 2.0, f"n=64 (на границе) took {elapsed:.4f}s -- unexpectedly slow"
+
+
+def test_m2_3_beyond_boundary_4000_openers_early_exit_linear():
+    """ЗА границей (n=4000, много больше 64): ранний выход -- certain
+    ВСЕГДА False (консервативно, деньга не расширяется), и время НЕ
+    квадратично -- дешёвый `count("<<")` линеен от размера команды, а не
+    от числа опенеров в квадрате (см. докстринг `MAX_HEREDOC_OPENERS`
+    выше за замер ДО фикса: 8.363с на 96КБ; после фикса та же
+    ПОРЯДКОВО бОльшая команда обязана остаться на порядки быстрее)."""
+    command = _unterminated_heredoc_openers(4000)
+    t0 = time.perf_counter()
+    certain = hygiene_gate._is_python_dash_c_certain(command)
+    elapsed = time.perf_counter() - t0
+    print(f"M2-3 perf: n=4000 openers ({len(command)} bytes) -> {elapsed:.4f}s")
+    assert certain is False
+    assert elapsed < 1.0, (
+        f"n=4000 (за границей) took {elapsed:.4f}s -- ранний выход не сработал "
+        "или сам предфильтр внезапно не O(n)"
+    )
+
+
+def test_m2_3_65_openers_one_past_boundary_early_exit_uncertain():
+    """ГРАНИЦА+1 (n=65): ОДИН опенер сверх лимита -- предфильтр уже
+    срабатывает (`65 > 64`), certain=False -- дискриминирует ОТ n=64
+    (test_m2_3_boundary_at_64_openers_is_certain_and_fast даёт True)."""
+    command = _unterminated_heredoc_openers(65)
+    assert hygiene_gate._is_python_dash_c_certain(command) is False
+
+
+def test_m2_3_over_limit_classification_falls_back_to_u_not_deny(monkeypatch):
+    """Консервативный сдвиг НАЗВАН тестом (спека, буквально): сверх
+    лимита классификация "U" (не M/P), decide() даёт СТАРОЕ безусловное
+    WARN-поведение -- НЕ deny, даже при PYC_DENY_ENABLED=True (I2-
+    инвариант: deny не расширяется, форма уходит В WARN, не в тишину и
+    не в блок)."""
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = _unterminated_heredoc_openers(65)
+    assert _payload_class(command) == "U"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso, (
+        "гигантская форма сверх MAX_HEREDOC_OPENERS денается -- "
+        "консервативное направление нарушено"
+    )
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+def test_m2_3_i2_invariant_existing_deny_tests_green_without_body_changes():
+    """I2-инвариант (спека, буквально): существующий deny-пин
+    (test_pycnarrow_a4_asymmetry_pure_payload_still_denies_when_switch_on
+    несёт СВОЙ собственный monkeypatch/assert) продолжает денаить --
+    здесь ПОВТОРНО, узко, без monkeypatch на V5_ENABLED (дефолт), чтобы
+    зафиксировать САМ факт "предфильтр не тронул обычный `python -c`
+    payload" в одном месте рядом с M2-3 батареей (не дублирует
+    остальные ~15 pycnarrow-тестов -- та же логика уже покрыта ими)."""
+    command = 'python -c "print(1+1)"'
+    assert hygiene_gate._is_python_dash_c_certain(command) is True
+    assert _payload_class(command) == "P"
+
+
+# ---------------------------------------------------------------------
+# Ф1 (критик волны "fit_with_fixes", СОСЕД М2-3, тот же
+# COMMIT_HEREDOC_RE, ДРУГОЙ путь: `_strip_commit_messages()` <-
+# `_is_journal_bypass()` <- `_collect_v5_signals`): квадратичность
+# достижима на командах, несущих "git commit" ОДНОВРЕМЕННО с
+# множеством незакрытых heredoc-опенеров -- замер критика 0.12/0.50/
+# 2.23с при n=500/1000/2000 (негативный контроль без "git commit"
+# 0.0035с). ТОТ ЖЕ MAX_HEREDOC_OPENERS-предфильтр в `_is_journal_bypass`
+# (см. её докстринг) -- граница НА (64, дорогой путь исполняется, как
+# раньше) и ЗА (>64, ранний выход False, направление "не bypass").
+# ---------------------------------------------------------------------
+
+
+def _git_commit_with_unterminated_heredocs(n: int) -> str:
+    return 'git commit -m "msg" && ' + _unterminated_heredoc_openers(n)
+
+
+def test_f1_boundary_at_64_openers_still_runs_real_check_and_fast():
+    """НА границе (n == MAX_HEREDOC_OPENERS == 64, С "git commit"):
+    предфильтр НЕ срабатывает (`64 > 64` ложно) -- дорогой путь
+    исполняется как раньше; на этом РАЗМЕРЕ (n=64, ~14КБ) он всё ещё
+    быстрый (квадратичный рост становится заметен на порядках,
+    измеренных критиком -- n=500+)."""
+    command = _git_commit_with_unterminated_heredocs(64)
+    t0 = time.perf_counter()
+    result = hygiene_gate._is_journal_bypass(command)
+    elapsed = time.perf_counter() - t0
+    print(f"F1 perf: n=64 openers + git commit ({len(command)} bytes) -> {elapsed:.4f}s")
+    assert result is False  # никакой записи в журнал в этой синтетике нет
+    assert elapsed < 2.0, f"n=64 (на границе) took {elapsed:.4f}s -- unexpectedly slow"
+
+
+def test_f1_beyond_boundary_2000_openers_early_exit_not_quadratic():
+    """ЗА границей (n=2000, ТА ЖЕ величина, что замерил критик, С
+    "git commit"): ранний выход -- `_is_journal_bypass` ВСЕГДА False
+    (консервативно -- "не bypass", журнальный DENY не расширяется), и
+    время НЕ квадратично (дешёвый `count("<<")` линеен). ДО фикса ЭТА
+    ЖЕ форма (прямой вызов `_strip_commit_messages`, в обход гейта --
+    см. отчёт билдера за точные секунды на ЭТОЙ машине, порядок
+    величины совпадает с замером критика 2.23с при n=2000, абсолютные
+    числа разнятся по машине/окружению) занимала секунды-десятки
+    секунд; ПОСЛЕ фикса -- на порядки быстрее."""
+    command = _git_commit_with_unterminated_heredocs(2000)
+    t0 = time.perf_counter()
+    result = hygiene_gate._is_journal_bypass(command)
+    elapsed = time.perf_counter() - t0
+    print(f"F1 perf: n=2000 openers + git commit ({len(command)} bytes) -> {elapsed:.4f}s")
+    assert result is False
+    assert elapsed < 1.0, (
+        f"n=2000 (за границей, критиковский размер) took {elapsed:.4f}s -- "
+        "ранний выход не сработал"
+    )
+
+
+def test_f1_65_openers_one_past_boundary_forces_early_exit():
+    """ГРАНИЦА+1 (n=65, С "git commit") -- предфильтр уже срабатывает
+    (`65 > 64`), дискриминирует ОТ n=64 (граница исполняет реальную
+    проверку, n=65 -- ранний выход False безусловно)."""
+    command = _git_commit_with_unterminated_heredocs(65)
+    assert hygiene_gate._is_journal_bypass(command) is False
+
+
+def test_f1_negative_control_no_git_commit_stays_cheap_regardless_of_openers():
+    """Негативный контроль (командная гигиена п.6, парный позитивному
+    выше): ТА ЖЕ форма БЕЗ "git commit" -- `_strip_commit_messages` уже
+    ДО этой правки рано выходила по GIT_COMMIT_RE-гарду (дорогой путь
+    недостижим), предфильтр её не касается -- быстро НЕЗАВИСИМО от
+    числа опенеров (n=4000, за пределом лимита -- предфильтр всё равно
+    сработал бы первым, но эта ветка доказывает, что дело не только в
+    нём)."""
+    command = _unterminated_heredoc_openers(4000)  # нет "git commit" вовсе
+    t0 = time.perf_counter()
+    result = hygiene_gate._is_journal_bypass(command)
+    elapsed = time.perf_counter() - t0
+    assert result is False
+    assert elapsed < 1.0, f"no-git-commit form took {elapsed:.4f}s -- unexpectedly slow"
+
+
+def test_f1_real_journal_bypass_still_detected_below_limit_regress():
+    """Регресс-пин (направление проверено вживую, не только числом):
+    настоящий journal bypass (echo-редирект в logs/routing-log.jsonl
+    ВНУТРИ statement'а, НИЖЕ лимита опенеров) продолжает детектиться --
+    предфильтр не гасит штатное обнаружение класса (г) на нормальных
+    командах."""
+    command = 'echo "x" >> logs/routing-log.jsonl'
+    assert hygiene_gate._is_journal_bypass(command) is True
 
 
 # --- I1/E15: ключ `pyc` (широкий) и измеритель -- НЕ переопределены -------

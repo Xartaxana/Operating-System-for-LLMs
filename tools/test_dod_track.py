@@ -213,6 +213,46 @@ def test_is_verification_command_matches_spec_forms():
 
 
 # ---------------------------------------------------------------------
+# М2-2 (docs/tasks/2026-08-25_kopilka-wave-spec.md, "БИЛДЕР М2",
+# находка t-602, атрибуция исправлена координатором 2026-08-25 --
+# регексп физически живёт в этом файле, не в dod_gate.py): пин-тест
+# двух команд -- one-off скрипт-прогон без "test"/"pytest" в тексте
+# команды НЕ распознаётся; та же команда, обёрнутая КОНВЕНЦИЕЙ
+# `&& echo "verification test passed: <что проверено>"` (см. докстринг
+# VERIFICATION_COMMAND_RE в tools/dod_track.py), распознаётся --
+# РЕГЕКСП НЕ МЕНЯЛСЯ, обёртка проходит существующей третьей
+# альтернативой (`python\s+.*test`).
+#
+# Ф3 (критик волны "fit_with_fixes"): ПЕРВАЯ версия этого пина/
+# конвенции несла маркер БЕЗ слова "passed" -- is_verification_command()
+# узнавал бы форму (эта проверка), но determine_outcome() дал бы "red"
+# (нет признака успеха в тексте, защитный дефолт SUCCESS_INDICATORS_RE
+# не матчит) -- ИСПРАВЛЕНО: маркер теперь несёт "passed" (см.
+# test_determine_outcome_wrapper_convention_marker_is_green ниже).
+# ---------------------------------------------------------------------
+
+
+def test_is_verification_command_one_off_script_wrapper_convention():
+    bare = "python docs/tasks/x.py"
+    wrapped = 'python docs/tasks/x.py && echo "verification test passed: probe"'
+    assert not dod_track.is_verification_command(bare), bare
+    assert dod_track.is_verification_command(wrapped), wrapped
+
+
+def test_determine_outcome_wrapper_convention_marker_is_green():
+    """Ф3: determine_outcome() на СТРОКЕ-МАРКЕРЕ (то, что реально
+    появляется в stdout после `&&`) обязано дать "green" -- иначе
+    конвенция распознаётся is_verification_command(), но остаётся
+    красной для dod_gate (класс уже задокументирован в докстринге
+    VERIFICATION_COMMAND_RE, "ПОСЛЕДСТВИЕ ... xfail" -- "признана как
+    форма" не равно "признана зелёной")."""
+    outcome = dod_track.determine_outcome(
+        {"stdout": "verification test passed: probe", "stderr": ""}
+    )
+    assert outcome == "green"
+
+
+# ---------------------------------------------------------------------
 # STAGING_HQ п.1: НЕТ исключения "самотесты гейтовой инфры" -- И
 # канонический, И узкий таргет ОБА признаются verification-командой.
 # ---------------------------------------------------------------------

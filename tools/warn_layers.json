@@ -13,7 +13,7 @@
       "denominator": "Z1",
       "listed_in_check_11v": true,
       "reachable": "unmeasured",
-      "reason": "подкласс I (ложное срабатывание), не подкласс II -- знаменатель вне задачи узла B, чинится узлом A (docs/tasks/2026-08-25_warn-class-fix-dag.md)"
+      "reason": "подкласс I (ложное срабатывание), не подкласс II -- знаменатель вне задачи узла B, чинится узлом A (docs/tasks/2026-08-25_warn-class-fix-dag.md); префикс-набор расширен logs 2026-08-25 (V-2); доли до/после несравнимы"
     },
     {
       "id": "ROLE_TYPE",

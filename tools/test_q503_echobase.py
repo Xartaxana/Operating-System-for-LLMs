@@ -485,7 +485,10 @@ def test_k16_validation_stays_on_cumulative_head_diff_base_unaffected_by_fallbac
     hook_output = _parse_stdout_json(result.stdout)
     ctx = hook_output["additionalContext"]
     assert "JOURNAL ECHO" in ctx
-    assert "отсутствует/невалидно обязательное поле 'category'" in ctx
+    # V-1 (2026-08-25, t-611): тексты валидатора переписаны по правилу
+    # трёх — пин обновлён на новую форму, предмет (дефект category
+    # виден сквозь эхо-базу) прежний.
+    assert "поле 'category' отсутствует/невалидно" in ctx
     assert je.FALLBACK_MARKER_TEXT not in ctx  # primary path -- НЕ фолбэк
 
 

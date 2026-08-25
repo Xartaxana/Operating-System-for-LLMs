@@ -170,6 +170,13 @@ JOURNAL_TAIL = ("logs", "routing-log.jsonl")
 GIT_TIMEOUT_SECONDS = 5
 MAX_MESSAGE_LEN = 500
 MAX_HEAD_MESSAGES = 3
+# Байтовый потолок base-сегмента на json-проводе (тот же класс, что
+# MAX_R3_BYTES ниже; посадка Lead 2026-08-25, см. build_context). Ниже
+# R3-потолка НАМЕРЕННО: канонический worst-case B1 (4 builder-строки:
+# base + R3 M1×2 + оверхед) обязан оставаться под ёмкостью пайпа 4096
+# (SIBLING_MAP:1003); замер разложения — scratchpad-скрипт b1_compose,
+# числа в коммит-сообщении посадки.
+MAX_BASE_BYTES = 2000
 
 # --- TIER ECHO при записи (расширение этой задачи) ---------------------
 # Триггер: НОВАЯ строка журнала с event из TIER_TRIGGER_EVENTS И worker_ref
@@ -741,8 +748,23 @@ def build_context(violations: list, ascii_only: bool = False) -> str:
     n = len(violations)
     sanitize = _ascii_sanitize if ascii_only else _raw_sanitize
     head = [sanitize(v) for v in violations[:MAX_HEAD_MESSAGES]]
-    rest = n - len(head)
-    body = "; ".join(head)
+    # БАЙТОВЫЙ ПОТОЛОК base-сегмента (посадка Lead 2026-08-25, канон
+    # схождения волны копилки): тексты валидатора выросли правилом трёх
+    # (V-1, t-611) и 4 нарушения давали 5499 Б wire при ёмкости пайпа
+    # 4096 (ось «недренирующий потребитель», SIBLING_MAP:1003) — тот же
+    # потолок, что MAX_R3_BYTES у R3-ЗЕРКАЛА: жадно режем ГОЛОВУ по
+    # байтам wire (ensure_ascii), хвост сворачивается в «+K more».
+    # Дедлайн записи (t-609) остаётся сетью нижнего уровня.
+    kept = []
+    budget = MAX_BASE_BYTES
+    for msg in head:
+        wire = len(json.dumps(msg, ensure_ascii=True).encode("utf-8"))
+        if kept and wire > budget:
+            break
+        kept.append(msg)
+        budget -= wire
+    rest = n - len(kept)
+    body = "; ".join(kept)
     if rest > 0:
         body += f"; +{rest} more"
     return f"JOURNAL ECHO: {n} дефект(ов) в новых строках: {body}"

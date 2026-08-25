@@ -842,6 +842,29 @@ def test_given_path_warn_missing_absolute_path_under_own_root_warns():
     assert missing_abs in warn
 
 
+# --- V-2 (2026-08-25, docs/tasks/2026-08-25_kopilka-wave-spec.md,
+# находка №4 t-599): "logs" добавлен в _GIVEN_REPO_REL_PREFIX --
+# logs/routing-log.jsonl (самый цитируемый носитель фактов) теперь
+# ПРОВЕРЯЕТСЯ given-слоем на существование, как и tools/gateway/etc. ---
+
+def test_given_path_warn_existing_logs_path_no_warn():
+    # logs/routing-log.jsonl -- живой журнал маршрутизации, реально
+    # существует в этом репо.
+    warn = dispatch_gate.given_path_warn(
+        _task_payload("Дано: logs/routing-log.jsonl. Прочитай его хвост.", cwd=_REPO_ROOT)
+    )
+    assert warn == ""
+
+
+def test_given_path_warn_missing_logs_path_warns_with_name():
+    warn = dispatch_gate.given_path_warn(
+        _task_payload("Дано: logs/несуществующий-журнал.jsonl. Прочитай его.", cwd=_REPO_ROOT)
+    )
+    assert "GIVEN-PATH WARN" in warn
+    assert "logs/несуществующий-журнал.jsonl" in warn
+    assert "D-0096" in warn
+
+
 def test_given_path_warn_placeholders_and_globs_no_warn():
     prompt = (
         "Дано: tools/<имя>.py, tools/*.py, gateway/{name}.py, docs/$VAR.md. "

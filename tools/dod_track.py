@@ -319,6 +319,65 @@ EDIT_TOOL_NAMES = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 # "команда матчит pytest|python -m pytest|python .*test" -- буквально
 # спека t-150, три альтернативы (первая уже покрывает вторую, но обе
 # оставлены ради дословного соответствия тексту спеки).
+#
+# М2-2 (docs/tasks/2026-08-25_kopilka-wave-spec.md, "БИЛДЕР М2",
+# находка t-602; атрибуция изначально указывала на tools/dod_gate.py --
+# это НЕТОЧНОСТЬ отчёта, регексп физически живёт ЗДЕСЬ, в dod_track.py,
+# исправлено координатором 2026-08-25): one-off ПРОГОН СКРИПТА без
+# слова "test"/"pytest" в ТЕКСТЕ команды (напр. `python
+# docs/tasks/x.py`, `python scratchpad/measure.py`) этим регекспом НЕ
+# распознаётся как verification-команда -- РЕГЕКСП НЕ ОСЛАБЛЯЕТСЯ
+# (признать ЛЮБОЙ скрипт-прогон verification-командой было бы дырой:
+# гейт засчитывал бы «зелёным» произвольный python-вызов, никак не
+# подтверждающий факт проверки).
+#
+# КОНВЕНЦИЯ ОБЁРТКИ (легальная форма для one-off скрипт-прогонов,
+# ДОСЛОВНО, Ф3 критика волны "fit_with_fixes" -- ИСПРАВЛЕНО против
+# первой версии этого докстринга, которая называла форму БЕЗ зелёного
+# токена):
+#
+#     <команда> && echo "verification test passed: <что проверено>"
+#
+# -- `echo` исполняется ТОЛЬКО при exit 0 предыдущей команды (`&&`),
+# поэтому его появление в выводе -- честный маркер "команда реально
+# завершилась зелёным", а не голословная приписка.
+#
+# ДВА НЕЗАВИСИМЫХ ГЕЙТА читают эту строку РАЗНЫМИ регекспами -- ОБА
+# обязаны узнать её, иначе конвенция даёт признанную, но КРАСНУЮ
+# команду (класс уже задокументирован в этом файле, см. комментарий
+# выше SUCCESS_INDICATORS_RE/FAILURE_INDICATORS_RE, "ПОСЛЕДСТВИЕ ...
+# xfail НЕ блокирует сдачу" -- тот же принцип "распознана как форма" ≠
+# "распознана как ЗЕЛЁНАЯ"):
+#  1. is_verification_command() (ЭТОТ регексп, VERIFICATION_COMMAND_RE
+#     ниже, НЕ ИЗМЕНЁН и не ослабляется): слово "test" в echo-строке
+#     матчит третью альтернативу (`python\s+.*test`, без границ слова,
+#     case-insensitive) -- `.*` между "python" и "test" накрывает всё,
+#     включая `&&`/`echo`/кавычки, так что обёрнутая команда
+#     признаётся verification-командой БЕЗ единой правки регекспа.
+#  2. determine_outcome() (SUCCESS_INDICATORS_RE = `passed|\bok\b|
+#     xfailed`, ниже): ПЕРВАЯ версия этого докстринга называла форму
+#     `echo "verification test: <...>"` -- БЕЗ слова "passed"/"ok"/
+#     "xfailed" -- is_verification_command() узнавал бы её (гейт 1), но
+#     determine_outcome() давал бы "red" (нет признака успеха в тексте,
+#     защитный дефолт) -- сама конвенция производила бы ПРИЗНАННУЮ, но
+#     КРАСНУЮ команду, что для builder'а выглядело бы как "гейт видит
+#     verification-команду, но dod_gate всё равно блокирует сдачу
+#     непонятно почему". ФИКС -- слово "passed" В САМОЙ конвенции (см.
+#     форму выше): `SUCCESS_INDICATORS_RE` матчит подстроку "passed" в
+#     "verification test passed: ..." БЕЗ границ слова -- has_success
+#     True, has_failure False (нет "failed"/"error"/"traceback") ->
+#     "green".
+#
+# Проверено эмпирически (прямой вызов is_verification_command()/
+# determine_outcome() на этой строке) и запинено ниже в
+# tools/test_dod_track.py:
+#  - test_is_verification_command_one_off_script_wrapper_convention:
+#    `python docs/tasks/x.py` -> False,
+#    `python docs/tasks/x.py && echo "verification test passed: probe"`
+#    -> True (is_verification_command обе формы -- КАК РАНЬШЕ, регексп
+#    не менялся).
+#  - test_determine_outcome_wrapper_convention_marker_is_green:
+#    determine_outcome() на строке-маркере -> "green".
 VERIFICATION_COMMAND_RE = re.compile(
     r"pytest|python\s+-m\s+pytest|python\s+.*test", re.IGNORECASE
 )
