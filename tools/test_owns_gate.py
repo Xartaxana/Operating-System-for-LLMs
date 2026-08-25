@@ -878,7 +878,11 @@ def test_window_on_boundary_still_live(tmp_path):
     registry = tmp_path / "owns_registry.jsonl"
     now = datetime(2026, 7, 28, 12, 0, 0)
     boundary_ts = (now - timedelta(seconds=owns_gate.WINDOW_SECONDS)).strftime(owns_gate._TS_FORMAT)
-    _write_registry_line(registry, boundary_ts, "s-1", "D:\\repo", "sonnet: prior write", ["D:\\repo\\tools\\x.py"])
+    # s-OTHER (УЗЕЛ I, t-593): запись той же сессии с owns-подмножеством
+    # теперь законно глушится как пересдача (К1); предмет ЭТОГО теста --
+    # граница окна живости, не сессионная принадлежность -- чужая сессия
+    # предупреждает всегда (К3), намерение теста сохранено.
+    _write_registry_line(registry, boundary_ts, "s-OTHER", "D:\\repo", "sonnet: prior write", ["D:\\repo\\tools\\x.py"])
 
     payload = _writing_payload("D:\\repo\\tools\\x.py", session_id="s-1", cwd="D:\\repo")
     exit_code, output = owns_gate.decide(payload, registry_path=registry, now=now)
@@ -1054,8 +1058,11 @@ def test_malformed_registry_line_fail_open(tmp_path):
     fresh_ts = now.strftime(owns_gate._TS_FORMAT)
     with registry.open("a", encoding="utf-8") as f:
         f.write("{not valid json\n")
+        # s-OTHER (УЗЕЛ I, t-593): предмет теста -- fail-open на битой
+        # строке, не сессионная принадлежность; та же сессия с
+        # owns-подмножеством теперь глушится как пересдача (К1).
         f.write(json.dumps({
-            "ts": fresh_ts, "session_key": "s-1", "cwd": "D:\\repo",
+            "ts": fresh_ts, "session_key": "s-OTHER", "cwd": "D:\\repo",
             "description": "d", "owns": ["D:\\repo\\tools\\x.py"],
         }) + "\n")
 
