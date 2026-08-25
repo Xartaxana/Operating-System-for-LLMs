@@ -23,6 +23,19 @@ When starting a new conversation, read Layer A then Layer B:
 
 ## Layer A — Orientation (always)
 
+If this session's SessionStart output already includes a
+`--- BOOT LAYER A INJECTED (D-0103 hybrid) ...` block (verbatim
+content of the five files below, closed by a `--- END BOOT LAYER A: N
+files, N lines, N bytes emitted ---` line), Layer A is ALREADY in your
+context — do not re-read the five files, that is the double payment
+the injection exists to remove (D-0104). Reading a file anyway is only
+warranted if the closing line is missing (the block was truncated) or
+that file is shown as `[missing: ...]` (it was not printed).
+
+If the block is NOT present (older/broken hook, a deployment not yet
+carrying D-0104's hybrid delivery, or a manual boot outside the
+harness), read the five files yourself, in order:
+
 1. Read README.md.
 2. Read PROJECT_CHARTER.md.
 3. Read ANTI_GOALS.md.

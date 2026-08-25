@@ -225,6 +225,7 @@ requirements create is a dispatcher defect, not the performer's guess.
 | n | a checklist miss exposed by a reject or finding | a spec-defect of the dispatcher; promotion to a machine layer follows the next recurrence | D-0063 |
 | o | a worker returns a DoD-less dispatch (or a writing/parallel one without a manifest) with questions | the emergency net, not the normal cycle: frequent returns = a spec-discipline defect of the coordinator, a calibration case | D-0054 |
 | p | edge sub-class (iii) GENERATIVE — the spec's own requirement births an artifact, case or branch absent before it, BEYOND the deliverable the dispatch itself declares | the spec names the birth's CARRIER (file/field/event — where it lives) and its CLASSIFICATION (mechanism path or not; a paired entity — axis 4/registry/detector; the owner), or hands the fork down explicitly as a question; silence is a dispatcher defect, not the performer's guess | D-0054 |
+| q | манифест given | исполнен ПОМЕЧЕННОЙ декларацией: инлайн-перечень ИЛИ указатель на персистированную спеку с перечнем (ОДИН переход); без маркера — не манифест; owns строго инлайн | D-0106 |
 
 FIVE-POINT CHECKLIST (D-0096) run against every dispatch before it
 goes: (1) explicit question / completeness criterion or acceptance
@@ -492,6 +493,11 @@ all sessions and subagents of this repo:
    its header inside a read window is NOT a check. (F-55: the verdict
    sits at the END of an append-only entry — a truncated window shows
    the problem without its resolution).
+
+| п.6 | when | duty | src |
+|---|---|---|---|
+| а | проектное решение стоит на НЕИЗВЕСТНОМ свойстве среды | сначала ОДИН эксперимент; машинерия вместо замера — лишь при непереносимости замера (порт) или разрушительности опыта | D-0105 |
+
 7. **Temporary corruption is rolled back by a BYTE COPY, never by
    `git checkout`** — that idiom wipes ANOTHER session's uncommitted
    changes to the file along with the corruption. For any

@@ -8,6 +8,7 @@ C5), and this test now imports the LIVE module.
 Run from the repo root: python -m pytest tools/test_session_context_autoboot.py -q
 """
 
+import ast
 import importlib.util
 import json
 import sys
@@ -87,9 +88,14 @@ def test_autoboot_lines_startup_present():
     lines = sc.autoboot_lines("startup")
     assert lines
     assert lines == sc._AUTOBOOT_DIRECTIVE_LINES
-    assert lines[0].startswith(
-        "AUTO-BOOT (D-0103, operator opted in): fresh session start -- run the full boot now."
-    )
+    # AK11 sibling fix (found empirically while verifying the two-world
+    # edit above on a post-posting copy -- this assertion embeds the OLD
+    # world's full first-line wording, a hardcoded pin the spec's own
+    # breaking-tests list (S7 point 4, "test_autoboot_lines_* НЕ
+    # ломаются") missed; report note): only the "AUTO-BOOT (D-0103"
+    # prefix is the byte-stable guarantee across both worlds (AK8) -- the
+    # rest of the old sentence is old-world-only text.
+    assert lines[0].startswith("AUTO-BOOT (D-0103")
 
 
 def test_autoboot_lines_clear_present():
@@ -119,13 +125,35 @@ def test_autoboot_directive_block_is_ascii_and_exact():
     for line in sc._AUTOBOOT_DIRECTIVE_LINES:
         assert line.isascii()
     joined = "\n".join(sc._AUTOBOOT_DIRECTIVE_LINES)
-    assert joined == (
-        "AUTO-BOOT (D-0103, operator opted in): fresh session start -- run the full boot now.\n"
-        "  Read the files listed in BOOT.md in order, then produce a Boot Report per\n"
-        "  PROCESS/BOOT_REPORT_PROTOCOL.md and STOP for work authorization.\n"
-        "  (Boot recovery is not work authorization -- BOOT_REPORT_PROTOCOL rule 4.\n"
-        "  This directive fires on a fresh start only, not after resume/compact.)"
-    )
+    # AK11 (D-0103 HYBRID, docs/tasks/2026-08-25_autoboot-hybrid-spec.md):
+    # two-world form. Discriminator is the presence of _LAYER_A_FILES --
+    # absent in today's live module (pre-posting: old directive-only
+    # text), present after the hybrid sibling lands (AK8: new text, Layer
+    # A content printed below the directive instead of "go read it").
+    if hasattr(sc, "_LAYER_A_FILES"):
+        assert joined == (
+            "AUTO-BOOT (D-0103, operator opted in): fresh session start -- the full boot runs now.\n"
+            "  Layer A (orientation) is PRINTED BELOW, verbatim -- it is ALREADY in your context.\n"
+            "  Do NOT open or re-read those five files: re-reading them is the double payment\n"
+            "  this injection exists to remove.\n"
+            "  The block ends with a line reporting how many files, lines and bytes were emitted.\n"
+            "  If you do NOT see that closing line, the injection was TRUNCATED -- read the five\n"
+            "  files listed in BOOT.md yourself, and tell the operator the block was cut.\n"
+            "  A Layer A file shown as [missing: ...] was NOT printed -- read that one file yourself.\n"
+            "  Layer B (state) is NOT printed -- read CURRENT_CONTEXT.md yourself now.\n"
+            "  Then produce a Boot Report per PROCESS/BOOT_REPORT_PROTOCOL.md and STOP for work\n"
+            "  authorization.\n"
+            "  (Boot recovery is not work authorization -- BOOT_REPORT_PROTOCOL rule 4.\n"
+            "  This directive fires on a fresh start only, not after resume/compact.)"
+        )
+    else:
+        assert joined == (
+            "AUTO-BOOT (D-0103, operator opted in): fresh session start -- run the full boot now.\n"
+            "  Read the files listed in BOOT.md in order, then produce a Boot Report per\n"
+            "  PROCESS/BOOT_REPORT_PROTOCOL.md and STOP for work authorization.\n"
+            "  (Boot recovery is not work authorization -- BOOT_REPORT_PROTOCOL rule 4.\n"
+            "  This directive fires on a fresh start only, not after resume/compact.)"
+        )
 
 
 # ==== end-to-end main() (AK5) ===============================================
@@ -140,6 +168,18 @@ def test_main_startup_shows_boot_lite_and_autoboot(tmp_path, capsys, monkeypatch
     out = capsys.readouterr().out.strip().splitlines()
     assert any(l.startswith("NOW:") for l in out)
     assert any(l.startswith("AUTO-BOOT") for l in out)
+    if hasattr(sc, "_LAYER_A_FILES"):
+        # AK11 (D-0103 HYBRID): new world additionally injects the Layer A
+        # content block right after the directive (AK7).
+        assert any(l.startswith("--- BOOT LAYER A") for l in out)
+    else:
+        # R2-К5 (ФИКС 5 критика): the OLD-world branch carries its OWN
+        # assertion, symmetric to test_autoboot_directive_block_is_ascii_
+        # and_exact's own else -- a renamed _LAYER_A_FILES constant must
+        # fail this test LOUDLY (block missing where expected), never
+        # silently no-op past a bare `if hasattr(...)` with nothing on
+        # the other side.
+        assert not any(l.startswith("--- BOOT LAYER A") for l in out)
 
 
 def test_main_compact_shows_boot_lite_but_not_autoboot(tmp_path, capsys, monkeypatch):
@@ -151,6 +191,14 @@ def test_main_compact_shows_boot_lite_but_not_autoboot(tmp_path, capsys, monkeyp
     out = capsys.readouterr().out.strip().splitlines()
     assert any(l.startswith("NOW:") for l in out)
     assert not any(l.startswith("AUTO-BOOT") for l in out)
+    if hasattr(sc, "_LAYER_A_FILES"):
+        assert not any(l.startswith("--- BOOT LAYER A") for l in out)
+    else:
+        # R2-К5: symmetric else (see the startup test's own comment) --
+        # true in both worlds here (compact never fires autoboot at all),
+        # but the STRUCTURE stays uniform so a class-wide check (B27)
+        # can enforce "no bare hasattr guard without an else" mechanically.
+        assert not any(l.startswith("--- BOOT LAYER A") for l in out)
 
 
 def test_main_resume_shows_boot_lite_but_not_autoboot(tmp_path, capsys, monkeypatch):
@@ -162,6 +210,11 @@ def test_main_resume_shows_boot_lite_but_not_autoboot(tmp_path, capsys, monkeypa
     out = capsys.readouterr().out.strip().splitlines()
     assert any(l.startswith("NOW:") for l in out)
     assert not any(l.startswith("AUTO-BOOT") for l in out)
+    if hasattr(sc, "_LAYER_A_FILES"):
+        assert not any(l.startswith("--- BOOT LAYER A") for l in out)
+    else:
+        # R2-К5: symmetric else, same rationale as compact's own above.
+        assert not any(l.startswith("--- BOOT LAYER A") for l in out)
 
 
 def test_main_missing_source_still_shows_autoboot(tmp_path, capsys, monkeypatch):
@@ -210,6 +263,47 @@ def test_autoboot_survives_when_boot_lite_context_fills_max_lines(
 
 
 # ==== fail-open: an exception in the autoboot path does not blank the hook =
+
+
+# ==== B27 (R2-К5): no bare hasattr(sc, "_LAYER_A_FILES") guard =============
+
+
+def test_b27_layer_a_files_hasattr_guards_carry_symmetric_else_assertion():
+    """R2-К5 (ФИКС 5 критика): every `if hasattr(sc, "_LAYER_A_FILES")`
+    guard in THIS test file must carry an else branch with its own
+    assertion -- a bare guard would silently no-op (not fail) instead of
+    detecting the class the fix names: renaming _LAYER_A_FILES in a
+    landed-but-broken module must fail this suite LOUDLY, not vanish
+    into an untaken `if`. A structural (AST) check, not a narrow
+    per-test assertion, so a FUTURE guard added the same bare way is
+    caught mechanically too (D-0043: fix the class).
+
+    ПРИНЯТАЯ ГРАНИЦА (вердикт критика t-595, фикс 5): детектор узнаёт
+    только форму `if hasattr(...)` как ЦЕЛОЕ условие. Составное условие
+    (`if hasattr(...) and X`), `if not hasattr(...)` и вынос предиката в
+    переменную остаются вне его. На момент посадки таких форм в файле
+    нет; появление одной из них -- осознанный обход, а не случайность."""
+    text = Path(__file__).read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    guards = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
+        if (
+            isinstance(test, ast.Call)
+            and isinstance(test.func, ast.Name)
+            and test.func.id == "hasattr"
+            and len(test.args) == 2
+            and isinstance(test.args[1], ast.Constant)
+            and test.args[1].value == "_LAYER_A_FILES"
+        ):
+            guards.append(node)
+    assert guards, "sanity: no hasattr(sc, '_LAYER_A_FILES') guard found at all -- detector is vacuous"
+    for node in guards:
+        assert node.orelse, f"guard at line {node.lineno} has no else branch (B27 class)"
+        has_assert = any(isinstance(stmt, ast.Assert) for stmt in node.orelse)
+        assert has_assert, f"guard at line {node.lineno}'s else branch carries no assertion (B27 class)"
 
 
 def test_main_fail_open_when_extract_source_raises(tmp_path, capsys, monkeypatch):

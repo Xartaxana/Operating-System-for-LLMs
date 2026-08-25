@@ -1103,11 +1103,16 @@ def test_session_context_b2_main_writes_output_exactly_once_with_flush(tmp_path,
 
 @pytest.mark.parametrize(
     "marker",
-    ["NOW:", "GATE BREAK-GLASS", "AUTO-BOOT (D-0103"],
-    ids=["first-line", "middle-break-glass", "autoboot-block"],
+    ["NOW:", "GATE BREAK-GLASS", "AUTO-BOOT (D-0103", "--- END BOOT LAYER A:"],
+    ids=["first-line", "middle-break-glass", "autoboot-block", "layer-a-close"],
 )
 def test_session_context_b1_stdout_failure_leaves_break_glass_fact_unacked(marker, tmp_path, monkeypatch):
     mod, script, is_live = _load("session_context")
+    if marker == "--- END BOOT LAYER A:" and not hasattr(mod, "_LAYER_A_FILES"):
+        pytest.skip(
+            "--- END BOOT LAYER A: marker: D-0104 HYBRID Layer A block not landed "
+            "on this target yet, nothing to break on"
+        )
     root = _seed_sc_repo(tmp_path)
     track_dir = root / ".claude" / "dod_track"
     _write_bg_fact(track_dir, "sess-b1")

@@ -597,14 +597,36 @@ def _run_holding_stdin_open(script: Path, deadline, extra_wait=2.0):
         stderr=subprocess.PIPE,
         env=env,
     )
+    # ДРЕНАЖ stdout/stderr ПАРАЛЛЕЛЬНО ожиданию (посадка D-0104, вердикт
+    # критика t-595 по В5): обвязка обязана моделировать ОДИН отказ --
+    # «писатель не закрыл stdin». Без дренажа она с посадкой Layer A
+    # (выдача ~11 КБ > ёмкости пайпа 4096) начинала моделировать ВТОРОЙ,
+    # независимый отказ -- «потребитель не читает», и тот маскировал
+    # первый: стдаут-дедлайн хука истекал раньше stdin-проверки, вывод
+    # пустел, K5/Ф1 краснели. Читающие потоки стартуют ДО proc.wait();
+    # для модулей с малой выдачей дренаж -- no-op.
+    drained: dict = {}
+
+    def _drain(stream, key):
+        try:
+            drained[key] = stream.read()
+        except Exception:
+            drained[key] = b""
+
+    t_out = threading.Thread(target=_drain, args=(proc.stdout, "out"), daemon=True)
+    t_err = threading.Thread(target=_drain, args=(proc.stderr, "err"), daemon=True)
+    t_out.start()
+    t_err.start()
     try:
         proc.wait(timeout=wait_deadline + extra_wait)
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
         raise
-    out = proc.stdout.read()
-    err = proc.stderr.read()
+    t_out.join(5.0)
+    t_err.join(5.0)
+    out = drained.get("out", b"")
+    err = drained.get("err", b"")
     proc.stdin.close()
     proc.stdout.close()
     proc.stderr.close()

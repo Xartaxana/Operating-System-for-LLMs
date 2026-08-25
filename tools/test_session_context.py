@@ -1092,7 +1092,22 @@ def test_main_b3_success_path_includes_model_and_boot_budget(tmp_path, capsys, m
     out = capsys.readouterr().out.strip().splitlines()
     assert any(l.startswith("MODEL: claude-sonnet-5 -> tier builder-tier") for l in out)
     assert any(l.startswith("BOOT BUDGET:") for l in out)
-    assert len(out) <= sc.MAX_LINES
+    # R2-К6 (БЛОКЕР 2 критика, docs/tasks/2026-08-25_autoboot-hybrid-spec.md
+    # §12): MAX_LINES bounds the boot-lite CONTEXT block only (NOW/MODEL/
+    # BOOT BUDGET/...), not the whole stdout stream -- the D-0103 AUTO-BOOT
+    # directive (and, once the Layer A HYBRID sibling lands, its content
+    # block) are appended AFTER that cut, by construction (spec §5(ii),
+    # "Усечение не переезжает"; positional invariant B17/test_
+    # autoboot_survives_when_boot_lite_context_fills_max_lines). Counting
+    # the WHOLE stream here breaks the moment landing happens even though
+    # the boot-lite context itself never grew -- exactly the failure the
+    # critic's copy-tree canon run measured (37 <= 25). Slicing up to the
+    # first AUTO-BOOT line preserves the pin's ORIGINAL intent (boot-lite
+    # itself must not grow past MAX_LINES): with no such line present at
+    # all (a payload/source that never fires autoboot), the whole output
+    # IS the boot-lite context and this assertion is unchanged from before.
+    autoboot_idx = next((i for i, l in enumerate(out) if l.startswith("AUTO-BOOT")), len(out))
+    assert autoboot_idx <= sc.MAX_LINES
 
 
 # ==== D-0076: OPEN DISPATCH lines ====================================

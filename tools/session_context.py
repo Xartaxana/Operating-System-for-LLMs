@@ -75,6 +75,11 @@ the spec this file was built from):
 - <=25 lines total (MAX_LINES) -- not raised by this change; the D-0076
   addition can only ever add up to 4 lines (3 OPEN DISPATCH + 1 summary)
   and build_context_lines() still truncates to MAX_LINES at the end.
+  The D-0103 HYBRID Layer A block (this batch) is the same kind of
+  exception the pre-existing AUTO-BOOT directive already was: assembled
+  and appended in main() AFTER this truncation, never counted against
+  it -- see the "D-0103 HYBRID addition" section below for the full
+  rationale.
 - Reading stdin must never block: only attempted when stdin is not a
   TTY (a manual `python tools/session_context.py` run from an
   interactive shell with nothing piped in must return instantly, not
@@ -130,7 +135,87 @@ non-monotonic (D-0089: do not rewrite past lines)" so the mismatch is
 visible instead of silently producing non-monotonic ts ordering on the
 next append. Fail-open on an empty journal, a missing/blank tail ts, or
 a tail ts that does not parse as the journal's naive-ISO format.
-"""
+
+--- D-0104 HYBRID (LANDED 2026-08-25, t-587 rev.2; built as sibling
+session_context_layer_a.py per D-0069, landed by Lead after the
+critic control pass t-595 -- exception-relay race probed 400
+iterations, os._exit branch proven ack-free, footer bytes verified
+two independent ways) ---
+Layer A (README.md/PROJECT_CHARTER.md/ANTI_GOALS.md/
+PROJECT_PHILOSOPHY.md/ARCHITECTURE_BOOT.md, in BOOT.md order --
+_LAYER_A_FILES) is now printed VERBATIM by this hook alongside the
+AUTO-BOOT directive, instead of the directive alone telling the
+session to go read those five files itself. Operator decision
+2026-08-25: the directive-only form had already proven it can leak --
+a session answered an operator question without reading Layer A first,
+because reading it stayed a matter of the model's own discipline, not
+something the hook guaranteed. Three design choices this paragraph
+records so the "<=25 lines total (MAX_LINES)" bullet above is not read
+as silently contradicted by a 209-line addition:
+
+- The Layer A block sits OUTSIDE build_context_lines()'s MAX_LINES
+  slice entirely, exactly like the pre-existing AUTO-BOOT directive it
+  now sits next to -- same "always survives regardless of how full the
+  boot-lite context already is" contract, same call site in main(),
+  appended AFTER the lines[:MAX_LINES] cut. MAX_LINES still governs
+  ONLY the boot-lite context lines (NOW/MODEL/BOOT BUDGET/OPEN
+  DISPATCH/WIRING/...) -- never Layer A's own line count.
+- TRANSLITERATION, not a raw-Unicode print: this console is cp1251
+  (see the ASCII-safe-output paragraph above), and Layer A's own prose
+  carries em/en dashes and arrows for MEANING, not decoration -- a raw
+  print risks either an un-encodable write crashing mid-flush, or a
+  silent meaning-losing drop. _ascii_content_line() (deliberately NOT
+  _ascii_sanitize -- that one truncates to 80 chars, unusable for a
+  prose line that can legitimately run past 500 characters) carries a
+  small transliteration table for the characters actually observed in
+  Layer A content (measured 2026-08-25: em dash and right arrow only)
+  plus the rest of the same character family (en dash, left arrow,
+  ellipsis, curly quotes, NBSP), so a future Layer A edit using any of
+  them degrades gracefully. Anything OUTSIDE that table still degrades
+  (encode("ascii","replace")) rather than crashing the write, but ONLY
+  together with a loud per-file WARNING line -- operator condition
+  2026-08-25, verbatim: "meaning must not be lost silently". A file
+  where only the table fired (no lost meaning) gets a soft [note: ...]
+  line instead of an alarm.
+- WARN, not a hard cap, at LAYER_A_INLINE_WARN_BYTES (16384 bytes,
+  measured-independent by design -- SIBLING_MAP axis 14 does not apply
+  here, this constant claims no monotonicity and is not derived from
+  the 2026-08-25 measurement of 8279 bytes): Layer A is meant to grow
+  slowly as orientation documents are edited, and this hook silently
+  truncating an orientation file mid-sentence would be a worse failure
+  than an oversized boot line. The existing BOOT BUDGET WARN/BREACH
+  thresholds (D-0068, boot_budget_lines() above) remain the real net
+  against runaway growth; this addition does not duplicate that
+  judgment with a second hard limit.
+- layer_a_lines() carries its OWN local try/except, same pattern as
+  wiring_lines() above and for the same reason (see that function's
+  own docstring): an unforeseen failure while assembling Layer A must
+  degrade to ONE line, not reach main()'s outer boundary and blank
+  NOW/MODEL/BOOT BUDGET/etc for the sake of an unprinted README --
+  strictly worse than losing just the Layer A block. main()'s own call
+  site wraps that call a SECOND time (belt-and-suspenders) so that even
+  a future edit replacing layer_a_lines() wholesale, bypassing its own
+  try/except entirely, still cannot regress this guarantee.
+
+--- R2-K1 addition (revision 2, critic BLOCKER 1) -- STDOUT DEADLINE ---
+A landed hook writes 10+ KB in the ONE sys.stdout.write() call this file
+already made (B2 invariant, unchanged). A SessionStart harness that does
+not drain its child's stdout concurrently would otherwise block that
+write forever once the OS pipe fills (critic-measured on this machine:
+4096 B capacity, 4097 B is enough to hang a non-draining parent) --
+session start never returns, which is strictly worse than every other
+failure mode this file already guards against (truncation, a blanked
+context). _write_stdout_deadline() (own docstring above its block, right
+after the pre-existing stdin-deadline helper) mirrors that helper's
+exact shape for writing instead of reading: a daemon thread does the
+write+flush, the main thread joins on a deadline
+(_STDOUT_DEADLINE_DEFAULT=5.0s, env OSLLM_STDOUT_TIMEOUT, same
+validation rules as the stdin side). On a timeout, main() calls
+os._exit(0) IMMEDIATELY -- see the helper's own docstring for why even a
+diagnostic write would hang the same way, and for what this buys (the
+process exits instead of hanging forever) versus what it does NOT buy
+(no guarantee about how much of the output actually reached a consumer
+that WAS draining, just slowly)."""
 
 import contextlib
 import datetime
@@ -712,6 +797,107 @@ def _read_stdin_bytes_deadline():
 _STDIN_DEADLINE_MSG = "stdin deadline exceeded -- fail-open, payload discarded"
 # --- END stdin-deadline helper ---
 
+# --- BEGIN stdout-deadline helper (R2-K1, docs/tasks/2026-08-25_autoboot-
+# hybrid-spec.md; ЛОКАЛЬНАЯ копия, зеркалит ФОРМУ stdin-deadline helper'а
+# выше -- общий модуль запрещён по той же причине: та же конструкция
+# (демон-поток делает работу, главный поток join(дедлайн)), просто для
+# ЗАПИСИ вместо чтения) ---
+_STDOUT_DEADLINE_DEFAULT = 5.0
+_STDOUT_DEADLINE_MAX = 600.0
+_STDOUT_DEADLINE_ENV = "OSLLM_STDOUT_TIMEOUT"
+
+
+def _stdout_deadline_seconds():
+    """Секунды дедлайна ЗАПИСИ: env-переопределение, иначе дефолт. ТА ЖЕ
+    форма валидации, что у _stdin_deadline_seconds() выше: невалидное,
+    нечисловое, <=0 и > _STDOUT_DEADLINE_MAX -> дефолт; режима "0 = ждать
+    вечно" НЕТ намеренно (та же дыра, что и у чтения -- см. тот докстринг)."""
+    try:
+        value = float(os.environ.get(_STDOUT_DEADLINE_ENV, ""))
+    except (TypeError, ValueError):
+        return _STDOUT_DEADLINE_DEFAULT
+    if not (0.0 < value <= _STDOUT_DEADLINE_MAX):
+        return _STDOUT_DEADLINE_DEFAULT
+    return value
+
+
+def _write_stdout_deadline(text: str) -> bool:
+    """Пишет text ОДНОЙ логической записью (sys.stdout.write + flush) на
+    демон-потоке; главный поток ждёт join(дедлайн) -- зеркало
+    _read_stdin_bytes_deadline() выше, для записи вместо чтения (спека
+    R2-К1). B2 не нарушается: запись остаётся ОДНОЙ (это по-прежнему
+    ровно один вызов sys.stdout.write(text) + flush()), просто исполненной
+    на другом потоке -- дробить на чанки запрещено (спека: при
+    недренирующем потребителе дробление не помогает, блокирует суммарный
+    объём, не размер вызова, и рушит инвариант).
+
+    Возвращает True, если поток-писатель ЗАВЕРШИЛСЯ в срок (write+flush
+    либо прошли успешно, либо бросили штатное исключение -- см. ниже),
+    False, если поток всё ещё жив по истечении дедлайна: недренирующий
+    потребитель держит write() застрявшим внутри ОС на полном, непустом
+    пайпе (критик-замер на этой машине: ёмкость пайпа 4096 Б, наименьшая
+    ОДНА запись, вешающая недренирующего родителя, 4097 Б).
+
+    Исключение самой записи (напр. OSError на мёртвом stdout, тест B18)
+    ЛОВИТСЯ ВНУТРИ потока-писателя и ПЕРЕБРАСЫВАЕТСЯ здесь, на главном
+    потоке, ПОСЛЕ join() -- но ТОЛЬКО когда поток успел завершиться (True-
+    путь join'а): вызывающий код (main()) видит это исключение ровно так
+    же, как раньше видел его от прямого sys.stdout.write(), и его
+    существующий except-контур (fail-open: warning на stdout/stderr) не
+    меняется ни на йоту. На самом ТАЙМАУТЕ (False) исключения нет и быть
+    не может -- поток ещё жив, застрял внутри самого write(), а не упал.
+
+    КРИТИЧНО для вызывающего кода: на False (таймаут) он обязан НЕМЕДЛЕННО
+    os._exit(0) и НЕ пытаться писать НИКУДА больше -- ни в stdout (тот же
+    застрявший канал), ни в stderr (часто тот же терминал/консоль того же
+    недренирующего потребителя). Поток-писатель в этот момент буквально
+    заблокирован ВНУТРИ ОС в системном вызове write() на полном пайпе;
+    ЛЮБАЯ следующая запись в тот же класс ресурса блокируется по ТОЙ ЖЕ
+    причине -- попытка СООБЩИТЬ о таймауте сама стала бы вторым
+    зависанием, а не диагностикой. Он остаётся демоном и продолжает
+    висеть в фоне после os._exit(0) -- сам os._exit() не ждёт его и не
+    трогает его состояние (interpreter shutdown/atexit пропускается
+    целиком), что и делает немедленный выход безопасным независимо от
+    того, разблокируется ли когда-нибудь этот поток вообще (тот же приём,
+    что П4-эмпирика K7 применила к _STDIN_DEADLINE_STATE ниже, во
+    избежание "Fatal Python error: _enter_buffered_busy" -- см. её
+    комментарий сразу под этим блоком).
+
+    Что дедлайн ПОКУПАЕТ: старт сессии продолжается (процесс выходит)
+    вместо зависания навсегда на недренирующем потребителе. Чего он НЕ
+    покупает: целостность выдачи -- частично записанное (или не
+    записанное вовсе) остаётся в пайпе и извлечению не подлежит; счётчик
+    прогресса записи здесь не ведётся (ОС не отдаёт "сколько байт ушло" в
+    момент обрыва без platform-specific ioctl). Композиция закрывает это
+    место без такого счётчика: сборка (context_lines -> AUTO-BOOT
+    директива -> Layer A блок) уже гарантирует, что при обрыве выживает
+    ГОЛОВА потока -- NOW/MODEL/BOOT BUDGET и сама директива с клаузой
+    AK8 ("если не видишь закрывающую строку -- блок усечён, читай сам")
+    успевают уйти первыми у любого потребителя, что вообще что-то читает,
+    и это ровно тот случай (недренирующий потребитель ВООБЩЕ ничего не
+    читает), для которого "что уехало" неважно -- сессия такого
+    потребителя не увидит ни байта в любом случае."""
+    box: dict = {}
+
+    def _writer():
+        try:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+        except BaseException as e:  # перебрасывается на главном потоке ниже
+            box["exc"] = e
+
+    thread = threading.Thread(target=_writer, name="stdout-deadline", daemon=True)
+    thread.start()
+    thread.join(_stdout_deadline_seconds())
+    if thread.is_alive():
+        return False
+    if "exc" in box:
+        raise box["exc"]
+    return True
+
+
+# --- END stdout-deadline helper ---
+
 # P4/В3.1 (К7-эмпирика): a background reader thread left blocked on the REAL
 # stdin buffered-reader at normal interpreter shutdown crashes with "Fatal
 # Python error: _enter_buffered_busy" instead of exiting cleanly (reproduced
@@ -834,11 +1020,27 @@ _AUTOBOOT_NO_FIRE_SOURCES = {"resume", "compact"}
 
 # EXACT text (ASCII only, this file's hard invariant -- do not translate to
 # Cyrillic): the AUTO-BOOT directive block, printed verbatim, one list
-# entry per line.
+# entry per line. AK8 (D-0103 HYBRID, this batch): revised wording -- the
+# old text's "Read the files listed in BOOT.md in order" is GONE on
+# purpose (it was the whole double-payment problem: Layer A is now
+# printed below this directive, in the SAME output, so an instruction to
+# go re-read it is the double payment this injection exists to remove).
+# The first line's "AUTO-BOOT (D-0103" prefix is preserved BYTE FOR BYTE
+# -- test_f61_halfstate.py and check 13(zh) both key off that literal
+# substring to detect "the hook is alive" independent of directive
+# wording changes.
 _AUTOBOOT_DIRECTIVE_LINES = [
-    "AUTO-BOOT (D-0103, operator opted in): fresh session start -- run the full boot now.",
-    "  Read the files listed in BOOT.md in order, then produce a Boot Report per",
-    "  PROCESS/BOOT_REPORT_PROTOCOL.md and STOP for work authorization.",
+    "AUTO-BOOT (D-0103, operator opted in): fresh session start -- the full boot runs now.",
+    "  Layer A (orientation) is PRINTED BELOW, verbatim -- it is ALREADY in your context.",
+    "  Do NOT open or re-read those five files: re-reading them is the double payment",
+    "  this injection exists to remove.",
+    "  The block ends with a line reporting how many files, lines and bytes were emitted.",
+    "  If you do NOT see that closing line, the injection was TRUNCATED -- read the five",
+    "  files listed in BOOT.md yourself, and tell the operator the block was cut.",
+    "  A Layer A file shown as [missing: ...] was NOT printed -- read that one file yourself.",
+    "  Layer B (state) is NOT printed -- read CURRENT_CONTEXT.md yourself now.",
+    "  Then produce a Boot Report per PROCESS/BOOT_REPORT_PROTOCOL.md and STOP for work",
+    "  authorization.",
     "  (Boot recovery is not work authorization -- BOOT_REPORT_PROTOCOL rule 4.",
     "  This directive fires on a fresh start only, not after resume/compact.)",
 ]
@@ -850,10 +1052,278 @@ def autoboot_lines(source) -> list:
     else []. Fires when source is "startup" or "clear", OR when source is
     None / any other unrecognized string (fail-toward-booting -- see the
     module comment above this section). Does NOT fire when source is
-    "resume" or "compact"."""
+    "resume" or "compact". Deliberately still directive-only (decision M1,
+    D-0103 HYBRID spec) -- Layer A's own CONTENT is a separate function,
+    layer_a_lines() below, so this function's name and contract are
+    unchanged by the hybrid addition."""
     if source in _AUTOBOOT_NO_FIRE_SOURCES:
         return []
     return list(_AUTOBOOT_DIRECTIVE_LINES)
+
+
+# ---------------------------------------------------------------------------
+# D-0104 HYBRID: Layer A CONTENT (landed 2026-08-25, t-587 rev.2,
+# built as sibling per D-0069, landed by Lead at acceptance).
+# See the module docstring's "D-0104 HYBRID" section
+# for the full rationale (why translit not raw Unicode, why WARN not a
+# hard cap, why a local try/except). AK1: hardcoded, in BOOT.md's own
+# "## Layer A" order -- the live boot path parses NOTHING from BOOT.md's
+# markdown for this list (boot_path_files() above parses `Read X.md`
+# lines for BUDGET arithmetic only, a different purpose with a
+# deliberately NOT-reused parser: reusing it here would inherit the
+# class "a markdown/fence parser cannot tell an author's own statement
+# from quoted text" that this hardcoded list avoids by never parsing
+# markdown at all). The cost of the duplication is a second copy of the
+# same five names living in BOOT.md's prose -- paid for by
+# test_session_context.py's AK10 pin, which independently re-derives
+# this list from the live BOOT.md text and fails loudly on drift.
+# ---------------------------------------------------------------------------
+
+_LAYER_A_FILES = [
+    "README.md",
+    "PROJECT_CHARTER.md",
+    "ANTI_GOALS.md",
+    "PROJECT_PHILOSOPHY.md",
+    "ARCHITECTURE_BOOT.md",
+]
+
+# AK4: a project CONSTANT, deliberately NOT derived from the 2026-08-25
+# measurement (8279 bytes) -- SIBLING_MAP axis 14 ("threshold as a
+# formula off a single measurement, claiming monotonicity") does not
+# apply here by construction: this number carries no claim that Layer A
+# will stay under it, only a notice point. Crossing it is a WARN, never
+# a block (operator decision 2026-08-25) -- BOOT BUDGET's existing WARN/
+# BREACH thresholds (D-0068, boot_budget_lines() above) remain the real
+# safety net against unbounded growth.
+LAYER_A_INLINE_WARN_BYTES = 16384
+
+# AK5: meaning-preserving transliteration table for the console (cp1251,
+# same constraint as the module docstring's ASCII-safe-output paragraph).
+# Keys are the characters actually load-bearing in Layer A prose (given
+# measurement 2026-08-25: em dash and right arrow; the rest of the table
+# covers the same FAMILY of characters -- en dash, left arrow, ellipsis,
+# curly quotes, NBSP -- so a future Layer A edit using any of them
+# degrades gracefully instead of tripping the loud WARNING path below).
+_LAYER_A_TRANSLIT = {
+    "—": "--",   # em dash            --
+    "–": "-",    # en dash            -
+    "→": "->",   # right arrow        ->
+    "←": "<-",   # left arrow         <-
+    "…": "...",  # ellipsis           ...
+    "«": '"',    # left guillemet     "
+    "»": '"',    # right guillemet    "
+    "“": '"',    # left double quote  "
+    "”": '"',    # right double quote "
+    "‘": "'",    # left single quote  '
+    "’": "'",    # right single quote '
+    " ": " ",    # non-breaking space (regular space)
+}
+_LAYER_A_TRANSLATE_TABLE = str.maketrans(_LAYER_A_TRANSLIT)
+
+# Control characters stripped from Layer A content lines -- same ranges
+# _ascii_sanitize already strips (\x00-\x1f\x7f) EXCEPT \t, which is
+# allowed to live (Layer A files may use it inside code fences). \r/\n
+# are never seen here -- the caller already split on them via
+# str.splitlines() before calling _ascii_content_line per line.
+_LAYER_A_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _ascii_content_line(s: str) -> "tuple[str, int, int]":
+    """Returns (ascii_safe_line, translit_count, unmapped_count) for ONE
+    logical line of Layer A file content. Deliberately a NEW helper, not
+    a reuse of _ascii_sanitize above -- that one truncates to 80 chars
+    (fine for a single diagnostic token, unusable for a prose line that
+    can legitimately run past 500 characters, AK5's own adversarial
+    case: B10). Never truncates, never raises on its own (its caller,
+    layer_a_lines(), still wraps everything in a try/except regardless
+    -- belt and suspenders, same discipline as the rest of this module).
+
+    translit_count is how many characters were rewritten via the
+    meaning-preserving table above (_LAYER_A_TRANSLIT) -- reported by
+    the caller as a soft `[note: ...]` line when it is the ONLY thing
+    that fired for a file. unmapped_count is how many remaining
+    non-ASCII characters, AFTER the table, had no mapping and were
+    replaced with '?' via encode("ascii","replace") -- reported by the
+    caller as a loud `[WARNING: ... MEANING MAY BE LOST]` line (operator
+    condition 2026-08-25: a silent '?' is not acceptable)."""
+    s = _LAYER_A_CONTROL_RE.sub("", s)
+    translit_count = sum(1 for ch in s if ch in _LAYER_A_TRANSLIT)
+    s = s.translate(_LAYER_A_TRANSLATE_TABLE)
+    unmapped_count = sum(1 for ch in s if ord(ch) > 127)
+    if unmapped_count:
+        s = s.encode("ascii", "replace").decode("ascii")
+    return s, translit_count, unmapped_count
+
+
+def _layer_a_unavailable_line(exc: Exception) -> str:
+    """AK2's degraded single line, factored out so layer_a_lines()'s own
+    try/except AND main()'s second, outer defensive wrapper (AK9 -- see
+    main()'s docstring) print the IDENTICAL text rather than two
+    messages that could drift apart over time.
+
+    R2-К4 (ФИКС 3 критика): f"{exc}" calls exc.__str__() implicitly -- an
+    exception whose OWN __str__ override raises would otherwise escape
+    straight out of THIS function (called from inside layer_a_lines()'s
+    own except body, which has nothing left to catch a NEW exception
+    raised while building its degraded fallback line, and from main()'s
+    second belt-and-suspenders wrapper) and blow past the "NEVER raises"
+    contract AK2/AK9 both promise -- exactly the measured failure the
+    critic named: layer_a_lines() itself raising, and main()'s outer
+    boundary then blanking the WHOLE context for it. Wrapped in its own
+    try with a CONSTANT fallback -- deliberately NOT a second str(exc)
+    attempt, which could raise the exact same way again."""
+    try:
+        detail = _ascii_sanitize(f"{type(exc).__name__}: {exc}", 200)
+    except Exception:
+        detail = f"{type(exc).__name__}: <unprintable exception>"
+    return (
+        f"AUTO-BOOT: Layer A inline unavailable ({detail}) -- read the "
+        "five files listed in BOOT.md yourself."
+    )
+
+
+def layer_a_lines(root: Path) -> list:
+    """AK2/AK3/AK4/AK6: the Layer A content block, printed verbatim (one
+    list element per output line; no element embeds an internal '\\n').
+    NEVER raises -- the whole body is wrapped in its own try/except (same
+    pattern as wiring_lines() above, the sample AK9 names): an unforeseen
+    failure anywhere in this function degrades to ONE line
+    (_layer_a_unavailable_line) instead of propagating to main()'s outer
+    boundary, which would discard NOW/MODEL/BOOT BUDGET/etc for the sake
+    of an unprinted README -- strictly worse than just losing this block.
+    (main() ALSO wraps its call to this function a second time, in case a
+    future edit or a test replaces this function wholesale and thus
+    bypasses this try/except entirely -- see main()'s own docstring,
+    AK9 / "Fail-open строго сильнее".)
+
+    The HEADER's byte total ("N bytes on disk") is measured from st_size
+    (os.stat), the SAME choice boot_budget_lines() above already makes
+    (docs/SIBLING_MAP.md axis 14 -- not a NEW instance of that class for
+    THAT figure). The WARN-threshold sum (AK4) is computed from EXISTING
+    files' sizes BEFORE any file is read, so a mid-read failure never
+    changes which branch already fired.
+
+    The FOOTER's byte total ("N bytes emitted", R2-К2, critic ФИКС 1)
+    is DELIBERATELY a different measurement: st_size counts bytes ON
+    DISK (CRLF line endings on this platform inflate it; a raw non-ASCII
+    character encoded as multi-byte UTF-8 also inflates it relative to
+    its single-byte ASCII transliteration), while "emitted" means what
+    this function actually appended to the returned block -- so it is
+    accumulated per LINE (len(ascii_line) + 1 for the join separator,
+    right next to emitted_lines) as each line is built, not derived from
+    st_size at all. The two numbers are EXPECTED to diverge on real
+    content with CRLF or transliterated characters (tests B24/B25); an
+    accidental reintroduction of st_size here would make the footer a
+    tautology again -- a session comparing "on disk" against "emitted"
+    would get a false OK on a block truncated mid-file (see the class-
+    completeness note in this batch's spec, §11, for the full incident:
+    AK4's on-disk sum and this footer used to be the SAME measurement by
+    construction, so they could never actually disagree with each
+    other, defeating the whole point of printing both).
+
+    Missing/unreadable files (AK6: absent, or any OSError including
+    "path is actually a directory") degrade to a single per-file
+    `[missing: ...]` line; the block still includes every OTHER file. A
+    present-but-EMPTY (0-byte) file is NOT missing -- it gets an empty
+    BEGIN/END pair, deliberately distinguished from "absent" (B3).
+
+    KNOWN GAP, accepted in writing (F13, test B12): a Layer A file's OWN
+    content containing the literal text of a boundary marker (e.g. a
+    line reading exactly "----- END README.md -----") prints through
+    unmodified and could visually fake a second per-file boundary. The
+    FOOTER line ("--- END BOOT LAYER A: N files, N lines, N bytes
+    emitted ---") is the trustworthy signal regardless, because it is a
+    single line assembled LAST from real counts -- forging it would
+    require a committed line that happens to embed the exact
+    runtime-computed counts, not a foreseeable accident. Fixing the
+    per-file marker's spoofability (escaping/nonces) was judged more
+    expensive than the risk it removes."""
+    try:
+        root = Path(root)
+        sizes = []
+        for name in _LAYER_A_FILES:
+            try:
+                size = (root / name).stat().st_size
+            except OSError:
+                size = None
+            sizes.append((name, size))
+
+        total_on_disk = sum(size for _name, size in sizes if size is not None)
+
+        block = []
+        if total_on_disk > LAYER_A_INLINE_WARN_BYTES:
+            # AK4: WARN, not a block -- injection proceeds in full either way.
+            block.append(
+                f"AUTO-BOOT: Layer A is {total_on_disk} bytes, over the "
+                f"{LAYER_A_INLINE_WARN_BYTES} byte notice threshold -- "
+                "injected in full; every fresh session now pays these "
+                "bytes of context, the threshold exists so growth is a "
+                "decision, not drift -- tell the operator the "
+                "orientation layer has grown."
+            )
+        block.append(
+            f"--- BOOT LAYER A INJECTED (D-0103 hybrid) -- "
+            f"{len(_LAYER_A_FILES)} files, {total_on_disk} bytes on disk ---"
+        )
+
+        emitted_files = 0
+        emitted_lines = 0
+        emitted_bytes = 0
+        summary_notes = []
+
+        for name, size in sizes:
+            if size is None:
+                block.append(f"[missing: {name} -- not injected, read this one file yourself]")
+                continue
+            path = root / name
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                block.append(f"[missing: {name} -- not injected, read this one file yourself]")
+                continue
+
+            raw_lines = text.splitlines()
+            block.append(f"----- BEGIN {name} ({size} bytes) -----")
+            file_translit = 0
+            file_unmapped = 0
+            for raw_line in raw_lines:
+                ascii_line, t_count, u_count = _ascii_content_line(raw_line)
+                file_translit += t_count
+                file_unmapped += u_count
+                block.append(ascii_line)
+                emitted_lines += 1
+                # R2-К2 (ФИКС 1 критика): bytes counted from what was
+                # ACTUALLY emitted (this ASCII line's own length + 1 for
+                # the join separator), not from st_size -- see this
+                # function's docstring for why st_size is wrong HERE
+                # specifically (CRLF on disk, transliteration shrinking
+                # multi-byte UTF-8 to single ASCII bytes) even though it
+                # stays the right choice for the HEADER's "on disk" figure
+                # above (computed before any file is read).
+                emitted_bytes += len(ascii_line) + 1
+            block.append(f"----- END {name} -----")
+
+            emitted_files += 1
+            if file_unmapped:
+                summary_notes.append(
+                    f"[WARNING: {file_unmapped} unmapped non-ASCII characters "
+                    f"in {name} were replaced with '?' -- MEANING MAY BE LOST; "
+                    "tell the operator]"
+                )
+            elif file_translit:
+                summary_notes.append(
+                    f"[note: {file_translit} non-ASCII characters transliterated "
+                    "for the console -- source files are unmodified]"
+                )
+
+        block.extend(summary_notes)
+        block.append(
+            f"--- END BOOT LAYER A: {emitted_files} files, "
+            f"{emitted_lines} lines, {emitted_bytes} bytes emitted ---"
+        )
+        return block
+    except Exception as e:
+        return [_layer_a_unavailable_line(e)]
 
 
 # D-0099 (2026-08-04): sentinel "config_text не передан явно" -- model_tier()
@@ -2103,34 +2573,99 @@ def main(root: Path = None) -> int:
     the warning line, on EVERY channel attempt: an unsanitized non-ASCII
     or multi-line message could silently die against a cp1251 console
     (measured by critic) or blow the one-line/no-injected-newline
-    invariant this hook otherwise holds everywhere else."""
+    invariant this hook otherwise holds everywhere else.
+
+    D-0103 HYBRID (this batch) -- one more addition to the SAME single
+    try, AFTER context_lines/pending_ack are built but BEFORE the single
+    write: when autoboot fires, layer_a_lines(ack_root) is appended to
+    it (AK7's single gate: `if autoboot:`, not a second independent
+    `source` check that could drift from the first -- conflict pair,
+    spec S6). ack_root -- not repo_root() -- is deliberately the SAME
+    root _build_context_lines_and_pending_ack() already resolved from
+    main()'s own `root` argument (decision M4): a hardcoded repo_root()
+    default here would silently pull a real repo file into an
+    otherwise-fully-injectable test path. The call is wrapped in its
+    OWN try/except here, on top of layer_a_lines()'s own internal one
+    (AK9, "Fail-open строго сильнее", B16) -- so even a test or a future
+    edit that replaces layer_a_lines() wholesale (bypassing its own
+    try/except entirely) still cannot blow past THIS boundary and
+    discard NOW/MODEL/BOOT BUDGET/etc for the sake of an unprinted
+    README.
+
+    R2-K1 (this revision, critic BLOCKER 1 -- see the spec's §11/§12):
+    the single write below no longer calls sys.stdout.write()/flush()
+    directly -- it goes through _write_stdout_deadline() (own docstring
+    above the helper block has the full contract). A landed hook can
+    write 10+ KB in that one call (measured: 10780 B); a non-draining
+    SessionStart harness on the other end of that pipe would otherwise
+    block session start FOREVER, which is strictly worse than the
+    truncation/blank-context failure modes this file already guards
+    against. False -> os._exit(0) immediately, no further I/O, ack
+    skipped by construction (see the call site's own comment)."""
     try:
         stdin_payload = read_stdin_payload()
         context_lines, pending_ack = _build_context_lines_and_pending_ack(
             root, stdin_payload=stdin_payload
         )
+        ack_root, pending_keys, ack_now = pending_ack
         # AUTO-BOOT (D-0103): computed as a separate block, deliberately
         # OUTSIDE build_context_lines()'s own MAX_LINES (25) truncation --
         # the directive must always survive regardless of how full the
         # boot-lite context already is -- but still folded into the SAME
         # single write below (B2), not a second print loop.
         autoboot = autoboot_lines(extract_source(stdin_payload))
+        if autoboot:
+            # D-0103 HYBRID: Layer A content rides the SAME gate as the
+            # directive above it -- see this function's own docstring
+            # for why the call is wrapped here a second time on top of
+            # layer_a_lines()'s own internal try/except.
+            try:
+                layer_a = layer_a_lines(ack_root)
+            except Exception as _layer_a_exc:
+                layer_a = [_layer_a_unavailable_line(_layer_a_exc)]
+            autoboot = autoboot + layer_a
         all_lines = context_lines + autoboot
         output = "\n".join(all_lines)
         if all_lines:
             output += "\n"
-        sys.stdout.write(output)
-        sys.stdout.flush()
+        # R2-K1: the single write (still exactly ONE logical write, B2
+        # invariant intact -- see _write_stdout_deadline's own docstring)
+        # now runs on a deadline. True -> write+flush actually completed,
+        # or raised an ORDINARY exception that _write_stdout_deadline
+        # re-raises here into this SAME try -- caught by the except below
+        # exactly like a bare sys.stdout.write() call used to be. False
+        # -> a non-draining consumer left the write stuck inside the OS
+        # on a full pipe past the deadline: os._exit(0) below terminates
+        # IMMEDIATELY, with NO further I/O attempt of any kind (see the
+        # helper's own docstring for why even a diagnostic write would
+        # hang the same way) -- rc 0, not 1: this hook did not "crash",
+        # it emitted as much as made it through before the deadline, and
+        # session start must proceed regardless.
+        if not _write_stdout_deadline(output):
+            os._exit(0)
         # B1: ack ONLY now, after the single write+flush above has
         # actually succeeded -- a failure anywhere above raises before
         # this line is ever reached, so no break-glass key is ever marked
-        # acknowledged for content the user never actually saw.
-        ack_root, pending_keys, ack_now = pending_ack
+        # acknowledged for content the user never actually saw. R2-K1
+        # tightens this further BY CONSTRUCTION: ack also never runs on
+        # the os._exit(0) branch above -- the process is already gone by
+        # the time this line would have executed.
         _ack_break_glass_keys(ack_root, pending_keys, ack_now)
     except Exception as e:  # fail-open: this hook must never break session start
         # fix4: sanitize BEFORE formatting -- applies to whichever channel
         # below actually ends up carrying the line, not just one of them.
-        safe_detail = _ascii_sanitize(str(e), 300)
+        # R2-К4 (ФИКС 3 критика): str(e) itself can raise (a __str__
+        # override that throws, same class _layer_a_unavailable_line
+        # guards against above) -- this is the OUTERMOST boundary, the
+        # ONE place nothing else in this file catches, so a raise here
+        # would escape as a bare, unhandled traceback -- the single worst
+        # failure mode this whole hook exists to prevent. Wrapped in its
+        # own try with a CONSTANT fallback, deliberately not a second
+        # str(e) attempt.
+        try:
+            safe_detail = _ascii_sanitize(str(e), 300)
+        except Exception:
+            safe_detail = f"{type(e).__name__}: <unprintable exception>"
         warning = f"session-context warning: {safe_detail}\n"
         try:
             # fix5: stdout FIRST -- a healthy stdout (the common case: a

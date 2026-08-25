@@ -13,7 +13,7 @@ Repository Loaded: YES/NO
 
 Working Tree at Boot: CLEAN / DIRTY (n files) / UNPUSHED (n commits)
 
-Orientation Loaded (Layer A): YES/NO
+Orientation Loaded (Layer A): YES (injected) / YES (read) / NO
 
 State Loaded (Layer B — CURRENT_CONTEXT): YES/NO
 
@@ -63,10 +63,20 @@ Rationale for 1–2 (added 2026-07-03): a session that starts with a
 silent series of file reads buries the report in tool noise; the
 operator could not tell whether context recovery had happened.
 
-7. Boot loads TWO layers (BOOT.md, D-0103 restructure 2026-08-18):
-   Layer A = orientation (README/PROJECT_CHARTER/ANTI_GOALS/
-   PROJECT_PHILOSOPHY/ARCHITECTURE_BOOT); Layer B = state
-   (CURRENT_CONTEXT). "Orientation Loaded" / "State Loaded" report those.
+7. Boot loads TWO layers (BOOT.md, D-0103 restructure 2026-08-18;
+   HYBRID delivery 2026-08-25, D-0104): Layer A = orientation
+   (README/PROJECT_CHARTER/ANTI_GOALS/PROJECT_PHILOSOPHY/
+   ARCHITECTURE_BOOT); Layer B = state (CURRENT_CONTEXT).
+   "Orientation Loaded (Layer A)" reports one of three values:
+   `YES (injected)` — the hook's `--- BOOT LAYER A INJECTED ...` block
+   was present and CLOSED by the `--- END BOOT LAYER A: ...` counted
+   line, so Layer A reached context via the hook, not a session read;
+   `YES (read)` — the session read the five files itself (hook
+   absent/broken/truncated, or a pre-D-0104 deployment); `NO` —
+   neither happened. "State Loaded (Layer B)" is unchanged: Layer B is
+   never injected, always a session read. Rule 1's announcement duty
+   covers the session's OWN reads (Layer B, and Layer A only in the
+   `YES (read)` case).
    Current Phase / Current Objective are read from CURRENT_CONTEXT
    (Current Milestone / Current Task sections); ROADMAP.md remains the
    OWNER of phases/gates but is REFERENCE, point-read on demand, not
