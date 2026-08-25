@@ -1109,6 +1109,28 @@ pytest-мишени может не существовать), но конкре
   ужаты в ядре до указателей — рационал не потерян, он здесь и в
   своих носителях.
 
+### Диета слоя CLAUDE.md 2026-08-25 (вечерний прогон boot-diet) — полные формы ужатого
+
+- Tiers: перечень код-гейтов, резолвящих привязку
+  (mechanism_gate, journal_validator, session_context) — ядро теперь
+  говорит «code gates», состав живёт здесь и в самих файлах.
+- R13(f): полная форма — «Misclassification is recoverable by
+  construction: a leaf that was really a graph comes back via judge
+  reject / decomposable (R5); a graph-classified simple task only pays
+  the Lead-layer tax».
+- Журнал/каденция: рационал «facts in session memory die with it,
+  disk survives» (D-0079) — мотив немедленной записи перед долгим
+  ожиданием.
+- Чеклист п.3: хвост «not a capability failure of the performer» —
+  дефект атрибутируется диспетчеру, не исполнителю.
+- Гигиена п.6, статус записи: полная форма F-55 — «вердикт стоит в
+  КОНЦЕ append-only записи; усечённое окно показывает проблему без её
+  резолюции».
+- R10(в): полная форма — «механизм без детектора — пожелание, а
+  найденный детектор — сам по себе находка».
+- Role≠tier: деталь кодировки D-0099 — «by == binding family accepts
+  agent tiers <= itself» (ветка lead-binding journal_validator).
+
 ### Журнал — диаграмма жизненного цикла (перенос диетой 2026-08-25)
 
 ```mermaid

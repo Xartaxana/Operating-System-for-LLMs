@@ -25,10 +25,8 @@ commit). Breach → boot-diet, CLAUDE layer.
 | Lead | Opus | decomposition, specs, acceptance, architecture, mechanisms | — |
 
 Policy rules speak ONLY these function names; the function→model
-binding is a deployment property; it LIVES in delegation.config.yaml
-(roles.lead) at the repo root — code gates (mechanism_gate,
-journal_validator, session_context) resolve it from there, defaulting
-to fable when the file is absent. A RESERVE tier sits ABOVE the Lead
+binding is a deployment property living in delegation.config.yaml
+(roles.lead) — code gates resolve it from there (default fable). A RESERVE tier sits ABOVE the Lead
 binding (`roles.reserve`) and is summoned only by the operator's word
 for the hardest cases (D-0099). Grades (API contour) are accounting
 vocabulary, never rule words (ARCHITECTURE.md "Two Vocabularies").
@@ -185,8 +183,8 @@ D-0063/D-0064) — in writing, in the mechanism text or commit message:
 itself); (б) SIBLING_MAP axes BY ENUMERATION (D-0055): a line
 «ось N: покрыта / в очередь / н-п <why>» per axis of the CURRENT map
 per mechanism; (в) where its failure DETECTOR is registered — a
-calibration check or a named external one; a mechanism without a
-detector is a wish, and finding one is a finding; (г) what stands on
+calibration check or a named external one (без детектора — не
+механизм, а пожелание); (г) what stands on
 the execution path (D-0063: code guarantees the encounter, an AI tier
 above judges the meaning); «held by discipline» is legal only as an
 explicit line naming the (в) detector. Enforcement: the commit-msg
@@ -235,9 +233,8 @@ AND the TOOLS OF THE EXECUTING TIER: a fact reachable only through a
 tool the performer's role lacks (git history, live process/network
 state, anything needing Bash for a Bash-less tier) is put IN THE
 BASKET pre-fetched by the dispatcher's own R1/R8(f)-legal route, never
-assigned as something the performer must go get — assigning it anyway
-is the dispatcher's own spec defect, not a
-capability failure of the performer; (4) writing dispatch:
+assigned as something the performer must go get (else: dispatcher's
+spec defect); (4) writing dispatch:
 owns/non-goals/handoff present; a PARALLEL writing dispatch also names
 the NARROWED witness scope (R4); (5) freshness — the spec's
 load-bearing facts checked against their carrier, not memory (a stale
@@ -282,7 +279,7 @@ Graph tasks keep the standard Lead loop.
 | c | which judge is legal | TWO forms: the gateway alias (judge-sonnet, needs a live proxy — the only form for script-driven constructions) and a SUBSCRIPTION judge-subagent carrying the pinned JUDGE_SYSTEM_PROMPT (gateway/shadow_eval.py) VERBATIM; a drifted subagent-judge prompt is a finding, not a judge. With no judge available in either form the standard acceptance path applies | D-0087 |
 | d | the dispatch is NOT leaf-class — a mechanism, a policy edit, an integration whole | judge acceptance is illegal: those keep the D-0058 matrix — it is legal ONLY for leaf-class dispatches: recon / implementation to a written spec | D-0087 |
 | e | a quality-critical task, on the operator's word | H-mode: a Lead-authored DAG + per-node intent keys incl. adversarial probes + D-machinery on leaves | D-0087 |
-| f | the classification was wrong | Misclassification is recoverable by construction: a leaf that was really a graph comes back via judge reject / `decomposable` (R5); a graph-classified simple task only pays the Lead-layer tax | D-0087 |
+| f | the classification was wrong | recoverable: real-graph leaf returns via judge reject / `decomposable` (R5); graph-classified simple task pays only the Lead-layer tax | D-0087 |
 | g | judge-приёмка листа НЕ заменяет критик-гейт ИНТЕГРАЦИИ | критик при вливании: лист >100 строк; листы одной темы — ВМЕСТЕ; >2 малых одной темы/места последствий — тоже (кумулятив) | D-0110 |
 
 ## Journal — logs/routing-log.jsonl
@@ -297,9 +294,8 @@ Append-only; records ACCOMPLISHED FACTS, never intentions
 (D-0076/F-44). Cadence (D-0079): events accumulate and are written as
 a BATCH at the stage boundary — one Edit to the TAIL — but never
 later than entering a long wait (background dispatch with no other
-work, pre-idle turn end, handoff): facts in session memory die with
-it, disk survives; an unwritten journal with live workers is
-forbidden. `delegated`/`escalated` — strictly AFTER the dispatch call
+work, pre-idle turn end, handoff); an unwritten journal with live
+workers is forbidden. `delegated`/`escalated` — strictly AFTER the dispatch call
 returns; a new `delegated` carries a non-empty `worker_ref` (id of
 the background task, job id, `cli:<ts>`, `retro:<...>`).
 
@@ -386,11 +382,9 @@ calibrated-judge verdict on a leaf-class dispatch (basis "judge",
 R13/D-0087), OR acceptance is explicitly queued to the full Lead
 (note in notes), OR the acceptor IS the full Lead (tier == the Lead
 binding) accepting critic/designer output: the verdict was produced
-in an INDEPENDENT context (separate background session), and at the
-top of the ladder that independence substitutes for strict model
-superiority (D-0099; encoded as the lead-binding branch of
-journal_validator — by == binding family accepts agent tiers <=
-itself). Equal/higher-tier acceptance without such input = session
+in an INDEPENDENT context (separate background session) — at the top
+of the ladder independence substitutes for strict superiority
+(D-0099; ветка lead-binding journal_validator). Equal/higher-tier acceptance without such input = session
 self-certification (F-22; class F-6/F-14). The matrix by the
 coordinator's ACTUAL tier:
 
@@ -476,9 +470,7 @@ all sessions and subagents of this repo:
    structured registry (escalations, decisions, tasks, ledgers) is
    valid only after reading THROUGH that entry's status line, or
    grepping the status FIELD itself; the presence of the entry or of
-   its header inside a read window is NOT a check. (F-55: the verdict
-   sits at the END of an append-only entry — a truncated window shows
-   the problem without its resolution).
+   its header inside a read window is NOT a check (F-55).
 
 | п.6 | when | duty | src |
 |---|---|---|---|
