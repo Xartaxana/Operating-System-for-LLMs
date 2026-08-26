@@ -185,6 +185,30 @@ def test_v_sample_write_is_once_only(tmp_path):
     assert sample_path.read_text(encoding="utf-8") == "PRE-EXISTING CONTENT"
 
 
+def test_v_sample_write_retries_on_a_zero_byte_pre_existing_file(tmp_path):
+    # t-641 verdict, F5: a 0-byte sample file (an interrupted write, a
+    # placeholder, any zero-length artifact -- the live incident was
+    # exactly this, D:\Dog\logs\posttooluse-schema-sample.json) used to
+    # satisfy `os.path.exists()` and permanently block the write. The
+    # guard now checks non-emptiness -- AT the 0-byte boundary, this
+    # case must write; test_v_sample_write_is_once_only right above is
+    # the boundary's other side (non-empty pre-existing content, which
+    # must NOT be overwritten).
+    sample_path = tmp_path / "sample.json"
+    sample_path.write_text("", encoding="utf-8")
+    assert sample_path.stat().st_size == 0
+    payload = {
+        "tool_name": "Grep",
+        "tool_input": {"pattern": "foo"},
+        "tool_response": {"totally_unrecognized_key": 123},
+    }
+    result = _run_hook(payload, sample_path=sample_path)
+    assert result.returncode == 0
+    written = sample_path.read_text(encoding="utf-8")
+    assert written != ""
+    assert "totally_unrecognized_key" in written
+
+
 def test_missing_result_on_search_tool_writes_sample(tmp_path):
     sample_path = tmp_path / "sample.json"
     payload = {"tool_name": "Grep", "tool_input": {"pattern": "foo"}}

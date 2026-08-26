@@ -731,29 +731,17 @@ def test_main_no_mode_selected_errors(capsys):
 # ---------------------------------------------------------------------------
 
 
-def _resolve_kit_source(kit_path: str) -> tuple[Path | None, list[Path]]:
+def _resolve_kit_source(kit_path: str) -> Path | None:
     """Resolve a manifest unit's kit_path (always "toolkit/..." form, see
-    install_parity.py's module docstring) against the tree this test
-    actually runs in, trying BOTH layouts this test suite ships into:
+    install_parity.py's module docstring) against the HQ kit source tree:
+    TOOLKIT_ROOT.parent / kit_path, e.g. "toolkit/CLAUDE.md" ->
+    <repo_root>/toolkit/CLAUDE.md.
 
-    1. HQ (this repo): kit_path resolves under TOOLKIT_ROOT.parent, i.e.
-       "toolkit/CLAUDE.md" -> <repo_root>/toolkit/CLAUDE.md.
-    2. Public kit / installed host: no "toolkit/" subdir -- the kit's
-       files sit directly at the tree root (TOOLKIT_ROOT itself, since
-       for a copy of this test living at <host_root>/tools/, HERE.parent
-       IS the host root), so the "toolkit/" prefix is stripped:
-       "toolkit/CLAUDE.md" -> <host_root>/CLAUDE.md.
-
-    Absence in BOTH forms is a real staleness/resolution failure, not an
-    environment quirk -- both candidate paths are returned so the caller
-    can report both."""
-    candidates = [TOOLKIT_ROOT.parent / kit_path]
-    stripped = kit_path[len("toolkit/") :] if kit_path.startswith("toolkit/") else kit_path
-    candidates.append(TOOLKIT_ROOT / stripped)
-    for c in candidates:
-        if c.is_file():
-            return c, candidates
-    return None, candidates
+    This resolves ONLY the HQ layout on purpose (see
+    test_manifest_anchors_match_live_sources for why a host-layout
+    fallback is not attempted here)."""
+    c = TOOLKIT_ROOT.parent / kit_path
+    return c if c.is_file() else None
 
 
 def test_manifest_anchors_match_live_sources():
@@ -765,29 +753,46 @@ def test_manifest_anchors_match_live_sources():
     deployment's delivery findings applied to this mechanism's own
     manifest.
 
-    kit_path resolution tries the HQ layout first, then the public-kit/
-    host layout (no "toolkit/" subdir) -- see _resolve_kit_source. This
-    same suite is shipped as a sibling copy at <host_root>/tools/, where
-    HQ's "toolkit/" prefix doesn't exist on disk; resolving from the repo
-    root alone made this test FileNotFoundError on every host/public-kit
-    install (t-638 diagnosis)."""
+    This test runs ONLY on the HQ layout, where TOOLKIT_ROOT.parent/
+    kit_path resolves to an independent kit SOURCE tree (kit_path and
+    host_path are two distinct trees there). On a host/public-kit layout
+    (no "toolkit/" subdir -- kit_path's prefix would have to be stripped
+    to reach anything, and what it reaches is host_path itself, i.e. the
+    DELIVERED copy, not an independent kit source) there is nothing
+    separate left to check freshness against: host content is legitimately
+    allowed to diverge from the kit's per the ledger's waiver table, and
+    substring-asserting the manifest against the host's own delivered file
+    would reject a legitimate customization as staleness (t-641 verdict:
+    this was exactly the false-failure mode the earlier two-candidate
+    fallback produced). So on a host layout this test SKIPS instead, with
+    the reason printed; install_parity.py --check plus the ledger's waiver
+    table cover host-layout freshness instead. This same suite is shipped
+    as a sibling copy at <host_root>/tools/, where HQ's "toolkit/" prefix
+    doesn't exist on disk -- that absence is exactly the skip trigger
+    below (t-638 diagnosis: it used to be a FileNotFoundError instead)."""
+    if not (TOOLKIT_ROOT.parent / "toolkit").is_dir():
+        reason = (
+            "manifest freshness is checked against the kit source tree; "
+            "on a host layout use install_parity --check + the ledger waiver table"
+        )
+        print(reason)
+        pytest.skip(reason)
+
     units = ip.load_manifest(SHIPPED_MANIFEST)
     stale = []
     unresolved = []
     for unit in units:
         if unit["kind"] != "anchor":
             continue
-        src_path, candidates = _resolve_kit_source(unit["kit_path"])
+        src_path = _resolve_kit_source(unit["kit_path"])
         if src_path is None:
-            unresolved.append((unit["unit_id"], [str(c) for c in candidates]))
+            unresolved.append((unit["unit_id"], str(TOOLKIT_ROOT.parent / unit["kit_path"])))
             continue
         text = ip.normalize_text(src_path.read_text(encoding="utf-8"))
         for a in unit["anchors"]:
             if ip.normalize_text(a) not in text:
                 stale.append((unit["unit_id"], a))
-    assert not unresolved, (
-        f"kit source not found in either resolution form (both paths tried): {unresolved[:10]}"
-    )
+    assert not unresolved, f"kit source not found under HQ layout: {unresolved[:10]}"
     assert not stale, f"stale anchors (manifest vs current kit source): {stale[:10]}"
 
 

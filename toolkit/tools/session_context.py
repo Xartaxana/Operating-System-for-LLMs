@@ -1479,6 +1479,17 @@ _LAYER_A_TRANSLIT = {
     "‘": "'",  # left single quote
     "’": "'",  # right single quote
     " ": " ",  # non-breaking space
+    # t-641 verdict, F4: a host tree's own README.md carries a directory
+    # tree diagram (box-drawing) and inline section references (section
+    # sign) -- both load-bearing for MEANING, not decoration, same
+    # rationale as the entries above. Windows `tree`-style ASCII
+    # stand-ins for the box-drawing glyphs (widely recognized, not an
+    # invented notation).
+    "─": "-",  # box drawing light horizontal (tree line)
+    "│": "|",  # box drawing light vertical (tree line)
+    "├": "+",  # box drawing light vertical and right (tree branch)
+    "└": "\\",  # box drawing light up and right (tree last branch)
+    "§": "Sec.",  # section sign
 }
 _LAYER_A_TRANSLATE_TABLE = str.maketrans(_LAYER_A_TRANSLIT)
 

@@ -382,16 +382,24 @@ def _classify_result(result):
 
 
 def _write_sample_once(raw):
-    """Writes the raw payload to _sample_path(), once only (same guard
-    as before: skip if the file already exists). Never raises -- a
-    write failure (missing logs/ directory unwritable, disk full) must
-    not turn a WARN-mode hook into a crash."""
+    """Writes the raw payload to _sample_path(), once only (guard: skip
+    if the file already exists AND is non-empty). Checking mere
+    existence (an earlier version) is a trap: a 0-byte sample file --
+    left behind by an interrupted write, a placeholder, or any other
+    zero-length artifact -- permanently satisfies `os.path.exists()`
+    and silences this evidence-collection path FOREVER with no sample
+    ever actually captured (t-641 verdict, F5; the live incident: a
+    0-byte D:\\Dog\\logs\\posttooluse-schema-sample.json). The guard now
+    checks non-emptiness, not mere presence, so a 0-byte file is
+    retried on the next call exactly like a missing one. Never raises
+    -- a write failure (missing logs/ directory unwritable, disk full)
+    must not turn a WARN-mode hook into a crash."""
     try:
         path = _sample_path()
         parent = os.path.dirname(path)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        if not os.path.exists(path):
+        if not (os.path.exists(path) and os.path.getsize(path) > 0):
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(raw[:20000])
     except Exception:

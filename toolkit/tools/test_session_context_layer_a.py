@@ -226,6 +226,39 @@ def test_layer_a_lines_pure_ascii_content_no_note_no_warning(tmp_path):
     assert not any("MEANING MAY BE LOST" in l for l in lines)
 
 
+def test_layer_a_lines_transliterates_box_drawing_tree_diagram_with_soft_note(tmp_path):
+    # t-641 verdict, F4: a real host README.md tree diagram shape --
+    # all four box-drawing glyphs the verdict named, on one line each.
+    _seed(
+        tmp_path,
+        {
+            "README.md": (
+                "├── README.md\n"
+                "│   ├── nested.py\n"
+                "└── last.py\n"
+            )
+        },
+    )
+    lines = sc.layer_a_lines(tmp_path)
+    assert "+-- README.md" in lines
+    assert "|   +-- nested.py" in lines
+    assert "\\-- last.py" in lines
+    assert not any("MEANING MAY BE LOST" in l for l in lines)
+    for l in lines:
+        assert l.isascii()
+
+
+def test_layer_a_lines_transliterates_section_sign_with_soft_note(tmp_path):
+    # t-641 verdict, F4: an inline section reference, the other
+    # load-bearing character the verdict named (U+00A7).
+    _seed(tmp_path, {"README.md": "see AGENTS.md §4.1\n"})
+    lines = sc.layer_a_lines(tmp_path)
+    assert "see AGENTS.md Sec.4.1" in lines
+    assert not any("MEANING MAY BE LOST" in l for l in lines)
+    for l in lines:
+        assert l.isascii()
+
+
 # ---- WARN threshold (16384 bytes on the TOTAL layer-A on-disk size) ----
 # Matches the reference implementation's own behavior (a whole-block
 # total, not a per-file figure) -- see this node's report for the
