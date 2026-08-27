@@ -48,6 +48,18 @@ TASK_ID_REQUIRED_EVENTS = {"delegated", "accepted", "rejected", "escalated", "de
 FAILURE_CLASSES = {"spec", "capability", "recon", "tooling"}
 LIFECYCLE_EVENTS = {"delegated", "accepted", "rejected", "escalated"}
 ALWAYS_REQUIRED_FIELDS = ("agent", "category", "notes")
+
+# SPEC-RECIDIV (R11(n), чек 13(г) поверх готового счёта -- C1 t-646,
+# 2026-08-27, посадка формы [Б] по docs/tasks/2026-08-27_c1-spec-recidiv-
+# draft.md). Порог ДВУЧАСТНЫЙ, ПРЕДВАРИТЕЛЬНЫЙ (одна точка): числа
+# пересматриваются ВТОРОЙ точкой (следующая калибровка), не этим
+# коммитом. Носитель обоснования (базлайн): OS logs/routing-log.jsonl,
+# окно "с последнего calibrated" (строка 1475, ts 2026-08-20T14:24:00,
+# калибровка №8/окно №9) -- 7 rejected (строки 1478/1490/1491/1525/
+# 1553/1574/1580), из них 5 несут failure_class=="spec" (строки 1490,
+# 1525, 1553, 1574, 1580; остальные две -- capability) = 5/7 = 71.4%.
+SPEC_RECIDIV_MIN_COUNT = 3
+SPEC_RECIDIV_MIN_RATIO = 0.40
 # Маркер замены умершего воркера (2026-07-15, правило 9в2 / t-129 M1):
 # литерал-зеркало REPLACES_WORKER_RE из journal_validator.py. Продублирован
 # намеренно, не импортирован -- calibration_counts работает с ОБОИМИ
@@ -440,6 +452,80 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
         key = (fc, agent, model)
         rejected_distribution[key] = rejected_distribution.get(key, 0) + 1
 
+    # --- 8b. SPEC-RECIDIV (R11(n), C1 t-646/2026-08-27, форма [Б]) ---
+    # Порог видимости чека 13(г) поверх готового счёта rejected_
+    # distribution выше: доля rejected с failure_class=="spec" в окне
+    # "с последнего calibrated" (Р3 спеки). НЕ блокирует (exit 0 всегда,
+    # append-only, не судит текст notes) -- только печатает КАНДИДАТ для
+    # Lead, как остальные счётчики этого скрипта (см. докстринг файла).
+    #
+    # Окно НЕЗАВИСИМО от --window-start/--window-end этого прогона (те
+    # управляют остальными чеками отчёта): последнее событие calibrated
+    # ПО ПОЗИЦИИ В ФАЙЛЕ среди ВСЕХ распарсенных строк (не только
+    # --window-*), окно открытое до конца файла. Нет calibrated в
+    # журнале -- окно = весь файл (last_calibrated_ts=None зеркалит
+    # _in_window(start=None) "нет нижней границы", тот же приём, что и
+    # везде в этом скрипте).
+    last_calibrated_ts: Optional[datetime] = None
+    for pl in parsed_lines:
+        if pl.data.get("event") == "calibrated":
+            last_calibrated_ts = pl.ts  # последняя ПО ПОЗИЦИИ запись перезаписывает предыдущую
+
+    spec_recidiv_rejected = [
+        pl for pl in parsed_lines
+        if pl.data.get("event") == "rejected" and _in_window(pl, last_calibrated_ts, None)
+    ]
+    sr_denominator = len(spec_recidiv_rejected)
+    sr_numerator = 0
+    sr_unclassified = 0
+    sr_retro = 0
+    sr_spec_lines: List[Dict[str, Any]] = []
+    for pl in spec_recidiv_rejected:
+        fc = pl.data.get("failure_class")
+        notes = pl.data.get("notes")
+        # Маркер ретро-события -- зеркало journal_echo.py:1202
+        # ("retroactive" in notes), продублирован намеренно (та же
+        # причина, что REPLACES_WORKER_RE/CLOSES_RE выше: этот скрипт не
+        # зависит от journal_echo). Скоуп -- ВСЕ rejected окна (не только
+        # spec), печатается одним числом в той же строке (Р6 спеки).
+        if isinstance(notes, str) and "retroactive" in notes:
+            sr_retro += 1
+        if fc == "spec":
+            sr_numerator += 1
+            by_val = pl.data.get("by")
+            sr_spec_lines.append({
+                "line": pl.line_no,
+                "task_id": pl.data.get("task_id"),
+                # Фикс C1-F2 (атрибуция): ярус ДИСПЕТЧЕРА-ПРИЁМЩИКА,
+                # принявшего reject (поле "by"), не agent/model
+                # исполнителя -- печать не должна читаться как метрика
+                # builder/sonnet (см. render_text ниже).
+                "by": by_val if isinstance(by_val, str) and by_val.strip() else "<нет>",
+            })
+        elif fc not in FAILURE_CLASSES:
+            # Форму поля failure_class держит journal_validator.py --
+            # этот счётчик не судит валидность, только откладывает
+            # неклассифицируемые rejected в отдельный счёт (не в
+            # числитель, форму см. п.4 диспетчерской спеки t-646).
+            sr_unclassified += 1
+    sr_ratio = (sr_numerator / sr_denominator) if sr_denominator else None
+    sr_threshold_hit = (
+        sr_denominator > 0
+        and sr_numerator >= SPEC_RECIDIV_MIN_COUNT
+        and sr_ratio is not None
+        and sr_ratio >= SPEC_RECIDIV_MIN_RATIO
+    )
+    spec_recidiv = {
+        "window_start": last_calibrated_ts.isoformat() if last_calibrated_ts else None,
+        "numerator": sr_numerator,
+        "denominator": sr_denominator,
+        "ratio": sr_ratio,
+        "unclassified": sr_unclassified,
+        "retro": sr_retro,
+        "threshold_hit": sr_threshold_hit,
+        "spec_lines": sr_spec_lines,
+    }
+
     # --- 9. Деградация (чек 5): пары lead_degraded/lead_restored ---
     degradation_pairs = []
     open_degraded = None
@@ -517,6 +603,7 @@ def analyze_journal(path: str, window_start: Optional[datetime], window_end: Opt
             {"failure_class": fc, "agent": a, "model": m, "count": c}
             for (fc, a, m), c in sorted(rejected_distribution.items())
         ],
+        "spec_recidiv": spec_recidiv,
         "degradation_pairs": degradation_pairs,
         "unclosed_tasks": unclosed_tasks,
         "closed_by_decomposable": closed_by_decomposable,
@@ -605,6 +692,24 @@ def render_text(report: Dict[str, Any]) -> str:
             out.append(f"  {r['failure_class']} / {r['agent']} / {r['model']}: {r['count']}")
     else:
         out.append("  (нет rejected в окне)")
+
+    # SPEC-RECIDIV (R11(n), C1 t-646/2026-08-27) -- ВСЕГДА печатается
+    # (видимость, п.1 спеки), окно "с последнего calibrated" (см.
+    # analyze_journal), независимо от --window-start/--window-end.
+    sr = report["spec_recidiv"]
+    ratio_pct = f"{sr['ratio'] * 100:.1f}%" if sr["ratio"] is not None else "н/д"
+    out.append(f"  SPEC-RECIDIV (R11(n)): {sr['numerator']} spec из {sr['denominator']} "
+               f"rejected ({ratio_pct}), ретро: {sr['retro']}")
+    if sr["threshold_hit"]:
+        out.append("  ПОРОГ СРАБОТАЛ (предварительный, базлайн 5/7 окна №9)")
+    # Фикс C1-F2: правило атрибуции несёт та же печать -- spec есть
+    # дефект СПЕКИ диспетчера (R11(n)), вывод не должен читаться как
+    # метрика исполнителя (builder/sonnet).
+    out.append("  spec = дефект ДИСПЕТЧЕРА (R11(n)), не исполнителя")
+    for sl in sr["spec_lines"]:
+        out.append(f"    line {sl['line']} task_id={sl['task_id']} by={sl['by']}")
+    if sr["unclassified"]:
+        out.append(f"  unclassified (нет/невалиден failure_class): {sr['unclassified']}")
 
     out.append(_fmt_section("Пары деградации lead_degraded/lead_restored (чек 5)"))
     if report["degradation_pairs"]:

@@ -52,7 +52,7 @@
       "hook_event": "PreToolUse",
       "matcher": "Task|Agent",
       "denominator": "Z1",
-      "listed_in_check_11v": false,
+      "listed_in_check_11v": true,
       "reachable": "subagent_type_builder"
     },
     {
@@ -65,7 +65,7 @@
       "hook_event": "PreToolUse",
       "matcher": "Task|Agent",
       "denominator": "Z1",
-      "listed_in_check_11v": false,
+      "listed_in_check_11v": true,
       "reachable": "subagent_type_builder"
     },
     {
@@ -211,7 +211,7 @@
       "hook_event": "PostToolUse",
       "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
       "denominator": "Z1",
-      "listed_in_check_11v": false,
+      "listed_in_check_11v": true,
       "reachable": "journal_path"
     },
     {
@@ -265,7 +265,7 @@
       "hook_event": "PreToolUse",
       "matcher": "Bash|PowerShell",
       "denominator": "Z1",
-      "listed_in_check_11v": false,
+      "listed_in_check_11v": true,
       "reachable": "unmeasured",
       "reason": "Р-D1 РЕШЕНА (Lead 2026-08-25, docs/tasks/2026-08-25_queue8-closure.md): достижимая популяция слоя = любая НЕПУСТАЯ строковая команда Bash/PowerShell; вырожденный край (command отсутствует/не строка/пуста — выход до проверок) НЕ экземпляр подкласса II. Населённость этой популяцией пока не ИЗМЕРЕНА (нет measured-вида) — потому unmeasured, определение популяции зафиксировано здесь"
     }

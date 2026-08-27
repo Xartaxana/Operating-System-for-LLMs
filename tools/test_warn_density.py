@@ -984,12 +984,74 @@ def test_parse_check_11v_names_from_live_protocol():
         assert expected in names, (expected, names)
 
 
-def test_diff_check_11v_matches_known_divergence():
+def test_density_check_reconciliation_against_real_protocol():
+    """Пин инварианта 11(в) <-> warn_layers.json (t-648 критик-вердикт,
+    docs/tasks/2026-08-27_c2-check11v-pin-draft.md, Р1=(в)+(б)). Прежде
+    этот тест ФИКСИРОВАЛ известное расхождение (4 имени) как ожидаемое
+    -- машинный слой защищал протухший чек; теперь обе стороны
+    расхождения обязаны быть пусты, а расхождение падает в каноне."""
     layers = _real_registry_layers()
     protocol_path = REPO_ROOT / "PROCESS" / "WEEKLY_CALIBRATION_PROTOCOL.md"
-    names = wd.parse_check_11v_names(protocol_path.read_text(encoding="utf-8"))
+    check_names = wd.parse_check_11v_names(protocol_path.read_text(encoding="utf-8"))
+    # К1: блок 11(в) не распознан -> None -> внятный assert, не молчаливый [],[].
+    assert check_names is not None, "11(в) блок не распознан в протоколе -- форма протокола разошлась"
+    in_check_not_reg, in_reg_not_check = wd.diff_check_11v(layers, check_names)
+    assert in_check_not_reg == []
+    assert in_reg_not_check == []
+    # К2: непустота ОБЕИХ сторон -- защита от вырожденного "совпадения" пустых множеств.
+    assert check_names != []
+    assert layers != []
+    # Р4: третий assert -- поле listed_in_check_11v синхронно с фактом
+    # присутствия имени слоя в самом тексте чека (третья ручная копия факта).
+    check_set = set(check_names)
+    for layer in layers:
+        assert layer.listed_in_check_11v == (layer.name in check_set), (
+            layer.name, layer.listed_in_check_11v, layer.name in check_set)
+
+
+def test_check_11v_reconciliation_fails_loudly_when_parser_returns_none():
+    """К1 (граница, вне живого дерева): блок 11(в) не распознан в тексте
+    -> parse_check_11v_names возвращает None -> пин должен падать по
+    внятному assert, а не молча вечнозеленеть на [],[]."""
+    broken_text = "протокол без блока 11(в) вовсе -- форма разошлась"
+    names = wd.parse_check_11v_names(broken_text)
+    assert names is None
+    with pytest.raises(AssertionError):
+        assert names is not None, "11(в) блок не распознан в протоколе -- форма протокола разошлась"
+
+
+def test_check_11v_reconciliation_fails_loudly_when_both_sides_empty():
+    """К2 (граница, синтетика): пустой реестр и пустой перечень чека ->
+    diff_check_11v молча возвращает ([],[]) -- "совпадение" вырожденное,
+    не содержательное; assert непустоты обеих сторон ловит этот случай."""
+    layers = []
+    check_names = []
+    in_check_not_reg, in_reg_not_check = wd.diff_check_11v(layers, check_names)
+    assert in_check_not_reg == []
+    assert in_reg_not_check == []
+    with pytest.raises(AssertionError):
+        assert check_names != [] and layers != [], "обе стороны пусты -- вырожденный случай"
+
+
+def test_check_11v_reconciliation_negative_control_removed_name():
+    """НЕГАТИВНЫЙ КОНТРОЛЬ (спека п.4): синтетическая копия текста чека
+    (в памяти, не на диске) с удалённым живым именем при живом реестре
+    -> непустой in_reg_not_check, проверка падает. Живой PROCESS/*.md не
+    портится -- порча идёт по СТРОКЕ, прочитанной read-only (гигиена
+    п.7(г): та же истина доказывается без мутации боевого файла)."""
+    protocol_path = REPO_ROOT / "PROCESS" / "WEEKLY_CALIBRATION_PROTOCOL.md"
+    live_text = protocol_path.read_text(encoding="utf-8")
+    mutated = live_text.replace("NOTES LEN, TIER ECHO", "TIER ECHO", 1)
+    assert mutated != live_text  # контроль: замена реально сработала
+    names = wd.parse_check_11v_names(mutated)
+    assert names is not None
+    assert "NOTES LEN" not in names
+    layers = _real_registry_layers()
     in_check_not_reg, in_reg_not_check = wd.diff_check_11v(layers, names)
-    assert set(in_reg_not_check) == {"DOD-QUOTED", "MANIFEST-QUOTED", "JOURNAL ECHO", "Командная гигиена"}
+    assert "NOTES LEN" in in_reg_not_check
+    assert in_reg_not_check != []
+    with pytest.raises(AssertionError):
+        assert in_reg_not_check == []
 
 
 # ---------------------------------------------------------------------------

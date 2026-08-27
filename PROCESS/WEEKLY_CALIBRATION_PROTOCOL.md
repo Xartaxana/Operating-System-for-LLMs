@@ -154,7 +154,19 @@ D:\AO3_tests), cc_usage через tools/usage_report.py, git-история
     — сигнал диспатчей без DoD/манифеста; проверить последние спеки
     Lead на критерии приёмки+прогон и на «дано»/owns;
     `failure_class=recon` у builder — недостаточная корзина «дано» —
-    тело.
+    тело. ПОРОГ SPEC-RECIDIV (машинный слой R11(n), посадка
+    2026-08-27): блок SPEC-RECIDIV в выводе calibration_counts —
+    числитель rejected(failure_class=spec), знаменатель ВСЕ rejected
+    окна от последнего calibrated, печать безусловная; порог «≥3
+    spec И ≥40% rejected» — ПРЕДВАРИТЕЛЬНЫЙ (базлайн одна точка:
+    5/7 окна №9, носитель счёта — журнал строки 1490/1525/1553/
+    1574/1580; пересмотр обязателен второй точкой, дисциплина оси
+    14); срабатывание = находка калибровки, ЧИСЛО обязано попасть в
+    notes события `calibrated` (отсутствующее число — находка о
+    самом чеке); атрибуция — диспетчеру (поле by), не исполнителю
+    (R11(n): spec-дефект пишет спеку, а не исполняет её); детектор
+    смерти слоя — канон-тест присутствия блока в
+    tools/test_calibration_counts.py (C1-F1).
 <!--CHK 13(д)|src:журнал,журнал-AO3|pred:journal.any|rules:RC§2/D-0060|status:живой-->
     (д) Целостность task_id (D-0060): дублей между несвязанными
     задачами нет — в ОБОИХ журналах; тот же скан — residual-детектор
@@ -937,13 +949,25 @@ D:\AO3_tests), cc_usage через tools/usage_report.py, git-история
     R6-ЗЕРКАЛО давал 0 — калибровка №8). Слои и носители:
     NOTES LEN, TIER ECHO, WITNESS ECHO, TS DRIFT, R3-ЗЕРКАЛО,
     R6-ЗЕРКАЛО (бывшее
-    имя «ESCALATION» — литералом никогда не было) — tools/
-    journal_echo.py; GIVEN-PATH, ROLE-TYPE, WRITE-QUOTED, FRESHNESS —
-    tools/dispatch_gate.py; OWNS OVERLAP, QUOTED_OWNS, BLIND_OWNS — tools/
+    имя «ESCALATION» — литералом никогда не было), JOURNAL ECHO —
+    tools/journal_echo.py; GIVEN-PATH, ROLE-TYPE, WRITE-QUOTED,
+    FRESHNESS, DOD-QUOTED, MANIFEST-QUOTED — tools/dispatch_gate.py;
+    OWNS OVERLAP, QUOTED_OWNS, BLIND_OWNS — tools/
     owns_gate.py; NEGATIVE LINT — tools/negative_lint.py; Negative
     claim — tools/claim_control_gate.py; Search returned nothing —
-    tools/search_control_gate.py. ПЕРЕЧЕНЬ ОТКРЫТ: живой слой, не
-    попавший сюда, = находка о САМОМ ЭТОМ ЧЕКЕ, а не о слое. По
+    tools/search_control_gate.py; Командная гигиена —
+    tools/hygiene_gate.py. ПЕРЕЧЕНЬ ОТКРЫТ: живой слой, не
+    попавший сюда, = находка о САМОМ ЭТОМ ЧЕКЕ, а не о слое; такая
+    находка секции «НАХОДКИ О ЧЕКЕ» о самом чеке закрывается правкой
+    ЭТОГО ЧЕКА в ТОМ ЖЕ ходе, а не переносится на следующий прогон.
+    ФОРМА ИМЕНИ В ЭТОМ ПЕРЕЧНЕ: без скобок и без запятых внутри
+    самого имени, носитель — путь ПОД tools/; имя слоя с носителем
+    ВНЕ tools/ вносится сюда НЕ раньше, чем парсер
+    tools/warn_density.py:parse_check_11v_names расширен под такой
+    путь ОТДЕЛЬНЫМ узлом — расширение парсера и правка этого перечня
+    идут ОДНИМ коммитом (docs/tasks/2026-08-27_c2-check11v-pin-draft.md,
+    C2-F1). Машинный пин: tools/test_warn_density.py::
+    test_density_check_reconciliation_against_real_protocol. По
     каждому — какую ДОЛЮ своего потока он пометил за окно.
     ЗНАМЕНАТЕЛЬ ДОЛИ — ДОСТИЖИМАЯ ПОПУЛЯЦИЯ СЛОЯ, НЕ ПОПУЛЯЦИЯ ЕГО
     МАТЧЕРА (правка 2026-08-25, ось 15 карты, класс

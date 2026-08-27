@@ -2,7 +2,14 @@
 на tmp_path, по одному кейсу на класс из спеки, плюс smoke-тест CLI."""
 import json
 
-from calibration_counts import analyze_journal, main, parse_ts
+from calibration_counts import (
+    SPEC_RECIDIV_MIN_COUNT,
+    SPEC_RECIDIV_MIN_RATIO,
+    analyze_journal,
+    main,
+    parse_ts,
+    render_text,
+)
 
 
 def write_journal(path, lines):
@@ -599,6 +606,232 @@ def test_unclosed_closed_by_decomposable(tmp_path):
     report = analyze_journal(str(p), None, None, parse_ts("2026-07-16T00:00:00"))
     assert report["unclosed_tasks"] == []
     assert report["closed_by_decomposable"] == ["t-002"]
+
+
+# ---------------------------------------------------------------------
+# SPEC-RECIDIV (R11(n), C1 t-646/2026-08-27, форма [Б]). Порог
+# ДВУЧАСТНЫЙ: N_spec >= SPEC_RECIDIV_MIN_COUNT (3) И доля >=
+# SPEC_RECIDIV_MIN_RATIO (0.40). Окно -- "с последнего calibrated" ПО
+# ПОЗИЦИИ В ФАЙЛЕ, независимо от --window-start/--window-end,
+# переданных analyze_journal (те управляют остальными чеками отчёта).
+# ---------------------------------------------------------------------
+def _rej(ts, task_id, failure_class=None, by=None, notes="n", agent="builder", model="sonnet"):
+    d = {"ts": ts, "event": "rejected", "agent": agent, "model": model,
+         "task_id": task_id, "attempt": 1, "category": "implementation", "notes": notes}
+    if failure_class is not None:
+        d["failure_class"] = failure_class
+    if by is not None:
+        d["by"] = by
+    return d
+
+
+def test_spec_recidiv_present_in_report_structure_c1f1_detector(tmp_path):
+    """Детектор смерти слоя (C1-F1): непустая фикстура ОБЯЗАНА нести ключ
+    spec_recidiv с полным набором подполей -- исчезновение поля из отчёта
+    красит этот тест."""
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        ev("2026-08-20T14:24:00", "calibrated", agent="lead", model="opus",
+           category="calibration", notes="calibration-N"),
+        _rej("2026-08-20T15:00:00", "t-001", failure_class="spec", by="opus"),
+        _rej("2026-08-20T15:10:00", "t-002", failure_class="capability", by="opus"),
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    assert "spec_recidiv" in report
+    sr = report["spec_recidiv"]
+    for key in ("window_start", "numerator", "denominator", "ratio",
+                "unclassified", "retro", "threshold_hit", "spec_lines"):
+        assert key in sr, f"пропало поле {key}"
+    assert sr["numerator"] == 1
+    assert sr["denominator"] == 2
+    # структура вывода: блок присутствует в тексте секции чека 13г
+    text = render_text(report)
+    assert "SPEC-RECIDIV (R11(n))" in text
+    assert "spec = дефект ДИСПЕТЧЕРА (R11(n)), не исполнителя" in text
+
+
+def _window9_journal(tmp_path, rejected_lines):
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        ev("2026-08-20T14:24:00", "calibrated", agent="lead", model="opus",
+           category="calibration", notes="calibration-N"),
+        *rejected_lines,
+    ])
+    return p
+
+
+def test_spec_recidiv_count_below_threshold_quiet(tmp_path):
+    # 2 spec / 5 rejected = 40% (доля НА пороге), но count=2 < MIN_COUNT=3
+    # -> тихо (двучастный порог требует ОБА условия).
+    rejected = [
+        _rej("2026-08-20T15:00:00", "t-001", failure_class="spec", by="opus"),
+        _rej("2026-08-20T15:01:00", "t-002", failure_class="spec", by="opus"),
+        _rej("2026-08-20T15:02:00", "t-003", failure_class="capability", by="opus"),
+        _rej("2026-08-20T15:03:00", "t-004", failure_class="capability", by="opus"),
+        _rej("2026-08-20T15:04:00", "t-005", failure_class="capability", by="opus"),
+    ]
+    p = _window9_journal(tmp_path, rejected)
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    sr = report["spec_recidiv"]
+    assert (sr["numerator"], sr["denominator"]) == (2, 5)
+    assert abs(sr["ratio"] - 0.40) < 1e-9
+    assert sr["threshold_hit"] is False
+    assert "ПОРОГ СРАБОТАЛ" not in render_text(report)
+
+
+def test_spec_recidiv_count_and_ratio_at_edge_hits(tmp_path):
+    # 3 spec / 7 rejected ~= 42.9% -- НА границе целочисленного знаменателя:
+    # m=7 -- последнее значение, при котором доля ещё >= 0.40 (m=8 уже
+    # ниже, см. следующий тест) -- ровно требование п.6а "тест на границе".
+    rejected = [_rej(f"2026-08-20T15:0{i}:00", f"t-00{i}", failure_class="spec", by="opus")
+                for i in range(3)]
+    rejected += [_rej(f"2026-08-20T15:1{i}:00", f"t-01{i}", failure_class="capability", by="opus")
+                 for i in range(4)]
+    p = _window9_journal(tmp_path, rejected)
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    sr = report["spec_recidiv"]
+    assert (sr["numerator"], sr["denominator"]) == (3, 7)
+    assert sr["threshold_hit"] is True
+    assert "ПОРОГ СРАБОТАЛ (предварительный, базлайн 5/7 окна №9)" in render_text(report)
+
+
+def test_spec_recidiv_ratio_just_beyond_edge_quiet(tmp_path):
+    # 3 spec / 8 rejected = 37.5% -- ОДИН rejected больше, чем предыдущий
+    # тест (m=8 вместо m=7): count=3 удовлетворён, доля падает ниже 0.40
+    # -> тихо. "За границей" двойника предыдущего теста.
+    rejected = [_rej(f"2026-08-20T15:0{i}:00", f"t-00{i}", failure_class="spec", by="opus")
+                for i in range(3)]
+    rejected += [_rej(f"2026-08-20T15:1{i}:00", f"t-01{i}", failure_class="capability", by="opus")
+                 for i in range(5)]
+    p = _window9_journal(tmp_path, rejected)
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    sr = report["spec_recidiv"]
+    assert (sr["numerator"], sr["denominator"]) == (3, 8)
+    assert sr["ratio"] < SPEC_RECIDIV_MIN_RATIO
+    assert sr["threshold_hit"] is False
+    assert "ПОРОГ СРАБОТАЛ" not in render_text(report)
+
+
+def test_spec_recidiv_4_of_8_hits_without_duplication(tmp_path):
+    # 4 spec / 8 rejected = 50% -> порог срабатывает; строка порога не
+    # дублируется (ровно ОДНО вхождение в тексте).
+    rejected = [_rej(f"2026-08-20T15:0{i}:00", f"t-00{i}", failure_class="spec", by="opus")
+                for i in range(4)]
+    rejected += [_rej(f"2026-08-20T15:1{i}:00", f"t-01{i}", failure_class="capability", by="opus")
+                 for i in range(4)]
+    p = _window9_journal(tmp_path, rejected)
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    sr = report["spec_recidiv"]
+    assert (sr["numerator"], sr["denominator"]) == (4, 8)
+    assert sr["threshold_hit"] is True
+    text = render_text(report)
+    assert text.count("ПОРОГ СРАБОТАЛ (предварительный, базлайн 5/7 окна №9)") == 1
+
+
+def test_spec_recidiv_empty_window_zero_over_zero_no_division_error(tmp_path):
+    # Нет rejected после calibrated -> 0 из 0, без строки порога, без
+    # ZeroDivisionError.
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        ev("2026-08-20T14:24:00", "calibrated", agent="lead", model="opus",
+           category="calibration", notes="calibration-N"),
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    sr = report["spec_recidiv"]
+    assert (sr["numerator"], sr["denominator"]) == (0, 0)
+    assert sr["ratio"] is None
+    assert sr["threshold_hit"] is False
+    text = render_text(report)
+    assert "0 spec из 0 rejected" in text
+    assert "ПОРОГ СРАБОТАЛ" not in text
+
+
+def test_spec_recidiv_no_calibrated_event_at_all_whole_file_is_window(tmp_path):
+    # Нет ни одного calibrated в журнале вовсе -- окно = весь файл (тот же
+    # приём, что _in_window(start=None)), не крэш и не путаница с "0 из 0".
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        _rej("2026-08-20T15:00:00", "t-001", failure_class="spec", by="opus"),
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    sr = report["spec_recidiv"]
+    assert sr["window_start"] is None
+    assert (sr["numerator"], sr["denominator"]) == (1, 1)
+
+
+def test_spec_recidiv_unclassified_separated_from_numerator(tmp_path):
+    # rejected без failure_class -- пропуск в отдельный счёт unclassified,
+    # НЕ в числитель (форму поля failure_class валидирует journal_
+    # validator, не этот скрипт); знаменатель = ВСЕ rejected окна (п.1
+    # спеки), unclassified остаётся включён в него.
+    rejected = [
+        _rej("2026-08-20T15:00:00", "t-001", failure_class="spec", by="opus"),
+        _rej("2026-08-20T15:01:00", "t-002", failure_class=None, by="opus"),  # нет поля вовсе
+    ]
+    p = _window9_journal(tmp_path, rejected)
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    sr = report["spec_recidiv"]
+    assert sr["numerator"] == 1
+    assert sr["unclassified"] == 1
+    assert sr["denominator"] == 2  # unclassified остаётся в "ВСЕ rejected окна"
+
+
+def test_spec_recidiv_attribution_by_field_and_missing_by(tmp_path):
+    # Фикс C1-F2: spec-строки несут ярус ДИСПЕТЧЕРА (поле by), не
+    # agent/model исполнителя; отсутствующий by -> "<нет>", не крэш.
+    rejected = [
+        _rej("2026-08-20T15:00:00", "t-001", failure_class="spec", by="opus",
+             agent="builder", model="sonnet"),
+        _rej("2026-08-20T15:01:00", "t-002", failure_class="spec", by=None,
+             agent="builder", model="sonnet"),
+    ]
+    p = _window9_journal(tmp_path, rejected)
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    sr = report["spec_recidiv"]
+    by_values = {sl["task_id"]: sl["by"] for sl in sr["spec_lines"]}
+    assert by_values == {"t-001": "opus", "t-002": "<нет>"}
+    text = render_text(report)
+    assert "line" in text and "by=opus" in text and "by=<нет>" in text
+
+
+def test_spec_recidiv_retro_counted_separately_same_line(tmp_path):
+    rejected = [
+        _rej("2026-08-20T15:00:00", "t-001", failure_class="spec", by="opus",
+             notes="retroactive fix of missed reject; bounds fixed"),
+        _rej("2026-08-20T15:01:00", "t-002", failure_class="capability", by="opus"),
+    ]
+    p = _window9_journal(tmp_path, rejected)
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    sr = report["spec_recidiv"]
+    assert sr["retro"] == 1
+    text = render_text(report)
+    # ретро печатается в ТОЙ ЖЕ строке, что n/m -- строка SPEC-RECIDIV
+    # несёт и долю, и число ретро.
+    line = [l for l in text.splitlines() if "SPEC-RECIDIV (R11(n)):" in l][0]
+    assert "ретро: 1" in line
+
+
+def test_spec_recidiv_window_independent_of_cli_window_args(tmp_path):
+    # rejected(spec) ДО calibrated -- вне окна SPEC-RECIDIV, даже когда
+    # общий --window-start/--window-end прогона (None/None здесь) его бы
+    # включил в остальные чеки отчёта (rejected_distribution и т.п.).
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        _rej("2026-08-19T00:00:00", "t-000", failure_class="spec", by="opus"),
+        ev("2026-08-20T14:24:00", "calibrated", agent="lead", model="opus",
+           category="calibration", notes="calibration-N"),
+        _rej("2026-08-20T15:00:00", "t-001", failure_class="capability", by="opus"),
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    sr = report["spec_recidiv"]
+    # t-000 (spec, до calibrated) исключён из окна SPEC-RECIDIV
+    assert sr["denominator"] == 1
+    assert sr["numerator"] == 0
+    # но он ВИДЕН в общем rejected_distribution (общее окно None/None
+    # включает весь файл) -- доказывает, что окна разные, не молчаливая
+    # потеря данных
+    dist_fcs = [d["failure_class"] for d in report["rejected_distribution"]]
+    assert "spec" in dist_fcs
 
 
 def test_unclosed_closes_token_trailing_punctuation(tmp_path):
