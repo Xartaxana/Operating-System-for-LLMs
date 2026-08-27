@@ -293,15 +293,19 @@ def test_live_positional_invariant_no_new_numbered_sections():
     assert numbers == list(range(1, 9)), numbers
 
 
-def test_live_records_still_61():
-    """И-3: вынос тел не есть удаление строк -- 61 запись таблицы карты
-    (тот же счётчик, что и tools/corpus_growth.py record_re)."""
+def test_live_records_still_62():
+    """И-3: вынос тел не есть удаление строк -- 62 записи таблицы карты
+    (тот же счётчик, что и tools/corpus_growth.py record_re).
+    61 -> 62: строка R1(d)/D-0111 добавлена посадкой 69cdf4b 2026-08-27
+    (пин обновляется тем же ходом, что добавляет строку карты; пропуск
+    обновления при посадке D-0111 вскрыт BATCH CANON петли, итерация 1
+    -- экземпляр класса spec-recidiv в копилку счётчика 13(г))."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import corpus_growth as cg  # noqa: E402
     rc_text, _ = _load_live()
     normalized = rc_text.replace("\r\n", "\n").replace("\r", "\n")
     n = cg.count_records(normalized, r"^\| + exclude разделители/шапки")
-    assert n == 61
+    assert n == 62
 
 
 # ---------------------------------------------------------------------------

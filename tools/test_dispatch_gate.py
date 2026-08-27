@@ -3103,17 +3103,32 @@ def test_echo_json_no_freshness_warn_when_gate_blocks():
 # --- Б1: logs/-якорь -- параметризованный _filter_given_candidates -------
 
 
-def test_fixround_b1_logs_prefix_beyond_eof_warns():
-    warn = _fw("logs/routing-log.jsonl:9999999")
+def _b1_tmp_logs_root(tmp_path):
+    # Фикс 2026-08-27: три Б1-теста стояли на ЖИВОМ logs/routing-log.jsonl
+    # -- растущий носитель пересёк кап L2 (2 МиБ) и слой замолчал по
+    # дизайну, красня/вакуумно зеленя тесты (класс "тест на живом
+    # растущем носителе"; вскрыто BATCH CANON петли, итерация 1).
+    # Синтетика: маленький журнал в tmp-корне, L2 недостижим.
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "routing-log.jsonl").write_text(
+        "\n".join('{"ts":"2026-01-01T00:00:00","event":"x"}' for _ in range(20)),
+        encoding="utf-8",
+    )
+    return str(tmp_path)
+
+
+def test_fixround_b1_logs_prefix_beyond_eof_warns(tmp_path):
+    warn = _fw("logs/routing-log.jsonl:9999999", cwd=_b1_tmp_logs_root(tmp_path))
     assert "FRESHNESS WARN:" in warn
     assert "logs/routing-log.jsonl:9999999" in warn
 
 
-def test_fixround_b1_logs_prefix_within_bounds_silent():
-    assert _fw("logs/routing-log.jsonl:10") == ""
+def test_fixround_b1_logs_prefix_within_bounds_silent(tmp_path):
+    assert _fw("logs/routing-log.jsonl:10", cwd=_b1_tmp_logs_root(tmp_path)) == ""
 
 
-def test_fixround_b1_logs_owns_suppression_still_works():
+def test_fixround_b1_logs_owns_suppression_still_works(tmp_path):
     # logs/ теперь ДОХОДИТ до owns-подавления (не молчит по умолчанию),
     # но owns-декларация всё равно освобождает его -- симметрия с
     # остальными шестью префиксами.
@@ -3122,7 +3137,17 @@ def test_fixround_b1_logs_owns_suppression_still_works():
         "owns: logs/routing-log.jsonl\n"
         "Правь файл logs/routing-log.jsonl:9999999 по спеке."
     )
-    assert _fw(prompt) == ""
+    assert _fw(prompt, cwd=_b1_tmp_logs_root(tmp_path)) == ""
+
+
+def test_fixround_b1_live_journal_over_l2_cap_stays_silent():
+    # Пин ПРИЧИНЫ фикса выше: живой журнал ПЕРЕРОС кап L2 -- слой на нём
+    # молчит по дизайну (оценка L2 -- dispatch_gate._FRESHNESS_MAX_FILE_BYTES);
+    # если журнал когда-то ужмётся ниже капа, этот пин отвалится и Б1-тесты
+    # можно вернуть на живой носитель осознанным решением.
+    live = os.path.join(_REPO_ROOT, "logs", "routing-log.jsonl")
+    assert os.path.getsize(live) > dispatch_gate._FRESHNESS_MAX_FILE_BYTES
+    assert _fw("logs/routing-log.jsonl:9999999") == ""
 
 
 @pytest.mark.parametrize(

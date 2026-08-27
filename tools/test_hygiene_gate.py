@@ -151,21 +151,28 @@ def test_decide_redirect_stderr_triggers():
 # Переведена на мутирующий payload (класс M), текст MSG_PYTHON_DASH_C
 # НЕ меняется (F5b) -- см. отчёт builder'а t-605/спеку "ПОПРАВКА LEAD
 # 16:35" за полный разбор.
+# t-651 фикс-раунд (2026-08-27, Lead активировал PYC_DENY_ENABLED на
+# диске): payload мутирующий (класс M) -- в активированном мире денает
+# (permissionDecision == "deny", MSG_PYTHON_DASH_C_BLOCK), НЕ warn
+# старым текстом -- сквозное поведение decide(), переведено на deny.
 def test_decide_python_dash_c_triggers():
     command = 'python -c "open(\'x.txt\',\'w\').write(\'x\')"'
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
-    ctx = output["hookSpecificOutput"]["additionalContext"]
-    assert hygiene_gate.MSG_PYTHON_DASH_C in ctx
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
 
 
 # F5(A): та же причина, heredoc-форма -- фикстура на мутирующий payload.
+# t-651: активированный мир -- денает.
 def test_decide_python_heredoc_triggers():
     command = "python - <<EOF\nopen('x.txt','w').write('x')\nEOF"
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
-    ctx = output["hookSpecificOutput"]["additionalContext"]
-    assert hygiene_gate.MSG_PYTHON_DASH_C in ctx
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
 
 
 def test_decide_python3_dash_c_does_not_trigger():
@@ -422,9 +429,15 @@ def test_vg5_block_python_open_append_mode():
     hso = output["hookSpecificOutput"]
     assert hso["permissionDecision"] == "deny"
     assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
-    # python -c -- независимый WARN-класс (в) тоже сработал, инфа
-    # рядом с блоком (см. докстринг раздела v3, "СЕМАНТИКА КОМБИНАЦИИ").
-    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+    # t-651 фикс-раунд: python -c -- НЕЗАВИСИМЫЙ класс (в), payload
+    # мутирующий (open 'a') -- В АКТИВИРОВАННОМ мире это ТОЖЕ deny-
+    # причина (MSG_PYTHON_DASH_C_BLOCK), не WARN; журнальная причина
+    # (позиционно первая) остаётся permissionDecisionReason, pyc-причина
+    # идёт рядом в additionalContext (см. докстринг раздела v3,
+    # "СЕМАНТИКА КОМБИНАЦИИ" -- combination logic не изменилась, только
+    # природа второй причины: раньше WARN-довесок, теперь ВТОРОЙ
+    # deny_reason).
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
 
 
 # F5(A)-родственная правка (сужение предиката pyc, 2026-08-25, НЕ
@@ -1184,13 +1197,16 @@ def test_c_python_heredoc_still_caught_class_v_regress():
     # python - <<EOF -- НЕ git commit, класс (в) должен по-прежнему
     # ловить: COMMIT_HEREDOC_RE применяется ТОЛЬКО под гардом
     # GIT_COMMIT_RE (см. _strip_commit_messages) -- python-heredoc её
-    # не проходит и не задет этой правкой.
+    # не проходит и не задет этой правкой. t-651 фикс-раунд: payload
+    # мутирующий -- в активированном мире "поймать" означает deny, не
+    # WARN.
     exit_code, output = hygiene_gate.decide(
         _bash_payload("python - <<EOF\nopen('x.txt','w').write('x')\nEOF")
     )
     assert exit_code == 0
-    ctx = output["hookSpecificOutput"]["additionalContext"]
-    assert hygiene_gate.MSG_PYTHON_DASH_C in ctx
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
 
 
 def test_c_heredoc_body_unrelated_regression_still_blocks_real_write():
@@ -1423,6 +1439,10 @@ def test_echo_json_v2_regress_evidence_exit0_no_stdout():
 # мутирующий payload, чтобы сохранить предмет пина ("все сработавшие
 # классы перечислены в additionalContext").
 def test_decide_multiple_classes_all_listed():
+    # t-651 фикс-раунд: pyc-часть мутирующая -- в активированном мире
+    # это ТРЕТЬЯ deny-причина (после redirect, порядок журнал->cd->
+    # redirect->pyc не меняется -- permissionDecisionReason остаётся
+    # MSG_REDIRECT_STDERR, первой сработавшей), не WARN-довесок.
     command = 'cd gateway && python -c "open(\'x.txt\',\'w\').write(\'x\')" 2>&1'
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
@@ -1432,7 +1452,7 @@ def test_decide_multiple_classes_all_listed():
     ctx = hso["additionalContext"]
     assert hygiene_gate.MSG_CD_NON_ROOT_WARN in ctx
     assert hygiene_gate.MSG_REDIRECT_STDERR in ctx
-    assert hygiene_gate.MSG_PYTHON_DASH_C in ctx
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in ctx
 
 
 # M9 (пересдача 1, ЗАДОКУМЕНТИРОВАНО): под V5_ENABLED=True (пересдачи
@@ -1604,13 +1624,17 @@ def test_adversarial_very_long_command_no_crash():
 # кавычки не роняют subprocess") сохранён, additionalContext по-прежнему
 # парсится и несёт MSG_PYTHON_DASH_C.
 def test_adversarial_nested_quotes_no_crash():
+    # t-651 фикс-раунд: payload несёт реальную мутацию (open write) --
+    # в активированном мире это deny, не крах и не WARN старым текстом.
     command = """python -c "print('he said \\"hi\\" 2>&1'); open('x.txt','w').write('x')" """
     payload = _bash_payload(command)
     result = _run_hook(json.dumps(payload), text=True, encoding="utf-8")
     assert result.returncode == 0
     assert result.stderr == ""
     data = json.loads(result.stdout)
-    assert hygiene_gate.MSG_PYTHON_DASH_C in data["hookSpecificOutput"]["additionalContext"]
+    hso = data["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
 
 
 def test_adversarial_null_bytes_in_json_string_no_crash():
@@ -1652,7 +1676,13 @@ def test_v5_python_c_body_mentioning_journal_path_as_prose_not_classified(monkey
     # (`>`/printf/echo/sed -i/tee/open-write/PS-командлет) -- журнальный
     # класс требует ОБЕИХ (target И форма) в одном statement (_is_journal_
     # bypass), только упоминания пути мало. cd/2>&1 тут вовсе нет в тексте.
+    # t-651 фикс-раунд: ЦЕЛЬ теста -- журнальный класс (г) не путается
+    # прозой, а НЕ поведение pyc-deny (payload попутно мутирует ДРУГОЙ
+    # файл, x.txt, не журнал) -- мир ДО активации выключателя (активирована
+    # 08-27), чтобы pyc-часть оставалась WARN старым текстом и не
+    # заслоняла собственно проверяемый факт.
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", False)
     command = (
         "python -c \"print('see routing-log.jsonl for details'); "
         "open('x.txt','w').write('x')\""
@@ -1685,8 +1715,11 @@ def test_v5_python_c_body_mentioning_journal_path_as_prose_fully_silent_when_pur
 # F5(A)-родственная правка -- та же причина/форма правки, что у теста
 # выше (heredoc-двойник, координатор явно назвал его в развилке t-605).
 def test_v5_python_c_heredoc_body_mentioning_journal_path_as_prose_not_classified(monkeypatch):
-    # То же для heredoc-формы.
+    # То же для heredoc-формы. t-651 фикс-раунд: мир ДО активации
+    # выключателя (активирована 08-27) -- цель теста journal-класс, не
+    # pyc-deny (см. пометку в -c-двойнике этого теста выше).
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", False)
     command = (
         "python - <<EOF\n"
         "print('see routing-log.jsonl for details')\n"
@@ -2252,32 +2285,44 @@ def test_b6_redirect_inside_commit_message_not_trigger(monkeypatch, v5):
 
 # F5(A) (сужение предиката pyc, 2026-08-25): `print(1)` -> P -> тишина,
 # ломало бы сам предмет пина -- фикстура на мутирующий payload.
-def test_v5_python_c_always_warn_never_denies_class_v_removed(monkeypatch):
-    # Класс (в) НИКОГДА не денает после удаления части 3 -- ровно V4-роль.
+#
+# t-651 ФИКС-РАУНД (2026-08-27, Lead активировал PYC_DENY_ENABLED на
+# диске): ПЕРЕИМЕНОВАН и ПЕРЕПИСАН -- старое имя/докстринг
+# ("НИКОГДА не денает") ЛГАЛИ бы в активированном мире. Два РАЗНЫХ
+# факта не спутаны: (1) часть 3 (write-намерение, отдельный старый
+# механизм, распознававший `open(...,'w')` как namerение ВНУТРИ самого
+# класса (в)) остаётся УДАЛЁННОЙ, НЕ воскрешена этой правкой -- deny
+# теперь идёт СОВСЕМ ДРУГИМ, независимым путём: К3.6-классификатор
+# (`payload_class == "M"`, AST-анализ) + t-651 (`pyc_deny` в
+# `_decide_v5`). (2) Факт "класс (в) денает" в активированном мире --
+# ВЕРЕН, докстринг/имя обновлены, чтобы не лгать.
+def test_v5_python_c_mutation_denies_via_t651_not_resurrected_class_v_mechanism(monkeypatch):
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     command = 'python -c "open(\'x.txt\',\'w\').write(\'x\')"'
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
-    assert "permissionDecision" not in hso
-    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+    assert hso["permissionDecision"] == "deny"
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
 
 
-def test_v5_python_c_with_open_write_mode_stays_warn_class_v_no_longer_denies(monkeypatch):
-    # Регресс, задокументированный явно: ДО перепроектировки (пересдачи
-    # 1-3) write-намерение промотировало `open(...,'w')` внутри -c в
-    # DENY через класс (в); ПОСЛЕ удаления части 3 -- ТОЛЬКО WARN (класс
-    # в никогда не денает). Реальная запись в ЖУРНАЛ по-прежнему ловится
-    # -- НО через класс (г), см. тесты "denies_via_journal_class" ниже
-    # (target+форма записи -- открытый текст в СЫРОЙ команде, journal
-    # class никогда не зависел от write-намерения).
+def test_v5_python_c_with_open_write_mode_denies_via_t651_not_resurrected_class_v_mechanism(monkeypatch):
+    # t-651 ФИКС-РАУНД: ПЕРЕИМЕНОВАН/ПЕРЕПИСАН (см. пометку у теста выше
+    # за полный разбор двух разных фактов). Историческая часть остаётся
+    # верной: часть 3 (write-намерение, ПРЕЖНИЙ механизм промоции ВНУТРИ
+    # класса (в)) остаётся УДАЛЁННОЙ -- deny здесь идёт ЧЕРЕЗ К3.6/t-651
+    # классификатор (`payload_class == "M"`), НЕ через воскрешённую
+    # часть 3. Реальная запись в ЖУРНАЛ по-прежнему СВОИМ, независимым
+    # путём -- класс (г), см. тесты "denies_via_journal_class" ниже
+    # (target+форма записи в СЫРОЙ команде, journal class никогда не
+    # зависел ни от write-намерения, ни от К3.6/t-651).
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     command = "python -c \"open('f.txt','w').write('x')\""
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
-    assert "permissionDecision" not in hso
-    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+    assert hso["permissionDecision"] == "deny"
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
 
 
 # --- журнальный класс (г) ловит встроенные записи ЕСТЕСТВЕННО (никогда
@@ -2582,24 +2627,29 @@ def test_v5_blocker2_tee_object_already_covered_by_existing_tee_re_both_states(m
 # =========================================================================
 
 
-def test_p6_pyc_deny_enabled_default_is_false():
-    # К3.2: значение НА СДАЧЕ -- билдер не переключает.
-    assert hygiene_gate.PYC_DENY_ENABLED is False
+def test_p6_pyc_deny_enabled_default_is_true_after_activation():
+    # К3.2: билдер сдал False (D-0069 -- активация за Lead); Lead
+    # активировал 2026-08-27 словом оператора. Пин мира ПОСЛЕ
+    # активации; мир ДО -- test_promo_switch_off_world_* (monkeypatch).
+    assert hygiene_gate.PYC_DENY_ENABLED is True
 
 
 def test_p6_existing_suite_byte_identical_with_switch_off():
-    # К3.2 witness (дополнительно к полному прогону файла): значение
-    # выключателя на диске -- False, что и проверяет ВЕСЬ остальной
-    # существующий набор данного файла без правки тел (сам этот факт --
-    # весь файл зелёный с дефолтным значением константы).
-    assert hygiene_gate.PYC_DENY_ENABLED is False
+    # К3.2 witness: набор файла управляет выключателем monkeypatch'ем
+    # per-test, поэтому зелен при ЛЮБОМ дисковом значении; дисковое
+    # значение пинит сосед test_p6_pyc_deny_enabled_default_is_true_
+    # after_activation (активация Lead 2026-08-27).
     assert hygiene_gate.V5_ENABLED is True
 
 
 def test_p6_dash_c_deny_basic(monkeypatch):
+    # t-651 (2026-08-27, слово оператора): переписан на МУТИРУЮЩИЙ
+    # payload -- I2 ("deny зависит только от certain") суперсиден
+    # нормой D-0109 п.4(б); deny теперь требует payload_class == "M".
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
-    exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1)"'))
+    command = "python -c \"open('x.txt','w').write('1')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
     assert hso["permissionDecision"] == "deny"
@@ -2607,15 +2657,37 @@ def test_p6_dash_c_deny_basic(monkeypatch):
     assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
 
 
-def test_p6_heredoc_opener_deny(monkeypatch):
+def test_p6_dash_c_pure_stays_silent_mirror(monkeypatch):
+    # Зеркало t-651 к test_p6_dash_c_deny_basic: та же базовая форма,
+    # ЧИСТЫЙ payload -- полная тишина даже при включённом выключателе.
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
-    command = "python - <<'PY'\nprint(1)\nPY"
+    exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1)"'))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_p6_heredoc_opener_deny(monkeypatch):
+    # t-651: переписан на МУТИРУЮЩЕЕ тело heredoc'а (см. MSG_PYTHON_
+    # DASH_C_BLOCK докстринг за обоснование I2-супersession).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "python - <<'PY'\nopen('x.txt','w').write('1')\nPY"
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
     assert hso["permissionDecision"] == "deny"
     assert hso["permissionDecisionReason"] == hygiene_gate.MSG_PYTHON_DASH_C_BLOCK
+
+
+def test_p6_heredoc_opener_pure_stays_silent_mirror(monkeypatch):
+    # Зеркало t-651: та же heredoc-форма, ЧИСТОЕ тело -- тишина.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "python - <<'PY'\nprint(1)\nPY"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
 
 
 # F5(A)-родственная правка (сужение предиката pyc, 2026-08-25, явно
@@ -2628,6 +2700,25 @@ def test_p6_switch_off_stays_warn_even_under_v5(monkeypatch):
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", False)
     command = 'python -c "open(\'x.txt\',\'w\').write(\'x\')"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
+
+
+def test_promo_switch_off_world_mutating_payload_warns_not_deny(monkeypatch):
+    """t-651, ВОПРОС 3 координатора: явный, отдельно поименованный тест
+    «мир ДО активации выключателя» (R11(c) -- поведение ОБОИХ миров
+    названо явно) -- PYC_DENY_ENABLED остаётся False на сдаче
+    (D-0069/R2b: активация -- ход Lead, не билдера); МУТИРУЮЩИЙ payload
+    даёт СТАРЫЙ WARN (MSG_PYTHON_DASH_C), не deny. Функционально
+    пересекается с test_p6_switch_off_stays_warn_even_under_v5 (та же
+    фикстура) -- добавлен как отдельный, трассируемый DoD-пункт по
+    буквальному тексту решения координатора, не дубль-по-случайности."""
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", False)
+    command = "python -c \"open('x.txt','w').write('x')\""
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
@@ -2697,15 +2788,34 @@ def test_p6_mention_inside_git_commit_heredoc_body_stays_warn_not_deny(monkeypat
 def test_p6_real_python_heredoc_own_body_mentioning_dash_c_still_denies(monkeypatch):
     # Контроль: РЕАЛЬНЫЙ python-heredoc-опенер, чьё СОБСТВЕННОЕ тело
     # упоминает "python -c" как данные (тестовый код) -- маска тела НЕ
-    # трогает опенер-строку, денается по ОПЕНЕРУ.
+    # трогает опенер-строку, денается по ОПЕНЕРУ. t-651: тело ДОПОЛНЕНО
+    # реальной мутацией (`open(...).write(cmd)`) -- одно присваивание
+    # строкового литерала классифицируется как "P" (эмпирически
+    # проверено), payload_class == "M" нужен явной записью, чтобы
+    # тест остался deny-тестом под новым правилом.
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
-    command = "python - <<'PY'\ncmd = 'python -c \"print(1)\"'\nPY"
+    command = (
+        "python - <<'PY'\ncmd = 'python -c \"print(1)\"'\n"
+        "open('x.txt','w').write(cmd)\nPY"
+    )
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
     assert hso["permissionDecision"] == "deny"
     assert hso["permissionDecisionReason"] == hygiene_gate.MSG_PYTHON_DASH_C_BLOCK
+
+
+def test_p6_real_python_heredoc_own_body_mentioning_dash_c_pure_mirror(monkeypatch):
+    # Зеркало t-651: ТОТ ЖЕ опенер + мнение-как-данные, БЕЗ мутации --
+    # payload_class == "P" (эмпирически проверено: одно присваивание
+    # строкового литерала, ни вызовов, ни мутации) -- тишина.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "python - <<'PY'\ncmd = 'python -c \"print(1)\"'\nPY"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
 
 
 # --- К3.5: адверсариальная мини-батарея ---------------------------------
@@ -2748,76 +2858,154 @@ def test_p6_adversarial_pwsh_command_not_covered_known_limitation(monkeypatch):
 def test_p6_adversarial_absolute_path_python_still_denies(monkeypatch):
     # "/usr/bin/python -c" -- литерал "python" виден через \b на "/" ->
     # реальный, определённый вызов -- денает (НЕ про Р16 -- тот же
-    # токен "python", просто с путём перед ним).
+    # токен "python", просто с путём перед ним). t-651: МУТИРУЮЩИЙ
+    # payload -- форма-цель этого теста (обход boundary-детекта пути),
+    # не сам payload.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "/usr/bin/python -c \"open('x.txt','w').write('1')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_p6_adversarial_absolute_path_python_pure_mirror(monkeypatch):
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
     exit_code, output = hygiene_gate.decide(_bash_payload('/usr/bin/python -c "print(1)"'))
     assert exit_code == 0
-    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert output is None
 
 
 def test_p6_adversarial_case_insensitive_denies(monkeypatch):
+    # t-651: МУТИРУЮЩИЙ payload -- форма-цель (регистр PYTHON/-C).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "PYTHON -C \"open('x.txt','w').write('1')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_p6_adversarial_case_insensitive_pure_mirror(monkeypatch):
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
     exit_code, output = hygiene_gate.decide(_bash_payload('PYTHON -C "print(1)"'))
     assert exit_code == 0
-    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert output is None
 
 
 def test_p6_adversarial_double_space_denies(monkeypatch):
+    # t-651: МУТИРУЮЩИЙ payload -- форма-цель (двойной пробел).
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
-    exit_code, output = hygiene_gate.decide(_bash_payload('python  -c "print(1)"'))
+    command = "python  -c \"open('x.txt','w').write('1')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+def test_p6_adversarial_double_space_pure_mirror(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload('python  -c "print(1)"'))
+    assert exit_code == 0
+    assert output is None
+
+
 def test_p6_adversarial_crlf_heredoc_still_denies(monkeypatch):
+    # t-651: МУТИРУЮЩЕЕ тело -- форма-цель (CRLF-переводы строк).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "python - <<'PY'\r\nopen('x.txt','w').write('1')\r\nPY"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_p6_adversarial_crlf_heredoc_pure_mirror(monkeypatch):
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
     command = "python - <<'PY'\r\nprint(1)\r\nPY"
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
-    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert output is None
 
 
-def test_p6_adversarial_unclosed_quote_fail_safe_toward_detect_denies(monkeypatch):
+def test_p6_adversarial_unclosed_quote_fail_safe_toward_detect_warns_not_deny(monkeypatch):
     # Незакрытая кавычка НЕ матчится _mask_quoted_segments -- остаётся
     # как есть -- "python -c" (ПЕРЕД кавычкой) остаётся видимым --
-    # fail-safe В СТОРОНУ детекта (тот же принцип, что везде в файле).
+    # fail-safe В СТОРОНУ детекта (certain=True). t-651: ПЕРЕИМЕНОВАН и
+    # ПЕРЕПИСАН -- содержимое НЕ извлекается как валидный Python
+    # (незакрытая кавычка ломает ast.parse) -> payload_class == "O"
+    # ЭМПИРИЧЕСКИ (проверено скриптом в отчёте билдера), а не "M" -- ни
+    # при какой мутирующей форме "unclosed quote" не может стать M
+    # (текст всегда неразбираем), значит по новому правилу (О ->
+    # WARN, не deny) это WARN-opaque, а не блок. "Fail-safe в сторону
+    # детекта" теперь означает "минимум WARN", не "обязательно deny".
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
     command = 'python -c "print(unterminated'
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
-    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE in hso["additionalContext"]
 
 
 def test_p6_adversarial_heredoc_continuation_after_delimiter_still_denies(monkeypatch):
     # `python - <<'PY'` с продолжением ПОСЛЕ разделителя на опенер-строке.
+    # t-651: МУТИРУЮЩЕЕ тело -- форма-цель (опенер с trailing-комментарием).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "python - <<'PY' # trailing comment\nopen('x.txt','w').write('1')\nPY"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_p6_adversarial_heredoc_continuation_after_delimiter_pure_mirror(monkeypatch):
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
     command = "python - <<'PY' # trailing comment\nprint(1)\nPY"
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
-    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert output is None
 
 
 def test_p6_adversarial_emoji_non_ascii_payload_still_denies(monkeypatch):
+    # t-651: МУТИРУЮЩИЙ payload -- форма-цель (эмодзи/греческий в тексте).
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
-    command = "python -c \"print('\U0001F600 βήτα')\""
+    command = "python -c \"open('x.txt','w').write('\U0001F600 βήτα')\""
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
-def test_p6_adversarial_bare_python_dash_c_no_payload_denies(monkeypatch):
+def test_p6_adversarial_emoji_non_ascii_payload_pure_mirror(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "python -c \"print('\U0001F600 βήτα')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
+
+
+def test_p6_adversarial_bare_python_dash_c_no_payload_warns_not_deny(monkeypatch):
+    # t-651: ПЕРЕИМЕНОВАН и ПЕРЕПИСАН -- "python -c" без аргумента вовсе
+    # не извлекает ни одного payload'а -> payload_class == "O"
+    # ЭМПИРИЧЕСКИ (E1/E11/B8, проверено скриптом в отчёте) -- НЕТ формы
+    # "python -c" без payload'а, которая могла бы стать "M" (нечего
+    # классифицировать), значит по новому правилу это WARN-opaque,
+    # НИКОГДА не deny.
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
     exit_code, output = hygiene_gate.decide(_bash_payload("python -c"))
     assert exit_code == 0
-    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE in hso["additionalContext"]
 
 
 def test_p6_adversarial_empty_command_silent(monkeypatch):
@@ -2869,9 +3057,16 @@ def test_p6_adversarial_corrupted_stdin_bytes_subprocess_no_crash():
 
 
 def test_p6_positional_journal_deny_reason_unchanged_by_pyc_addition(monkeypatch):
+    # t-651: pyc-часть МУТИРУЮЩАЯ -- иначе (payload_class == "P") она
+    # вообще не добавила бы MSG_PYTHON_DASH_C_BLOCK в additionalContext
+    # (см. зеркало ниже), и тест перестал бы проверять позиционный
+    # инвариант "деньги co-occurring" вовсе.
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
-    command = 'echo x >> logs/routing-log.jsonl; python -c "print(1)"'
+    command = (
+        "echo x >> logs/routing-log.jsonl; "
+        "python -c \"open('x.txt','w').write('1')\""
+    )
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
@@ -2879,10 +3074,29 @@ def test_p6_positional_journal_deny_reason_unchanged_by_pyc_addition(monkeypatch
     assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
 
 
-def test_p6_positional_cd_root_deny_reason_unchanged_by_pyc_addition(monkeypatch):
+def test_p6_positional_journal_deny_reason_pyc_clean_mirror(monkeypatch):
+    # Зеркало t-651: ЧИСТАЯ pyc-часть -- журнал денает как обычно,
+    # НО pyc-строка (ни deny, ни даже warn) в additionalContext не
+    # появляется вовсе -- P-класс молчит безусловно.
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
-    command = f'cd {hygiene_gate._REPO_ROOT_NAME} && python -c "print(1)"'
+    command = 'echo x >> logs/routing-log.jsonl; python -c "print(1)"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_JOURNAL_BLOCK
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK not in hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C not in hso["additionalContext"]
+
+
+def test_p6_positional_cd_root_deny_reason_unchanged_by_pyc_addition(monkeypatch):
+    # t-651: pyc-часть МУТИРУЮЩАЯ (см. журнальный аналог выше).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = (
+        f"cd {hygiene_gate._REPO_ROOT_NAME} && "
+        "python -c \"open('x.txt','w').write('1')\""
+    )
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
@@ -2890,10 +3104,23 @@ def test_p6_positional_cd_root_deny_reason_unchanged_by_pyc_addition(monkeypatch
     assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
 
 
-def test_p6_positional_redirect_certain_deny_reason_unchanged_by_pyc_addition(monkeypatch):
+def test_p6_positional_cd_root_deny_reason_pyc_clean_mirror(monkeypatch):
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
-    command = 'ls x.py 2>&1; python -c "print(1)"'
+    command = f'cd {hygiene_gate._REPO_ROOT_NAME} && python -c "print(1)"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_CD_PREFIX
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK not in hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C not in hso["additionalContext"]
+
+
+def test_p6_positional_redirect_certain_deny_reason_unchanged_by_pyc_addition(monkeypatch):
+    # t-651: pyc-часть МУТИРУЮЩАЯ (см. журнальный аналог выше).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = 'ls x.py 2>&1; python -c "open(\'x.txt\',\'w\').write(\'1\')"'
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     hso = output["hookSpecificOutput"]
@@ -2901,10 +3128,30 @@ def test_p6_positional_redirect_certain_deny_reason_unchanged_by_pyc_addition(mo
     assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
 
 
+def test_p6_positional_redirect_certain_deny_reason_pyc_clean_mirror(monkeypatch):
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = 'ls x.py 2>&1; python -c "print(1)"'
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_REDIRECT_STDERR
+    assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK not in hso["additionalContext"]
+    assert hygiene_gate.MSG_PYTHON_DASH_C not in hso["additionalContext"]
+
+
 # --- К3, "Лимиты -- тест НА границе и ЗА ней" ---------------------------
 
 
 def test_p6_limit_100kb_command_on_boundary(monkeypatch):
+    # t-651: ЭМПИРИЧЕСКИ подтверждено (скрипт в отчёте билдера) --
+    # payload 100КБ >> PYC_PAYLOAD_LIMIT (20_000 символов) -> "O" по
+    # E10 (сверх лимита, без попытки ast.parse) НЕЗАВИСИМО от
+    # мутирующего/чистого содержимого -- НИКАКАЯ обёртка (open/write)
+    # не спасает классификацию в "M" на этом размере; поэтому ожидание
+    # меняется с deny на WARN-opaque (норма D-0109 п.4(б): не установлено
+    # детерминированно -> не блок), перф-утверждение (линейность
+    # времени) остаётся неизменным.
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
     payload_body = "a" * 100_000
@@ -2913,11 +3160,15 @@ def test_p6_limit_100kb_command_on_boundary(monkeypatch):
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     elapsed = time.perf_counter() - t0
     assert exit_code == 0
-    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE in hso["additionalContext"]
     assert elapsed < 2.0, f"decide() took {elapsed:.3f}s at 100KB -- linearity claim violated"
 
 
 def test_p6_limit_1mb_command_beyond_boundary(monkeypatch):
+    # t-651: та же логика, что 100КБ-тест выше -- сверх PYC_PAYLOAD_LIMIT
+    # классификация всегда "O", deny недостижим на этом размере.
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
     payload_body = "a" * 1_000_000
@@ -2926,7 +3177,9 @@ def test_p6_limit_1mb_command_beyond_boundary(monkeypatch):
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     elapsed = time.perf_counter() - t0
     assert exit_code == 0
-    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE in hso["additionalContext"]
     # ~10x рост длины входа -- утверждение линейности в докстринге
     # проверяется тем, что время растёт НЕ катастрофически (не более
     # чем на порядок величины сверх 100КБ-замера, щедрый потолок).
@@ -2934,9 +3187,12 @@ def test_p6_limit_1mb_command_beyond_boundary(monkeypatch):
 
 
 def test_p6_limit_500_statements_on_boundary(monkeypatch):
+    # t-651: pyc-хвост МУТИРУЮЩИЙ (payload мал -- <20_000, "M" достижим).
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
-    command = "; ".join(["echo hi"] * 500) + '; python -c "print(1)"'
+    command = (
+        "; ".join(["echo hi"] * 500) + "; python -c \"open('x.txt','w').write('1')\""
+    )
     t0 = time.perf_counter()
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     elapsed = time.perf_counter() - t0
@@ -2946,9 +3202,12 @@ def test_p6_limit_500_statements_on_boundary(monkeypatch):
 
 
 def test_p6_limit_5000_statements_beyond_boundary(monkeypatch):
+    # t-651: pyc-хвост МУТИРУЮЩИЙ (см. 500-statement аналог выше).
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
-    command = "; ".join(["echo hi"] * 5000) + '; python -c "print(1)"'
+    command = (
+        "; ".join(["echo hi"] * 5000) + "; python -c \"open('x.txt','w').write('1')\""
+    )
     t0 = time.perf_counter()
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     elapsed = time.perf_counter() - t0
@@ -2958,10 +3217,13 @@ def test_p6_limit_5000_statements_beyond_boundary(monkeypatch):
 
 
 def test_p6_limit_100_nested_quote_pairs_beyond_boundary(monkeypatch):
+    # t-651: -c-аргумент МУТИРУЮЩИЙ; 100 кавычковых пар остаются ПОСЛЕ
+    # него как отдельные trailing-токены (не часть -c-аргумента) --
+    # форма-цель (перф предфильтра масок) не меняется.
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
     quotes = "".join(f'"{i}"' for i in range(100))
-    command = f'python -c "print(1)" {quotes}'
+    command = f"python -c \"open('x.txt','w').write('1')\" {quotes}"
     t0 = time.perf_counter()
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     elapsed = time.perf_counter() - t0
@@ -3055,12 +3317,28 @@ def test_p6_wrapper_eval_quoted_not_covered_known_limitation(monkeypatch):
 
 def test_p6_wrapper_control_real_dash_c_still_denies(monkeypatch):
     # Контроль: НЕобёрнутый прямой вызов по-прежнему денается -- дыра
-    # именно в обёртках, не общая деградация класса.
+    # именно в обёртках, не общая деградация класса. t-651: МУТИРУЮЩИЙ
+    # payload (I2 суперсиден -- чистый прямой вызов больше не денает,
+    # см. зеркало ниже и test_promo_a4_pure_payload_stays_silent_when_
+    # switch_on).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "python -c \"open('x.txt','w').write('1')\""
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_p6_wrapper_control_real_dash_c_pure_mirror(monkeypatch):
+    # Зеркало t-651: прямой вызов, ЧИСТЫЙ payload -- тишина (контрастирует
+    # с обёрточными WARN-дырами выше: прямой чистый вызов молчит
+    # ЦЕЛИКОМ, обёрнутый мутирующий вызов даёт WARN, не тишину -- РАЗНЫЕ
+    # причины: классификация vs неопределённость обёртки).
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
     exit_code, output = hygiene_gate.decide(_bash_payload('python -c "print(1)"'))
     assert exit_code == 0
-    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert output is None
 
 
 # =========================================================================
@@ -3092,7 +3370,11 @@ def test_pycnarrow_a1_pure_json_read_silent():
     assert output is None
 
 
-def test_pycnarrow_a2_mutation_warns_old_text():
+def test_pycnarrow_a2_mutation_warns_old_text(monkeypatch):
+    # t-651 фикс-раунд: ЦЕЛЬ теста -- текст WARN-ветки классификатора
+    # (M-класс использует старый MSG_PYTHON_DASH_C, не OPAQUE), не
+    # deny-механика -- мир ДО активации выключателя (активирована 08-27).
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", False)
     command = "python -c \"open('x.txt','w').write('x')\""
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
@@ -3114,19 +3396,22 @@ def test_pycnarrow_a3_opaque_subprocess_warns_new_text_only():
     assert hygiene_gate.MSG_PYTHON_DASH_C not in ctx
 
 
-# A4: "новый тест асимметрии" -- чистый payload при PYC_DENY_ENABLED=True
-# всё равно денает (I2: deny-путь не читает pyc_payload вовсе -- deny
-# зависит ТОЛЬКО от pyc_certain, F4(A) принята явно).
-def test_pycnarrow_a4_asymmetry_pure_payload_still_denies_when_switch_on(monkeypatch):
+# A4 -- ЗАМЕНЁН t-651 (2026-08-27) ПРОТИВОПОЛОЖНЫМ ПО СМЫСЛУ тестом:
+# I2 ("deny-путь не читает pyc_payload вовсе -- deny зависит ТОЛЬКО от
+# pyc_certain", F4(A), docs/tasks/2026-08-25_pyc-narrow-spec.md:94)
+# СУПЕРСИДЕН словом оператора 08-27, норма D-0109 п.4(б) ("payload --
+# чистый расчёт/чтение -- НЕ ПОДПАДАЕТ, гейт молчит"): тотальный deny
+# ЧИСТОГО payload'а -- класс "эвристика в блокирующем слое душит
+# правильные ответы", устранён. Теперь чистый payload при включённом
+# выключателе даёт ПОЛНУЮ ТИШИНУ (allow), не deny.
+def test_promo_a4_pure_payload_stays_silent_when_switch_on(monkeypatch):
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
     command = 'python -c "print(1+1)"'
     assert _payload_class(command) == "P"
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
-    hso = output["hookSpecificOutput"]
-    assert hso["permissionDecision"] == "deny"
-    assert hso["permissionDecisionReason"] == hygiene_gate.MSG_PYTHON_DASH_C_BLOCK
+    assert output is None
 
 
 def test_pycnarrow_a6_v4_path_unaffected_by_new_classification(monkeypatch):
@@ -3205,7 +3490,11 @@ def test_pycnarrow_e7_two_calls_different_classes_strictest_wins():
     assert _payload_class(command) == "M"
 
 
-def test_pycnarrow_b9_two_mutating_calls_one_warn_line():
+def test_pycnarrow_b9_two_mutating_calls_one_warn_line(monkeypatch):
+    # t-651 фикс-раунд: ЦЕЛЬ теста -- дедуп текста (два мутирующих
+    # вызова дают ОДНУ строку, не две), не deny-механика -- мир ДО
+    # активации выключателя (активирована 08-27).
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", False)
     command = "python -c \"open('a','w').write('x'); open('b','w').write('y')\""
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
@@ -3476,9 +3765,13 @@ def test_m2_3_65_openers_one_past_boundary_early_exit_uncertain():
 def test_m2_3_over_limit_classification_falls_back_to_u_not_deny(monkeypatch):
     """Консервативный сдвиг НАЗВАН тестом (спека, буквально): сверх
     лимита классификация "U" (не M/P), decide() даёт СТАРОЕ безусловное
-    WARN-поведение -- НЕ deny, даже при PYC_DENY_ENABLED=True (I2-
-    инвариант: deny не расширяется, форма уходит В WARN, не в тишину и
-    не в блок)."""
+    WARN-поведение -- НЕ deny, даже при PYC_DENY_ENABLED=True. Правка
+    t-651 (2026-08-27) не меняет ЭТОТ вывод: класс "U" никогда не денал
+    при старом правиле (I2, "deny зависит только от certain") и не
+    денает при новом (deny требует payload_class == "M") -- I2 как
+    ОБЩИЙ инвариант суперсиден (см. блок PYC_DENY_ENABLED в
+    hygiene_gate.py), но ЭТОТ узкий вывод остаётся верным по ДРУГОЙ
+    причине."""
     monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
     monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
     command = _unterminated_heredoc_openers(65)
@@ -3493,14 +3786,18 @@ def test_m2_3_over_limit_classification_falls_back_to_u_not_deny(monkeypatch):
     assert hygiene_gate.MSG_PYTHON_DASH_C in hso["additionalContext"]
 
 
-def test_m2_3_i2_invariant_existing_deny_tests_green_without_body_changes():
-    """I2-инвариант (спека, буквально): существующий deny-пин
-    (test_pycnarrow_a4_asymmetry_pure_payload_still_denies_when_switch_on
-    несёт СВОЙ собственный monkeypatch/assert) продолжает денаить --
-    здесь ПОВТОРНО, узко, без monkeypatch на V5_ENABLED (дефолт), чтобы
-    зафиксировать САМ факт "предфильтр не тронул обычный `python -c`
-    payload" в одном месте рядом с M2-3 батареей (не дублирует
-    остальные ~15 pycnarrow-тестов -- та же логика уже покрыта ими)."""
+def test_m2_3_prefilter_does_not_disturb_ordinary_payload_classification():
+    """ПЕРЕИМЕНОВАН и ДОКСТРИНГ ИСПРАВЛЕН t-651 (2026-08-27): прежнее
+    имя/докстринг заявляли "I2-инвариант ... продолжает денаить", но
+    ЭТОТ тест НИКОГДА не вызывал `decide()` и не проверял deny вовсе --
+    только `_is_python_dash_c_certain`/`_payload_class` напрямую;
+    заявление было терминологически неточным и теперь, после
+    супersession I2 (см. test_promo_a4_pure_payload_stays_silent_when_
+    switch_on), было бы явно вводящим в заблуждение, если оставить как
+    есть. РЕАЛЬНАЯ, неизменная цель: зафиксировать САМ факт "предфильтр
+    M2-3 не тронул обычный `python -c` payload" (certain=True,
+    class=="P") в одном месте рядом с M2-3 батареей -- это утверждение
+    о ПРЕДФИЛЬТРЕ, не о deny-решении, и остаётся верным без изменений."""
     command = 'python -c "print(1+1)"'
     assert hygiene_gate._is_python_dash_c_certain(command) is True
     assert _payload_class(command) == "P"
@@ -3617,7 +3914,12 @@ def test_pycnarrow_i1_measurer_reads_pyc_not_pyc_payload():
 # ту, что ОБЯЗАНА молчать) -- witness ----------------------------------
 
 
-def test_pycnarrow_negative_control_m_class_warns_old_text():
+def test_pycnarrow_negative_control_m_class_warns_old_text(monkeypatch):
+    # t-651 фикс-раунд: ЦЕЛЬ теста -- текст warn-ветки классификатора
+    # (негативный контроль к test_pycnarrow_negative_control_p_class_
+    # fully_silent/o_class_warns_new_text ниже), не deny-механика -- мир
+    # ДО активации выключателя (активирована 08-27).
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", False)
     exit_code, output = hygiene_gate.decide(
         _bash_payload("python -c \"open('x.txt','w').write('x')\"")
     )
@@ -3649,11 +3951,27 @@ def test_pycnarrow_negative_control_o_class_warns_new_text():
 
 
 def _assert_never_silent(command: str, expected_class: str) -> None:
+    """Фикс-раунд t-651 (2026-08-27, Lead активировал PYC_DENY_ENABLED на
+    диске): анти-регресс-гарантия "атака не проходит молча" РАСЩЕПЛЕНА
+    по классу -- "M" (детерминированно установленная мутация) теперь
+    ДЕНАЕТ (permissionDecision == "deny", причина MSG_PYTHON_DASH_C_BLOCK)
+    в активированном мире; "O"/"U" (непрозрачность/неклассифицируемое)
+    остаются на прежнем WARN (permissionDecision отсутствует) -- деny
+    класса (в) НЕ распространяется на них (см. hygiene_gate.py,
+    `pyc_deny = PYC_DENY_ENABLED and payload_class == "M"`)."""
     assert _payload_class(command) == expected_class
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     assert output is not None, f"АТАКА ПРОШЛА МОЛЧА (регресс): {command}"
-    assert "permissionDecision" not in output["hookSpecificOutput"]
+    hso = output["hookSpecificOutput"]
+    if expected_class == "M":
+        assert hso.get("permissionDecision") == "deny", (
+            f"МУТИРУЮЩАЯ атака НЕ денает в активированном мире: {command}"
+        )
+        assert hso["permissionDecisionReason"] == hygiene_gate.MSG_PYTHON_DASH_C_BLOCK
+        assert hygiene_gate.MSG_PYTHON_DASH_C_BLOCK in hso["additionalContext"]
+    else:
+        assert "permissionDecision" not in hso
 
 
 # --- Ось A: алиасы импортов (import X as Y) -----------------------------
@@ -3707,8 +4025,13 @@ def test_pycnarrow_chained_receiver_2_worst_case_journal_path_write_text_mutatio
         "Path('logs/routing-log.jsonl').write_text('')\""
     )
     _assert_never_silent(command, "M")
+    # t-651 фикс-раунд: активированный мир -- денает, причина
+    # MSG_PYTHON_DASH_C_BLOCK (не старый WARN-текст MSG_PYTHON_DASH_C).
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
-    assert hygiene_gate.MSG_PYTHON_DASH_C in output["hookSpecificOutput"]["additionalContext"]
+    assert (
+        hygiene_gate.MSG_PYTHON_DASH_C_BLOCK
+        in output["hookSpecificOutput"]["additionalContext"]
+    )
 
 
 def test_pycnarrow_chained_receiver_3_pathlib_path_open_w_mutation():
@@ -3784,3 +4107,106 @@ def test_pycnarrow_u_group_and_deny_bodies_still_green_after_fix_round():
     exit_code, output = hygiene_gate.decide(_bash_payload(command))
     assert exit_code == 0
     assert hygiene_gate.MSG_PYTHON_DASH_C in output["hookSpecificOutput"]["additionalContext"]
+
+
+# =========================================================================
+# t-651 (2026-08-27) -- граница промоции WARN -> БЛОК (DoD, дословно):
+# именованный tools/-скрипт легален; адверсариальная мини-батарея R11(e).
+# =========================================================================
+
+
+def test_promo_named_committed_script_passes_silently(monkeypatch):
+    # DoD, п.4 (буквально): "именованный tools/-скрипт → проходит" --
+    # НЕ несёт ни "-c", ни "- <<" -- pyc-класс не срабатывает вовсе
+    # (никакого warn, никакого deny), НЕЗАВИСИМО от выключателя.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(
+        _bash_payload("python tools/hygiene_gate.py --self-check")
+    )
+    assert exit_code == 0
+    assert output is None
+
+
+def test_promo_adversarial_empty_dash_c_payload_no_crash_warns(monkeypatch):
+    # Адверсариальная батарея (R11e): пустой payload -- не падает, WARN
+    # (класс "O", непрозрачно/неизвлекаемо), не deny.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    exit_code, output = hygiene_gate.decide(_bash_payload('python -c ""'))
+    assert exit_code == 0
+    hso = output["hookSpecificOutput"]
+    assert "permissionDecision" not in hso
+    assert hygiene_gate.MSG_PYTHON_DASH_C_OPAQUE in hso["additionalContext"]
+
+
+def test_promo_adversarial_broken_utf8_bytes_in_mutating_command_no_crash(monkeypatch):
+    # Адверсариальная батарея (R11e): битая кодировка/не-UTF8 на уровне
+    # STDIN-байтов главного входа хука (не decide()-уровня строки --
+    # subprocess-путь main() декодирует errors="replace") -- команда
+    # несёт РЕАЛЬНУЮ мутацию сквозь мусорные байты, гейт не падает и не
+    # теряет deny.
+    payload_json = (
+        b'{"tool_name": "Bash", "tool_input": {"command": '
+        b'"python -c \\"open(\'x.txt\',\'w\').write(\'\xff\xfe\')\\""}}'
+    )
+    result = _run_hook(payload_json)
+    assert result.returncode == 0
+    # errors="replace" на битых байтах ломает валидный JSON -> fail-open
+    # (тихий пропуск, см. main()); проверяем ТОЛЬКО отсутствие краха --
+    # содержательный класс здесь не гарантирован (мусор мог сломать
+    # сам JSON-парсинг, это ОЖИДАЕМО и не является регрессом).
+    assert result.stdout is not None
+
+
+def test_promo_adversarial_nested_quotes_mutating_still_denies(monkeypatch):
+    # Адверсариальная батарея (R11e): вложенные кавычки (экранированная
+    # одинарная внутри строкового литерала) -- payload остаётся валидным
+    # Python, классифицируется "M", денает без исключений.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = "python -c \"open('a\\'b.txt','w').write('nested \\\"quotes\\\" here')\""
+    assert _payload_class(command) == "M"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_promo_adversarial_multiline_heredoc_mixed_content_denies(monkeypatch):
+    # Адверсариальная батарея (R11e): многострочный heredoc с MIXED-
+    # содержимым (часть тела -- чистое чтение/print, часть -- реальная
+    # запись) -- F6 (M > O > P): строжайший класс побеждает, денает.
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = (
+        "python - <<'PY'\n"
+        "import json\n"
+        "data = json.dumps({'a': 1})\n"
+        "print(data)\n"
+        "with open('out.txt', 'w') as f:\n"
+        "    f.write(data)\n"
+        "PY"
+    )
+    assert _payload_class(command) == "M"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_promo_adversarial_multiline_heredoc_all_pure_stays_silent(monkeypatch):
+    # Зеркало: тот же многострочный heredoc, но БЕЗ единой мутации --
+    # тишина (контраст с mixed-содержимым выше).
+    monkeypatch.setattr(hygiene_gate, "V5_ENABLED", True)
+    monkeypatch.setattr(hygiene_gate, "PYC_DENY_ENABLED", True)
+    command = (
+        "python - <<'PY'\n"
+        "import json\n"
+        "data = json.dumps({'a': 1})\n"
+        "print(data)\n"
+        "print(len(data))\n"
+        "PY"
+    )
+    assert _payload_class(command) == "P"
+    exit_code, output = hygiene_gate.decide(_bash_payload(command))
+    assert exit_code == 0
+    assert output is None
