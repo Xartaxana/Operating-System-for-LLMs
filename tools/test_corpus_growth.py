@@ -873,3 +873,102 @@ def test_m2_no_flag_output_matches_default_last_entry_behavior(tmp_path, capsys)
     assert rc == 0
     payload = json.loads(out)
     assert payload["deltas"]["a.md"]["d_bytes"] == 21 - 999  # последняя запись, не первая
+
+
+# ---------------------------------------------------------------------------
+# П.2 диспатча 2026-08-28 (ось 15 карты): знаменатель "порогов k/N" не
+# включает boot-mirror (порог запрещён формой); "БЕЗ ПОРОГА: <path>" --
+# находка (порог разрешён, но не назначен) чека 34(в), видимая строкой.
+# Живой манифест сегодня не несёт такого артефакта -- N6 покрывается
+# ТОЛЬКО синтетикой (спека, "живой прогон её не покажет").
+# ---------------------------------------------------------------------------
+
+def test_n6_corpus_artifact_without_threshold_prints_bez_poroga_and_counted(tmp_path, capsys):
+    root, registry = _sandbox(tmp_path)
+    _write_file(root, "a.md", _three_records())
+    manifest = _write_manifest(root, [_art("a.md", owner="corpus", bpr_max=None)])
+    rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "БЕЗ ПОРОГА: a.md" in out
+    # порог разрешён (owner != boot-mirror) -> артефакт ВХОДИТ в знаменатель
+    assert "порогов 0/1" in out
+    assert "вне порога (boot-mirror): 0" in out
+
+
+def test_n7_no_boot_mirror_in_manifest_prints_zero_outside_threshold(tmp_path, capsys):
+    root, registry = _sandbox(tmp_path)
+    _write_file(root, "a.md", _three_records())
+    _write_file(root, "b.md", _three_records())
+    manifest = _write_manifest(root, [_art("a.md", bpr_max=100), _art("b.md", bpr_max=100)])
+    rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "вне порога (boot-mirror): 0" in out
+    assert "порогов 2/2" in out
+    assert "БЕЗ ПОРОГА:" not in out
+
+
+def test_n8_one_boot_mirror_two_assigned_corpus_gives_2_of_2(tmp_path, capsys):
+    root, registry = _sandbox(tmp_path)
+    _write_file(root, "claude.md", "R1. правило\nR2a. правило\n".encode("utf-8"))
+    _write_file(root, "a.md", _three_records())
+    _write_file(root, "b.md", _three_records())
+    manifest = _write_manifest(root, [
+        _art("claude.md", owner="boot-mirror", record_re=r"^R\d+[a-z]?\."),
+        _art("a.md", bpr_max=100),
+        _art("b.md", bpr_max=100),
+    ])
+    rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root)])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "порогов 2/2" in out
+    assert "вне порога (boot-mirror): 1" in out
+    assert "БЕЗ ПОРОГА:" not in out
+
+
+def test_ip2_check_exit0_regardless_of_new_counter_form(tmp_path, capsys):
+    """IP2: --check не краснеет из-за новой формы счётчика/БЕЗ ПОРОГА --
+    ни один из этих двух классов не новая причина exit 1."""
+    root, registry = _sandbox(tmp_path)
+    _write_file(root, "a.md", _three_records())
+    manifest = _write_manifest(root, [_art("a.md", bpr_max=None)])  # БЕЗ ПОРОГА-класс
+    rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root), "--check"])
+    capsys.readouterr()
+    assert rc == 0
+
+
+def test_ip3_check_does_not_write_sidecar_even_with_new_fields(tmp_path, capsys):
+    """IP3: --check не пишет сайдкар ни при каком исходе -- в т.ч. когда
+    отчёт несёт новые поля threshold_denominator/no_threshold_paths."""
+    root, registry = _sandbox(tmp_path)
+    _write_file(root, "a.md", _three_records())
+    manifest = _write_manifest(root, [_art("a.md", bpr_max=None)])
+    assert not registry.exists()
+    rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root), "--check"])
+    capsys.readouterr()
+    assert rc == 0
+    assert not registry.exists()
+
+
+def test_json_new_totals_keys_present_alongside_old(tmp_path, capsys):
+    """JSON: assigned_k/total_n остаются (не переименованы), новые ключи
+    threshold_denominator/outside_threshold_boot_mirror/no_threshold_paths
+    добавлены рядом."""
+    root, registry = _sandbox(tmp_path)
+    _write_file(root, "claude.md", "R1. правило\n".encode("utf-8"))
+    _write_file(root, "a.md", _three_records())
+    manifest = _write_manifest(root, [
+        _art("claude.md", owner="boot-mirror", record_re=r"^R\d+[a-z]?\."),
+        _art("a.md", bpr_max=None),
+    ])
+    rc = _run(["--manifest", str(manifest), "--registry", str(registry), "--root", str(root), "--json"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    payload = json.loads(out)
+    totals = payload["totals"]
+    assert totals["assigned_k"] == 0
+    assert totals["total_n"] == 2
+    assert totals["threshold_denominator"] == 1
+    assert totals["outside_threshold_boot_mirror"] == 1
+    assert totals["no_threshold_paths"] == ["a.md"]

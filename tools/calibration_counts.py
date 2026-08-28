@@ -708,6 +708,15 @@ def render_text(report: Dict[str, Any]) -> str:
     out.append("  spec = дефект ДИСПЕТЧЕРА (R11(n)), не исполнителя")
     for sl in sr["spec_lines"]:
         out.append(f"    line {sl['line']} task_id={sl['task_id']} by={sl['by']}")
+    # Ось 15 карты ("недостижимый объём ПЕЧАТАЕТСЯ отдельной строкой, а
+    # не молчит") -- строка популяции ПОСТОЯННА (не зависит от чисел),
+    # печатается БЕЗУСЛОВНО на КАЖДОМ входе (в т.ч. denominator==0 и
+    # отсутствии calibrated в журнале) -- см. докстринг п.1 диспатча.
+    out.append(
+        "  популяция: знаменатель — только события rejected окна; самопризнанные "
+        "дефекты диспетчера без события rejected в него НЕ входят и машинно не "
+        "считаются (норма и пробел — чек 13(г))"
+    )
     if sr["unclassified"]:
         out.append(f"  unclassified (нет/невалиден failure_class): {sr['unclassified']}")
 

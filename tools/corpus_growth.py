@@ -496,6 +496,22 @@ def build_report(
     warn_count = sum(1 for m in measurements if m.state == "WARN")
     breach_count = sum(1 for m in measurements if m.state == "BREACH")
 
+    # П.2 диспатча 2026-08-28 (ось 15 карты): "порогов k/N" вечно недо-
+    # стижим до k/N-1, пока N считает boot-mirror (порог ЗАПРЕЩЁН формой
+    # -- validate_entries выше). Новый знаменатель -- ТОЛЬКО артефакты,
+    # которым порог РАЗРЕШЁН формой (owner != "boot-mirror"), считанные
+    # ПО valid_artifacts (той же популяции, что и assigned_k, 1:1 с
+    # measurements -- см. build_report выше measure_artifact). Недо-
+    # стижимое (boot-mirror) печатается СВОИМ числом рядом, не молчит.
+    # "БЕЗ ПОРОГА: <path>" (2б) -- порог разрешён, но НЕ назначен
+    # (bpr_max is None у НЕ-boot-mirror артефакта) -- отдельная находка
+    # для чека 34(в), не вычитаемая из дроби молча.
+    threshold_denominator = sum(1 for a in valid_artifacts if a.owner != "boot-mirror")
+    outside_threshold_boot_mirror = sum(1 for a in valid_artifacts if a.owner == "boot-mirror")
+    no_threshold_paths = [
+        a.path for a in valid_artifacts if a.owner != "boot-mirror" and a.bpr_max is None
+    ]
+
     prev_sum_bytes = None
     if prev_entry is not None:
         prev_totals = prev_entry.get("totals", {}) or {}
@@ -518,6 +534,9 @@ def build_report(
         "sum_bytes": sum_bytes,
         "assigned_k": assigned_k,
         "total_n": total_n,
+        "threshold_denominator": threshold_denominator,
+        "outside_threshold_boot_mirror": outside_threshold_boot_mirror,
+        "no_threshold_paths": no_threshold_paths,
         "warn_count": warn_count,
         "breach_count": breach_count,
         "delta_sum_bytes": delta_sum_bytes,
@@ -587,11 +606,23 @@ def render_text(report: Dict[str, Any], sidecar_warn: Optional[str]) -> str:
     else:
         out.append("  (роста вглубь не обнаружено)")
 
+    # П.2 диспатча 2026-08-28 (ось 15 карты): boot-mirror -- структурно
+    # недостижимое для порога (запрещён формой), выводится из знаменателя
+    # "порогов k/N" и печатается СВОИМ числом рядом, вместо молчаливого
+    # вечного зазора k/(N-1). Артефакт с порогом РАЗРЕШЁННЫМ, но не
+    # НАЗНАЧЕННЫМ -- отдельная строка БЕЗ ПОРОГА (находка чека 34(в),
+    # видимая глазами, не вычитаемая из дроби); печатается ТОЛЬКО когда
+    # такие артефакты есть (тот же приём, что WARN-строки выше -- не
+    # раздувает вывод пустым "(нет)" в НОРМАЛЬНОМ (сегодняшнем) случае).
+    for p in report["no_threshold_paths"]:
+        out.append(f"БЕЗ ПОРОГА: {p}")
+
     d_sum = report["delta_sum_bytes"]
     d_sum_str = f"{d_sum:+d}" if isinstance(d_sum, int) else "—"
     out.append(
         f"\nИТОГ: сумма байт corpus={report['sum_bytes']} (Δ{d_sum_str}) · "
-        f"порогов {report['assigned_k']}/{report['total_n']} · "
+        f"порогов {report['assigned_k']}/{report['threshold_denominator']} · "
+        f"вне порога (boot-mirror): {report['outside_threshold_boot_mirror']} · "
         f"WARN={report['warn_count']} BREACH={report['breach_count']}"
     )
     return "\n".join(out)
@@ -629,6 +660,16 @@ def render_json(report: Dict[str, Any], sidecar_warn: Optional[str]) -> str:
             "delta_sum_bytes": report["delta_sum_bytes"],
             "assigned_k": report["assigned_k"],
             "total_n": report["total_n"],
+            # П.2 диспатча 2026-08-28: ключи ТОЛЬКО ДОБАВЛЯЮТСЯ рядом со
+            # старыми assigned_k/total_n (те не переименовываются и не
+            # меняют смысл -- IP1/консистентность с I3 п.1 этого же
+            # диспатча). threshold_denominator -- новый знаменатель
+            # "порогов k/N" (owner != boot-mirror); outside_threshold_
+            # boot_mirror -- недостижимое формой рядом; no_threshold_
+            # paths -- находка чека 34(в) (порог разрешён, не назначен).
+            "threshold_denominator": report["threshold_denominator"],
+            "outside_threshold_boot_mirror": report["outside_threshold_boot_mirror"],
+            "no_threshold_paths": report["no_threshold_paths"],
             "warn_count": report["warn_count"],
             "breach_count": report["breach_count"],
         },

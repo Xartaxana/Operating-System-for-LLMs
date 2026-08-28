@@ -847,3 +847,100 @@ def test_unclosed_closes_token_trailing_punctuation(tmp_path):
     ])
     report = analyze_journal(str(p), None, None, parse_ts("2026-07-16T00:00:00"))
     assert report["unclosed_tasks"] == []
+
+
+# ---------------------------------------------------------------------
+# Строка популяции SPEC-RECIDIV (ось 15 карты, диспатч 2026-08-28,
+# п.1: "недостижимый объём ПЕЧАТАЕТСЯ отдельной строкой, а не молчит").
+# Текст строки ЗАДАН ДОСЛОВНО спекой -- константа модуля, не зависит от
+# чисел; N1 -- детектор смерти строки (красный контроль см. отчёт
+# билдера); N2 -- регрессия I1 (числа/строки блока не меняются) живёт
+# отдельным прогоном на КОПИИ живого журнала (не здесь -- гигиена
+# запрещает мутацию боевого сайдкара в юнит-тесте); N3-N5 -- края.
+# ---------------------------------------------------------------------
+
+POPULATION_LINE = (
+    "  популяция: знаменатель — только события rejected окна; самопризнанные "
+    "дефекты диспетчера без события rejected в него НЕ входят и машинно не "
+    "считаются (норма и пробел — чек 13(г))"
+)
+
+
+def test_n1_population_line_present_verbatim_and_positioned(tmp_path):
+    """N1: детектор смерти строки популяции -- КРАСНЕЕТ, если строка
+    отсутствует или текст разошёлся с заданным дословно. Позиция (I2):
+    ПОСЛЕ перечня 'line NNNN task_id=... by=...', ПЕРЕД 'unclassified'."""
+    rejected = [
+        _rej("2026-08-20T15:00:00", "t-001", failure_class="spec", by="opus"),
+        _rej("2026-08-20T15:01:00", "t-002", failure_class=None, by="opus"),
+    ]
+    p = _window9_journal(tmp_path, rejected)
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    text = render_text(report)
+    assert POPULATION_LINE in text
+    lines = text.splitlines()
+    pop_idx = lines.index(POPULATION_LINE)
+    spec_line_idxs = [i for i, l in enumerate(lines) if l.startswith("    line ")]
+    assert spec_line_idxs, "фикстура обязана нести хотя бы одну строку 'line NNNN...'"
+    assert pop_idx > max(spec_line_idxs)
+    unclassified_idxs = [i for i, l in enumerate(lines) if l.startswith("  unclassified")]
+    assert unclassified_idxs, "фикстура обязана нести unclassified (t-002 без failure_class)"
+    assert pop_idx < min(unclassified_idxs)
+
+
+def test_n3_empty_window_still_prints_population_line(tmp_path):
+    """N3: пустое окно (calibrated без единого rejected) -> доля н/д,
+    но строка популяции печатается тем же текстом, exit не влияет
+    (analyze_journal сам не даёт exit -- проверяется через main())."""
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        ev("2026-08-20T14:24:00", "calibrated", agent="lead", model="opus",
+           category="calibration", notes="calibration-N"),
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    text = render_text(report)
+    assert "0 spec из 0 rejected (н/д)" in text
+    assert POPULATION_LINE in text
+    rc = main(["--journal", str(p)])
+    assert rc == 0
+
+
+def test_n4_no_calibrated_event_still_prints_population_line(tmp_path):
+    """N4: журнал без единого calibrated -> окно = весь файл, строка
+    популяции печатается тем же текстом (второе правило окна не
+    заведено)."""
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        _rej("2026-08-20T15:00:00", "t-001", failure_class="spec", by="opus"),
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    text = render_text(report)
+    assert POPULATION_LINE in text
+
+
+def test_n5_notes_absent_or_broken_no_crash_population_line_intact(tmp_path):
+    """N5: notes отсутствует/не строка/пустая/очень длинная -- не крэш,
+    поведение как сейчас; строка популяции всё равно печатается."""
+    p = tmp_path / "j.jsonl"
+    write_journal(p, [
+        ev("2026-08-20T14:24:00", "calibrated", agent="lead", model="opus",
+           category="calibration", notes="calibration-N"),
+        {"ts": "2026-08-20T15:00:00", "event": "rejected", "agent": "builder", "model": "sonnet",
+         "task_id": "t-001", "attempt": 1, "category": "implementation", "failure_class": "spec",
+         "by": "opus"},  # notes отсутствует вовсе
+        {"ts": "2026-08-20T15:01:00", "event": "rejected", "agent": "builder", "model": "sonnet",
+         "task_id": "t-002", "attempt": 1, "category": "implementation", "failure_class": "spec",
+         "by": "opus", "notes": None},  # notes не строка
+        {"ts": "2026-08-20T15:02:00", "event": "rejected", "agent": "builder", "model": "sonnet",
+         "task_id": "t-003", "attempt": 1, "category": "implementation", "failure_class": "spec",
+         "by": "opus", "notes": ""},  # notes пустая
+        {"ts": "2026-08-20T15:03:00", "event": "rejected", "agent": "builder", "model": "sonnet",
+         "task_id": "t-004", "attempt": 1, "category": "implementation", "failure_class": "spec",
+         "by": "opus", "notes": "x" * 5000},  # notes очень длинная
+    ])
+    report = analyze_journal(str(p), None, None, parse_ts("2026-07-10T13:14:00"))
+    text = render_text(report)
+    sr = report["spec_recidiv"]
+    assert sr["numerator"] == 4
+    assert sr["denominator"] == 4
+    assert POPULATION_LINE in text
